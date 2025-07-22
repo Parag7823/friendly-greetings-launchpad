@@ -14,7 +14,163 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      ingestion_jobs: {
+        Row: {
+          completed_at: string | null
+          created_at: string | null
+          error_message: string | null
+          id: string
+          job_type: string
+          progress: number | null
+          record_id: string | null
+          result: Json | null
+          started_at: string | null
+          status: string | null
+          user_id: string | null
+        }
+        Insert: {
+          completed_at?: string | null
+          created_at?: string | null
+          error_message?: string | null
+          id?: string
+          job_type: string
+          progress?: number | null
+          record_id?: string | null
+          result?: Json | null
+          started_at?: string | null
+          status?: string | null
+          user_id?: string | null
+        }
+        Update: {
+          completed_at?: string | null
+          created_at?: string | null
+          error_message?: string | null
+          id?: string
+          job_type?: string
+          progress?: number | null
+          record_id?: string | null
+          result?: Json | null
+          started_at?: string | null
+          status?: string | null
+          user_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ingestion_jobs_record_id_fkey"
+            columns: ["record_id"]
+            isOneToOne: false
+            referencedRelation: "raw_records"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      metrics: {
+        Row: {
+          amount: number | null
+          category: string | null
+          classification_metadata: Json | null
+          confidence_score: number | null
+          created_at: string | null
+          currency: string | null
+          date_recorded: string | null
+          id: string
+          metric_type: string
+          period_end: string | null
+          period_start: string | null
+          record_id: string | null
+          subcategory: string | null
+          updated_at: string | null
+          user_id: string | null
+        }
+        Insert: {
+          amount?: number | null
+          category?: string | null
+          classification_metadata?: Json | null
+          confidence_score?: number | null
+          created_at?: string | null
+          currency?: string | null
+          date_recorded?: string | null
+          id?: string
+          metric_type: string
+          period_end?: string | null
+          period_start?: string | null
+          record_id?: string | null
+          subcategory?: string | null
+          updated_at?: string | null
+          user_id?: string | null
+        }
+        Update: {
+          amount?: number | null
+          category?: string | null
+          classification_metadata?: Json | null
+          confidence_score?: number | null
+          created_at?: string | null
+          currency?: string | null
+          date_recorded?: string | null
+          id?: string
+          metric_type?: string
+          period_end?: string | null
+          period_start?: string | null
+          record_id?: string | null
+          subcategory?: string | null
+          updated_at?: string | null
+          user_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "metrics_record_id_fkey"
+            columns: ["record_id"]
+            isOneToOne: false
+            referencedRelation: "raw_records"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      raw_records: {
+        Row: {
+          classification_status: string | null
+          content: Json
+          created_at: string | null
+          file_name: string | null
+          file_size: number | null
+          id: string
+          ingested_at: string | null
+          metadata: Json | null
+          source: string
+          status: string | null
+          updated_at: string | null
+          user_id: string | null
+        }
+        Insert: {
+          classification_status?: string | null
+          content: Json
+          created_at?: string | null
+          file_name?: string | null
+          file_size?: number | null
+          id?: string
+          ingested_at?: string | null
+          metadata?: Json | null
+          source: string
+          status?: string | null
+          updated_at?: string | null
+          user_id?: string | null
+        }
+        Update: {
+          classification_status?: string | null
+          content?: Json
+          created_at?: string | null
+          file_name?: string | null
+          file_size?: number | null
+          id?: string
+          ingested_at?: string | null
+          metadata?: Json | null
+          source?: string
+          status?: string | null
+          updated_at?: string | null
+          user_id?: string | null
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
