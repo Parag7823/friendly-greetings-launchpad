@@ -87,7 +87,7 @@ const IntegrationTest = () => {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          test_data: "Integration test",
+          message: "Integration test",
           timestamp: new Date().toISOString()
         }),
       });
