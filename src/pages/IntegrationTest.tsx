@@ -12,8 +12,8 @@ const IntegrationTest = () => {
   const [fastApiResponse, setFastApiResponse] = useState<string>('');
   const { toast } = useToast();
 
-  // Replace with your actual Railway FastAPI URL
-  const FASTAPI_URL = "https://your-railway-app.railway.app"; // Update this with your actual URL
+  // Updated with your actual Railway FastAPI URL
+  const FASTAPI_URL = "https://ai-financial-backend-production.up.railway.app";
 
   useEffect(() => {
     testSupabaseConnection();
