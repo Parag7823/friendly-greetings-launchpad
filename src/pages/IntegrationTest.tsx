@@ -81,7 +81,7 @@ const IntegrationTest = () => {
   const testCompleteFlow = async () => {
     try {
       // Test creating a test ingestion job via API
-      const response = await fetch(`${FASTAPI_URL}/api/ingestion/test`, {
+      const response = await fetch(`${FASTAPI_URL}/test`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
