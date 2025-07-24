@@ -1,0 +1,10 @@
+
+{
+  "build": {
+    "builder": "DOCKERFILE"
+  },
+  "deploy": {
+    "startCommand": "python fastapi_backend.py",
+    "healthcheckPath": "/health"
+  }
+}
