@@ -64,6 +64,30 @@ export type Database = {
           },
         ]
       }
+      integration_test_logs: {
+        Row: {
+          created_at: string
+          id: string
+          message: string
+          source: string
+          timestamp: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          message: string
+          source?: string
+          timestamp?: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          message?: string
+          source?: string
+          timestamp?: string
+        }
+        Relationships: []
+      }
       metrics: {
         Row: {
           amount: number | null
