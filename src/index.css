@@ -1,105 +1,182 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Satoshi:wght@300;400;500;600;700&display=swap');
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-/* Definition of the design system. All colors, gradients, fonts, etc should be defined here. 
-All colors MUST be HSL.
-*/
-
 @layer base {
   :root {
-    --background: 0 0% 100%;
-    --foreground: 222.2 84% 4.9%;
-
-    --card: 0 0% 100%;
-    --card-foreground: 222.2 84% 4.9%;
-
-    --popover: 0 0% 100%;
-    --popover-foreground: 222.2 84% 4.9%;
-
-    --primary: 222.2 47.4% 11.2%;
-    --primary-foreground: 210 40% 98%;
-
-    --secondary: 210 40% 96.1%;
-    --secondary-foreground: 222.2 47.4% 11.2%;
-
-    --muted: 210 40% 96.1%;
-    --muted-foreground: 215.4 16.3% 46.9%;
-
-    --accent: 210 40% 96.1%;
-    --accent-foreground: 222.2 47.4% 11.2%;
-
-    --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 210 40% 98%;
-
-    --border: 214.3 31.8% 91.4%;
-    --input: 214.3 31.8% 91.4%;
-    --ring: 222.2 84% 4.9%;
-
-    --radius: 0.5rem;
-
-    --sidebar-background: 0 0% 98%;
-
-    --sidebar-foreground: 240 5.3% 26.1%;
-
-    --sidebar-primary: 240 5.9% 10%;
-
-    --sidebar-primary-foreground: 0 0% 98%;
-
-    --sidebar-accent: 240 4.8% 95.9%;
-
-    --sidebar-accent-foreground: 240 5.9% 10%;
-
-    --sidebar-border: 220 13% 91%;
-
-    --sidebar-ring: 217.2 91.2% 59.8%;
+    /* Finley AI Dark Theme - Premium Black */
+    --background: 0 0% 0%;           /* #000000 - Solid black */
+    --foreground: 0 0% 100%;         /* #FFFFFF - Pure white text */
+    
+    --card: 0 0% 4%;                 /* #0A0A0A - Slightly lighter black for cards */
+    --card-foreground: 0 0% 100%;    /* #FFFFFF - White text on cards */
+    
+    --popover: 0 0% 4%;              /* #0A0A0A - Dark popover background */
+    --popover-foreground: 0 0% 100%; /* #FFFFFF - White text in popovers */
+    
+    --primary: 0 0% 100%;            /* #FFFFFF - White for primary buttons */
+    --primary-foreground: 0 0% 0%;   /* #000000 - Black text on white buttons */
+    
+    --secondary: 0 0% 8%;            /* #141414 - Dark gray for secondary */
+    --secondary-foreground: 0 0% 100%; /* #FFFFFF - White text on secondary */
+    
+    --muted: 0 0% 8%;                /* #141414 - Muted background */
+    --muted-foreground: 0 0% 63%;    /* #A0A0A0 - Muted text */
+    
+    --accent: 0 0% 8%;               /* #141414 - Accent background */
+    --accent-foreground: 0 0% 96%;   /* #F4F4F4 - Light accent text */
+    
+    --destructive: 0 84% 60%;        /* Red for errors */
+    --destructive-foreground: 0 0% 98%; /* Light text on destructive */
+    
+    --border: 0 0% 12%;              /* #1F1F1F - Subtle borders */
+    --input: 0 0% 12%;               /* #1F1F1F - Input backgrounds */
+    --ring: 0 0% 63%;                /* #A0A0A0 - Focus rings */
+    
+    --radius: 0.5rem;               /* 8px border radius */
+    
+    /* Finley AI Custom Variables */
+    --finley-accent: 0 0% 63%;       /* #A0A0A0 - Brand accent */
+    --finley-light-accent: 0 0% 96%; /* #F4F4F4 - Light accent */
+    --finley-shadow: 0 0% 0%;        /* Pure black for shadows */
+    
+    /* Gradients */
+    --gradient-primary: linear-gradient(135deg, hsl(var(--primary)), hsl(var(--finley-light-accent)));
+    --gradient-subtle: linear-gradient(180deg, hsl(var(--background)), hsl(var(--card)));
+    
+    /* Animations */
+    --transition-smooth: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    --transition-fast: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   }
-
-  .dark {
-    --background: 222.2 84% 4.9%;
-    --foreground: 210 40% 98%;
-
-    --card: 222.2 84% 4.9%;
-    --card-foreground: 210 40% 98%;
-
-    --popover: 222.2 84% 4.9%;
-    --popover-foreground: 210 40% 98%;
-
-    --primary: 210 40% 98%;
-    --primary-foreground: 222.2 47.4% 11.2%;
-
-    --secondary: 217.2 32.6% 17.5%;
-    --secondary-foreground: 210 40% 98%;
-
-    --muted: 217.2 32.6% 17.5%;
-    --muted-foreground: 215 20.2% 65.1%;
-
-    --accent: 217.2 32.6% 17.5%;
-    --accent-foreground: 210 40% 98%;
-
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 210 40% 98%;
-
-    --border: 217.2 32.6% 17.5%;
-    --input: 217.2 32.6% 17.5%;
-    --ring: 212.7 26.8% 83.9%;
-    --sidebar-background: 240 5.9% 10%;
-    --sidebar-foreground: 240 4.8% 95.9%;
-    --sidebar-primary: 224.3 76.3% 48%;
-    --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 240 3.7% 15.9%;
-    --sidebar-accent-foreground: 240 4.8% 95.9%;
-    --sidebar-border: 240 3.7% 15.9%;
-    --sidebar-ring: 217.2 91.2% 59.8%;
-  }
-}
-
-@layer base {
+  
   * {
     @apply border-border;
   }
-
+  
   body {
     @apply bg-background text-foreground;
+    font-family: 'Inter', 'Satoshi', system-ui, -apple-system, sans-serif;
+    font-feature-settings: "cv11", "ss01";
+    font-variation-settings: "opsz" 32;
+  }
+  
+  /* Custom scrollbar for dark theme */
+  ::-webkit-scrollbar {
+    width: 6px;
+  }
+  
+  ::-webkit-scrollbar-track {
+    @apply bg-background;
+  }
+  
+  ::-webkit-scrollbar-thumb {
+    @apply bg-muted rounded-full;
+  }
+  
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-muted-foreground;
+  }
+}
+
+@layer components {
+  /* Finley AI specific components */
+  .finley-button {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-medium;
+    @apply bg-primary text-primary-foreground hover:bg-primary/90;
+    @apply transition-all duration-200 ease-in-out;
+    @apply focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring;
+    @apply disabled:pointer-events-none disabled:opacity-50;
+  }
+  
+  .finley-button-outline {
+    @apply finley-button bg-transparent border border-border text-foreground;
+    @apply hover:bg-accent hover:text-accent-foreground;
+  }
+  
+  .finley-card {
+    @apply rounded-lg border bg-card text-card-foreground shadow-sm;
+    @apply transition-all duration-200 ease-in-out;
+  }
+  
+  .finley-sidebar {
+    @apply h-full bg-card border-r border-border;
+    @apply transition-all duration-300 ease-in-out;
+  }
+  
+  .finley-chat {
+    @apply flex-1 bg-background;
+  }
+  
+  /* Upload area styling */
+  .upload-zone {
+    @apply border-2 border-dashed border-border rounded-lg p-6;
+    @apply transition-colors duration-200 ease-in-out;
+    @apply hover:border-finley-accent hover:bg-accent/50;
+  }
+  
+  .upload-zone.drag-over {
+    @apply border-primary bg-primary/10;
+  }
+}
+
+@layer utilities {
+  /* Custom animations */
+  .animate-fade-in {
+    animation: fadeIn 0.3s ease-out;
+  }
+  
+  .animate-slide-up {
+    animation: slideUp 0.4s ease-out;
+  }
+  
+  .animate-scale-in {
+    animation: scaleIn 0.2s ease-out;
+  }
+  
+  @keyframes fadeIn {
+    from {
+      opacity: 0;
+      transform: translateY(10px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+  
+  @keyframes slideUp {
+    from {
+      opacity: 0;
+      transform: translateY(20px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+  
+  @keyframes scaleIn {
+    from {
+      opacity: 0;
+      transform: scale(0.95);
+    }
+    to {
+      opacity: 1;
+      transform: scale(1);
+    }
+  }
+  
+  /* Hover effects */
+  .hover-lift {
+    @apply transition-transform duration-200 ease-in-out hover:scale-105;
+  }
+  
+  .hover-glow {
+    @apply transition-shadow duration-200 ease-in-out;
+  }
+  
+  .hover-glow:hover {
+    box-shadow: 0 0 20px hsl(var(--finley-accent) / 0.3);
   }
 }
