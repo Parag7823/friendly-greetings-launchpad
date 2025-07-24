@@ -21,9 +21,9 @@ const IntegrationTest = () => {
 
   const testSupabaseConnection = async () => {
     try {
-      // Test reading from raw_records table
+      // Test reading from integration_test_logs table (the new test table)
       const { data, error } = await supabase
-        .from('raw_records')
+        .from('integration_test_logs')
         .select('*')
         .limit(5);
 
