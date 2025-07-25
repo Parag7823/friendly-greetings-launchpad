@@ -17,12 +17,14 @@ interface FileUploadState {
 
 interface UploadState {
   files: FileUploadState[];
+  uploadedFiles: { id: string; name: string; uploadedAt: Date; analysisResults?: ProcessingResult }[];
   showConfig: boolean;
 }
 
 export const ExcelUpload = () => {
   const [uploadState, setUploadState] = useState<UploadState>({
     files: [],
+    uploadedFiles: [],
     showConfig: false
   });
   const [apiKey, setApiKey] = useState<string>('');
@@ -103,15 +105,21 @@ export const ExcelUpload = () => {
       const result = await processor.processFile(file);
       
       // Save to database in background
-      saveJobToDatabase(file, result);
+      await saveJobToDatabase(file, result);
 
+      // Move file to uploaded files list and remove from processing
       setUploadState(prev => ({
         ...prev,
-        files: prev.files.map((f, i) => 
-          i === fileIndex 
-            ? { ...f, status: 'success' as const, progress: 100, analysisResults: result }
-            : f
-        )
+        files: prev.files.filter((_, i) => i !== fileIndex),
+        uploadedFiles: [
+          ...prev.uploadedFiles,
+          {
+            id: `${file.name}-${Date.now()}`,
+            name: file.name,
+            uploadedAt: new Date(),
+            analysisResults: result
+          }
+        ]
       }));
 
       return result;
@@ -232,8 +240,48 @@ export const ExcelUpload = () => {
   const resetUpload = () => {
     setUploadState({
       files: [],
+      uploadedFiles: [],
       showConfig: false
     });
+  };
+
+  const deleteUploadedFile = async (fileId: string) => {
+    try {
+      const file = uploadState.uploadedFiles.find(f => f.id === fileId);
+      if (!file) return;
+
+      // Delete from database
+      const { data: { user } } = await supabase.auth.getUser();
+      
+      const { error } = await supabase
+        .from('ingestion_jobs')
+        .delete()
+        .eq('user_id', user?.id)
+        .eq('job_type', 'excel_analysis')
+        .like('result->file_name', `%${file.name}%`);
+
+      if (error) {
+        console.warn('Failed to delete from database:', error);
+      }
+
+      // Remove from state
+      setUploadState(prev => ({
+        ...prev,
+        uploadedFiles: prev.uploadedFiles.filter(f => f.id !== fileId)
+      }));
+
+      toast({
+        title: "File deleted successfully",
+        description: `${file.name} has been removed.`
+      });
+    } catch (error) {
+      console.error('Error deleting file:', error);
+      toast({
+        variant: "destructive",
+        title: "Delete Failed",
+        description: "Failed to delete the file. Please try again."
+      });
+    }
   };
 
   const handleApiKeySubmit = () => {
@@ -377,6 +425,40 @@ export const ExcelUpload = () => {
           ))}
         </div>
       )}
+
+      {/* Uploaded Files List */}
+      {uploadState.uploadedFiles.length > 0 && (
+        <div className="space-y-2">
+          <h4 className="text-sm font-medium text-foreground">Uploaded Files</h4>
+          <div className="space-y-2 max-h-40 overflow-y-auto">
+            {uploadState.uploadedFiles.map((file) => (
+              <div key={file.id} className="bg-green-50 dark:bg-green-950/20 p-3 rounded-lg border border-green-200 dark:border-green-800">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <CheckCircle className="w-4 h-4 text-green-600" />
+                    <div>
+                      <span className="text-sm font-medium text-foreground">
+                        {file.name}
+                      </span>
+                      <p className="text-xs text-muted-foreground">
+                        Uploaded {file.uploadedAt.toLocaleDateString()} at {file.uploadedAt.toLocaleTimeString()}
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => deleteUploadedFile(file.id)}
+                    className="text-muted-foreground hover:text-destructive transition-colors"
+                    title="Delete file"
+                  >
+                    🗑️
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      
       
       <div className="mt-3 text-center space-y-2">
         <button
