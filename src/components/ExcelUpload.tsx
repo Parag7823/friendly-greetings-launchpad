@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { Upload, CheckCircle, AlertCircle, Loader2, Settings, X } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
@@ -29,6 +29,14 @@ export const ExcelUpload = () => {
   });
   const [apiKey, setApiKey] = useState<string>('');
   const { toast } = useToast();
+
+  // Load API key from localStorage on component mount
+  useEffect(() => {
+    const storedKey = localStorage.getItem('openai_api_key');
+    if (storedKey) {
+      setApiKey(storedKey);
+    }
+  }, []);
 
   const validateFile = (file: File): { isValid: boolean; error?: string } => {
     const validTypes = [
@@ -155,9 +163,19 @@ export const ExcelUpload = () => {
       return;
     }
 
+    // Debug API key storage
+    const storedApiKey = localStorage.getItem('openai_api_key');
+    const currentApiKey = apiKey;
+    
+    console.log('Debug API Key Info:', {
+      storedApiKey: storedApiKey ? 'Present' : 'Not found',
+      currentApiKey: currentApiKey ? 'Present' : 'Not found',
+      finalKey: storedApiKey || currentApiKey
+    });
+    
     // Check if API key is available
-    const storedApiKey = localStorage.getItem('openai_api_key') || apiKey;
-    if (!storedApiKey) {
+    const finalApiKey = storedApiKey || currentApiKey;
+    if (!finalApiKey) {
       setUploadState(prev => ({ ...prev, showConfig: true }));
       toast({
         variant: "destructive",
