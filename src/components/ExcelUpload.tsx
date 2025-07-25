@@ -54,7 +54,7 @@ export const ExcelUpload = () => {
   };
 
   const setupWebSocket = (jobId: string) => {
-    const websocket = new WebSocket(`wss://ai-financial-backend-production.up.railway.app/ws/${jobId}`);
+    const websocket = new WebSocket(`wss://friendly-greetings-launchpad-production.up.railway.app/ws/${jobId}`);
     
     websocket.onopen = () => {
       console.log('WebSocket connected for job:', jobId);
@@ -147,8 +147,7 @@ export const ExcelUpload = () => {
   };
 
   const triggerFastAPIProcessing = async (jobId: string, storagePath: string, fileName: string) => {
-    // Replace this URL with your actual Railway deployment URL
-    const response = await fetch('https://YOUR_RAILWAY_URL.railway.app/process-excel', {
+    const response = await fetch('https://friendly-greetings-launchpad-production.up.railway.app/process-excel', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
