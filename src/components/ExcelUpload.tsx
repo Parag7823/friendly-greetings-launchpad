@@ -1,27 +1,31 @@
 import { useState, useCallback } from 'react';
-import { Upload, CheckCircle, AlertCircle, Loader2, Brain, FileText, TrendingUp, Settings } from 'lucide-react';
+import { Upload, CheckCircle, AlertCircle, Loader2, Settings, X } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 import { ExcelProcessor, ProcessingProgress, ProcessingResult } from '@/lib/excelProcessor';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
 
-interface UploadState {
-  status: 'idle' | 'processing' | 'success' | 'error' | 'config';
+interface FileUploadState {
+  file: File;
+  status: 'processing' | 'success' | 'error';
   progress: number;
-  error?: string;
-  fileName?: string;
   currentStep?: string;
+  error?: string;
   analysisResults?: ProcessingResult;
+}
+
+interface UploadState {
+  files: FileUploadState[];
+  showConfig: boolean;
 }
 
 export const ExcelUpload = () => {
   const [uploadState, setUploadState] = useState<UploadState>({
-    status: 'idle',
-    progress: 0
+    files: [],
+    showConfig: false
   });
   const [apiKey, setApiKey] = useState<string>('');
-  const [showConfig, setShowConfig] = useState<boolean>(false);
   const { toast } = useToast();
 
   const validateFile = (file: File): { isValid: boolean; error?: string } => {
@@ -80,40 +84,19 @@ export const ExcelUpload = () => {
     }
   };
 
-  const handleFileUpload = useCallback(async (file: File) => {
-    const validation = validateFile(file);
-    if (!validation.isValid) {
-      setUploadState({
-        status: 'error',
-        progress: 0,
-        error: validation.error
-      });
-      toast({
-        variant: "destructive",
-        title: "Upload Failed",
-        description: validation.error
-      });
-      return;
-    }
-
-    setUploadState({
-      status: 'processing',
-      progress: 0,
-      fileName: file.name,
-      currentStep: 'Initializing...'
-    });
-
+  const processFile = async (file: File, fileIndex: number) => {
     try {
-      // Get API key from localStorage or state
       const storedApiKey = localStorage.getItem('openai_api_key') || apiKey;
-      
       const processor = new ExcelProcessor(storedApiKey);
       
       processor.setProgressCallback((progress: ProcessingProgress) => {
         setUploadState(prev => ({
           ...prev,
-          currentStep: progress.message,
-          progress: progress.progress
+          files: prev.files.map((f, i) => 
+            i === fileIndex 
+              ? { ...f, currentStep: progress.message, progress: progress.progress }
+              : f
+          )
         }));
       });
 
@@ -122,38 +105,105 @@ export const ExcelUpload = () => {
       // Save to database in background
       saveJobToDatabase(file, result);
 
-      setUploadState({
-        status: 'success',
-        progress: 100,
-        fileName: file.name,
-        analysisResults: result
-      });
+      setUploadState(prev => ({
+        ...prev,
+        files: prev.files.map((f, i) => 
+          i === fileIndex 
+            ? { ...f, status: 'success' as const, progress: 100, analysisResults: result }
+            : f
+        )
+      }));
 
-      toast({
-        title: "Analysis Complete",
-        description: `${file.name} has been successfully analyzed by Finley AI.`
-      });
-      
+      return result;
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
-      setUploadState({
-        status: 'error',
-        progress: 0,
-        error: errorMessage
-      });
       
+      setUploadState(prev => ({
+        ...prev,
+        files: prev.files.map((f, i) => 
+          i === fileIndex 
+            ? { ...f, status: 'error' as const, error: errorMessage }
+            : f
+        )
+      }));
+      
+      throw error;
+    }
+  };
+
+  const handleMultipleFileUpload = useCallback(async (files: FileList) => {
+    const fileArray = Array.from(files).slice(0, 10); // Limit to 10 files
+    
+    // Validate all files first
+    const validations = fileArray.map(file => ({ file, validation: validateFile(file) }));
+    const invalidFiles = validations.filter(v => !v.validation.isValid);
+    
+    if (invalidFiles.length > 0) {
       toast({
         variant: "destructive",
-        title: "Analysis Failed",
-        description: errorMessage
+        title: "Upload Failed",
+        description: `Invalid files: ${invalidFiles.map(f => f.file.name).join(', ')}`
       });
+      return;
     }
-  }, [toast, apiKey]);
+
+    // Initialize file states
+    const initialFileStates: FileUploadState[] = fileArray.map(file => ({
+      file,
+      status: 'processing' as const,
+      progress: 0,
+      currentStep: 'Initializing...'
+    }));
+
+    setUploadState(prev => ({
+      ...prev,
+      files: [...prev.files, ...initialFileStates]
+    }));
+
+    // Process all files in parallel
+    const promises = fileArray.map((file, index) => 
+      processFile(file, uploadState.files.length + index)
+    );
+
+    try {
+      const results = await Promise.allSettled(promises);
+      
+      // Show success message for completed files
+      const successCount = results.filter(r => r.status === 'fulfilled').length;
+      const successfulFiles = fileArray.filter((_, i) => results[i].status === 'fulfilled');
+      
+      if (successCount > 0) {
+        // Extract document types from successful results
+        const documentTypes = successfulFiles.map(file => {
+          const result = results[fileArray.indexOf(file)];
+          if (result.status === 'fulfilled') {
+            return (result.value as ProcessingResult).documentType || 'Financial Document';
+          }
+          return 'Financial Document';
+        });
+
+        toast({
+          title: "Analysis Complete",
+          description: `Successfully read: ${documentTypes.join(', ')}. Finley is ready to simulate and explain.`
+        });
+      }
+
+      if (successCount < fileArray.length) {
+        toast({
+          variant: "destructive",
+          title: "Some Files Failed",
+          description: `${fileArray.length - successCount} file(s) failed to process.`
+        });
+      }
+    } catch (error) {
+      console.error('Error processing files:', error);
+    }
+  }, [uploadState.files.length, toast, apiKey]);
 
   const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (file) {
-      handleFileUpload(file);
+    const files = event.target.files;
+    if (files && files.length > 0) {
+      handleMultipleFileUpload(files);
     }
   };
 
@@ -161,28 +211,35 @@ export const ExcelUpload = () => {
     event.preventDefault();
     event.stopPropagation();
     
-    const file = event.dataTransfer.files[0];
-    if (file) {
-      handleFileUpload(file);
+    const files = event.dataTransfer.files;
+    if (files && files.length > 0) {
+      handleMultipleFileUpload(files);
     }
-  }, [handleFileUpload]);
+  }, [handleMultipleFileUpload]);
 
   const handleDragOver = useCallback((event: React.DragEvent<HTMLDivElement>) => {
     event.preventDefault();
     event.stopPropagation();
   }, []);
 
+  const removeFile = (fileIndex: number) => {
+    setUploadState(prev => ({
+      ...prev,
+      files: prev.files.filter((_, i) => i !== fileIndex)
+    }));
+  };
+
   const resetUpload = () => {
     setUploadState({
-      status: 'idle',
-      progress: 0
+      files: [],
+      showConfig: false
     });
   };
 
   const handleApiKeySubmit = () => {
     if (apiKey.trim()) {
       localStorage.setItem('openai_api_key', apiKey.trim());
-      setShowConfig(false);
+      setUploadState(prev => ({ ...prev, showConfig: false }));
       toast({
         title: "API Key Saved",
         description: "OpenAI API key has been configured for enhanced analysis."
@@ -190,20 +247,20 @@ export const ExcelUpload = () => {
     }
   };
 
-  const getStepIcon = (status: string) => {
+  const getStatusIcon = (status: string) => {
     switch (status) {
       case 'processing':
-        return <Brain className="w-8 h-8 text-finley-accent mx-auto mb-2 animate-pulse" />;
+        return <Loader2 className="w-4 h-4 text-finley-accent animate-spin" />;
       case 'success':
-        return <CheckCircle className="w-8 h-8 text-green-500 mx-auto mb-2" />;
+        return <CheckCircle className="w-4 h-4 text-green-500" />;
       case 'error':
-        return <AlertCircle className="w-8 h-8 text-destructive mx-auto mb-2" />;
+        return <AlertCircle className="w-4 h-4 text-destructive" />;
       default:
-        return <Loader2 className="w-8 h-8 text-finley-accent mx-auto mb-2 animate-spin" />;
+        return <Loader2 className="w-4 h-4 text-finley-accent animate-spin" />;
     }
   };
 
-  if (showConfig) {
+  if (uploadState.showConfig) {
     return (
       <Card className="w-full max-w-md mx-auto">
         <CardHeader>
@@ -233,7 +290,7 @@ export const ExcelUpload = () => {
             <Button onClick={handleApiKeySubmit} className="flex-1">
               Save & Continue
             </Button>
-            <Button variant="outline" onClick={() => setShowConfig(false)}>
+            <Button variant="outline" onClick={() => setUploadState(prev => ({ ...prev, showConfig: false }))}>
               Skip
             </Button>
           </div>
@@ -242,125 +299,13 @@ export const ExcelUpload = () => {
     );
   }
 
-  if (uploadState.status === 'success' && uploadState.analysisResults) {
-    const results = uploadState.analysisResults;
-    return (
-      <div className="space-y-4">
-        <div className="text-center p-4">
-          <CheckCircle className="w-8 h-8 text-green-500 mx-auto mb-2" />
-          <p className="text-sm font-medium text-foreground">Analysis Complete</p>
-          <p className="text-xs text-muted-foreground mb-2">{uploadState.fileName}</p>
-          <div className="text-xs text-finley-accent bg-accent/20 rounded-lg p-2 border border-border mb-3">
-            <TrendingUp className="w-4 h-4 inline mr-1" />
-            {results.documentType}
-          </div>
-          <button
-            onClick={resetUpload}
-            className="finley-button-outline text-xs px-3 py-1"
-          >
-            Upload Another
-          </button>
-        </div>
-
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-lg">Analysis Results</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {results.summary && (
-              <div>
-                <h4 className="font-medium mb-2">Summary</h4>
-                <p className="text-sm text-muted-foreground">{results.summary}</p>
-              </div>
-            )}
-
-            {results.metrics && results.metrics.length > 0 && (
-              <div>
-                <h4 className="font-medium mb-2">Key Metrics</h4>
-                <div className="grid grid-cols-2 gap-2">
-                  {results.metrics.map((metric, index) => (
-                    <div key={index} className="bg-muted/50 p-2 rounded">
-                      <p className="text-xs text-muted-foreground">{metric.label}</p>
-                      <p className="font-medium">{metric.value}</p>
-                      {metric.change && (
-                        <p className="text-xs text-finley-accent">{metric.change}</p>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {results.insights && results.insights.length > 0 && (
-              <div>
-                <h4 className="font-medium mb-2">Insights</h4>
-                <ul className="space-y-1">
-                  {results.insights.map((insight, index) => (
-                    <li key={index} className="text-sm text-muted-foreground">
-                      • {insight}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
-
-  if (uploadState.status === 'error') {
-    return (
-      <div className="text-center p-4">
-        <AlertCircle className="w-8 h-8 text-destructive mx-auto mb-2" />
-        <p className="text-sm font-medium text-destructive">Analysis Failed</p>
-        <p className="text-xs text-muted-foreground mb-3">{uploadState.error}</p>
-        <div className="flex gap-2 justify-center">
-          <button
-            onClick={resetUpload}
-            className="finley-button text-xs px-3 py-1"
-          >
-            Try Again
-          </button>
-          <button
-            onClick={() => setShowConfig(true)}
-            className="finley-button-outline text-xs px-3 py-1"
-          >
-            Configure AI
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  if (uploadState.status === 'processing') {
-    return (
-      <div className="text-center p-4">
-        {getStepIcon(uploadState.status)}
-        <p className="text-sm font-medium text-foreground">Analyzing Document...</p>
-        <p className="text-xs text-muted-foreground mb-2">{uploadState.fileName}</p>
-        <div className="w-full bg-muted rounded-full h-1.5 mb-2">
-          <div 
-            className="bg-primary h-1.5 rounded-full transition-all duration-300"
-            style={{ width: `${uploadState.progress}%` }}
-          />
-        </div>
-        <p className="text-xs text-finley-accent font-medium mb-1">{uploadState.progress}%</p>
-        {uploadState.currentStep && (
-          <p className="text-xs text-muted-foreground italic">
-            {uploadState.currentStep}
-          </p>
-        )}
-      </div>
-    );
-  }
-
   return (
-    <div>
+    <div className="space-y-4">
       <input
         type="file"
         id="excel-upload"
         accept=".xlsx,.xls,.csv"
+        multiple
         onChange={handleFileSelect}
         className="hidden"
       />
@@ -375,22 +320,81 @@ export const ExcelUpload = () => {
           <Upload className="w-6 h-6 text-finley-accent mx-auto mb-2" />
           <p className="text-sm font-medium text-foreground mb-1">Upload Excel</p>
           <p className="text-xs text-muted-foreground">
-            Drag & drop or click to browse
+            Drag & drop or click to browse (up to 10 files)
           </p>
           <p className="text-xs text-muted-foreground mt-1">
-            .xlsx, .xls, .csv (max 10MB)
+            .xlsx, .xls, .csv (max 10MB each)
           </p>
         </div>
       </div>
+
+      {/* File Progress List */}
+      {uploadState.files.length > 0 && (
+        <div className="space-y-2 max-h-60 overflow-y-auto">
+          {uploadState.files.map((fileState, index) => (
+            <div key={index} className="bg-muted/50 p-3 rounded-lg">
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-2">
+                  {getStatusIcon(fileState.status)}
+                  <span className="text-sm font-medium truncate max-w-32">
+                    {fileState.file.name}
+                  </span>
+                </div>
+                <button
+                  onClick={() => removeFile(index)}
+                  className="text-muted-foreground hover:text-foreground"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+              
+              {fileState.status === 'processing' && (
+                <>
+                  <div className="w-full bg-muted rounded-full h-1.5 mb-1">
+                    <div 
+                      className="bg-primary h-1.5 rounded-full transition-all duration-300"
+                      style={{ width: `${fileState.progress}%` }}
+                    />
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    {fileState.currentStep}
+                  </p>
+                </>
+              )}
+              
+              {fileState.status === 'error' && (
+                <p className="text-xs text-destructive">
+                  {fileState.error}
+                </p>
+              )}
+              
+              {fileState.status === 'success' && (
+                <p className="text-xs text-green-600">
+                  Analysis complete
+                </p>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
       
-      <div className="mt-3 text-center">
+      <div className="mt-3 text-center space-y-2">
         <button
-          onClick={() => setShowConfig(true)}
+          onClick={() => setUploadState(prev => ({ ...prev, showConfig: true }))}
           className="text-xs text-finley-accent hover:underline flex items-center gap-1 mx-auto"
         >
           <Settings className="w-3 h-3" />
           Configure AI for enhanced analysis
         </button>
+        
+        {uploadState.files.length > 0 && (
+          <button
+            onClick={resetUpload}
+            className="text-xs text-muted-foreground hover:text-foreground underline"
+          >
+            Clear all files
+          </button>
+        )}
       </div>
     </div>
   );
