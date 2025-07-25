@@ -147,7 +147,8 @@ export const ExcelUpload = () => {
   };
 
   const triggerFastAPIProcessing = async (jobId: string, storagePath: string, fileName: string) => {
-    const response = await fetch('https://ai-financial-backend-production.up.railway.app/process-excel', {
+    // Replace this URL with your actual Railway deployment URL
+    const response = await fetch('https://YOUR_RAILWAY_URL.railway.app/process-excel', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
