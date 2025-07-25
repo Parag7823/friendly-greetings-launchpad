@@ -1,23 +1,18 @@
-
 import { useState, useCallback } from 'react';
-import { Upload, CheckCircle, AlertCircle, Loader2, Brain, FileText, TrendingUp } from 'lucide-react';
+import { Upload, CheckCircle, AlertCircle, Loader2, Brain, FileText, TrendingUp, Settings } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
+import { ExcelProcessor, ProcessingProgress, ProcessingResult } from '@/lib/excelProcessor';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
+import { Button } from './ui/button';
 
 interface UploadState {
-  status: 'idle' | 'uploading' | 'processing' | 'success' | 'error';
+  status: 'idle' | 'processing' | 'success' | 'error' | 'config';
   progress: number;
   error?: string;
   fileName?: string;
   currentStep?: string;
-  analysisResults?: any;
-}
-
-interface ProcessingMessage {
-  step: string;
-  message: string;
-  progress: number;
-  icon?: string;
+  analysisResults?: ProcessingResult;
 }
 
 export const ExcelUpload = () => {
@@ -25,7 +20,8 @@ export const ExcelUpload = () => {
     status: 'idle',
     progress: 0
   });
-  const [ws, setWs] = useState<WebSocket | null>(null);
+  const [apiKey, setApiKey] = useState<string>('');
+  const [showConfig, setShowConfig] = useState<boolean>(false);
   const { toast } = useToast();
 
   const validateFile = (file: File): { isValid: boolean; error?: string } => {
@@ -53,122 +49,35 @@ export const ExcelUpload = () => {
     return { isValid: true };
   };
 
-  const setupWebSocket = (jobId: string) => {
-    const websocket = new WebSocket(`wss://friendly-greetings-launchpad-production.up.railway.app/ws/${jobId}`);
-    
-    websocket.onopen = () => {
-      console.log('WebSocket connected for job:', jobId);
-    };
+  const saveJobToDatabase = async (file: File, result: ProcessingResult): Promise<void> => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      
+      const { error } = await supabase
+        .from('ingestion_jobs')
+        .insert({
+          job_type: 'excel_analysis',
+          user_id: user?.id,
+          record_id: null,
+          status: 'completed',
+          progress: 100,
+          result: {
+            file_name: file.name,
+            file_size: file.size,
+            document_type: result.documentType,
+            insights: result.insights,
+            metrics: result.metrics,
+            summary: result.summary,
+            processed_at: new Date().toISOString()
+          }
+        });
 
-    websocket.onmessage = (event) => {
-      try {
-        const data: ProcessingMessage = JSON.parse(event.data);
-        console.log('WebSocket message:', data);
-        
-        setUploadState(prev => ({
-          ...prev,
-          currentStep: data.message,
-          progress: data.progress
-        }));
-
-        if (data.step === 'completed') {
-          setUploadState(prev => ({
-            ...prev,
-            status: 'success',
-            progress: 100,
-            analysisResults: data
-          }));
-          websocket.close();
-        } else if (data.step === 'error') {
-          setUploadState(prev => ({
-            ...prev,
-            status: 'error',
-            error: data.message
-          }));
-          websocket.close();
-        }
-      } catch (error) {
-        console.error('Error parsing WebSocket message:', error);
+      if (error) {
+        console.warn('Failed to save job to database:', error);
       }
-    };
-
-    websocket.onerror = (error) => {
-      console.error('WebSocket error:', error);
-      setUploadState(prev => ({
-        ...prev,
-        status: 'error',
-        error: 'Connection error during processing'
-      }));
-    };
-
-    websocket.onclose = () => {
-      console.log('WebSocket connection closed');
-    };
-
-    setWs(websocket);
-    return websocket;
-  };
-
-  const uploadToSupabase = async (file: File): Promise<string> => {
-    const fileName = `${Date.now()}-${file.name}`;
-    const { data, error } = await supabase.storage
-      .from('finley-uploads')
-      .upload(fileName, file);
-
-    if (error) {
-      throw new Error(`Storage upload failed: ${error.message}`);
+    } catch (error) {
+      console.warn('Database save error:', error);
     }
-
-    return data.path;
-  };
-
-  const createIngestionJob = async (file: File, storagePath: string): Promise<string> => {
-    const { data: { user } } = await supabase.auth.getUser();
-    
-    const { data, error } = await supabase
-      .from('ingestion_jobs')
-      .insert({
-        job_type: 'excel_analysis',
-        user_id: user?.id,
-        record_id: null,
-        status: 'queued',
-        progress: 0,
-        result: {
-          storage_path: storagePath,
-          file_name: file.name,
-          file_size: file.size
-        }
-      })
-      .select('id')
-      .single();
-
-    if (error) {
-      throw new Error(`Failed to create job: ${error.message}`);
-    }
-
-    return data.id;
-  };
-
-  const triggerFastAPIProcessing = async (jobId: string, storagePath: string, fileName: string) => {
-    const response = await fetch('https://friendly-greetings-launchpad-production.up.railway.app/process-excel', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        job_id: jobId,
-        storage_path: storagePath,
-        file_name: fileName,
-        supabase_url: 'https://gnrbafqifucxlaihtyuv.supabase.co',
-        supabase_key: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImducmJhZnFpZnVjeGxhaWh0eXV2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTMxMTM5OTksImV4cCI6MjA2ODY4OTk5OX0.Lb5Fuu1ktYuPKBgx0Oxla9SXot-TWI-bPhsML9EkRwE'
-      })
-    });
-
-    if (!response.ok) {
-      throw new Error(`FastAPI processing failed: ${response.statusText}`);
-    }
-
-    return response.json();
   };
 
   const handleFileUpload = useCallback(async (file: File) => {
@@ -188,31 +97,41 @@ export const ExcelUpload = () => {
     }
 
     setUploadState({
-      status: 'uploading',
+      status: 'processing',
       progress: 0,
       fileName: file.name,
-      currentStep: 'Uploading file to secure storage...'
+      currentStep: 'Initializing...'
     });
 
     try {
-      // Step 1: Upload to Supabase Storage
-      const storagePath = await uploadToSupabase(file);
-      setUploadState(prev => ({ ...prev, progress: 25, currentStep: 'Creating analysis job...' }));
+      // Get API key from localStorage or state
+      const storedApiKey = localStorage.getItem('openai_api_key') || apiKey;
       
-      // Step 2: Create ingestion job
-      const jobId = await createIngestionJob(file, storagePath);
-      setUploadState(prev => ({ ...prev, progress: 50, currentStep: 'Connecting to AI analysis engine...' }));
+      const processor = new ExcelProcessor(storedApiKey);
       
-      // Step 3: Setup WebSocket for real-time updates
-      setupWebSocket(jobId);
-      setUploadState(prev => ({ ...prev, status: 'processing', progress: 60, currentStep: 'Starting intelligent analysis...' }));
+      processor.setProgressCallback((progress: ProcessingProgress) => {
+        setUploadState(prev => ({
+          ...prev,
+          currentStep: progress.message,
+          progress: progress.progress
+        }));
+      });
+
+      const result = await processor.processFile(file);
       
-      // Step 4: Trigger FastAPI processing
-      await triggerFastAPIProcessing(jobId, storagePath, file.name);
-      
+      // Save to database in background
+      saveJobToDatabase(file, result);
+
+      setUploadState({
+        status: 'success',
+        progress: 100,
+        fileName: file.name,
+        analysisResults: result
+      });
+
       toast({
-        title: "Analysis Started",
-        description: `${file.name} is being analyzed by Finley AI. You'll see real-time progress updates.`
+        title: "Analysis Complete",
+        description: `${file.name} has been successfully analyzed by Finley AI.`
       });
       
     } catch (error) {
@@ -225,11 +144,11 @@ export const ExcelUpload = () => {
       
       toast({
         variant: "destructive",
-        title: "Upload Failed",
+        title: "Analysis Failed",
         description: errorMessage
       });
     }
-  }, [toast]);
+  }, [toast, apiKey]);
 
   const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -254,14 +173,21 @@ export const ExcelUpload = () => {
   }, []);
 
   const resetUpload = () => {
-    if (ws) {
-      ws.close();
-      setWs(null);
-    }
     setUploadState({
       status: 'idle',
       progress: 0
     });
+  };
+
+  const handleApiKeySubmit = () => {
+    if (apiKey.trim()) {
+      localStorage.setItem('openai_api_key', apiKey.trim());
+      setShowConfig(false);
+      toast({
+        title: "API Key Saved",
+        description: "OpenAI API key has been configured for enhanced analysis."
+      });
+    }
   };
 
   const getStepIcon = (status: string) => {
@@ -277,22 +203,108 @@ export const ExcelUpload = () => {
     }
   };
 
-  if (uploadState.status === 'success') {
+  if (showConfig) {
     return (
-      <div className="text-center p-4">
-        <CheckCircle className="w-8 h-8 text-green-500 mx-auto mb-2" />
-        <p className="text-sm font-medium text-foreground">Analysis Complete</p>
-        <p className="text-xs text-muted-foreground mb-2">{uploadState.fileName}</p>
-        <div className="text-xs text-finley-accent bg-accent/20 rounded-lg p-2 border border-border mb-3">
-          <TrendingUp className="w-4 h-4 inline mr-1" />
-          Ready for intelligent insights
+      <Card className="w-full max-w-md mx-auto">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Settings className="w-5 h-5" />
+            Configure AI Analysis
+          </CardTitle>
+          <CardDescription>
+            Enter your OpenAI API key for enhanced financial analysis
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div>
+            <label className="text-sm font-medium mb-2 block">OpenAI API Key</label>
+            <input
+              type="password"
+              value={apiKey}
+              onChange={(e) => setApiKey(e.target.value)}
+              placeholder="sk-..."
+              className="w-full px-3 py-2 border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-primary"
+            />
+            <p className="text-xs text-muted-foreground mt-1">
+              Your key is stored locally and used only for analysis
+            </p>
+          </div>
+          <div className="flex gap-2">
+            <Button onClick={handleApiKeySubmit} className="flex-1">
+              Save & Continue
+            </Button>
+            <Button variant="outline" onClick={() => setShowConfig(false)}>
+              Skip
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (uploadState.status === 'success' && uploadState.analysisResults) {
+    const results = uploadState.analysisResults;
+    return (
+      <div className="space-y-4">
+        <div className="text-center p-4">
+          <CheckCircle className="w-8 h-8 text-green-500 mx-auto mb-2" />
+          <p className="text-sm font-medium text-foreground">Analysis Complete</p>
+          <p className="text-xs text-muted-foreground mb-2">{uploadState.fileName}</p>
+          <div className="text-xs text-finley-accent bg-accent/20 rounded-lg p-2 border border-border mb-3">
+            <TrendingUp className="w-4 h-4 inline mr-1" />
+            {results.documentType}
+          </div>
+          <button
+            onClick={resetUpload}
+            className="finley-button-outline text-xs px-3 py-1"
+          >
+            Upload Another
+          </button>
         </div>
-        <button
-          onClick={resetUpload}
-          className="finley-button-outline text-xs px-3 py-1"
-        >
-          Upload Another
-        </button>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-lg">Analysis Results</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {results.summary && (
+              <div>
+                <h4 className="font-medium mb-2">Summary</h4>
+                <p className="text-sm text-muted-foreground">{results.summary}</p>
+              </div>
+            )}
+
+            {results.metrics && results.metrics.length > 0 && (
+              <div>
+                <h4 className="font-medium mb-2">Key Metrics</h4>
+                <div className="grid grid-cols-2 gap-2">
+                  {results.metrics.map((metric, index) => (
+                    <div key={index} className="bg-muted/50 p-2 rounded">
+                      <p className="text-xs text-muted-foreground">{metric.label}</p>
+                      <p className="font-medium">{metric.value}</p>
+                      {metric.change && (
+                        <p className="text-xs text-finley-accent">{metric.change}</p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {results.insights && results.insights.length > 0 && (
+              <div>
+                <h4 className="font-medium mb-2">Insights</h4>
+                <ul className="space-y-1">
+                  {results.insights.map((insight, index) => (
+                    <li key={index} className="text-sm text-muted-foreground">
+                      • {insight}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </CardContent>
+        </Card>
       </div>
     );
   }
@@ -303,23 +315,29 @@ export const ExcelUpload = () => {
         <AlertCircle className="w-8 h-8 text-destructive mx-auto mb-2" />
         <p className="text-sm font-medium text-destructive">Analysis Failed</p>
         <p className="text-xs text-muted-foreground mb-3">{uploadState.error}</p>
-        <button
-          onClick={resetUpload}
-          className="finley-button text-xs px-3 py-1"
-        >
-          Try Again
-        </button>
+        <div className="flex gap-2 justify-center">
+          <button
+            onClick={resetUpload}
+            className="finley-button text-xs px-3 py-1"
+          >
+            Try Again
+          </button>
+          <button
+            onClick={() => setShowConfig(true)}
+            className="finley-button-outline text-xs px-3 py-1"
+          >
+            Configure AI
+          </button>
+        </div>
       </div>
     );
   }
 
-  if (uploadState.status === 'uploading' || uploadState.status === 'processing') {
+  if (uploadState.status === 'processing') {
     return (
       <div className="text-center p-4">
         {getStepIcon(uploadState.status)}
-        <p className="text-sm font-medium text-foreground">
-          {uploadState.status === 'processing' ? 'Analyzing Document...' : 'Uploading...'}
-        </p>
+        <p className="text-sm font-medium text-foreground">Analyzing Document...</p>
         <p className="text-xs text-muted-foreground mb-2">{uploadState.fileName}</p>
         <div className="w-full bg-muted rounded-full h-1.5 mb-2">
           <div 
@@ -363,6 +381,16 @@ export const ExcelUpload = () => {
             .xlsx, .xls, .csv (max 10MB)
           </p>
         </div>
+      </div>
+      
+      <div className="mt-3 text-center">
+        <button
+          onClick={() => setShowConfig(true)}
+          className="text-xs text-finley-accent hover:underline flex items-center gap-1 mx-auto"
+        >
+          <Settings className="w-3 h-3" />
+          Configure AI for enhanced analysis
+        </button>
       </div>
     </div>
   );
