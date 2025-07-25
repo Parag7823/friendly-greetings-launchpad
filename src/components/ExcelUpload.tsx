@@ -123,10 +123,13 @@ export const ExcelUpload = () => {
   };
 
   const createIngestionJob = async (file: File, storagePath: string): Promise<string> => {
+    const { data: { user } } = await supabase.auth.getUser();
+    
     const { data, error } = await supabase
       .from('ingestion_jobs')
       .insert({
         job_type: 'excel_analysis',
+        user_id: user?.id,
         record_id: null,
         status: 'queued',
         progress: 0,
