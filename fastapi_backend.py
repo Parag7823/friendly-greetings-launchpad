@@ -1,4 +1,3 @@
-
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -75,7 +74,7 @@ class ProcessRequest(BaseModel):
 class DocumentAnalyzer:
     def __init__(self, openai_client):
         self.openai_client = openai_client
-        
+    
     async def detect_document_type(self, df: pd.DataFrame, filename: str) -> Dict[str, Any]:
         """Detect the type of financial document using AI"""
         
@@ -221,7 +220,8 @@ class ExcelProcessor:
                 return pd.read_excel(io.BytesIO(file_content))
         except Exception as e:
             logger.error(f"Error reading file {filename}: {e}")
-            raise HTTPException(status_code=400, f"Could not read file: {str(e)}")
+            # --- THIS IS THE CORRECTED LINE ---
+            raise HTTPException(status_code=400, detail=f"Could not read file: {str(e)}")
     
     async def process_file(self, job_id: str, file_content: bytes, filename: str) -> Dict[str, Any]:
         """Main processing pipeline"""
