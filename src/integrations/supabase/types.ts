@@ -54,15 +54,7 @@ export type Database = {
           status?: string | null
           user_id?: string | null
         }
-        Relationships: [
-          {
-            foreignKeyName: "ingestion_jobs_record_id_fkey"
-            columns: ["record_id"]
-            isOneToOne: false
-            referencedRelation: "raw_records"
-            referencedColumns: ["id"]
-          },
-        ]
+        Relationships: []
       }
       integration_test_logs: {
         Row: {
