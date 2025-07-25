@@ -155,7 +155,20 @@ export const ExcelUpload = () => {
       return;
     }
 
+    // Check if API key is available
+    const storedApiKey = localStorage.getItem('openai_api_key') || apiKey;
+    if (!storedApiKey) {
+      setUploadState(prev => ({ ...prev, showConfig: true }));
+      toast({
+        variant: "destructive",
+        title: "API Key Required",
+        description: "Please configure your OpenAI API key for enhanced analysis."
+      });
+      return;
+    }
+
     // Initialize file states
+    const baseIndex = uploadState.files.length;
     const initialFileStates: FileUploadState[] = fileArray.map(file => ({
       file,
       status: 'processing' as const,
@@ -170,7 +183,7 @@ export const ExcelUpload = () => {
 
     // Process all files in parallel
     const promises = fileArray.map((file, index) => 
-      processFile(file, uploadState.files.length + index)
+      processFile(file, baseIndex + index)
     );
 
     try {
@@ -178,21 +191,11 @@ export const ExcelUpload = () => {
       
       // Show success message for completed files
       const successCount = results.filter(r => r.status === 'fulfilled').length;
-      const successfulFiles = fileArray.filter((_, i) => results[i].status === 'fulfilled');
       
       if (successCount > 0) {
-        // Extract document types from successful results
-        const documentTypes = successfulFiles.map(file => {
-          const result = results[fileArray.indexOf(file)];
-          if (result.status === 'fulfilled') {
-            return (result.value as ProcessingResult).documentType || 'Financial Document';
-          }
-          return 'Financial Document';
-        });
-
         toast({
           title: "Analysis Complete",
-          description: `Successfully read: ${documentTypes.join(', ')}. Finley is ready to simulate and explain.`
+          description: `Successfully processed ${successCount} file(s). Data stored in database.`
         });
       }
 
@@ -280,6 +283,42 @@ export const ExcelUpload = () => {
         variant: "destructive",
         title: "Delete Failed",
         description: "Failed to delete the file. Please try again."
+      });
+    }
+  };
+
+  const viewStoredData = async () => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      
+      const { data, error } = await supabase
+        .from('ingestion_jobs')
+        .select('*')
+        .eq('user_id', user?.id)
+        .eq('job_type', 'excel_analysis')
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        toast({
+          variant: "destructive",
+          title: "Database Error",
+          description: "Failed to fetch stored data."
+        });
+        return;
+      }
+
+      toast({
+        title: "Database Query Complete",
+        description: `Found ${data?.length || 0} stored analysis records. Check console for details.`
+      });
+      
+      console.log('Stored analysis data:', data);
+    } catch (error) {
+      console.error('Error fetching data:', error);
+      toast({
+        variant: "destructive",
+        title: "Query Failed",
+        description: "Unable to retrieve stored data."
       });
     }
   };
@@ -432,10 +471,10 @@ export const ExcelUpload = () => {
           <h4 className="text-sm font-medium text-foreground">Uploaded Files</h4>
           <div className="space-y-2 max-h-40 overflow-y-auto">
             {uploadState.uploadedFiles.map((file) => (
-              <div key={file.id} className="bg-green-50 dark:bg-green-950/20 p-3 rounded-lg border border-green-200 dark:border-green-800">
+              <div key={file.id} className="bg-finley-accent/10 p-3 rounded-lg border border-finley-accent/20">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
-                    <CheckCircle className="w-4 h-4 text-green-600" />
+                    <CheckCircle className="w-4 h-4 text-finley-accent" />
                     <div>
                       <span className="text-sm font-medium text-foreground">
                         {file.name}
@@ -443,6 +482,11 @@ export const ExcelUpload = () => {
                       <p className="text-xs text-muted-foreground">
                         Uploaded {file.uploadedAt.toLocaleDateString()} at {file.uploadedAt.toLocaleTimeString()}
                       </p>
+                      {file.analysisResults && (
+                        <p className="text-xs text-finley-accent font-medium">
+                          {file.analysisResults.documentType || 'Financial Document'} • Stored in Database
+                        </p>
+                      )}
                     </div>
                   </div>
                   <button
@@ -468,6 +512,15 @@ export const ExcelUpload = () => {
           <Settings className="w-3 h-3" />
           Configure AI for enhanced analysis
         </button>
+        
+        {uploadState.uploadedFiles.length > 0 && (
+          <button
+            onClick={viewStoredData}
+            className="text-xs text-finley-accent hover:underline flex items-center gap-1 mx-auto"
+          >
+            🔍 View Stored Database Records
+          </button>
+        )}
         
         {uploadState.files.length > 0 && (
           <button
