@@ -16,28 +16,15 @@ export const ChatInterface = () => {
     <div className="finley-chat flex flex-col h-full">
       {/* Chat Messages Area */}
       <div className="flex-1 flex items-center justify-center p-8">
-        <div className="text-center max-w-md animate-fade-in">
-          <div className="w-16 h-16 bg-card rounded-full flex items-center justify-center mx-auto mb-6 hover-lift">
-            <MessageCircle className="w-8 h-8 text-finley-accent" />
-          </div>
-          
-          <h2 className="text-2xl font-semibold text-foreground mb-3">
-            Welcome to Finley AI
-          </h2>
-          
-          <p className="text-muted-foreground mb-8 leading-relaxed">
-            Your intelligent financial analyst is ready to help you transform data into actionable insights. 
-            Start by uploading an Excel file or ask me anything about your financial data.
-          </p>
-          
-          <div className="text-sm text-finley-accent bg-accent/20 rounded-lg p-3 border border-border">
-            💡 Try uploading an Excel file to begin your financial analysis journey
-          </div>
+        <div className="text-center">
+          <h1 className="text-3xl font-bold text-foreground tracking-tight">
+            Finley AI
+          </h1>
         </div>
       </div>
       
-      {/* Chat Input Area */}
-      <div className="border-t border-border p-6">
+      {/* Chat Input Area - Fixed at bottom */}
+      <div className="border-t border-border p-6 bg-background">
         <div className="max-w-3xl mx-auto">
           <div className="relative">
             <input
@@ -57,10 +44,6 @@ export const ChatInterface = () => {
               <Send className="w-4 h-4" />
             </button>
           </div>
-          
-          <p className="text-xs text-muted-foreground mt-2 text-center">
-            Finley AI can help you analyze financial data, generate insights, and answer questions about your spreadsheets.
-          </p>
         </div>
       </div>
     </div>
