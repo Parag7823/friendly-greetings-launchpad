@@ -1,6 +1,5 @@
 import { FinleySidebar } from './FinleySidebar';
 import { ChatInterface } from './ChatInterface';
-import { ExcelUpload } from './ExcelUpload';
 import { useAuth } from './AuthProvider';
 import { Button } from './ui/button';
 
@@ -36,11 +35,6 @@ export const FinleyLayout = () => {
       
       {/* Main Content */}
       <div className="flex-1 flex flex-col">
-        {/* Excel Upload Section */}
-        <div className="p-6 border-b">
-          <ExcelUpload />
-        </div>
-        
         {/* Chat Interface */}
         <div className="flex-1">
           <ChatInterface />
