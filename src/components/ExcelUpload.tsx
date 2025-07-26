@@ -65,45 +65,60 @@ export const ExcelUpload = () => {
 
   const saveJobToDatabase = async (file: File, result: ProcessingResult): Promise<void> => {
     try {
+      console.log('🔍 Starting saveJobToDatabase...');
       const { data: { user } } = await supabase.auth.getUser();
       
+      console.log('👤 User authentication status:', { 
+        isAuthenticated: !!user, 
+        userId: user?.id 
+      });
+      
       if (!user) {
-        console.warn('User not authenticated');
+        console.error('❌ User not authenticated - cannot save to database');
         return;
       }
 
       // First, save raw record with file content
+      console.log('💾 Attempting to save raw record...');
+      const rawRecordData = {
+        user_id: user.id,
+        source: 'excel_upload',
+        file_name: file.name,
+        file_size: file.size,
+        content: {
+          document_type: result.documentType,
+          insights: result.insights,
+          metrics: result.metrics,
+          summary: result.summary,
+          file_metadata: {
+            name: file.name,
+            size: file.size,
+            type: file.type,
+            last_modified: file.lastModified
+          }
+        },
+        status: 'processed',
+        classification_status: 'completed'
+      };
+      
+      console.log('📄 Raw record data:', rawRecordData);
+      
       const { data: rawRecord, error: rawError } = await supabase
         .from('raw_records')
-        .insert({
-          user_id: user.id,
-          source: 'excel_upload',
-          file_name: file.name,
-          file_size: file.size,
-          content: {
-            document_type: result.documentType,
-            insights: result.insights,
-            metrics: result.metrics,
-            summary: result.summary,
-            file_metadata: {
-              name: file.name,
-              size: file.size,
-              type: file.type,
-              last_modified: file.lastModified
-            }
-          },
-          status: 'processed',
-          classification_status: 'completed'
-        })
+        .insert(rawRecordData)
         .select()
         .single();
 
       if (rawError) {
-        console.error('Failed to save raw record:', rawError);
+        console.error('❌ Failed to save raw record:', rawError);
+        console.error('Error details:', JSON.stringify(rawError, null, 2));
         throw rawError;
       }
+      
+      console.log('✅ Raw record saved successfully:', rawRecord);
 
       // Then save job with reference to raw record
+      console.log('📊 Attempting to save ingestion job...');
       const { error: jobError } = await supabase
         .from('ingestion_jobs')
         .insert({
@@ -124,7 +139,7 @@ export const ExcelUpload = () => {
         });
 
       if (jobError) {
-        console.warn('Failed to save job to database:', jobError);
+        console.error('⚠️ Failed to save job to database:', jobError);
       }
     } catch (error) {
       console.warn('Database save error:', error);
