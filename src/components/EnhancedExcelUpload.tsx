@@ -230,9 +230,7 @@ export const EnhancedExcelUpload = () => {
               <p className="text-sm text-muted-foreground mb-2">
                 Drag & drop or click to browse (up to 5 files)
               </p>
-              <p className="text-xs text-muted-foreground">
-                .xlsx, .xls, .csv • Max 50MB per file • FastAPI enhanced analysis
-              </p>
+              <p className="text-xs text-muted-foreground">.xlsx, .xls, .csv • Max 50MB per file </p>
             </div>
           </div>
         </CardContent>
