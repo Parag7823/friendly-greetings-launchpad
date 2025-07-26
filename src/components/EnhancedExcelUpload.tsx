@@ -343,24 +343,7 @@ export const EnhancedExcelUpload = () => {
 
       {/* Empty State */}
       {uploadState.files.length === 0 && uploadState.uploadedFiles.length === 0 && <Card>
-          <CardContent className="p-8 text-center">
-            <Upload className="w-16 h-16 mx-auto mb-4 text-muted-foreground/50" />
-            <h3 className="text-lg font-medium mb-2">Ready for Financial Analysis</h3>
-            <p className="text-muted-foreground mb-4">
-              Upload your Excel files to begin advanced AI-powered financial analysis with FastAPI
-            </p>
-            <div className="flex justify-center gap-4 text-sm text-muted-foreground">
-              
-              <div className="flex items-center gap-1">
-                <CheckCircle className="w-4 h-4 text-green-500" />
-                Custom Prompts
-              </div>
-              <div className="flex items-center gap-1">
-                <CheckCircle className="w-4 h-4 text-green-500" />
-                Real-time Progress
-              </div>
-            </div>
-          </CardContent>
+          
         </Card>}
     </div>;
 };
