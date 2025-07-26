@@ -97,7 +97,7 @@ export const ExcelUpload = () => {
             last_modified: file.lastModified
           }
         },
-        status: 'processed',
+        status: 'completed',
         classification_status: 'completed'
       };
       
