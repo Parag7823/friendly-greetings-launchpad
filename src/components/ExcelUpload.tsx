@@ -67,12 +67,49 @@ export const ExcelUpload = () => {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       
-      const { error } = await supabase
+      if (!user) {
+        console.warn('User not authenticated');
+        return;
+      }
+
+      // First, save raw record with file content
+      const { data: rawRecord, error: rawError } = await supabase
+        .from('raw_records')
+        .insert({
+          user_id: user.id,
+          source: 'excel_upload',
+          file_name: file.name,
+          file_size: file.size,
+          content: {
+            document_type: result.documentType,
+            insights: result.insights,
+            metrics: result.metrics,
+            summary: result.summary,
+            file_metadata: {
+              name: file.name,
+              size: file.size,
+              type: file.type,
+              last_modified: file.lastModified
+            }
+          },
+          status: 'processed',
+          classification_status: 'completed'
+        })
+        .select()
+        .single();
+
+      if (rawError) {
+        console.error('Failed to save raw record:', rawError);
+        throw rawError;
+      }
+
+      // Then save job with reference to raw record
+      const { error: jobError } = await supabase
         .from('ingestion_jobs')
         .insert({
           job_type: 'excel_analysis',
-          user_id: user?.id,
-          record_id: null,
+          user_id: user.id,
+          record_id: rawRecord.id,
           status: 'completed',
           progress: 100,
           result: {
@@ -86,8 +123,8 @@ export const ExcelUpload = () => {
           }
         });
 
-      if (error) {
-        console.warn('Failed to save job to database:', error);
+      if (jobError) {
+        console.warn('Failed to save job to database:', jobError);
       }
     } catch (error) {
       console.warn('Database save error:', error);
