@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { FileSpreadsheet, ChevronDown, ChevronRight, Settings } from 'lucide-react';
-import { ExcelUpload } from './ExcelUpload';
+import { EnhancedExcelUpload } from './EnhancedExcelUpload';
 export const FinleySidebar = () => {
   const [isIntegrationsOpen, setIsIntegrationsOpen] = useState(false);
   return <div className="finley-sidebar flex flex-col h-full p-6 overflow-y-auto">
@@ -42,7 +42,7 @@ export const FinleySidebar = () => {
                 </div>
                 
                 {/* Upload Component */}
-                <ExcelUpload />
+                <EnhancedExcelUpload />
                 
                 {/* Inspirational Tagline */}
                 <p className="text-xs text-muted-foreground mt-3 italic leading-relaxed">
