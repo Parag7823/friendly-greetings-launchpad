@@ -350,10 +350,7 @@ export const EnhancedExcelUpload = () => {
               Upload your Excel files to begin advanced AI-powered financial analysis with FastAPI
             </p>
             <div className="flex justify-center gap-4 text-sm text-muted-foreground">
-              <div className="flex items-center gap-1">
-                <CheckCircle className="w-4 h-4 text-green-500" />
-                Sheet Recognition
-              </div>
+              
               <div className="flex items-center gap-1">
                 <CheckCircle className="w-4 h-4 text-green-500" />
                 Custom Prompts
