@@ -148,12 +148,82 @@ export class FastAPIProcessor {
 
         this.updateProgress('complete', 'Analysis complete!', 100);
 
-        // Update job status in database
+        // Step 4: Store raw data in raw_records table
+        this.updateProgress('saving', 'Saving raw data...', 95);
+        
+        const { data: rawRecord, error: rawRecordError } = await supabase
+          .from('raw_records')
+          .insert({
+            user_id: jobData.user_id,
+            file_name: file.name,
+            file_size: file.size,
+            source: 'excel_upload',
+            content: {
+              sheets: sheets.map(sheet => ({
+                name: sheet.name,
+                type: sheet.type,
+                rowCount: sheet.rowCount,
+                columnCount: sheet.columnCount,
+                keyColumns: sheet.keyColumns,
+                hasNumbers: sheet.hasNumbers,
+                preview: sheet.preview,
+                detectedPeriod: sheet.detectedPeriod
+              })),
+              originalFileName: file.name,
+              processedAt: new Date().toISOString()
+            },
+            status: 'processed',
+            classification_status: 'completed'
+          })
+          .select()
+          .single();
+
+        if (rawRecordError) {
+          console.error('Failed to save raw record:', rawRecordError);
+        }
+
+        // Step 5: Extract and save metrics for each sheet
+        if (rawRecord) {
+          this.updateProgress('saving', 'Extracting metrics...', 98);
+          
+          for (const sheet of sheets) {
+            // Extract metrics for financial sheets
+            if (sheet.type !== 'general' && sheet.hasNumbers) {
+              const sheetMetrics = this.extractSheetMetrics(sheet, rawRecord.id);
+              
+              for (const metric of sheetMetrics) {
+                await supabase
+                  .from('metrics')
+                  .insert({
+                    user_id: jobData.user_id,
+                    record_id: rawRecord.id,
+                    metric_type: sheet.type,
+                    category: metric.category,
+                    subcategory: metric.subcategory || null,
+                    amount: metric.amount,
+                    currency: 'USD',
+                    date_recorded: metric.date_recorded,
+                    period_start: metric.period_start || null,
+                    period_end: metric.period_end || null,
+                    confidence_score: sheet.confidenceScore,
+                    classification_metadata: {
+                      sheetName: sheet.name,
+                      columnSource: metric.columnSource,
+                      rowIndex: metric.rowIndex
+                    }
+                  });
+              }
+            }
+          }
+        }
+
+        // Step 6: Update job status in database
         await supabase
           .from('ingestion_jobs')
           .update({
             status: 'completed',
             progress: 100,
+            record_id: rawRecord?.id || null,
             result: {
               document_type: this.detectDocumentType(sheets),
               insights,
@@ -161,7 +231,8 @@ export class FastAPIProcessor {
               summary,
               sheets: JSON.parse(JSON.stringify(sheets)), // Convert to JSON-serializable format
               suggested_prompts: this.generateCustomPrompts(sheets),
-              processing_time: Date.now() - performance.now()
+              processing_time: Date.now() - performance.now(),
+              raw_record_id: rawRecord?.id
             }
           })
           .eq('id', jobData.id);
@@ -291,6 +362,56 @@ export class FastAPIProcessor {
     if (types.includes('budget')) return 'budget_analysis';
     if (types.includes('cash_flow')) return 'cash_flow_analysis';
     return 'financial_data';
+  }
+
+  private extractSheetMetrics(sheet: SheetMetadata, recordId: string): any[] {
+    const metrics: any[] = [];
+    
+    if (!sheet.preview || sheet.preview.length < 2) return metrics;
+    
+    const headers = sheet.preview[0] as string[];
+    const dataRows = sheet.preview.slice(1);
+    
+    // Look for financial columns
+    const amountColumns = headers
+      .map((header, index) => ({ header: header?.toLowerCase() || '', index }))
+      .filter(col => 
+        col.header.includes('amount') || 
+        col.header.includes('revenue') || 
+        col.header.includes('expense') || 
+        col.header.includes('profit') || 
+        col.header.includes('cost') ||
+        col.header.includes('price') ||
+        col.header.includes('total')
+      );
+    
+    // Extract metrics from each data row
+    dataRows.forEach((row: any[], rowIndex) => {
+      amountColumns.forEach(col => {
+        const value = row[col.index];
+        if (typeof value === 'number' && value > 0) {
+          metrics.push({
+            category: this.getCategoryFromHeader(col.header),
+            subcategory: col.header,
+            amount: value,
+            date_recorded: new Date().toISOString().split('T')[0],
+            columnSource: col.header,
+            rowIndex: rowIndex + 1
+          });
+        }
+      });
+    });
+    
+    return metrics;
+  }
+
+  private getCategoryFromHeader(header: string): string {
+    if (header.includes('revenue') || header.includes('income')) return 'revenue';
+    if (header.includes('expense') || header.includes('cost')) return 'expense';
+    if (header.includes('profit')) return 'profit';
+    if (header.includes('asset')) return 'asset';
+    if (header.includes('liability')) return 'liability';
+    return 'other';
   }
 
   private generateCustomPrompts(sheets: SheetMetadata[]): string[] {
