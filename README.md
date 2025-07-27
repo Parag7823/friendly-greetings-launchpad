@@ -1,6 +1,6 @@
 **Obvio AI - The First Full-Time AI Finance Employees**
 
-For early-stage founders setting up a finance team is hard. Hiring a full-time CFO costs too much and junior accountants struggle alone. What they really need is intelligence at a fraction of the cost. And even well funded companies still run on messy exports, fragile spreadsheets, and tools that don’t talk to each other. It's not just slow but there is simply no system today that can handle financeand compliance on its own without people constantly stepping in.
+For early stage founders setting up a finance team is hard. Hiring a full-time CFO costs too much and junior accountants struggle alone. What they really need is intelligence at a fraction of the cost. And even well funded companies still run on messy exports, fragile spreadsheets, and tools that don’t talk to each other. It's not just slow but there is simply no system today that can handle financeand compliance on its own without people constantly stepping in.
 
 Obvio AI is building autonomous finance employees that run your back office for you. Finley is just the first. Over the next 10 years we will roll out a full stack of intelligent agents:
 
