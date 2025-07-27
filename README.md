@@ -1,13 +1,13 @@
 **Obvio AI - The First Full-Time AI Finance Employees**
 
-For early stage founders setting up a finance team is hard. Hiring a full-time CFO costs too much and junior accountants struggle alone. What they really need is intelligence at a fraction of the cost. And even well funded companies still run on unstructured exports, fragile spreadsheets and different scattered tools . It is not just slow but there is simply no system today that can handle financeand compliance on its own without people constantly stepping in.
+For early stage founders setting up a finance team is hard. Hiring a full-time CFO costs too much and junior accountants struggle alone. What they really need is intelligence at a fraction of the cost. And even well funded companies still run on unstructured exports, fragile spreadsheets and different scattered tools . It is not just slow but there is simply no system today that can handle finance and compliance on its own without people constantly stepping in.
 
 Obvio AI is building autonomous finance employees that run your back office for you. Finley is just the first. Over the next 10 years we will roll out a full stack of intelligent agents:
 
 Finley turns messy data into clean ledgers,
 Tess optimizes and executes cash operations,
 Lexi Handles filings, audits, and compliance 24/7,
-Nova Giving VCs, investor and founders portfolio intelligence,
+Nova Giving VCs,investor and founders portfolio intelligence,
 Aria finding and matching companies with the right growth capital
 Each agent builds on the last as Agent action needs clean data and deep context. So by sequencing trust first then automation we are actually building a system that compounds in value for every company that joins.
 
