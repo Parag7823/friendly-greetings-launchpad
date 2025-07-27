@@ -11,7 +11,7 @@ Nova Giving VCs, investor and founders portfolio intelligence,
 Aria finding and matching companies with the right growth capital
 Each agent builds on the last as Agent action needs clean data and deep context. So by sequencing trust first then automation we are actually building a system that compounds in value for every company that joins.
 
-Before we bring autonomy in payments, filings or any other part of compliance we need a ledger users can trust. Finley builds that base file by file, match by match, line by line. In early rollouts it already closing books 3 days faster, hitting 97% accuracy and pulling a 90+ NPS—all before we added deep intelligence. Finely is being build in 7 layers—each designed to mimic what a full-time finance analyst does across weeks of work:
+Before we bring autonomy in payments, filings or any other part of compliance we need a ledger users can trust. Finley builds that base file by file, match by match, line by line. In early rollouts it already closing books 3 days faster, hitting 97% accuracy and pulling a 90+ NPS all before we add deep intelligence. Finely is being build in 7 layers—each designed to mimic what a full-time finance analyst does across weeks of work:
 
 1. Ingesting unorganized data 2. Normalizing it into clean . 3. Computing Metrics 4. Simulating on financial suitations. 5. Agent layer 6. Memory graph 7. Explainability layer
 
