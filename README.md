@@ -1,73 +1,25 @@
-# Welcome to your Lovable project
+**Obvio AI - The First Full-Time AI Finance Employees**
 
-## Project info
+For early-stage founders setting up a finance team is hard. Hiring a full-time CFO costs too much and junior accountants struggle alone. What they really need is intelligence at a fraction of the cost. And even well-funded companies still run on messy exports, fragile spreadsheets, and tools that don’t talk to each other.  It is not just slow it’s that nothing out there truly thinks, acts, or improves itself across finance, ops, and compliance without constant human involvement
 
-**URL**: https://lovable.dev/projects/7bb498b0-bd7e-46b0-9b0f-5b2a6989a0b8
+Solution - Obvio AI is building autonomous finance employees that run your back office for you. Finley is just the first. Over the next 10 years we will roll out a full stack of intelligent agents:
 
-## How can I edit this code?
+Finley – turns messy data into clean ledgers
+Tess – optimizes and executes cash operations
+Lexi – Handles filings, audits, and compliance 24/7
+Nova – Giving VCs, investors, and founders portfolio intelligence
+Aria – finding and matching companies with the right growth capital
+Each agent builds on the last—because intelligent action needs clean data and deep context. By sequencing trust first then automation we are actually building a system that compounds in value for every company that joins.
 
-There are several ways of editing your application.
 
-**Use Lovable**
+Why start with Finley?
+Before we can automate payments, filings, or investor reporting we need a ledger users can trust. Finley builds that base file by file, match by match, line by line. In early rollouts it’s already closing books 3 days faster, hitting 97% accuracy, and pulling a 90+ NPS—all before we added deep intelligence. We’re building Finley in 7 layers—each designed to mimic what a full-time finance analyst does across weeks of work:
 
-Simply visit the [Lovable Project](https://lovable.dev/projects/7bb498b0-bd7e-46b0-9b0f-5b2a6989a0b8) and start prompting.
+1. Ingesting unorganized data 2. Normalizing it into clean . 3. Computing Metrics 4. Simulating on financial suitations. 5. Agent layer 6. Memory graph 7. Explainability layer
 
-Changes made via Lovable will be committed automatically to this repo.
+Shipping layer by layer  not just to prove value early but to build trust step by step. Each layer unlocks the next.
+This repo is where Finley comes to life. Backend runs on FastAPI. Frontend’s being built on Lovable AI. All logic is designed to be transparent, auditable, and modular so Finley can grow into a global, autonomous finance stack.
 
-**Use your preferred IDE**
+By 2035 Obvio will run finance and compliance department for millions of companies saving billions of hours and becoming the operating layer for modern business. It will handle complex financial operations like compliance, filings and analysis even for companies with multiple branches across different geographies by adapting to local rule and workflows acting like a full-stack finance team that just works and no matter where you operate.
 
-If you want to work locally using your own IDE, you can clone this repo and push changes. Pushed changes will also be reflected in Lovable.
 
-The only requirement is having Node.js & npm installed - [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
-
-Follow these steps:
-
-```sh
-# Step 1: Clone the repository using the project's Git URL.
-git clone <YOUR_GIT_URL>
-
-# Step 2: Navigate to the project directory.
-cd <YOUR_PROJECT_NAME>
-
-# Step 3: Install the necessary dependencies.
-npm i
-
-# Step 4: Start the development server with auto-reloading and an instant preview.
-npm run dev
-```
-
-**Edit a file directly in GitHub**
-
-- Navigate to the desired file(s).
-- Click the "Edit" button (pencil icon) at the top right of the file view.
-- Make your changes and commit the changes.
-
-**Use GitHub Codespaces**
-
-- Navigate to the main page of your repository.
-- Click on the "Code" button (green button) near the top right.
-- Select the "Codespaces" tab.
-- Click on "New codespace" to launch a new Codespace environment.
-- Edit files directly within the Codespace and commit and push your changes once you're done.
-
-## What technologies are used for this project?
-
-This project is built with:
-
-- Vite
-- TypeScript
-- React
-- shadcn-ui
-- Tailwind CSS
-
-## How can I deploy this project?
-
-Simply open [Lovable](https://lovable.dev/projects/7bb498b0-bd7e-46b0-9b0f-5b2a6989a0b8) and click on Share -> Publish.
-
-## Can I connect a custom domain to my Lovable project?
-
-Yes, you can!
-
-To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
-
-Read more here: [Setting up a custom domain](https://docs.lovable.dev/tips-tricks/custom-domain#step-by-step-guide)
