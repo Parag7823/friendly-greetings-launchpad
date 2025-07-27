@@ -18,6 +18,6 @@ Before we bring autonomy in payments, filings or any other part of compliance we
 Shipping layer by layer to prove value early and to build trust. Each layer unlocks the next.
 This repo is where Finley comes to life. Backend runs on FastAPI. Frontend’s being built on Lovable AI. Cursor for writing code.
 
-By 2035 Obvio will run finance and compliance department for millions of companies saving billions of hours and becoming the operating layer for modern business. It will handle complex financial operations like compliance, filings and analysis even for companies with multiple branches across different geographies by adapting to local rule and workflows acting like a full-stack finance team that just works and no matter where you operate.
+By 2035 Obvio will run finance and compliance department for millions of companies saving billions of hours and becoming the operating layer for modern business. It will handle complex financial operations like compliance, filings and even for companies with multiple branches across different geographies by adapting to local rule and workflows acting like a full-stack finance team that just works and no matter where you operate.
 
 
