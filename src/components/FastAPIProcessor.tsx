@@ -62,7 +62,8 @@ export class FastAPIProcessor {
 
   async processFile(
     file: File, 
-    customPrompt?: string
+    customPrompt?: string,
+    userId?: string
   ): Promise<FastAPIProcessingResult> {
     try {
       this.updateProgress('upload', 'Uploading file to secure processing...', 10);
@@ -100,18 +101,74 @@ export class FastAPIProcessor {
         throw new Error(`Job creation failed: ${jobError.message}`);
       }
 
-      this.updateProgress('analysis', 'Processing with local analysis engine...', 30);
+      this.updateProgress('analysis', 'Processing with FastAPI backend...', 30);
 
-      // For now, process locally using our Excel processor since FastAPI backend is not available
+      // Get Supabase configuration for backend
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        throw new Error('User session required');
+      }
+
+      // Prepare request for FastAPI backend
+      const requestBody = {
+        job_id: jobData.id,
+        storage_path: fileName,
+        file_name: file.name,
+        supabase_url: process.env.REACT_APP_SUPABASE_URL || '',
+        supabase_key: process.env.REACT_APP_SUPABASE_ANON_KEY || '',
+        user_id: user.id
+      };
+
+      // Call FastAPI backend for processing
       try {
-        // Simulate processing with local analysis
-        this.updateProgress('processing', 'Analyzing file structure...', 40);
+        const response = await fetch(`${this.apiUrl}/process-excel`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(requestBody)
+        });
+
+        if (!response.ok) {
+          throw new Error(`Backend processing failed: ${response.statusText}`);
+        }
+
+        const backendResult = await response.json();
         
-        // Read the file and analyze sheets
+        // Parse backend results into our format
+        const sheets: SheetMetadata[] = [];
+        const insights = backendResult.results || {};
+        const metrics = insights.summary_stats || {};
+        const summary = insights.analysis || 'Analysis completed successfully.';
+
+        // Convert backend results to our sheet format
+        if (backendResult.results?.processing_stats) {
+          const stats = backendResult.results.processing_stats;
+          sheets.push({
+            name: 'Processed Data',
+            type: 'general',
+            rowCount: stats.total_rows_processed || 0,
+            columnCount: 0,
+            keyColumns: [],
+            hasNumbers: true,
+            preview: [],
+            confidenceScore: stats.platform_confidence || 0.5,
+            detectedPeriod: 'Current',
+            suggestedPrompts: []
+          });
+        }
+
+        this.updateProgress('complete', 'Analysis complete!', 100);
+
+      } catch (backendError) {
+        console.error('Backend processing error:', backendError);
+        
+        // Fallback to local processing if backend fails
+        this.updateProgress('fallback', 'Backend unavailable, using local processing...', 40);
+        
+        // Read the file and analyze sheets locally
         const arrayBuffer = await file.arrayBuffer();
         const workbook = await import('xlsx').then(xlsx => xlsx.read(arrayBuffer, { type: 'array' }));
-        
-        this.updateProgress('processing', 'Detecting sheet types...', 60);
         
         const sheets: SheetMetadata[] = [];
         const sheetNames = workbook.SheetNames;
@@ -121,7 +178,6 @@ export class FastAPIProcessor {
           const worksheet = workbook.Sheets[sheetName];
           const jsonData = await import('xlsx').then(xlsx => xlsx.utils.sheet_to_json(worksheet, { header: 1 })) as any[][];
           
-          // Detect sheet type based on content
           const type = this.detectSheetType(sheetName, jsonData);
           const keyColumns = this.extractKeyColumns(jsonData);
           
@@ -133,91 +189,36 @@ export class FastAPIProcessor {
             keyColumns,
             hasNumbers: this.hasNumericData(jsonData),
             preview: jsonData.slice(0, 10),
-            confidenceScore: Math.random() * 0.3 + 0.7, // 70-100% confidence
+            confidenceScore: Math.random() * 0.3 + 0.7,
             detectedPeriod: this.detectPeriod(jsonData),
             suggestedPrompts: this.generatePrompts(type, sheetName)
           });
         }
 
-        this.updateProgress('analysis', 'Generating insights...', 80);
-
-        // Generate summary insights
         const insights = this.generateInsights(sheets);
         const metrics = this.calculateMetrics(sheets);
         const summary = this.generateSummary(sheets, insights);
 
-        this.updateProgress('complete', 'Analysis complete!', 100);
+        this.updateProgress('complete', 'Local analysis complete!', 100);
 
-        // Step 4: Store raw data in raw_records table
-        this.updateProgress('saving', 'Saving raw data...', 95);
-        
+        // Backend has already stored the data, just get the record
         const { data: rawRecord, error: rawRecordError } = await supabase
           .from('raw_records')
-          .insert({
-            user_id: jobData.user_id,
-            file_name: file.name,
-            file_size: file.size,
-            source: 'excel_upload',
-            content: {
-              sheets: sheets.map(sheet => ({
-                name: sheet.name,
-                type: sheet.type,
-                rowCount: sheet.rowCount,
-                columnCount: sheet.columnCount,
-                keyColumns: sheet.keyColumns,
-                hasNumbers: sheet.hasNumbers,
-                preview: sheet.preview,
-                detectedPeriod: sheet.detectedPeriod
-              })),
-              originalFileName: file.name,
-              processedAt: new Date().toISOString()
-            },
-            status: 'processed',
-            classification_status: 'completed'
-          })
-          .select()
+          .select('*')
+          .eq('user_id', user.id)
+          .eq('file_name', file.name)
+          .order('created_at', { ascending: false })
+          .limit(1)
           .single();
 
         if (rawRecordError) {
-          console.error('Failed to save raw record:', rawRecordError);
+          console.error('Failed to retrieve raw record:', rawRecordError);
         }
 
-        // Step 5: Extract and save metrics for each sheet
-        if (rawRecord) {
-          this.updateProgress('saving', 'Extracting metrics...', 98);
-          
-          for (const sheet of sheets) {
-            // Extract metrics for financial sheets
-            if (sheet.type !== 'general' && sheet.hasNumbers) {
-              const sheetMetrics = this.extractSheetMetrics(sheet, rawRecord.id);
-              
-              for (const metric of sheetMetrics) {
-                await supabase
-                  .from('metrics')
-                  .insert({
-                    user_id: jobData.user_id,
-                    record_id: rawRecord.id,
-                    metric_type: sheet.type,
-                    category: metric.category,
-                    subcategory: metric.subcategory || null,
-                    amount: metric.amount,
-                    currency: 'USD',
-                    date_recorded: metric.date_recorded,
-                    period_start: metric.period_start || null,
-                    period_end: metric.period_end || null,
-                    confidence_score: sheet.confidenceScore,
-                    classification_metadata: {
-                      sheetName: sheet.name,
-                      columnSource: metric.columnSource,
-                      rowIndex: metric.rowIndex
-                    }
-                  });
-              }
-            }
-          }
-        }
+        // Backend has already processed metrics, no need to extract here
+        this.updateProgress('saving', 'Processing complete...', 98);
 
-        // Step 6: Update job status in database
+        // Step 6: Update job status in database with backend results
         await supabase
           .from('ingestion_jobs')
           .update({
@@ -225,25 +226,25 @@ export class FastAPIProcessor {
             progress: 100,
             record_id: rawRecord?.id || null,
             result: {
-              document_type: this.detectDocumentType(sheets),
-              insights,
-              metrics,
-              summary,
-              sheets: JSON.parse(JSON.stringify(sheets)), // Convert to JSON-serializable format
-              suggested_prompts: this.generateCustomPrompts(sheets),
+              document_type: backendResult.results?.document_type || 'unknown',
+              insights: backendResult.results || {},
+              metrics: backendResult.results?.summary_stats || {},
+              summary: backendResult.results?.analysis || 'Analysis completed successfully.',
+              processing_stats: backendResult.results?.processing_stats || {},
               processing_time: Date.now() - performance.now(),
-              raw_record_id: rawRecord?.id
+              raw_record_id: rawRecord?.id,
+              backend_processed: true
             }
           })
           .eq('id', jobData.id);
 
         const result: FastAPIProcessingResult = {
-          documentType: this.detectDocumentType(sheets),
-          insights,
-          metrics,
-          summary,
+          documentType: backendResult.results?.document_type || 'unknown',
+          insights: backendResult.results || {},
+          metrics: backendResult.results?.summary_stats || {},
+          summary: backendResult.results?.analysis || 'Analysis completed successfully.',
           sheets,
-          customPromptSuggestions: this.generateCustomPrompts(sheets),
+          customPromptSuggestions: [],
           processingTime: Date.now() - performance.now()
         };
 

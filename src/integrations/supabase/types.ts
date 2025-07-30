@@ -142,6 +142,97 @@ export type Database = {
           },
         ]
       }
+      raw_events: {
+        Row: {
+          id: string
+          user_id: string | null
+          file_id: string | null
+          job_id: string | null
+          provider: string
+          kind: string
+          source_platform: string | null
+          payload: Json
+          row_index: number
+          sheet_name: string | null
+          source_filename: string
+          uploader: string | null
+          ingest_ts: string | null
+          processed_at: string | null
+          status: string | null
+          error_message: string | null
+          confidence_score: number | null
+          classification_metadata: Json | null
+          created_at: string | null
+          updated_at: string | null
+        }
+        Insert: {
+          id?: string
+          user_id?: string | null
+          file_id?: string | null
+          job_id?: string | null
+          provider: string
+          kind: string
+          source_platform?: string | null
+          payload: Json
+          row_index: number
+          sheet_name?: string | null
+          source_filename: string
+          uploader?: string | null
+          ingest_ts?: string | null
+          processed_at?: string | null
+          status?: string | null
+          error_message?: string | null
+          confidence_score?: number | null
+          classification_metadata?: Json | null
+          created_at?: string | null
+          updated_at?: string | null
+        }
+        Update: {
+          id?: string
+          user_id?: string | null
+          file_id?: string | null
+          job_id?: string | null
+          provider?: string
+          kind?: string
+          source_platform?: string | null
+          payload?: Json
+          row_index?: number
+          sheet_name?: string | null
+          source_filename?: string
+          uploader?: string | null
+          ingest_ts?: string | null
+          processed_at?: string | null
+          status?: string | null
+          error_message?: string | null
+          confidence_score?: number | null
+          classification_metadata?: Json | null
+          created_at?: string | null
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "raw_events_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "raw_events_file_id_fkey"
+            columns: ["file_id"]
+            isOneToOne: false
+            referencedRelation: "raw_records"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "raw_events_job_id_fkey"
+            columns: ["job_id"]
+            isOneToOne: false
+            referencedRelation: "ingestion_jobs"
+            referencedColumns: ["id"]
+          }
+        ]
+      }
       raw_records: {
         Row: {
           classification_status: string | null
