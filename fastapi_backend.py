@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import Dict, Any, List, Optional
 import pandas as pd
 import numpy as np
-from fastapi import FastAPI, HTTPException, BackgroundTasks, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, BackgroundTasks, WebSocket, WebSocketDisconnect, UploadFile, Form, File
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from supabase import create_client, Client
@@ -14,6 +14,7 @@ import openai
 import magic
 import filetype
 from openai import OpenAI
+import time
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -678,6 +679,104 @@ async def test_raw_events(user_id: str):
 @app.get("/health")
 async def health_check():
     return {"status": "healthy", "service": "Finley AI Backend"}
+
+@app.post("/upload-and-process")
+async def upload_and_process(
+    file: UploadFile = Form(...),
+    user_id: str = Form("test-user-123"),  # Default test user ID
+    job_id: str = Form(None)  # Optional, will generate if not provided
+):
+    """Direct file upload and processing endpoint for testing"""
+    try:
+        # Generate job_id if not provided
+        if not job_id:
+            job_id = f"test-job-{int(time.time())}"
+        
+        # Read file content
+        file_content = await file.read()
+        
+        # Initialize Supabase client
+        supabase_url = os.environ.get("SUPABASE_URL")
+        supabase_key = os.environ.get("SUPABASE_SERVICE_KEY")
+        
+        if not supabase_url or not supabase_key:
+            raise HTTPException(status_code=500, detail="Supabase credentials not configured")
+        
+        supabase: Client = create_client(supabase_url, supabase_key)
+        
+        # Process the file directly
+        results = await processor.process_file(
+            job_id, 
+            file_content, 
+            file.filename,
+            user_id,
+            supabase
+        )
+        
+        return {
+            "status": "success", 
+            "job_id": job_id, 
+            "results": results,
+            "message": "File processed successfully"
+        }
+        
+    except Exception as e:
+        logger.error(f"Upload and process error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/test-simple")
+async def test_simple():
+    """Simple test endpoint without any dependencies"""
+    return {
+        "status": "success",
+        "message": "Backend is working! No authentication required.",
+        "timestamp": datetime.utcnow().isoformat(),
+        "endpoints": {
+            "health": "/health",
+            "upload_and_process": "/upload-and-process",
+            "test_raw_events": "/test-raw-events/{user_id}",
+            "process_excel": "/process-excel"
+        }
+    }
+
+@app.get("/test-database")
+async def test_database():
+    """Test database connection and basic operations"""
+    try:
+        supabase_url = os.environ.get("SUPABASE_URL")
+        supabase_key = os.environ.get("SUPABASE_SERVICE_KEY")
+        
+        if not supabase_url or not supabase_key:
+            return {"error": "Supabase credentials not configured"}
+        
+        supabase: Client = create_client(supabase_url, supabase_key)
+        
+        # Test basic database operations
+        test_user_id = "test-user-123"
+        
+        # Test raw_events table
+        events_count = supabase.table('raw_events').select('id', count='exact').eq('user_id', test_user_id).execute()
+        
+        # Test ingestion_jobs table
+        jobs_count = supabase.table('ingestion_jobs').select('id', count='exact').eq('user_id', test_user_id).execute()
+        
+        # Test raw_records table
+        records_count = supabase.table('raw_records').select('id', count='exact').eq('user_id', test_user_id).execute()
+        
+        return {
+            "status": "success",
+            "database_connection": "working",
+            "tables": {
+                "raw_events": events_count.count if hasattr(events_count, 'count') else 0,
+                "ingestion_jobs": jobs_count.count if hasattr(jobs_count, 'count') else 0,
+                "raw_records": records_count.count if hasattr(records_count, 'count') else 0
+            },
+            "message": "Database connection and queries working"
+        }
+        
+    except Exception as e:
+        logger.error(f"Database test error: {e}")
+        return {"error": f"Database test failed: {str(e)}"}
 
 if __name__ == "__main__":
     import uvicorn
