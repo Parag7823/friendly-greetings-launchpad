@@ -76,7 +76,7 @@ export class FastAPIProcessor {
 
       const fileName = `${user.id}/${Date.now()}-${file.name}`;
       const { data: uploadData, error: uploadError } = await supabase.storage
-        .from('finley-uploads')
+        .from('finely-upload')
         .upload(fileName, file);
 
       if (uploadError) {

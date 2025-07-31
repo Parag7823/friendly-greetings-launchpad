@@ -25,5 +25,5 @@ DROP POLICY IF EXISTS "Users can view their own records" ON public.raw_records;
 
 -- Disable RLS on storage.objects and drop storage policies
 ALTER TABLE storage.objects DISABLE ROW LEVEL SECURITY;
-DROP POLICY IF EXISTS "Allow authenticated uploads to finley-uploads" ON storage.objects;
-DROP POLICY IF EXISTS "Allow authenticated access to finley-uploads" ON storage.objects;
+DROP POLICY IF EXISTS "Allow authenticated uploads to finely-upload" ON storage.objects;
+DROP POLICY IF EXISTS "Allow authenticated access to finely-upload" ON storage.objects;

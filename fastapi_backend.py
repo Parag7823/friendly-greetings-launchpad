@@ -583,7 +583,7 @@ async def process_excel(request: ProcessRequest, background_tasks: BackgroundTas
         
         # Download file from Supabase storage
         try:
-            response = supabase.storage.from_('finley-uploads').download(request.storage_path)
+            response = supabase.storage.from_('finely-upload').download(request.storage_path)
             file_content = response
         except Exception as e:
             logger.error(f"Error downloading file: {e}")
