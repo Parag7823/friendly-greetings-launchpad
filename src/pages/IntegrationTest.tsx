@@ -12,8 +12,8 @@ const IntegrationTest = () => {
   const [fastApiResponse, setFastApiResponse] = useState<string>('');
   const { toast } = useToast();
 
-  // Updated with your actual Railway FastAPI URL
-  const FASTAPI_URL = "https://ai-financial-backend-production.up.railway.app";
+  // Updated with your actual Render FastAPI URL
+  const FASTAPI_URL = "https://friendly-greetings-launchpad.onrender.com";
 
   useEffect(() => {
     testSupabaseConnection();
@@ -166,7 +166,7 @@ const IntegrationTest = () => {
                 {getStatusBadge(fastApiStatus)}
               </CardTitle>
               <CardDescription>
-                Connection from frontend to Railway-deployed FastAPI
+                Connection from frontend to Render-deployed FastAPI
               </CardDescription>
             </CardHeader>
             <CardContent>

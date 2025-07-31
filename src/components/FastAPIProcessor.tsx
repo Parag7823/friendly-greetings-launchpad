@@ -41,8 +41,8 @@ export class FastAPIProcessor {
   private progressCallback?: (progress: FastAPIProcessingProgress) => void;
 
   constructor() {
-    // Use Railway FastAPI URL
-    this.apiUrl = "https://friendly-greetings-launchpad-production.up.railway.app";
+    // Use Render FastAPI URL
+    this.apiUrl = "https://friendly-greetings-launchpad.onrender.com";
   }
 
   setProgressCallback(callback: (progress: FastAPIProcessingProgress) => void) {
