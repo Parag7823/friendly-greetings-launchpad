@@ -261,12 +261,15 @@ class RowProcessor:
         # Determine row type based on content
         row_type = self._determine_row_type(row, platform_info)
         
+        # Convert row to JSON-serializable format
+        payload = self._convert_row_to_json_serializable(row)
+        
         # Create the event payload
         event = {
             "provider": "excel-upload",
             "kind": row_type,
             "source_platform": platform_info.get('platform', 'unknown'),
-            "payload": row.to_dict(),
+            "payload": payload,
             "row_index": row_index,
             "sheet_name": sheet_name,
             "source_filename": file_context['filename'],
@@ -283,6 +286,43 @@ class RowProcessor:
         }
         
         return event
+    
+    def _convert_row_to_json_serializable(self, row: pd.Series) -> Dict[str, Any]:
+        """Convert a pandas Series to JSON-serializable format"""
+        result = {}
+        for column, value in row.items():
+            if pd.isna(value):
+                result[str(column)] = None
+            elif isinstance(value, pd.Timestamp):
+                result[str(column)] = value.isoformat()
+            elif isinstance(value, (pd.Timedelta, pd.Period)):
+                result[str(column)] = str(value)
+            elif isinstance(value, (int, float, str, bool)):
+                result[str(column)] = value
+            elif isinstance(value, (list, dict)):
+                # Handle nested structures
+                result[str(column)] = self._convert_nested_to_json_serializable(value)
+            else:
+                # Convert any other types to string
+                result[str(column)] = str(value)
+        return result
+    
+    def _convert_nested_to_json_serializable(self, obj: Any) -> Any:
+        """Convert nested objects to JSON-serializable format"""
+        if isinstance(obj, dict):
+            return {str(k): self._convert_nested_to_json_serializable(v) for k, v in obj.items()}
+        elif isinstance(obj, list):
+            return [self._convert_nested_to_json_serializable(item) for item in obj]
+        elif isinstance(obj, pd.Timestamp):
+            return obj.isoformat()
+        elif isinstance(obj, (pd.Timedelta, pd.Period)):
+            return str(obj)
+        elif pd.isna(obj):
+            return None
+        elif isinstance(obj, (int, float, str, bool)):
+            return obj
+        else:
+            return str(obj)
     
     def _determine_row_type(self, row: pd.Series, platform_info: Dict) -> str:
         """Determine the type of row based on content and platform"""
