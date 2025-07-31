@@ -42,7 +42,7 @@ export class FastAPIProcessor {
 
   constructor() {
     // Use Railway FastAPI URL
-    this.apiUrl = "https://ai-financial-backend-production.up.railway.app";
+    this.apiUrl = "https://friendly-greetings-launchpad-production.up.railway.app";
   }
 
   setProgressCallback(callback: (progress: FastAPIProcessingProgress) => void) {
