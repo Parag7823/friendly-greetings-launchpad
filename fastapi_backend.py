@@ -15,6 +15,8 @@ import magic
 import filetype
 from openai import OpenAI
 import time
+import json
+import re
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -669,26 +671,228 @@ class PlatformDetector:
             'confidence_threshold': 0.0
         }
 
+class AIRowClassifier:
+    def __init__(self, openai_client):
+        self.openai = openai_client
+    
+    async def classify_row_with_ai(self, row: pd.Series, platform_info: Dict, column_names: List[str]) -> Dict[str, Any]:
+        """AI-powered row classification with entity extraction and semantic understanding"""
+        try:
+            # Prepare row data for AI analysis
+            row_data = {}
+            for col, val in row.items():
+                if pd.notna(val):
+                    row_data[str(col)] = str(val)
+            
+            # Create context for AI
+            context = {
+                'platform': platform_info.get('platform', 'unknown'),
+                'column_names': column_names,
+                'row_data': row_data,
+                'row_index': row.name if hasattr(row, 'name') else 'unknown'
+            }
+            
+            # AI prompt for semantic classification
+            prompt = f"""
+            Analyze this financial data row and provide detailed classification.
+            
+            PLATFORM: {context['platform']}
+            COLUMN NAMES: {context['column_names']}
+            ROW DATA: {context['row_data']}
+            
+            Classify this row and return ONLY a valid JSON object with this structure:
+            
+            {{
+                "row_type": "payroll_expense|salary_expense|revenue_income|operating_expense|capital_expense|invoice|bill|transaction|investment|tax|other",
+                "category": "payroll|revenue|expense|investment|tax|other",
+                "subcategory": "employee_salary|office_rent|client_payment|software_subscription|etc",
+                "entities": {{
+                    "employees": ["employee_name1", "employee_name2"],
+                    "vendors": ["vendor_name1", "vendor_name2"],
+                    "customers": ["customer_name1", "customer_name2"],
+                    "projects": ["project_name1", "project_name2"]
+                }},
+                "amount": "positive_number_or_null",
+                "currency": "USD|EUR|INR|etc",
+                "date": "YYYY-MM-DD_or_null",
+                "description": "human_readable_description",
+                "confidence": 0.95,
+                "reasoning": "explanation_of_classification",
+                "relationships": {{
+                    "employee_id": "extracted_or_null",
+                    "vendor_id": "extracted_or_null",
+                    "customer_id": "extracted_or_null",
+                    "project_id": "extracted_or_null"
+                }}
+            }}
+            
+            IMPORTANT RULES:
+            1. If you see salary/wage/payroll terms, classify as payroll_expense
+            2. If you see revenue/income/sales terms, classify as revenue_income
+            3. If you see expense/cost/payment terms, classify as operating_expense
+            4. Extract any person names as employees, vendors, or customers
+            5. Extract project names if mentioned
+            6. Provide confidence score based on clarity of data
+            7. Return ONLY valid JSON, no extra text
+            """
+            
+            # Get AI response
+            response = await self.openai.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.1,
+                max_tokens=1000
+            )
+            
+            result = response.choices[0].message.content.strip()
+            
+            # Clean and parse JSON response
+            cleaned_result = result.strip()
+            if cleaned_result.startswith('```json'):
+                cleaned_result = cleaned_result[7:]
+            if cleaned_result.endswith('```'):
+                cleaned_result = cleaned_result[:-3]
+            
+            # Parse JSON
+            try:
+                classification = json.loads(cleaned_result)
+                return classification
+            except json.JSONDecodeError as e:
+                logger.error(f"AI classification JSON parsing failed: {e}")
+                logger.error(f"Raw AI response: {result}")
+                return self._fallback_classification(row, platform_info, column_names)
+                
+        except Exception as e:
+            logger.error(f"AI classification failed: {e}")
+            return self._fallback_classification(row, platform_info, column_names)
+    
+    def _fallback_classification(self, row: pd.Series, platform_info: Dict, column_names: List[str]) -> Dict[str, Any]:
+        """Fallback classification when AI fails"""
+        platform = platform_info.get('platform', 'unknown')
+        row_str = ' '.join(str(val).lower() for val in row.values if pd.notna(val))
+        
+        # Basic classification
+        if any(word in row_str for word in ['salary', 'wage', 'payroll', 'employee']):
+            row_type = 'payroll_expense'
+            category = 'payroll'
+            subcategory = 'employee_salary'
+        elif any(word in row_str for word in ['revenue', 'income', 'sales']):
+            row_type = 'revenue_income'
+            category = 'revenue'
+            subcategory = 'client_payment'
+        elif any(word in row_str for word in ['expense', 'cost', 'payment']):
+            row_type = 'operating_expense'
+            category = 'expense'
+            subcategory = 'general_expense'
+        else:
+            row_type = 'transaction'
+            category = 'other'
+            subcategory = 'general'
+        
+        return {
+            "row_type": row_type,
+            "category": category,
+            "subcategory": subcategory,
+            "entities": {"employees": [], "vendors": [], "customers": [], "projects": []},
+            "amount": None,
+            "currency": "USD",
+            "date": None,
+            "description": "Fallback classification",
+            "confidence": 0.3,
+            "reasoning": f"Fallback classification based on keywords: {row_str}",
+            "relationships": {"employee_id": None, "vendor_id": None, "customer_id": None, "project_id": None}
+        }
+    
+    def extract_entities_from_text(self, text: str) -> Dict[str, List[str]]:
+        """Extract entities from text using pattern matching"""
+        entities = {"employees": [], "vendors": [], "customers": [], "projects": []}
+        
+        # Common patterns for entity extraction
+        if text:
+            text_lower = text.lower()
+            
+            # Employee patterns
+            if any(word in text_lower for word in ['salary', 'wage', 'payroll', 'employee']):
+                # Extract names after common patterns
+                import re
+                name_patterns = [
+                    r'(?:salary|wage|payroll|employee)\s+(?:to|for|of)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)',
+                    r'(?:paid to|paid for)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)',
+                    r'([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\s+(?:salary|wage)'
+                ]
+                
+                for pattern in name_patterns:
+                    matches = re.findall(pattern, text, re.IGNORECASE)
+                    entities["employees"].extend(matches)
+            
+            # Vendor patterns
+            if any(word in text_lower for word in ['vendor', 'supplier', 'service', 'subscription']):
+                vendor_patterns = [
+                    r'(?:vendor|supplier|service|subscription)\s+(?:from|with)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)',
+                    r'([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\s+(?:vendor|supplier|service)'
+                ]
+                
+                for pattern in vendor_patterns:
+                    matches = re.findall(pattern, text, re.IGNORECASE)
+                    entities["vendors"].extend(matches)
+            
+            # Customer patterns
+            if any(word in text_lower for word in ['customer', 'client', 'revenue', 'payment']):
+                customer_patterns = [
+                    r'(?:customer|client|revenue|payment)\s+(?:from|by)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)',
+                    r'([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\s+(?:customer|client)'
+                ]
+                
+                for pattern in customer_patterns:
+                    matches = re.findall(pattern, text, re.IGNORECASE)
+                    entities["customers"].extend(matches)
+            
+            # Project patterns
+            if any(word in text_lower for word in ['project', 'campaign', 'initiative']):
+                project_patterns = [
+                    r'(?:project|campaign|initiative)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)',
+                    r'([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\s+(?:project|campaign)'
+                ]
+                
+                for pattern in project_patterns:
+                    matches = re.findall(pattern, text, re.IGNORECASE)
+                    entities["projects"].extend(matches)
+        
+        # Remove duplicates and empty strings
+        for key in entities:
+            entities[key] = list(set([entity.strip() for entity in entities[key] if entity.strip()]))
+        
+        return entities
+    
+    def map_relationships(self, entities: Dict[str, List[str]], platform_info: Dict) -> Dict[str, str]:
+        """Map extracted entities to internal IDs (placeholder for future enhancement)"""
+        relationships = {"employee_id": None, "vendor_id": None, "customer_id": None, "project_id": None}
+        
+        # TODO: In future, this would query internal databases to map names to IDs
+        # For now, return None as placeholders
+        return relationships
+
 class RowProcessor:
     """Processes individual rows and creates events"""
     
-    def __init__(self, platform_detector: PlatformDetector):
+    def __init__(self, platform_detector: PlatformDetector, ai_classifier: AIRowClassifier):
         self.platform_detector = platform_detector
+        self.ai_classifier = ai_classifier
     
-    def process_row(self, row: pd.Series, row_index: int, sheet_name: str, 
-                   platform_info: Dict, file_context: Dict) -> Dict[str, Any]:
-        """Process a single row and create an event"""
+    async def process_row(self, row: pd.Series, row_index: int, sheet_name: str, 
+                   platform_info: Dict, file_context: Dict, column_names: List[str]) -> Dict[str, Any]:
+        """Process a single row and create an event with AI-powered classification"""
         
-        # Determine row type based on content
-        row_type = self._determine_row_type(row, platform_info)
+        # AI-powered row classification
+        ai_classification = await self.ai_classifier.classify_row_with_ai(row, platform_info, column_names)
         
         # Convert row to JSON-serializable format
         payload = self._convert_row_to_json_serializable(row)
         
-        # Create the event payload
+        # Create the event payload with enhanced metadata
         event = {
             "provider": "excel-upload",
-            "kind": row_type,
+            "kind": ai_classification.get('row_type', 'general_row'),
             "source_platform": platform_info.get('platform', 'unknown'),
             "payload": payload,
             "row_index": row_index,
@@ -697,10 +901,17 @@ class RowProcessor:
             "uploader": file_context['user_id'],
             "ingest_ts": datetime.utcnow().isoformat(),
             "status": "pending",
-            "confidence_score": platform_info.get('confidence', 0.5),
+            "confidence_score": ai_classification.get('confidence', 0.5),
             "classification_metadata": {
                 "platform_detection": platform_info,
-                "row_type": row_type,
+                "ai_classification": ai_classification,
+                "row_type": ai_classification.get('row_type', 'general_row'),
+                "category": ai_classification.get('category', 'other'),
+                "subcategory": ai_classification.get('subcategory', 'general'),
+                "entities": ai_classification.get('entities', {}),
+                "relationships": ai_classification.get('relationships', {}),
+                "description": ai_classification.get('description', ''),
+                "reasoning": ai_classification.get('reasoning', ''),
                 "sheet_name": sheet_name,
                 "file_context": file_context
             }
@@ -745,50 +956,14 @@ class RowProcessor:
         else:
             return str(obj)
     
-    def _determine_row_type(self, row: pd.Series, platform_info: Dict) -> str:
-        """Determine the type of row based on content and platform"""
-        platform = platform_info.get('platform', 'unknown')
-        
-        # Platform-specific row type detection
-        if platform == 'gusto':
-            if any('employee' in str(col).lower() for col in row.index):
-                return 'payroll_row'
-            elif any('salary' in str(col).lower() for col in row.index):
-                return 'salary_row'
-        
-        elif platform == 'razorpay':
-            if any('transaction' in str(col).lower() for col in row.index):
-                return 'transaction_row'
-            elif any('payment' in str(col).lower() for col in row.index):
-                return 'payment_row'
-        
-        elif platform == 'quickbooks':
-            if any('invoice' in str(col).lower() for col in row.index):
-                return 'invoice_row'
-            elif any('bill' in str(col).lower() for col in row.index):
-                return 'bill_row'
-        
-        # Generic detection based on content
-        row_str = ' '.join(str(val).lower() for val in row.values if pd.notna(val))
-        
-        if any(word in row_str for word in ['salary', 'wage', 'payroll', 'employee']):
-            return 'payroll_row'
-        elif any(word in row_str for word in ['revenue', 'income', 'sales']):
-            return 'revenue_row'
-        elif any(word in row_str for word in ['expense', 'cost', 'payment']):
-            return 'expense_row'
-        elif any(word in row_str for word in ['invoice', 'bill']):
-            return 'invoice_row'
-        elif any(word in row_str for word in ['transaction', 'payment']):
-            return 'transaction_row'
-        else:
-            return 'general_row'
+
 
 class ExcelProcessor:
     def __init__(self):
         self.analyzer = DocumentAnalyzer(openai)
         self.platform_detector = PlatformDetector()
-        self.row_processor = RowProcessor(self.platform_detector)
+        self.ai_classifier = AIRowClassifier(openai)
+        self.row_processor = RowProcessor(self.platform_detector, self.ai_classifier)
     
     async def detect_file_type(self, file_content: bytes, filename: str) -> str:
         """Detect file type using multiple methods"""
@@ -913,15 +1088,18 @@ class ExcelProcessor:
             if df.empty:
                 continue
             
+            # Get column names for this sheet
+            column_names = list(df.columns)
+            
             # Process each row in the sheet
             for row_index, (index, row) in enumerate(df.iterrows()):
                 try:
-                    # Create event for this row
-                    event = self.row_processor.process_row(
-                        row, row_index, sheet_name, platform_info, file_context
+                    # Create event for this row with AI classification
+                    event = await self.row_processor.process_row(
+                        row, row_index, sheet_name, platform_info, file_context, column_names
                     )
                     
-                    # Store event in raw_events table
+                    # Store event in raw_events table with enhanced classification
                     event_result = supabase.table('raw_events').insert({
                         'user_id': user_id,
                         'file_id': file_id,
@@ -929,6 +1107,8 @@ class ExcelProcessor:
                         'provider': event['provider'],
                         'kind': event['kind'],
                         'source_platform': event['source_platform'],
+                        'category': event['classification_metadata'].get('category'),
+                        'subcategory': event['classification_metadata'].get('subcategory'),
                         'payload': event['payload'],
                         'row_index': event['row_index'],
                         'sheet_name': event['sheet_name'],
@@ -937,7 +1117,9 @@ class ExcelProcessor:
                         'ingest_ts': event['ingest_ts'],
                         'status': event['status'],
                         'confidence_score': event['confidence_score'],
-                        'classification_metadata': event['classification_metadata']
+                        'classification_metadata': event['classification_metadata'],
+                        'entities': event['classification_metadata'].get('entities', {}),
+                        'relationships': event['classification_metadata'].get('relationships', {})
                     }).execute()
                     
                     if event_result.data:
@@ -1353,6 +1535,92 @@ async def test_platform_detection():
     except Exception as e:
         logger.error(f"Platform detection test failed: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Platform detection test failed: {str(e)}")
+
+@app.get("/test-ai-row-classification")
+async def test_ai_row_classification():
+    """Test endpoint for AI-powered row classification"""
+    try:
+        processor = ExcelProcessor()
+        
+        # Test cases for different row types
+        test_cases = [
+            {
+                "name": "Payroll Row",
+                "description": "Salary payment to employee",
+                "row_data": {
+                    "Date": "2024-01-15",
+                    "Description": "Salary paid to Abhishek Kumar",
+                    "Amount": -5000.00,
+                    "Category": "Payroll"
+                }
+            },
+            {
+                "name": "Revenue Row",
+                "description": "Client payment for services",
+                "row_data": {
+                    "Date": "2024-01-15",
+                    "Description": "Payment from Client ABC for Project X",
+                    "Amount": 2500.00,
+                    "Category": "Revenue"
+                }
+            },
+            {
+                "name": "Expense Row",
+                "description": "Office rent payment",
+                "row_data": {
+                    "Date": "2024-01-15",
+                    "Description": "Office rent payment to Landlord Corp",
+                    "Amount": -1500.00,
+                    "Category": "Expense"
+                }
+            },
+            {
+                "name": "Vendor Payment",
+                "description": "Software subscription",
+                "row_data": {
+                    "Date": "2024-01-15",
+                    "Description": "Software subscription payment to Microsoft",
+                    "Amount": -99.00,
+                    "Category": "Expense"
+                }
+            }
+        ]
+        
+        results = []
+        for test_case in test_cases:
+            # Create DataFrame with single row
+            df = pd.DataFrame([test_case["row_data"]])
+            first_row = df.iloc[0]
+            column_names = list(df.columns)
+            
+            # Mock platform info
+            platform_info = {
+                "platform": "quickbooks",
+                "confidence": 0.85,
+                "description": "QuickBooks accounting software"
+            }
+            
+            # Test AI classification
+            ai_classification = await processor.ai_classifier.classify_row_with_ai(
+                first_row, platform_info, column_names
+            )
+            
+            results.append({
+                "test_case": test_case["name"],
+                "description": test_case["description"],
+                "row_data": test_case["row_data"],
+                "ai_classification": ai_classification
+            })
+        
+        return {
+            "message": "AI row classification test completed",
+            "test_results": results,
+            "total_tests": len(test_cases)
+        }
+        
+    except Exception as e:
+        logger.error(f"Test AI row classification failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Test failed: {str(e)}")
 
 if __name__ == "__main__":
     import uvicorn
