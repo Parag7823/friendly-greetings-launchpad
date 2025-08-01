@@ -204,14 +204,37 @@ class DocumentAnalyzer:
         elif any(word in ' '.join(column_names).lower() for word in ['asset', 'liability', 'equity']):
             doc_type = "balance_sheet"
         
-        # Determine platform
+        # Enhanced platform detection using column patterns
         platform = "unknown"
-        if any(word in response_lower for word in ['quickbooks', 'qb']):
+        platform_indicators = []
+        
+        # Check for platform-specific patterns in column names
+        columns_lower = [col.lower() for col in column_names]
+        
+        # QuickBooks patterns
+        if any(word in ' '.join(columns_lower) for word in ['account', 'memo', 'ref number', 'split']):
             platform = "quickbooks"
-        elif any(word in response_lower for word in ['gusto']):
-            platform = "gusto"
-        elif any(word in response_lower for word in ['xero']):
+            platform_indicators.append("qb_column_patterns")
+        
+        # Xero patterns
+        elif any(word in ' '.join(columns_lower) for word in ['contact', 'tracking', 'reference']):
             platform = "xero"
+            platform_indicators.append("xero_column_patterns")
+        
+        # Gusto patterns
+        elif any(word in ' '.join(columns_lower) for word in ['employee', 'pay period', 'gross pay', 'net pay']):
+            platform = "gusto"
+            platform_indicators.append("gusto_column_patterns")
+        
+        # Stripe patterns
+        elif any(word in ' '.join(columns_lower) for word in ['charge id', 'payment intent', 'customer id']):
+            platform = "stripe"
+            platform_indicators.append("stripe_column_patterns")
+        
+        # Shopify patterns
+        elif any(word in ' '.join(columns_lower) for word in ['order id', 'product', 'fulfillment']):
+            platform = "shopify"
+            platform_indicators.append("shopify_column_patterns")
         
         return {
             "document_type": doc_type,
@@ -228,7 +251,7 @@ class DocumentAnalyzer:
                 "time_period": "unknown"
             },
             "classification_reasoning": f"Fallback classification based on column names: {column_names}",
-            "platform_indicators": [],
+            "platform_indicators": platform_indicators,
             "document_indicators": column_names
         }
 
@@ -413,34 +436,105 @@ class DocumentAnalyzer:
         return {"tax_columns": tax_cols, "total_taxes": sum(df[col].sum() for col in tax_cols if col in df.columns)}
 
 class PlatformDetector:
-    """Detects the source platform of uploaded files"""
+    """Enhanced platform detection for financial systems"""
     
     def __init__(self):
         self.platform_patterns = {
             'gusto': {
-                'keywords': ['gusto', 'payroll', 'employee', 'salary', 'wage'],
-                'columns': ['employee_name', 'employee_id', 'pay_period', 'gross_pay', 'net_pay'],
-                'confidence_threshold': 0.7
+                'keywords': ['gusto', 'payroll', 'employee', 'salary', 'wage', 'paystub'],
+                'columns': ['employee_name', 'employee_id', 'pay_period', 'gross_pay', 'net_pay', 'tax_deductions', 'benefits'],
+                'data_patterns': ['employee_ssn', 'pay_rate', 'hours_worked', 'overtime', 'federal_tax', 'state_tax'],
+                'confidence_threshold': 0.7,
+                'description': 'Payroll and HR platform'
+            },
+            'quickbooks': {
+                'keywords': ['quickbooks', 'qb', 'accounting', 'invoice', 'bill', 'qbo'],
+                'columns': ['account', 'memo', 'amount', 'date', 'type', 'ref_number', 'split'],
+                'data_patterns': ['account_number', 'class', 'customer', 'vendor', 'journal_entry'],
+                'confidence_threshold': 0.7,
+                'description': 'Accounting software'
+            },
+            'xero': {
+                'keywords': ['xero', 'invoice', 'contact', 'account', 'xero'],
+                'columns': ['contact_name', 'invoice_number', 'amount', 'date', 'reference', 'tracking'],
+                'data_patterns': ['contact_id', 'invoice_id', 'tax_amount', 'line_amount', 'tracking_category'],
+                'confidence_threshold': 0.7,
+                'description': 'Cloud accounting platform'
             },
             'razorpay': {
                 'keywords': ['razorpay', 'payment', 'transaction', 'merchant', 'settlement'],
+                'columns': ['transaction_id', 'merchant_id', 'amount', 'status', 'created_at', 'payment_id'],
+                'data_patterns': ['order_id', 'currency', 'method', 'description', 'fee_amount'],
+                'confidence_threshold': 0.7,
+                'description': 'Payment gateway'
+            },
+            'freshbooks': {
+                'keywords': ['freshbooks', 'invoice', 'time_tracking', 'client', 'project'],
+                'columns': ['client_name', 'invoice_number', 'amount', 'date', 'project', 'time_logged'],
+                'data_patterns': ['client_id', 'project_id', 'rate', 'hours', 'service_type'],
+                'confidence_threshold': 0.7,
+                'description': 'Invoicing and time tracking'
+            },
+            'wave': {
+                'keywords': ['wave', 'accounting', 'invoice', 'business'],
+                'columns': ['account_name', 'description', 'amount', 'date', 'category'],
+                'data_patterns': ['account_id', 'transaction_id', 'balance', 'wave_specific'],
+                'confidence_threshold': 0.7,
+                'description': 'Free accounting software'
+            },
+            'sage': {
+                'keywords': ['sage', 'accounting', 'business', 'sage50', 'sage100'],
+                'columns': ['account', 'description', 'amount', 'date', 'reference'],
+                'data_patterns': ['account_number', 'journal_entry', 'period', 'sage_specific'],
+                'confidence_threshold': 0.7,
+                'description': 'Business management software'
+            },
+            'netsuite': {
+                'keywords': ['netsuite', 'erp', 'enterprise', 'suite'],
+                'columns': ['account', 'memo', 'amount', 'date', 'entity', 'subsidiary'],
+                'data_patterns': ['internal_id', 'tran_id', 'line_id', 'netsuite_specific'],
+                'confidence_threshold': 0.7,
+                'description': 'Enterprise resource planning'
+            },
+            'stripe': {
+                'keywords': ['stripe', 'payment', 'charge', 'customer', 'subscription'],
+                'columns': ['charge_id', 'customer_id', 'amount', 'status', 'created', 'currency'],
+                'data_patterns': ['payment_intent', 'transfer_id', 'fee_amount', 'payment_method'],
+                'confidence_threshold': 0.7,
+                'description': 'Payment processing platform'
+            },
+            'square': {
+                'keywords': ['square', 'payment', 'transaction', 'merchant'],
                 'columns': ['transaction_id', 'merchant_id', 'amount', 'status', 'created_at'],
-                'confidence_threshold': 0.7
+                'data_patterns': ['location_id', 'device_id', 'tender_type', 'square_specific'],
+                'confidence_threshold': 0.7,
+                'description': 'Point of sale and payments'
             },
-            'quickbooks': {
-                'keywords': ['quickbooks', 'qb', 'accounting', 'invoice', 'bill'],
-                'columns': ['account', 'memo', 'amount', 'date', 'type'],
-                'confidence_threshold': 0.7
+            'paypal': {
+                'keywords': ['paypal', 'payment', 'transaction', 'merchant'],
+                'columns': ['transaction_id', 'merchant_id', 'amount', 'status', 'created_at'],
+                'data_patterns': ['paypal_id', 'fee_amount', 'currency', 'payment_type'],
+                'confidence_threshold': 0.7,
+                'description': 'Online payment system'
             },
-            'xero': {
-                'keywords': ['xero', 'invoice', 'contact', 'account'],
-                'columns': ['contact_name', 'invoice_number', 'amount', 'date'],
-                'confidence_threshold': 0.7
+            'shopify': {
+                'keywords': ['shopify', 'order', 'product', 'sales', 'ecommerce'],
+                'columns': ['order_id', 'product_name', 'amount', 'date', 'customer'],
+                'data_patterns': ['shopify_id', 'product_id', 'variant_id', 'fulfillment_status'],
+                'confidence_threshold': 0.7,
+                'description': 'E-commerce platform'
+            },
+            'zoho': {
+                'keywords': ['zoho', 'books', 'invoice', 'accounting'],
+                'columns': ['contact_name', 'invoice_number', 'amount', 'date', 'reference'],
+                'data_patterns': ['zoho_id', 'organization_id', 'zoho_specific'],
+                'confidence_threshold': 0.7,
+                'description': 'Business software suite'
             }
         }
     
     def detect_platform(self, df: pd.DataFrame, filename: str) -> Dict[str, Any]:
-        """Detect the source platform based on column names and data patterns"""
+        """Enhanced platform detection with multiple analysis methods"""
         filename_lower = filename.lower()
         columns_lower = [col.lower() for col in df.columns]
         
@@ -448,38 +542,132 @@ class PlatformDetector:
             'platform': 'unknown',
             'confidence': 0.0,
             'matched_columns': [],
-            'reasoning': 'No clear platform match found'
+            'matched_patterns': [],
+            'reasoning': 'No clear platform match found',
+            'description': 'Unknown platform'
         }
         
         for platform, patterns in self.platform_patterns.items():
             confidence = 0.0
             matched_columns = []
+            matched_patterns = []
             
-            # Check filename keywords
+            # 1. Filename keyword matching (25% weight)
+            filename_matches = 0
             for keyword in patterns['keywords']:
                 if keyword in filename_lower:
-                    confidence += 0.3
+                    filename_matches += 1
+                    confidence += 0.25 / len(patterns['keywords'])
             
-            # Check column name matches
+            # 2. Column name matching (40% weight)
+            column_matches = 0
             for expected_col in patterns['columns']:
                 for actual_col in columns_lower:
                     if expected_col in actual_col or actual_col in expected_col:
                         matched_columns.append(actual_col)
-                        confidence += 0.2
+                        column_matches += 1
+                        confidence += 0.4 / len(patterns['columns'])
             
-            # Check data patterns (basic)
+            # 3. Data pattern analysis (20% weight)
             if len(matched_columns) > 0:
+                confidence += 0.2
+            
+            # 4. Data content analysis (15% weight)
+            sample_data = df.head(3).astype(str).values.flatten()
+            sample_text = ' '.join(sample_data).lower()
+            
+            for pattern in patterns.get('data_patterns', []):
+                if pattern in sample_text:
+                    confidence += 0.15 / len(patterns.get('data_patterns', []))
+                    matched_patterns.append(pattern)
+            
+            # 5. Platform-specific terminology detection
+            platform_terms = self._detect_platform_terminology(df, platform)
+            if platform_terms:
                 confidence += 0.1
+                matched_patterns.extend(platform_terms)
             
             if confidence > best_match['confidence']:
                 best_match = {
                     'platform': platform,
                     'confidence': min(confidence, 1.0),
                     'matched_columns': matched_columns,
-                    'reasoning': f'Matched {len(matched_columns)} columns and filename patterns'
+                    'matched_patterns': matched_patterns,
+                    'reasoning': self._generate_reasoning(platform, filename_matches, column_matches, len(matched_patterns)),
+                    'description': patterns['description']
                 }
         
         return best_match
+    
+    def _detect_platform_terminology(self, df: pd.DataFrame, platform: str) -> List[str]:
+        """Detect platform-specific terminology in the data"""
+        platform_terms = []
+        
+        if platform == 'quickbooks':
+            # QB-specific terms
+            qb_terms = ['ref number', 'split', 'class', 'customer', 'vendor', 'journal entry']
+            for term in qb_terms:
+                if any(term in str(col).lower() for col in df.columns):
+                    platform_terms.append(f"qb_term: {term}")
+        
+        elif platform == 'xero':
+            # Xero-specific terms
+            xero_terms = ['tracking', 'reference', 'contact', 'line amount']
+            for term in xero_terms:
+                if any(term in str(col).lower() for col in df.columns):
+                    platform_terms.append(f"xero_term: {term}")
+        
+        elif platform == 'gusto':
+            # Gusto-specific terms
+            gusto_terms = ['pay period', 'gross pay', 'net pay', 'tax deductions', 'benefits']
+            for term in gusto_terms:
+                if any(term in str(col).lower() for col in df.columns):
+                    platform_terms.append(f"gusto_term: {term}")
+        
+        elif platform == 'stripe':
+            # Stripe-specific terms
+            stripe_terms = ['charge id', 'payment intent', 'transfer id', 'fee amount']
+            for term in stripe_terms:
+                if any(term in str(col).lower() for col in df.columns):
+                    platform_terms.append(f"stripe_term: {term}")
+        
+        return platform_terms
+    
+    def _generate_reasoning(self, platform: str, filename_matches: int, column_matches: int, pattern_matches: int) -> str:
+        """Generate detailed reasoning for platform detection"""
+        reasoning_parts = []
+        
+        if filename_matches > 0:
+            reasoning_parts.append(f"Filename contains {filename_matches} {platform} keywords")
+        
+        if column_matches > 0:
+            reasoning_parts.append(f"Matched {column_matches} column patterns typical of {platform}")
+        
+        if pattern_matches > 0:
+            reasoning_parts.append(f"Detected {pattern_matches} {platform}-specific data patterns")
+        
+        if not reasoning_parts:
+            return f"No clear indicators for {platform}"
+        
+        return f"{platform} detected: {'; '.join(reasoning_parts)}"
+    
+    def get_platform_info(self, platform: str) -> Dict[str, Any]:
+        """Get detailed information about a platform"""
+        if platform in self.platform_patterns:
+            return {
+                'name': platform,
+                'description': self.platform_patterns[platform]['description'],
+                'typical_columns': self.platform_patterns[platform]['columns'],
+                'keywords': self.platform_patterns[platform]['keywords'],
+                'confidence_threshold': self.platform_patterns[platform]['confidence_threshold']
+            }
+        return {
+            'name': platform,
+            'description': 'Unknown platform',
+            'typical_columns': [],
+            'keywords': [],
+            'confidence_threshold': 0.0
+        }
 
 class RowProcessor:
     """Processes individual rows and creates events"""
@@ -812,10 +1000,30 @@ class ExcelProcessor:
                 'errors_count': len(errors),
                 'platform_detected': platform_info.get('platform', 'unknown'),
                 'platform_confidence': platform_info.get('confidence', 0.0),
+                'platform_description': platform_info.get('description', 'Unknown platform'),
+                'platform_reasoning': platform_info.get('reasoning', 'No clear platform indicators'),
+                'matched_columns': platform_info.get('matched_columns', []),
+                'matched_patterns': platform_info.get('matched_patterns', []),
                 'file_hash': file_hash
             },
             'errors': errors
         })
+        
+        # Add enhanced platform information if detected
+        if platform_info.get('platform') != 'unknown':
+            platform_details = self.platform_detector.get_platform_info(platform_info['platform'])
+            insights['platform_details'] = {
+                'name': platform_details['name'],
+                'description': platform_details['description'],
+                'typical_columns': platform_details['typical_columns'],
+                'keywords': platform_details['keywords'],
+                'detection_confidence': platform_info.get('confidence', 0.0),
+                'detection_reasoning': platform_info.get('reasoning', ''),
+                'matched_indicators': {
+                    'columns': platform_info.get('matched_columns', []),
+                    'patterns': platform_info.get('matched_patterns', [])
+                }
+            }
         
         # Step 7: Complete
         await manager.send_update(job_id, {
@@ -1074,6 +1282,77 @@ async def test_database():
     except Exception as e:
         logger.error(f"Database test error: {e}")
         return {"error": f"Database test failed: {str(e)}"}
+
+@app.get("/test-platform-detection")
+async def test_platform_detection():
+    """Test endpoint for enhanced platform detection"""
+    try:
+        # Create sample data for different platforms
+        import pandas as pd
+        
+        test_cases = {
+            'quickbooks': pd.DataFrame({
+                'Account': ['Checking', 'Savings'],
+                'Memo': ['Payment', 'Deposit'],
+                'Amount': [1000, 500],
+                'Date': ['2024-01-01', '2024-01-02'],
+                'Ref Number': ['REF001', 'REF002']
+            }),
+            'gusto': pd.DataFrame({
+                'Employee Name': ['John Doe', 'Jane Smith'],
+                'Employee ID': ['EMP001', 'EMP002'],
+                'Pay Period': ['2024-01-01', '2024-01-15'],
+                'Gross Pay': [5000, 6000],
+                'Net Pay': [3500, 4200],
+                'Tax Deductions': [1500, 1800]
+            }),
+            'stripe': pd.DataFrame({
+                'Charge ID': ['ch_001', 'ch_002'],
+                'Customer ID': ['cus_001', 'cus_002'],
+                'Amount': [1000, 2000],
+                'Status': ['succeeded', 'succeeded'],
+                'Created': ['2024-01-01', '2024-01-02'],
+                'Currency': ['usd', 'usd']
+            }),
+            'xero': pd.DataFrame({
+                'Contact Name': ['Client A', 'Client B'],
+                'Invoice Number': ['INV001', 'INV002'],
+                'Amount': [1500, 2500],
+                'Date': ['2024-01-01', '2024-01-02'],
+                'Reference': ['REF001', 'REF002'],
+                'Tracking': ['Project A', 'Project B']
+            })
+        }
+        
+        results = {}
+        platform_detector = PlatformDetector()
+        
+        for platform_name, df in test_cases.items():
+            filename = f"{platform_name}_sample.xlsx"
+            detection_result = platform_detector.detect_platform(df, filename)
+            platform_info = platform_detector.get_platform_info(detection_result['platform'])
+            
+            results[platform_name] = {
+                'detection_result': detection_result,
+                'platform_info': platform_info,
+                'sample_columns': list(df.columns),
+                'sample_data_shape': df.shape
+            }
+        
+        return {
+            "status": "success",
+            "message": "Enhanced platform detection test completed",
+            "test_cases": results,
+            "summary": {
+                "total_platforms_tested": len(test_cases),
+                "detection_accuracy": sum(1 for r in results.values() 
+                                        if r['detection_result']['platform'] != 'unknown') / len(results)
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Platform detection test failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Platform detection test failed: {str(e)}")
 
 if __name__ == "__main__":
     import uvicorn
