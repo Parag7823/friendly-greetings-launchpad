@@ -634,12 +634,36 @@ async def process_excel(request: ProcessRequest, background_tasks: BackgroundTas
             })
             raise HTTPException(status_code=400, detail=f"File download failed: {str(e)}")
         
-        # Update job status to processing
-        supabase.table('ingestion_jobs').update({
-            'status': 'processing',
-            'started_at': datetime.utcnow().isoformat(),
-            'progress': 10
-        }).eq('id', request.job_id).execute()
+        # Create or update job status to processing
+        try:
+            # Try to update existing job
+            result = supabase.table('ingestion_jobs').update({
+                'status': 'processing',
+                'started_at': datetime.utcnow().isoformat(),
+                'progress': 10
+            }).eq('id', request.job_id).execute()
+            
+            # If no rows were updated, create the job
+            if not result.data:
+                supabase.table('ingestion_jobs').insert({
+                    'id': request.job_id,
+                    'job_type': 'fastapi_excel_analysis',
+                    'user_id': request.user_id,
+                    'status': 'processing',
+                    'started_at': datetime.utcnow().isoformat(),
+                    'progress': 10
+                }).execute()
+        except Exception as e:
+            logger.warning(f"Could not update job {request.job_id}, creating new one: {e}")
+            # Create the job if update fails
+            supabase.table('ingestion_jobs').insert({
+                'id': request.job_id,
+                'job_type': 'fastapi_excel_analysis',
+                'user_id': request.user_id,
+                'status': 'processing',
+                'started_at': datetime.utcnow().isoformat(),
+                'progress': 10
+            }).execute()
         
         # Process the file with row-by-row streaming
         results = await processor.process_file(
