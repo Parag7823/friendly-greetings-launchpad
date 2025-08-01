@@ -73,42 +73,78 @@ class DocumentAnalyzer:
         self.openai = openai_client
     
     async def detect_document_type(self, df: pd.DataFrame, filename: str) -> Dict[str, Any]:
-        """Detect document type using AI analysis"""
+        """Enhanced document type detection using AI analysis"""
         try:
-            # Create a sample of the data for analysis
+            # Create a comprehensive sample for analysis
             sample_data = df.head(10).to_dict('records')
+            column_names = list(df.columns)
             
+            # Analyze data patterns
+            numeric_columns = df.select_dtypes(include=['number']).columns.tolist()
+            date_columns = [col for col in column_names if any(word in col.lower() for word in ['date', 'time', 'period', 'month', 'year'])]
+            
+            # Enhanced prompt with more context and detailed classification rules
             prompt = f"""
-            Analyze this financial document sample and determine its type.
+            Analyze this financial document and classify it accurately using the detailed rules below.
             
-            Filename: {filename}
-            Sample data: {sample_data}
+            FILENAME: {filename}
+            COLUMN NAMES: {column_names}
+            NUMERIC COLUMNS: {numeric_columns}
+            DATE COLUMNS: {date_columns}
+            SAMPLE DATA: {sample_data}
             
-            Please classify this as one of:
-            - payroll_data
-            - revenue_data  
-            - expense_data
-            - balance_sheet
-            - income_statement
-            - cash_flow
-            - general_ledger
-            - unknown
+            CLASSIFICATION RULES:
             
-            Also detect the source platform if possible:
-            - gusto
-            - razorpay
-            - quickbooks
-            - xero
-            - freshbooks
-            - unknown
+            1. INCOME STATEMENT: Contains Revenue, Sales, Income, COGS, Cost of Goods, Operating Expenses, Net Profit, Net Income, Gross Profit, EBIT, EBITDA
+            2. BALANCE SHEET: Contains Assets, Liabilities, Equity, Cash, Accounts Receivable, Accounts Payable, Inventory, Fixed Assets, Current Assets, Current Liabilities
+            3. CASH FLOW: Contains Operating Cash Flow, Investing Cash Flow, Financing Cash Flow, Net Cash Flow, Cash from Operations, Cash from Investing, Cash from Financing
+            4. PAYROLL DATA: Contains Employee, Salary, Wage, Pay Period, Gross Pay, Net Pay, Tax, Employee Name, Employee ID, Hours Worked, Overtime
+            5. EXPENSE DATA: Contains Expense, Cost, Payment, Vendor, Category, Amount, Expense Type, Expense Category, Vendor Name
+            6. REVENUE DATA: Contains Revenue, Sales, Income, Customer, Invoice, Amount, Sales Revenue, Service Revenue, Product Revenue
+            7. GENERAL LEDGER: Contains Account, Debit, Credit, Balance, Transaction, Journal Entry, Account Number, Account Name
+            8. BUDGET: Contains Budget, Planned, Actual, Variance, Period, Budget vs Actual, Forecast, Target
+            9. BANK STATEMENT: Contains Transaction Date, Description, Debit, Credit, Balance, Account Number, Check Number
+            10. CREDIT CARD STATEMENT: Contains Transaction Date, Merchant, Amount, Category, Statement Period, Credit Limit
             
-            Return a JSON with:
+            PLATFORM DETECTION RULES:
+            
+            1. GUSTO: Employee names, Pay periods, Gross/Net pay, Tax deductions, Employee SSN, Pay rate, Hours worked
+            2. QUICKBOOKS: Account names, Memo fields, Transaction types, QB-specific terms, Ref number, Split transactions, Class tracking
+            3. XERO: Contact names, Invoice numbers, Xero-specific formatting, Reference numbers, Tracking categories, Line amounts
+            4. RAZORPAY: Transaction IDs, Merchant IDs, Payment status, Settlement data, Order IDs, Payment methods
+            5. FRESHBOOKS: Invoice data, Client information, Time tracking, Project tracking, Client names, Invoice numbers
+            6. WAVE: Wave-specific account names, Transaction types, Business account structure, Wave-specific terminology
+            7. SAGE: Sage-specific terminology, Account structures, Journal entries, Sage 50/100 specific fields
+            8. NETSUITE: NetSuite-specific fields, Enterprise account structures, Internal IDs, Transaction IDs
+            9. STRIPE: Payment intents, Customer IDs, Charge IDs, Transfer IDs, Fee amounts, Payment methods
+            10. SQUARE: Transaction IDs, Location IDs, Device IDs, Tender types, Square-specific payment data
+            
+            ANALYSIS REQUIREMENTS:
+            
+            1. Look at column names first - they are the strongest indicators
+            2. Analyze the data patterns in the sample
+            3. Consider the filename for additional context
+            4. Check for platform-specific terminology or formatting
+            5. Determine confidence based on how many indicators match
+            
+            Return a detailed JSON response with this exact structure:
             {{
-                "document_type": "type",
-                "source_platform": "platform",
+                "document_type": "income_statement|balance_sheet|cash_flow|payroll_data|expense_data|revenue_data|general_ledger|budget|bank_statement|credit_card_statement|unknown",
+                "source_platform": "gusto|quickbooks|xero|razorpay|freshbooks|wave|sage|netsuite|stripe|square|unknown",
                 "confidence": 0.95,
                 "key_columns": ["col1", "col2"],
-                "analysis": "brief description"
+                "analysis": "Detailed explanation of classification reasoning",
+                "data_patterns": {{
+                    "has_revenue_data": true/false,
+                    "has_expense_data": true/false,
+                    "has_employee_data": true/false,
+                    "has_account_data": true/false,
+                    "has_transaction_data": true/false,
+                    "time_period": "monthly|quarterly|yearly|unknown"
+                }},
+                "classification_reasoning": "Step-by-step explanation of why this classification was chosen",
+                "platform_indicators": ["indicator1", "indicator2"],
+                "document_indicators": ["indicator1", "indicator2"]
             }}
             """
             
@@ -122,14 +158,49 @@ class DocumentAnalyzer:
             # Parse JSON from response
             import json
             try:
-                return json.loads(result)
-            except:
+                parsed_result = json.loads(result)
+                
+                # Ensure all required fields are present
+                if 'data_patterns' not in parsed_result:
+                    parsed_result['data_patterns'] = {
+                        "has_revenue_data": False,
+                        "has_expense_data": False,
+                        "has_employee_data": False,
+                        "has_account_data": False,
+                        "has_transaction_data": False,
+                        "time_period": "unknown"
+                    }
+                
+                if 'classification_reasoning' not in parsed_result:
+                    parsed_result['classification_reasoning'] = "Analysis completed but reasoning not provided"
+                
+                if 'platform_indicators' not in parsed_result:
+                    parsed_result['platform_indicators'] = []
+                
+                if 'document_indicators' not in parsed_result:
+                    parsed_result['document_indicators'] = []
+                
+                return parsed_result
+                
+            except json.JSONDecodeError as e:
+                logger.error(f"Failed to parse AI response: {e}")
                 return {
                     "document_type": "unknown",
                     "source_platform": "unknown", 
                     "confidence": 0.5,
                     "key_columns": list(df.columns),
-                    "analysis": "Could not determine document type"
+                    "analysis": "Could not determine document type - AI response parsing failed",
+                    "data_patterns": {
+                        "has_revenue_data": False,
+                        "has_expense_data": False,
+                        "has_employee_data": False,
+                        "has_account_data": False,
+                        "has_transaction_data": False,
+                        "time_period": "unknown"
+                    },
+                    "classification_reasoning": "Failed to parse AI analysis response",
+                    "platform_indicators": [],
+                    "document_indicators": []
                 }
                 
         except Exception as e:
@@ -139,11 +210,22 @@ class DocumentAnalyzer:
                 "source_platform": "unknown",
                 "confidence": 0.3,
                 "key_columns": list(df.columns),
-                "analysis": f"Error in analysis: {str(e)}"
+                "analysis": f"Error in analysis: {str(e)}",
+                "data_patterns": {
+                    "has_revenue_data": False,
+                    "has_expense_data": False,
+                    "has_employee_data": False,
+                    "has_account_data": False,
+                    "has_transaction_data": False,
+                    "time_period": "unknown"
+                },
+                "classification_reasoning": f"Error occurred during analysis: {str(e)}",
+                "platform_indicators": [],
+                "document_indicators": []
             }
 
     async def generate_insights(self, df: pd.DataFrame, doc_analysis: Dict) -> Dict[str, Any]:
-        """Generate insights from the processed data"""
+        """Generate enhanced insights from the processed data"""
         try:
             # Basic statistical analysis
             numeric_columns = df.select_dtypes(include=[np.number]).columns
@@ -156,7 +238,12 @@ class DocumentAnalyzer:
                 "confidence": doc_analysis.get("confidence", 0.5),
                 "key_columns": doc_analysis.get("key_columns", []),
                 "analysis": doc_analysis.get("analysis", ""),
-                "summary_stats": {}
+                "classification_reasoning": doc_analysis.get("classification_reasoning", ""),
+                "data_patterns": doc_analysis.get("data_patterns", {}),
+                "platform_indicators": doc_analysis.get("platform_indicators", []),
+                "document_indicators": doc_analysis.get("document_indicators", []),
+                "summary_stats": {},
+                "enhanced_analysis": {}
             }
             
             # Calculate summary statistics for numeric columns
@@ -169,6 +256,27 @@ class DocumentAnalyzer:
                     "count": int(df[col].count())
                 }
             
+            # Enhanced analysis based on document type
+            doc_type = doc_analysis.get("document_type", "unknown")
+            if doc_type == "income_statement":
+                insights["enhanced_analysis"] = {
+                    "revenue_analysis": self._analyze_revenue_data(df),
+                    "expense_analysis": self._analyze_expense_data(df),
+                    "profitability_metrics": self._calculate_profitability_metrics(df)
+                }
+            elif doc_type == "balance_sheet":
+                insights["enhanced_analysis"] = {
+                    "asset_analysis": self._analyze_assets(df),
+                    "liability_analysis": self._analyze_liabilities(df),
+                    "equity_analysis": self._analyze_equity(df)
+                }
+            elif doc_type == "payroll_data":
+                insights["enhanced_analysis"] = {
+                    "payroll_summary": self._analyze_payroll_data(df),
+                    "employee_analysis": self._analyze_employee_data(df),
+                    "tax_analysis": self._analyze_tax_data(df)
+                }
+            
             return insights
             
         except Exception as e:
@@ -176,8 +284,125 @@ class DocumentAnalyzer:
             return {
                 "error": str(e),
                 "total_rows": len(df) if 'df' in locals() else 0,
-                "document_type": "unknown"
+                "document_type": "unknown",
+                "data_patterns": {},
+                "classification_reasoning": f"Error generating insights: {str(e)}",
+                "platform_indicators": [],
+                "document_indicators": []
             }
+    
+    def _analyze_revenue_data(self, df: pd.DataFrame) -> Dict[str, Any]:
+        """Analyze revenue-related data"""
+        revenue_cols = [col for col in df.columns if any(word in col.lower() for word in ['revenue', 'sales', 'income'])]
+        if not revenue_cols:
+            return {"message": "No revenue columns found"}
+        
+        analysis = {}
+        for col in revenue_cols:
+            if col in df.columns:
+                analysis[col] = {
+                    "total": float(df[col].sum()) if not df[col].empty else 0,
+                    "average": float(df[col].mean()) if not df[col].empty else 0,
+                    "growth_rate": self._calculate_growth_rate(df[col]) if len(df) > 1 else None
+                }
+        return analysis
+    
+    def _analyze_expense_data(self, df: pd.DataFrame) -> Dict[str, Any]:
+        """Analyze expense-related data"""
+        expense_cols = [col for col in df.columns if any(word in col.lower() for word in ['expense', 'cost', 'cogs', 'operating'])]
+        if not expense_cols:
+            return {"message": "No expense columns found"}
+        
+        analysis = {}
+        for col in expense_cols:
+            if col in df.columns:
+                analysis[col] = {
+                    "total": float(df[col].sum()) if not df[col].empty else 0,
+                    "average": float(df[col].mean()) if not df[col].empty else 0,
+                    "percentage_of_revenue": self._calculate_expense_ratio(df, col)
+                }
+        return analysis
+    
+    def _calculate_profitability_metrics(self, df: pd.DataFrame) -> Dict[str, Any]:
+        """Calculate profitability metrics"""
+        revenue_cols = [col for col in df.columns if any(word in col.lower() for word in ['revenue', 'sales', 'income'])]
+        expense_cols = [col for col in df.columns if any(word in col.lower() for word in ['expense', 'cost', 'cogs', 'operating'])]
+        profit_cols = [col for col in df.columns if any(word in col.lower() for word in ['profit', 'net'])]
+        
+        metrics = {}
+        
+        if revenue_cols and expense_cols:
+            total_revenue = sum(df[col].sum() for col in revenue_cols if col in df.columns)
+            total_expenses = sum(df[col].sum() for col in expense_cols if col in df.columns)
+            
+            if total_revenue > 0:
+                metrics["gross_margin"] = ((total_revenue - total_expenses) / total_revenue) * 100
+                metrics["expense_ratio"] = (total_expenses / total_revenue) * 100
+        
+        if profit_cols:
+            for col in profit_cols:
+                if col in df.columns:
+                    metrics[f"{col}_total"] = float(df[col].sum()) if not df[col].empty else 0
+        
+        return metrics
+    
+    def _calculate_growth_rate(self, series: pd.Series) -> float:
+        """Calculate growth rate between first and last values"""
+        if len(series) < 2:
+            return 0.0
+        
+        first_value = series.iloc[0]
+        last_value = series.iloc[-1]
+        
+        if first_value == 0:
+            return 0.0
+        
+        return ((last_value - first_value) / first_value) * 100
+    
+    def _calculate_expense_ratio(self, df: pd.DataFrame, expense_col: str) -> float:
+        """Calculate expense as percentage of revenue"""
+        revenue_cols = [col for col in df.columns if any(word in col.lower() for word in ['revenue', 'sales', 'income'])]
+        
+        if not revenue_cols or expense_col not in df.columns:
+            return 0.0
+        
+        total_revenue = sum(df[col].sum() for col in revenue_cols if col in df.columns)
+        total_expense = df[expense_col].sum()
+        
+        if total_revenue == 0:
+            return 0.0
+        
+        return (total_expense / total_revenue) * 100
+    
+    def _analyze_assets(self, df: pd.DataFrame) -> Dict[str, Any]:
+        """Analyze asset-related data"""
+        asset_cols = [col for col in df.columns if any(word in col.lower() for word in ['asset', 'cash', 'receivable', 'inventory'])]
+        return {"asset_columns": asset_cols, "total_assets": sum(df[col].sum() for col in asset_cols if col in df.columns)}
+    
+    def _analyze_liabilities(self, df: pd.DataFrame) -> Dict[str, Any]:
+        """Analyze liability-related data"""
+        liability_cols = [col for col in df.columns if any(word in col.lower() for word in ['liability', 'payable', 'debt', 'loan'])]
+        return {"liability_columns": liability_cols, "total_liabilities": sum(df[col].sum() for col in liability_cols if col in df.columns)}
+    
+    def _analyze_equity(self, df: pd.DataFrame) -> Dict[str, Any]:
+        """Analyze equity-related data"""
+        equity_cols = [col for col in df.columns if any(word in col.lower() for word in ['equity', 'capital', 'retained'])]
+        return {"equity_columns": equity_cols, "total_equity": sum(df[col].sum() for col in equity_cols if col in df.columns)}
+    
+    def _analyze_payroll_data(self, df: pd.DataFrame) -> Dict[str, Any]:
+        """Analyze payroll-related data"""
+        payroll_cols = [col for col in df.columns if any(word in col.lower() for word in ['pay', 'salary', 'wage', 'gross', 'net'])]
+        return {"payroll_columns": payroll_cols, "total_payroll": sum(df[col].sum() for col in payroll_cols if col in df.columns)}
+    
+    def _analyze_employee_data(self, df: pd.DataFrame) -> Dict[str, Any]:
+        """Analyze employee-related data"""
+        employee_cols = [col for col in df.columns if any(word in col.lower() for word in ['employee', 'name', 'id'])]
+        return {"employee_columns": employee_cols, "employee_count": len(df) if employee_cols else 0}
+    
+    def _analyze_tax_data(self, df: pd.DataFrame) -> Dict[str, Any]:
+        """Analyze tax-related data"""
+        tax_cols = [col for col in df.columns if any(word in col.lower() for word in ['tax', 'withholding', 'deduction'])]
+        return {"tax_columns": tax_cols, "total_taxes": sum(df[col].sum() for col in tax_cols if col in df.columns)}
 
 class PlatformDetector:
     """Detects the source platform of uploaded files"""
