@@ -76,76 +76,43 @@ class DocumentAnalyzer:
         """Enhanced document type detection using AI analysis"""
         try:
             # Create a comprehensive sample for analysis
-            sample_data = df.head(10).to_dict('records')
+            sample_data = df.head(5).to_dict('records')  # Reduced to 5 rows
             column_names = list(df.columns)
             
             # Analyze data patterns
             numeric_columns = df.select_dtypes(include=['number']).columns.tolist()
             date_columns = [col for col in column_names if any(word in col.lower() for word in ['date', 'time', 'period', 'month', 'year'])]
             
-            # Enhanced prompt with more context and detailed classification rules
+            # Simplified prompt that's more likely to return valid JSON
             prompt = f"""
-            Analyze this financial document and classify it accurately using the detailed rules below.
+            Analyze this financial document and return a JSON response.
             
             FILENAME: {filename}
             COLUMN NAMES: {column_names}
-            NUMERIC COLUMNS: {numeric_columns}
-            DATE COLUMNS: {date_columns}
             SAMPLE DATA: {sample_data}
             
-            CLASSIFICATION RULES:
+            Based on the column names and data, classify this document and return ONLY a valid JSON object with this structure:
             
-            1. INCOME STATEMENT: Contains Revenue, Sales, Income, COGS, Cost of Goods, Operating Expenses, Net Profit, Net Income, Gross Profit, EBIT, EBITDA
-            2. BALANCE SHEET: Contains Assets, Liabilities, Equity, Cash, Accounts Receivable, Accounts Payable, Inventory, Fixed Assets, Current Assets, Current Liabilities
-            3. CASH FLOW: Contains Operating Cash Flow, Investing Cash Flow, Financing Cash Flow, Net Cash Flow, Cash from Operations, Cash from Investing, Cash from Financing
-            4. PAYROLL DATA: Contains Employee, Salary, Wage, Pay Period, Gross Pay, Net Pay, Tax, Employee Name, Employee ID, Hours Worked, Overtime
-            5. EXPENSE DATA: Contains Expense, Cost, Payment, Vendor, Category, Amount, Expense Type, Expense Category, Vendor Name
-            6. REVENUE DATA: Contains Revenue, Sales, Income, Customer, Invoice, Amount, Sales Revenue, Service Revenue, Product Revenue
-            7. GENERAL LEDGER: Contains Account, Debit, Credit, Balance, Transaction, Journal Entry, Account Number, Account Name
-            8. BUDGET: Contains Budget, Planned, Actual, Variance, Period, Budget vs Actual, Forecast, Target
-            9. BANK STATEMENT: Contains Transaction Date, Description, Debit, Credit, Balance, Account Number, Check Number
-            10. CREDIT CARD STATEMENT: Contains Transaction Date, Merchant, Amount, Category, Statement Period, Credit Limit
-            
-            PLATFORM DETECTION RULES:
-            
-            1. GUSTO: Employee names, Pay periods, Gross/Net pay, Tax deductions, Employee SSN, Pay rate, Hours worked
-            2. QUICKBOOKS: Account names, Memo fields, Transaction types, QB-specific terms, Ref number, Split transactions, Class tracking
-            3. XERO: Contact names, Invoice numbers, Xero-specific formatting, Reference numbers, Tracking categories, Line amounts
-            4. RAZORPAY: Transaction IDs, Merchant IDs, Payment status, Settlement data, Order IDs, Payment methods
-            5. FRESHBOOKS: Invoice data, Client information, Time tracking, Project tracking, Client names, Invoice numbers
-            6. WAVE: Wave-specific account names, Transaction types, Business account structure, Wave-specific terminology
-            7. SAGE: Sage-specific terminology, Account structures, Journal entries, Sage 50/100 specific fields
-            8. NETSUITE: NetSuite-specific fields, Enterprise account structures, Internal IDs, Transaction IDs
-            9. STRIPE: Payment intents, Customer IDs, Charge IDs, Transfer IDs, Fee amounts, Payment methods
-            10. SQUARE: Transaction IDs, Location IDs, Device IDs, Tender types, Square-specific payment data
-            
-            ANALYSIS REQUIREMENTS:
-            
-            1. Look at column names first - they are the strongest indicators
-            2. Analyze the data patterns in the sample
-            3. Consider the filename for additional context
-            4. Check for platform-specific terminology or formatting
-            5. Determine confidence based on how many indicators match
-            
-            Return a detailed JSON response with this exact structure:
             {{
-                "document_type": "income_statement|balance_sheet|cash_flow|payroll_data|expense_data|revenue_data|general_ledger|budget|bank_statement|credit_card_statement|unknown",
-                "source_platform": "gusto|quickbooks|xero|razorpay|freshbooks|wave|sage|netsuite|stripe|square|unknown",
+                "document_type": "income_statement|balance_sheet|cash_flow|payroll_data|expense_data|revenue_data|general_ledger|budget|unknown",
+                "source_platform": "gusto|quickbooks|xero|razorpay|freshbooks|unknown",
                 "confidence": 0.95,
                 "key_columns": ["col1", "col2"],
-                "analysis": "Detailed explanation of classification reasoning",
+                "analysis": "Brief explanation",
                 "data_patterns": {{
-                    "has_revenue_data": true/false,
-                    "has_expense_data": true/false,
-                    "has_employee_data": true/false,
-                    "has_account_data": true/false,
-                    "has_transaction_data": true/false,
-                    "time_period": "monthly|quarterly|yearly|unknown"
+                    "has_revenue_data": true,
+                    "has_expense_data": true,
+                    "has_employee_data": false,
+                    "has_account_data": false,
+                    "has_transaction_data": false,
+                    "time_period": "monthly"
                 }},
-                "classification_reasoning": "Step-by-step explanation of why this classification was chosen",
-                "platform_indicators": ["indicator1", "indicator2"],
-                "document_indicators": ["indicator1", "indicator2"]
+                "classification_reasoning": "Step-by-step explanation",
+                "platform_indicators": ["indicator1"],
+                "document_indicators": ["indicator1"]
             }}
+            
+            IMPORTANT: Return ONLY the JSON object, no additional text or explanations.
             """
             
             response = self.openai.chat.completions.create(
@@ -155,10 +122,20 @@ class DocumentAnalyzer:
             )
             
             result = response.choices[0].message.content
+            logger.info(f"AI Response: {result}")  # Log the actual response
+            
             # Parse JSON from response
             import json
             try:
-                parsed_result = json.loads(result)
+                # Clean the response - remove any markdown formatting
+                cleaned_result = result.strip()
+                if cleaned_result.startswith('```json'):
+                    cleaned_result = cleaned_result[7:]
+                if cleaned_result.endswith('```'):
+                    cleaned_result = cleaned_result[:-3]
+                cleaned_result = cleaned_result.strip()
+                
+                parsed_result = json.loads(cleaned_result)
                 
                 # Ensure all required fields are present
                 if 'data_patterns' not in parsed_result:
@@ -184,24 +161,11 @@ class DocumentAnalyzer:
                 
             except json.JSONDecodeError as e:
                 logger.error(f"Failed to parse AI response: {e}")
-                return {
-                    "document_type": "unknown",
-                    "source_platform": "unknown", 
-                    "confidence": 0.5,
-                    "key_columns": list(df.columns),
-                    "analysis": "Could not determine document type - AI response parsing failed",
-                    "data_patterns": {
-                        "has_revenue_data": False,
-                        "has_expense_data": False,
-                        "has_employee_data": False,
-                        "has_account_data": False,
-                        "has_transaction_data": False,
-                        "time_period": "unknown"
-                    },
-                    "classification_reasoning": "Failed to parse AI analysis response",
-                    "platform_indicators": [],
-                    "document_indicators": []
-                }
+                logger.error(f"Raw response: {result}")
+                
+                # Fallback: Try to extract basic information from the response
+                fallback_result = self._extract_fallback_info(result, column_names)
+                return fallback_result
                 
         except Exception as e:
             logger.error(f"Error in document type detection: {e}")
@@ -223,6 +187,50 @@ class DocumentAnalyzer:
                 "platform_indicators": [],
                 "document_indicators": []
             }
+    
+    def _extract_fallback_info(self, response: str, column_names: list) -> Dict[str, Any]:
+        """Extract basic information from AI response when JSON parsing fails"""
+        response_lower = response.lower()
+        
+        # Determine document type based on column names
+        doc_type = "unknown"
+        if any(word in ' '.join(column_names).lower() for word in ['revenue', 'sales', 'income']):
+            if any(word in ' '.join(column_names).lower() for word in ['cogs', 'cost', 'expense']):
+                doc_type = "income_statement"
+            else:
+                doc_type = "revenue_data"
+        elif any(word in ' '.join(column_names).lower() for word in ['employee', 'payroll', 'salary']):
+            doc_type = "payroll_data"
+        elif any(word in ' '.join(column_names).lower() for word in ['asset', 'liability', 'equity']):
+            doc_type = "balance_sheet"
+        
+        # Determine platform
+        platform = "unknown"
+        if any(word in response_lower for word in ['quickbooks', 'qb']):
+            platform = "quickbooks"
+        elif any(word in response_lower for word in ['gusto']):
+            platform = "gusto"
+        elif any(word in response_lower for word in ['xero']):
+            platform = "xero"
+        
+        return {
+            "document_type": doc_type,
+            "source_platform": platform,
+            "confidence": 0.6,
+            "key_columns": column_names,
+            "analysis": "Fallback analysis due to JSON parsing failure",
+            "data_patterns": {
+                "has_revenue_data": any(word in ' '.join(column_names).lower() for word in ['revenue', 'sales', 'income']),
+                "has_expense_data": any(word in ' '.join(column_names).lower() for word in ['expense', 'cost', 'cogs']),
+                "has_employee_data": any(word in ' '.join(column_names).lower() for word in ['employee', 'payroll', 'salary']),
+                "has_account_data": any(word in ' '.join(column_names).lower() for word in ['account', 'ledger']),
+                "has_transaction_data": any(word in ' '.join(column_names).lower() for word in ['transaction', 'payment']),
+                "time_period": "unknown"
+            },
+            "classification_reasoning": f"Fallback classification based on column names: {column_names}",
+            "platform_indicators": [],
+            "document_indicators": column_names
+        }
 
     async def generate_insights(self, df: pd.DataFrame, doc_analysis: Dict) -> Dict[str, Any]:
         """Generate enhanced insights from the processed data"""
