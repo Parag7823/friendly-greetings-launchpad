@@ -2,8 +2,8 @@ import os
 import io
 import logging
 import hashlib
-from datetime import datetime
-from typing import Dict, Any, List, Optional
+from datetime import datetime, timedelta
+from typing import Dict, Any, List, Optional, Tuple
 import pandas as pd
 import numpy as np
 from fastapi import FastAPI, HTTPException, BackgroundTasks, WebSocket, WebSocketDisconnect, UploadFile, Form, File
@@ -19,6 +19,7 @@ import json
 import re
 import asyncio
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -674,10 +675,11 @@ class PlatformDetector:
         }
 
 class AIRowClassifier:
-    def __init__(self, openai_client):
+    def __init__(self, openai_client, entity_resolver: EntityResolver = None):
         self.openai = openai_client
+        self.entity_resolver = entity_resolver
     
-    async def classify_row_with_ai(self, row: pd.Series, platform_info: Dict, column_names: List[str]) -> Dict[str, Any]:
+    async def classify_row_with_ai(self, row: pd.Series, platform_info: Dict, column_names: List[str], file_context: Dict = None) -> Dict[str, Any]:
         """AI-powered row classification with entity extraction and semantic understanding"""
         try:
             # Prepare row data for AI analysis
@@ -758,6 +760,47 @@ class AIRowClassifier:
             # Parse JSON
             try:
                 classification = json.loads(cleaned_result)
+                
+                # Resolve entities if entity resolver is available
+                if self.entity_resolver and classification.get('entities'):
+                    try:
+                        # Convert row to dict for entity resolution
+                        row_data = {}
+                        for col, val in row.items():
+                            if pd.notna(val):
+                                row_data[str(col)] = str(val)
+                        
+                        # Resolve entities
+                        if file_context:
+                            resolution_result = await self.entity_resolver.resolve_entities_batch(
+                                classification['entities'], 
+                                platform_info.get('platform', 'unknown'),
+                                file_context.get('user_id', 'test-user-123'),
+                                row_data,
+                                column_names,
+                                file_context.get('filename', 'test-file.xlsx'),
+                                f"row-{row_index}" if 'row_index' in locals() else 'row-unknown'
+                            )
+                        else:
+                            resolution_result = {
+                                'resolved_entities': classification['entities'],
+                                'resolution_results': [],
+                                'total_resolved': 0,
+                                'total_attempted': 0
+                            }
+                        
+                        # Update classification with resolved entities
+                        classification['resolved_entities'] = resolution_result['resolved_entities']
+                        classification['entity_resolution_results'] = resolution_result['resolution_results']
+                        classification['entity_resolution_stats'] = {
+                            'total_resolved': resolution_result['total_resolved'],
+                            'total_attempted': resolution_result['total_attempted']
+                        }
+                        
+                    except Exception as e:
+                        logger.error(f"Entity resolution failed: {e}")
+                        classification['entity_resolution_error'] = str(e)
+                
                 return classification
             except json.JSONDecodeError as e:
                 logger.error(f"AI classification JSON parsing failed: {e}")
@@ -1108,7 +1151,7 @@ class BatchAIRowClassifier:
 class RowProcessor:
     """Processes individual rows and creates events"""
     
-    def __init__(self, platform_detector: PlatformDetector, ai_classifier: AIRowClassifier):
+    def __init__(self, platform_detector: PlatformDetector, ai_classifier):
         self.platform_detector = platform_detector
         self.ai_classifier = ai_classifier
     
@@ -1117,7 +1160,7 @@ class RowProcessor:
         """Process a single row and create an event with AI-powered classification"""
         
         # AI-powered row classification
-        ai_classification = await self.ai_classifier.classify_row_with_ai(row, platform_info, column_names)
+        ai_classification = await self.ai_classifier.classify_row_with_ai(row, platform_info, column_names, file_context)
         
         # Convert row to JSON-serializable format
         payload = self._convert_row_to_json_serializable(row)
@@ -1193,11 +1236,13 @@ class RowProcessor:
 
 class ExcelProcessor:
     def __init__(self):
-        self.analyzer = DocumentAnalyzer(openai)
+        self.openai = openai.OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
+        self.analyzer = DocumentAnalyzer(self.openai)
         self.platform_detector = PlatformDetector()
-        # Use batch classifier for better performance
-        self.batch_classifier = BatchAIRowClassifier(openai)
-        self.row_processor = RowProcessor(self.platform_detector, self.batch_classifier)
+        # Entity resolver and AI classifier will be initialized per request with Supabase client
+        self.entity_resolver = None
+        self.ai_classifier = None
+        self.row_processor = None
     
     async def detect_file_type(self, file_content: bytes, filename: str) -> str:
         """Detect file type using magic numbers and filetype library"""
@@ -1292,6 +1337,11 @@ class ExcelProcessor:
         first_sheet = list(sheets.values())[0]
         platform_info = self.platform_detector.detect_platform(first_sheet, filename)
         doc_analysis = await self.analyzer.detect_document_type(first_sheet, filename)
+        
+        # Initialize EntityResolver and AI classifier with Supabase client
+        self.entity_resolver = EntityResolver(supabase)
+        self.ai_classifier = AIRowClassifier(self.openai, self.entity_resolver)
+        self.row_processor = RowProcessor(self.platform_detector, self.ai_classifier)
         
         # Step 3: Create raw_records entry
         await manager.send_update(job_id, {
@@ -1681,7 +1731,42 @@ async def test_raw_events(user_id: str):
 
 @app.get("/health")
 async def health_check():
-    return {"status": "healthy", "service": "Finley AI Backend"}
+    """Basic health check that doesn't require external dependencies"""
+    try:
+        # Check if OpenAI API key is configured
+        openai_key = os.environ.get("OPENAI_API_KEY")
+        supabase_url = os.environ.get("SUPABASE_URL")
+        supabase_key = os.environ.get("SUPABASE_SERVICE_KEY")
+        
+        status = "healthy"
+        issues = []
+        
+        if not openai_key:
+            issues.append("OPENAI_API_KEY not configured")
+            status = "degraded"
+        
+        if not supabase_url:
+            issues.append("SUPABASE_URL not configured")
+            status = "degraded"
+            
+        if not supabase_key:
+            issues.append("SUPABASE_SERVICE_KEY not configured")
+            status = "degraded"
+        
+        return {
+            "status": status,
+            "service": "Finley AI Backend",
+            "timestamp": datetime.utcnow().isoformat(),
+            "issues": issues,
+            "environment_configured": len(issues) == 0
+        }
+    except Exception as e:
+        return {
+            "status": "unhealthy",
+            "service": "Finley AI Backend",
+            "error": str(e),
+            "timestamp": datetime.utcnow().isoformat()
+        }
 
 @app.post("/upload-and-process")
 async def upload_and_process(
@@ -1730,17 +1815,39 @@ async def upload_and_process(
 @app.get("/test-simple")
 async def test_simple():
     """Simple test endpoint without any dependencies"""
-    return {
-        "status": "success",
-        "message": "Backend is working! No authentication required.",
-        "timestamp": datetime.utcnow().isoformat(),
-        "endpoints": {
-            "health": "/health",
-            "upload_and_process": "/upload-and-process",
-            "test_raw_events": "/test-raw-events/{user_id}",
-            "process_excel": "/process-excel"
+    try:
+        # Test basic imports
+        import pandas as pd
+        import numpy as np
+        import openai
+        import magic
+        import filetype
+        
+        return {
+            "status": "success",
+            "message": "Backend is working! All dependencies loaded successfully.",
+            "timestamp": datetime.utcnow().isoformat(),
+            "dependencies": {
+                "pandas": "loaded",
+                "numpy": "loaded", 
+                "openai": "loaded",
+                "magic": "loaded",
+                "filetype": "loaded"
+            },
+            "endpoints": {
+                "health": "/health",
+                "upload_and_process": "/upload-and-process",
+                "test_raw_events": "/test-raw-events/{user_id}",
+                "process_excel": "/process-excel"
+            }
         }
-    }
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": f"Backend has issues: {str(e)}",
+            "timestamp": datetime.utcnow().isoformat(),
+            "error": str(e)
+        }
 
 @app.get("/test-database")
 async def test_database():
@@ -1985,6 +2092,410 @@ async def test_batch_processing():
             "efficiency": "Batch processing of 20 rows per AI call"
         }
     }
+
+class EntityResolver:
+    """Advanced entity resolution system for cross-platform entity matching"""
+    
+    def __init__(self, supabase_client: Client):
+        self.supabase = supabase_client
+        self.similarity_cache = {}
+    
+    def calculate_name_similarity(self, name1: str, name2: str) -> float:
+        """Calculate similarity between two entity names using multiple algorithms"""
+        if not name1 or not name2:
+            return 0.0
+        
+        name1_clean = self._normalize_name(name1)
+        name2_clean = self._normalize_name(name2)
+        
+        # Exact match
+        if name1_clean == name2_clean:
+            return 1.0
+        
+        # Contains match
+        if name1_clean in name2_clean or name2_clean in name1_clean:
+            return 0.9
+        
+        # Token-based similarity
+        tokens1 = set(name1_clean.split())
+        tokens2 = set(name2_clean.split())
+        
+        if not tokens1 or not tokens2:
+            return 0.0
+        
+        intersection = len(tokens1.intersection(tokens2))
+        union = len(tokens1.union(tokens2))
+        
+        jaccard_similarity = intersection / union if union > 0 else 0.0
+        
+        # Levenshtein-like similarity for partial matches
+        max_len = max(len(name1_clean), len(name2_clean))
+        if max_len == 0:
+            return 0.0
+        
+        # Simple character-based similarity
+        common_chars = sum(1 for c in name1_clean if c in name2_clean)
+        char_similarity = common_chars / max_len
+        
+        # Weighted combination
+        final_similarity = (jaccard_similarity * 0.6) + (char_similarity * 0.4)
+        
+        return min(final_similarity, 1.0)
+    
+    def _normalize_name(self, name: str) -> str:
+        """Normalize entity name for comparison"""
+        if not name:
+            return ""
+        
+        # Convert to lowercase
+        normalized = name.lower().strip()
+        
+        # Remove common suffixes and prefixes
+        suffixes_to_remove = [
+            ' inc', ' corp', ' llc', ' ltd', ' co', ' company', ' pvt', ' private',
+            ' limited', ' corporation', ' incorporated'
+        ]
+        
+        for suffix in suffixes_to_remove:
+            if normalized.endswith(suffix):
+                normalized = normalized[:-len(suffix)]
+        
+        # Remove extra whitespace
+        normalized = ' '.join(normalized.split())
+        
+        return normalized
+    
+    def extract_strong_identifiers(self, row_data: Dict, column_names: List[str]) -> Dict[str, str]:
+        """Extract strong identifiers (email, bank account, phone) from row data"""
+        identifiers = {
+            'email': None,
+            'bank_account': None,
+            'phone': None,
+            'tax_id': None
+        }
+        
+        # Common column name patterns for strong identifiers
+        email_patterns = ['email', 'e-mail', 'mail', 'contact_email']
+        bank_patterns = ['bank_account', 'account_number', 'bank_ac', 'ac_number', 'account']
+        phone_patterns = ['phone', 'mobile', 'contact', 'tel', 'telephone']
+        tax_patterns = ['tax_id', 'tax_number', 'pan', 'gst', 'tin']
+        
+        for col_name in column_names:
+            col_lower = col_name.lower()
+            col_value = str(row_data.get(col_name, '')).strip()
+            
+            if not col_value or col_value == 'nan':
+                continue
+            
+            # Email detection
+            if any(pattern in col_lower for pattern in email_patterns) or '@' in col_value:
+                if '@' in col_value and '.' in col_value:
+                    identifiers['email'] = col_value
+            
+            # Bank account detection
+            elif any(pattern in col_lower for pattern in bank_patterns):
+                if col_value.isdigit() or (len(col_value) >= 8 and any(c.isdigit() for c in col_value)):
+                    identifiers['bank_account'] = col_value
+            
+            # Phone detection
+            elif any(pattern in col_lower for pattern in phone_patterns):
+                if any(c.isdigit() for c in col_value) and len(col_value) >= 10:
+                    identifiers['phone'] = col_value
+            
+            # Tax ID detection
+            elif any(pattern in col_lower for pattern in tax_patterns):
+                if len(col_value) >= 5:
+                    identifiers['tax_id'] = col_value
+        
+        return {k: v for k, v in identifiers.items() if v is not None}
+    
+    async def resolve_entity(self, entity_name: str, entity_type: str, platform: str, 
+                           user_id: str, row_data: Dict, column_names: List[str], 
+                           source_file: str, row_id: str) -> Dict[str, Any]:
+        """Resolve entity using database functions and return resolution details"""
+        
+        # Extract strong identifiers
+        identifiers = self.extract_strong_identifiers(row_data, column_names)
+        
+        try:
+            # Call database function to find or create entity
+            result = self.supabase.rpc('find_or_create_entity', {
+                'p_user_id': user_id,
+                'p_entity_name': entity_name,
+                'p_entity_type': entity_type,
+                'p_platform': platform,
+                'p_email': identifiers.get('email'),
+                'p_bank_account': identifiers.get('bank_account'),
+                'p_phone': identifiers.get('phone'),
+                'p_tax_id': identifiers.get('tax_id'),
+                'p_source_file': source_file
+            }).execute()
+            
+            if result.data:
+                entity_id = result.data
+                
+                # Get entity details for response
+                entity_details = self.supabase.rpc('get_entity_details', {
+                    'user_uuid': user_id,
+                    'entity_id': entity_id
+                }).execute()
+                
+                return {
+                    'entity_id': entity_id,
+                    'resolved_name': entity_name,
+                    'entity_type': entity_type,
+                    'platform': platform,
+                    'identifiers': identifiers,
+                    'source_file': source_file,
+                    'row_id': row_id,
+                    'resolution_success': True,
+                    'entity_details': entity_details.data[0] if entity_details.data else None
+                }
+            else:
+                return {
+                    'entity_id': None,
+                    'resolved_name': entity_name,
+                    'entity_type': entity_type,
+                    'platform': platform,
+                    'identifiers': identifiers,
+                    'source_file': source_file,
+                    'row_id': row_id,
+                    'resolution_success': False,
+                    'error': 'Database function returned no entity ID'
+                }
+                
+        except Exception as e:
+            return {
+                'entity_id': None,
+                'resolved_name': entity_name,
+                'entity_type': entity_type,
+                'platform': platform,
+                'identifiers': identifiers,
+                'source_file': source_file,
+                'row_id': row_id,
+                'resolution_success': False,
+                'error': str(e)
+            }
+    
+    async def resolve_entities_batch(self, entities: Dict[str, List[str]], platform: str, 
+                                   user_id: str, row_data: Dict, column_names: List[str],
+                                   source_file: str, row_id: str) -> Dict[str, Any]:
+        """Resolve multiple entities in a batch"""
+        resolved_entities = {
+            'employees': [],
+            'vendors': [],
+            'customers': [],
+            'projects': []
+        }
+        
+        resolution_results = []
+        
+        for entity_type, entity_list in entities.items():
+            for entity_name in entity_list:
+                if entity_name and entity_name.strip():
+                    resolution = await self.resolve_entity(
+                        entity_name.strip(),
+                        entity_type,
+                        platform,
+                        user_id,
+                        row_data,
+                        column_names,
+                        source_file,
+                        row_id
+                    )
+                    
+                    resolution_results.append(resolution)
+                    
+                    if resolution['resolution_success']:
+                        resolved_entities[entity_type].append({
+                            'name': entity_name,
+                            'entity_id': resolution['entity_id'],
+                            'resolved_name': resolution['resolved_name']
+                        })
+        
+        return {
+            'resolved_entities': resolved_entities,
+            'resolution_results': resolution_results,
+            'total_resolved': sum(len(v) for v in resolved_entities.values()),
+            'total_attempted': len(resolution_results)
+        }
+
+@app.get("/test-entity-resolution")
+async def test_entity_resolution():
+    """Test the Entity Resolution system with sample data"""
+    try:
+        # Create test Supabase client
+        supabase_url = os.getenv('SUPABASE_URL')
+        supabase_key = os.getenv('SUPABASE_SERVICE_ROLE_KEY')
+        supabase = create_client(supabase_url, supabase_key)
+        
+        # Initialize EntityResolver
+        entity_resolver = EntityResolver(supabase)
+        
+        # Test cases for entity resolution
+        test_cases = [
+            {
+                "test_case": "Employee Name Resolution",
+                "description": "Test resolving employee names across platforms",
+                "entities": {
+                    "employees": ["Abhishek A.", "Abhishek Arora", "John Smith"],
+                    "vendors": ["Razorpay Payout", "Razorpay Payments Pvt. Ltd."],
+                    "customers": ["Client ABC", "ABC Corp"],
+                    "projects": ["Project Alpha", "Alpha Initiative"]
+                },
+                "platform": "gusto",
+                "user_id": "test-user-123",
+                "row_data": {
+                    "employee_name": "Abhishek A.",
+                    "email": "abhishek@company.com",
+                    "amount": "5000"
+                },
+                "column_names": ["employee_name", "email", "amount"],
+                "source_file": "test-payroll.xlsx",
+                "row_id": "row-1"
+            },
+            {
+                "test_case": "Vendor Name Resolution",
+                "description": "Test resolving vendor names with different formats",
+                "entities": {
+                    "employees": [],
+                    "vendors": ["Razorpay Payout", "Razorpay Payments Pvt. Ltd.", "Stripe Inc"],
+                    "customers": [],
+                    "projects": []
+                },
+                "platform": "razorpay",
+                "user_id": "test-user-123",
+                "row_data": {
+                    "vendor_name": "Razorpay Payout",
+                    "bank_account": "1234567890",
+                    "amount": "10000"
+                },
+                "column_names": ["vendor_name", "bank_account", "amount"],
+                "source_file": "test-payments.xlsx",
+                "row_id": "row-2"
+            }
+        ]
+        
+        results = []
+        
+        for test_case in test_cases:
+            try:
+                # Test entity resolution
+                resolution_result = await entity_resolver.resolve_entities_batch(
+                    test_case["entities"],
+                    test_case["platform"],
+                    test_case["user_id"],
+                    test_case["row_data"],
+                    test_case["column_names"],
+                    test_case["source_file"],
+                    test_case["row_id"]
+                )
+                
+                results.append({
+                    "test_case": test_case["test_case"],
+                    "description": test_case["description"],
+                    "entities": test_case["entities"],
+                    "platform": test_case["platform"],
+                    "resolution_result": resolution_result,
+                    "success": True
+                })
+                
+            except Exception as e:
+                results.append({
+                    "test_case": test_case["test_case"],
+                    "description": test_case["description"],
+                    "entities": test_case["entities"],
+                    "platform": test_case["platform"],
+                    "error": str(e),
+                    "success": False
+                })
+        
+        return {
+            "message": "Entity Resolution Test Results",
+            "total_tests": len(test_cases),
+            "successful_tests": len([r for r in results if r["success"]]),
+            "failed_tests": len([r for r in results if not r["success"]]),
+            "test_results": results
+        }
+        
+    except Exception as e:
+        logger.error(f"Entity resolution test failed: {e}")
+        return {
+            "message": "Entity Resolution Test Failed",
+            "error": str(e),
+            "total_tests": 0,
+            "successful_tests": 0,
+            "failed_tests": 1,
+            "test_results": []
+        }
+
+@app.get("/test-entity-search/{user_id}")
+async def test_entity_search(user_id: str, search_term: str = "Abhishek", entity_type: str = None):
+    """Test entity search functionality"""
+    try:
+        # Create test Supabase client
+        supabase_url = os.getenv('SUPABASE_URL')
+        supabase_key = os.getenv('SUPABASE_SERVICE_ROLE_KEY')
+        supabase = create_client(supabase_url, supabase_key)
+        
+        # Test entity search
+        search_result = supabase.rpc('search_entities_by_name', {
+            'user_uuid': user_id,
+            'search_term': search_term,
+            'entity_type': entity_type
+        }).execute()
+        
+        return {
+            "message": "Entity Search Test Results",
+            "search_term": search_term,
+            "entity_type": entity_type,
+            "user_id": user_id,
+            "results": search_result.data if search_result.data else [],
+            "total_results": len(search_result.data) if search_result.data else 0
+        }
+        
+    except Exception as e:
+        logger.error(f"Entity search test failed: {e}")
+        return {
+            "message": "Entity Search Test Failed",
+            "error": str(e),
+            "search_term": search_term,
+            "entity_type": entity_type,
+            "user_id": user_id,
+            "results": [],
+            "total_results": 0
+        }
+
+@app.get("/test-entity-stats/{user_id}")
+async def test_entity_stats(user_id: str):
+    """Test entity resolution statistics"""
+    try:
+        # Create test Supabase client
+        supabase_url = os.getenv('SUPABASE_URL')
+        supabase_key = os.getenv('SUPABASE_SERVICE_ROLE_KEY')
+        supabase = create_client(supabase_url, supabase_key)
+        
+        # Get entity resolution stats
+        stats_result = supabase.rpc('get_entity_resolution_stats', {
+            'user_uuid': user_id
+        }).execute()
+        
+        return {
+            "message": "Entity Resolution Statistics",
+            "user_id": user_id,
+            "stats": stats_result.data[0] if stats_result.data else {},
+            "success": True
+        }
+        
+    except Exception as e:
+        logger.error(f"Entity stats test failed: {e}")
+        return {
+            "message": "Entity Stats Test Failed",
+            "error": str(e),
+            "user_id": user_id,
+            "stats": {},
+            "success": False
+        }
 
 if __name__ == "__main__":
     import uvicorn

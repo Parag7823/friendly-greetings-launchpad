@@ -416,3 +416,89 @@ export const Constants = {
     Enums: {},
   },
 } as const
+
+// Entity Resolution System Types
+export interface NormalizedEntity {
+  id: string;
+  user_id: string;
+  entity_type: 'employee' | 'vendor' | 'customer' | 'project';
+  canonical_name: string;
+  aliases: string[];
+  email?: string;
+  phone?: string;
+  bank_account?: string;
+  tax_id?: string;
+  platform_sources: string[];
+  source_files: string[];
+  confidence_score: number;
+  first_seen_at: string;
+  last_seen_at: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface EntityMatch {
+  id: string;
+  user_id: string;
+  source_entity_name: string;
+  source_entity_type: string;
+  source_platform: string;
+  source_file: string;
+  source_row_id: string;
+  normalized_entity_id: string;
+  match_confidence: number;
+  match_reason: 'exact_match' | 'fuzzy_match' | 'email_match' | 'bank_match' | 'new_entity' | 'manual';
+  similarity_score?: number;
+  matched_fields: string[];
+  created_at: string;
+}
+
+export interface EntityResolutionStats {
+  total_entities: number;
+  employees_count: number;
+  vendors_count: number;
+  customers_count: number;
+  projects_count: number;
+  total_matches: number;
+  exact_matches: number;
+  fuzzy_matches: number;
+  email_matches: number;
+  bank_matches: number;
+  new_entities: number;
+  avg_confidence: number;
+}
+
+export interface EntitySearchResult {
+  id: string;
+  entity_type: string;
+  canonical_name: string;
+  aliases: string[];
+  email?: string;
+  platform_sources: string[];
+  confidence_score: number;
+  similarity_score: number;
+}
+
+export interface EntityDetails {
+  entity_info: NormalizedEntity;
+  related_events: RawEvent[];
+  match_history: EntityMatch[];
+}
+
+export interface ResolvedEntity {
+  name: string;
+  entity_id: string;
+  resolved_name: string;
+}
+
+export interface EntityResolutionResult {
+  resolved_entities: {
+    employees: ResolvedEntity[];
+    vendors: ResolvedEntity[];
+    customers: ResolvedEntity[];
+    projects: ResolvedEntity[];
+  };
+  resolution_results: any[];
+  total_resolved: number;
+  total_attempted: number;
+}
