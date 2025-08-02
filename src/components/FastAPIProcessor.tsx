@@ -65,6 +65,8 @@ export class FastAPIProcessor {
     customPrompt?: string,
     userId?: string
   ): Promise<FastAPIProcessingResult> {
+    let jobData: any = null;
+    
     try {
       this.updateProgress('upload', 'Uploading file to secure processing...', 10);
       
@@ -86,7 +88,7 @@ export class FastAPIProcessor {
       this.updateProgress('processing', 'Initializing advanced AI analysis...', 20);
 
       // Create processing job in database
-      const { data: jobData, error: jobError } = await supabase
+      const { data: jobResult, error: jobError } = await supabase
         .from('ingestion_jobs')
         .insert({
           job_type: 'fastapi_excel_analysis',
@@ -100,6 +102,8 @@ export class FastAPIProcessor {
       if (jobError) {
         throw new Error(`Job creation failed: ${jobError.message}`);
       }
+
+      jobData = jobResult; // Assign to outer scope variable
 
       this.updateProgress('analysis', 'Processing with FastAPI backend...', 30);
 
@@ -160,6 +164,77 @@ export class FastAPIProcessor {
 
         this.updateProgress('complete', 'Analysis complete!', 100);
 
+        // Store raw data in raw_records table
+        const { data: rawRecord, error: rawRecordError } = await supabase
+          .from('raw_records')
+          .insert({
+            user_id: user.id,
+            file_name: file.name,
+            source: 'fastapi_backend',
+            content: backendResult.results || {},
+            metadata: {
+              processing_stats: backendResult.results?.processing_stats || {},
+              backend_processed: true
+            }
+          })
+          .select()
+          .single();
+
+        if (rawRecordError) {
+          console.error('Failed to store raw record:', rawRecordError);
+        }
+
+        // Extract and store metrics from backend results
+        if (rawRecord?.id && backendResult.results?.summary_stats) {
+          const metricsToInsert = this.extractMetricsFromStats(
+            backendResult.results.summary_stats,
+            rawRecord.id,
+            user.id
+          );
+
+          if (metricsToInsert.length > 0) {
+            const { error: metricsError } = await supabase
+              .from('metrics')
+              .insert(metricsToInsert);
+
+            if (metricsError) {
+              console.error('Failed to store metrics:', metricsError);
+            }
+          }
+        }
+
+        // Update job status with success
+        await supabase
+          .from('ingestion_jobs')
+          .update({
+            status: 'completed',
+            progress: 100,
+            record_id: rawRecord?.id || null,
+            result: {
+              document_type: backendResult.results?.document_type || 'unknown',
+              insights: backendResult.results || {},
+              metrics: backendResult.results?.summary_stats || {},
+              summary: backendResult.results?.analysis || 'Analysis completed successfully.',
+              processing_stats: backendResult.results?.processing_stats || {},
+              processing_time: Date.now() - performance.now(),
+              raw_record_id: rawRecord?.id,
+              backend_processed: true
+            }
+          })
+          .eq('id', jobData.id);
+
+        const result: FastAPIProcessingResult = {
+          documentType: backendResult.results?.document_type || 'unknown',
+          insights: backendResult.results || {},
+          metrics: backendResult.results?.summary_stats || {},
+          summary: backendResult.results?.analysis || 'Analysis completed successfully.',
+          sheets,
+          customPromptSuggestions: [],
+          processingTime: Date.now() - performance.now()
+        };
+
+        return result;
+
       } catch (backendError) {
         console.error('Backend processing error:', backendError);
         
@@ -201,24 +276,68 @@ export class FastAPIProcessor {
 
         this.updateProgress('complete', 'Local analysis complete!', 100);
 
-        // Backend has already stored the data, just get the record
+        // Store raw data in raw_records table for local processing
         const { data: rawRecord, error: rawRecordError } = await supabase
           .from('raw_records')
-          .select('*')
-          .eq('user_id', user.id)
-          .eq('file_name', file.name)
-          .order('created_at', { ascending: false })
-          .limit(1)
+          .insert({
+            user_id: user.id,
+            file_name: file.name,
+            source: 'local_processing',
+            content: {
+              sheets: sheets.map(sheet => ({
+                name: sheet.name,
+                type: sheet.type,
+                rowCount: sheet.rowCount,
+                columnCount: sheet.columnCount,
+                preview: sheet.preview
+              })),
+              insights,
+              metrics
+            },
+            metadata: {
+              processing_stats: {
+                total_sheets: sheets.length,
+                total_rows_processed: sheets.reduce((acc, s) => acc + s.rowCount, 0)
+              },
+              backend_processed: false
+            }
+          })
+          .select()
           .single();
 
         if (rawRecordError) {
-          console.error('Failed to retrieve raw record:', rawRecordError);
+          console.error('Failed to store raw record:', rawRecordError);
         }
 
-        // Backend has already processed metrics, no need to extract here
+        // Extract and store metrics for local processing
+        if (rawRecord?.id) {
+          const allMetrics: any[] = [];
+          
+          // Extract metrics from each sheet
+          sheets.forEach(sheet => {
+            const sheetMetrics = this.extractSheetMetrics(sheet, rawRecord.id);
+            allMetrics.push(...sheetMetrics.map(metric => ({
+              ...metric,
+              user_id: user.id,
+              record_id: rawRecord.id,
+              metric_type: 'extracted'
+            })));
+          });
+
+          if (allMetrics.length > 0) {
+            const { error: metricsError } = await supabase
+              .from('metrics')
+              .insert(allMetrics);
+
+            if (metricsError) {
+              console.error('Failed to store metrics:', metricsError);
+            }
+          }
+        }
+
         this.updateProgress('saving', 'Processing complete...', 98);
 
-        // Step 6: Update job status in database with backend results
+        // Update job status with local processing results
         await supabase
           .from('ingestion_jobs')
           .update({
@@ -226,31 +345,37 @@ export class FastAPIProcessor {
             progress: 100,
             record_id: rawRecord?.id || null,
             result: {
-              document_type: backendResult.results?.document_type || 'unknown',
-              insights: backendResult.results || {},
-              metrics: backendResult.results?.summary_stats || {},
-              summary: backendResult.results?.analysis || 'Analysis completed successfully.',
-              processing_stats: backendResult.results?.processing_stats || {},
+              document_type: this.detectDocumentType(sheets),
+              insights,
+              metrics,
+              summary,
+              processing_stats: {
+                total_sheets: sheets.length,
+                total_rows_processed: sheets.reduce((acc, s) => acc + s.rowCount, 0)
+              },
               processing_time: Date.now() - performance.now(),
               raw_record_id: rawRecord?.id,
-              backend_processed: true
+              backend_processed: false
             }
           })
           .eq('id', jobData.id);
 
         const result: FastAPIProcessingResult = {
-          documentType: backendResult.results?.document_type || 'unknown',
-          insights: backendResult.results || {},
-          metrics: backendResult.results?.summary_stats || {},
-          summary: backendResult.results?.analysis || 'Analysis completed successfully.',
+          documentType: this.detectDocumentType(sheets),
+          insights,
+          metrics,
+          summary,
           sheets,
-          customPromptSuggestions: [],
+          customPromptSuggestions: this.generateCustomPrompts(sheets),
           processingTime: Date.now() - performance.now()
         };
 
         return result;
+      }
 
-      } catch (error) {
+    } catch (error) {
+      // Handle outer try-catch errors
+      if (jobData?.id) {
         await supabase
           .from('ingestion_jobs')
           .update({
@@ -258,11 +383,8 @@ export class FastAPIProcessor {
             error_details: error instanceof Error ? error.message : 'Unknown error'
           })
           .eq('id', jobData.id);
-        
-        throw error;
       }
-
-    } catch (error) {
+      
       throw new Error(`FastAPI processing failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   }
@@ -424,6 +546,39 @@ export class FastAPIProcessor {
       ...types.map(type => `Analyze my ${type.replace('_', ' ')}`),
       "Compare performance across periods"
     ];
+  }
+
+  private extractMetricsFromStats(stats: any, recordId: string, userId: string): any[] {
+    const metrics: any[] = [];
+    
+    if (!stats || typeof stats !== 'object') return metrics;
+    
+    // Extract metrics from summary statistics
+    Object.entries(stats).forEach(([key, value]) => {
+      if (typeof value === 'number' && value > 0) {
+        metrics.push({
+          category: this.getCategoryFromStatKey(key),
+          subcategory: key,
+          amount: value,
+          date_recorded: new Date().toISOString().split('T')[0],
+          metric_type: 'backend_extracted',
+          user_id: userId,
+          record_id: recordId
+        });
+      }
+    });
+    
+    return metrics;
+  }
+
+  private getCategoryFromStatKey(key: string): string {
+    const lowerKey = key.toLowerCase();
+    if (lowerKey.includes('revenue') || lowerKey.includes('income') || lowerKey.includes('sales')) return 'revenue';
+    if (lowerKey.includes('expense') || lowerKey.includes('cost') || lowerKey.includes('expense')) return 'expense';
+    if (lowerKey.includes('profit') || lowerKey.includes('net')) return 'profit';
+    if (lowerKey.includes('asset') || lowerKey.includes('cash')) return 'asset';
+    if (lowerKey.includes('liability') || lowerKey.includes('debt')) return 'liability';
+    return 'other';
   }
 
   // Get sheet-specific insights
