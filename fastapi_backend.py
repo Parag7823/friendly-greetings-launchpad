@@ -837,7 +837,7 @@ class AIRowClassifier:
         # Extract entities using regex
         entities = self.extract_entities_from_text(row_str)
         
-            return {
+        return {
             'row_type': row_type,
             'category': category,
             'subcategory': subcategory,
