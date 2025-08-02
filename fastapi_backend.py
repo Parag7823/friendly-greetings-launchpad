@@ -1196,42 +1196,63 @@ class ExcelProcessor:
     async def detect_file_type(self, file_content: bytes, filename: str) -> str:
         """Detect file type using magic numbers and filetype library"""
         try:
-            # Try filetype first
+            # Check file extension first
+            if filename.lower().endswith('.csv'):
+                return 'csv'
+            elif filename.lower().endswith('.xlsx'):
+                return 'xlsx'
+            elif filename.lower().endswith('.xls'):
+                return 'xls'
+            
+            # Try filetype library
             file_type = filetype.guess(file_content)
             if file_type:
-                return file_type.extension
+                if file_type.extension == 'csv':
+                    return 'csv'
+                elif file_type.extension in ['xlsx', 'xls']:
+                    return file_type.extension
             
             # Fallback to python-magic
             mime_type = magic.from_buffer(file_content, mime=True)
-            if 'excel' in mime_type or 'spreadsheet' in mime_type:
-                return 'xlsx'
-            elif 'csv' in mime_type:
+            if 'csv' in mime_type or 'text/plain' in mime_type:
                 return 'csv'
+            elif 'excel' in mime_type or 'spreadsheet' in mime_type:
+                return 'xlsx'
             else:
                 return 'unknown'
         except Exception as e:
             logger.error(f"File type detection failed: {e}")
             return 'unknown'
     
-    async def read_excel_file(self, file_content: bytes, filename: str) -> Dict[str, pd.DataFrame]:
-        """Read Excel file and return dictionary of sheets"""
+    async def read_file(self, file_content: bytes, filename: str) -> Dict[str, pd.DataFrame]:
+        """Read Excel or CSV file and return dictionary of sheets"""
         try:
             # Create a BytesIO object from the file content
             file_stream = io.BytesIO(file_content)
             
-            # Read all sheets
-            excel_file = pd.ExcelFile(file_stream)
-            sheets = {}
-            
-            for sheet_name in excel_file.sheet_names:
-                df = pd.read_excel(file_stream, sheet_name=sheet_name)
+            # Check file type and read accordingly
+            if filename.lower().endswith('.csv'):
+                # Handle CSV files
+                df = pd.read_csv(file_stream)
                 if not df.empty:
-                    sheets[sheet_name] = df
-            
-            return sheets
+                    return {'Sheet1': df}
+                else:
+                    raise HTTPException(status_code=400, detail="CSV file is empty")
+            else:
+                # Handle Excel files
+                excel_file = pd.ExcelFile(file_stream)
+                sheets = {}
+                
+                for sheet_name in excel_file.sheet_names:
+                    df = pd.read_excel(file_stream, sheet_name=sheet_name)
+                    if not df.empty:
+                        sheets[sheet_name] = df
+                
+                return sheets
+                
         except Exception as e:
-            logger.error(f"Error reading Excel file: {e}")
-            raise HTTPException(status_code=400, detail=f"Error reading Excel file: {str(e)}")
+            logger.error(f"Error reading file {filename}: {e}")
+            raise HTTPException(status_code=400, detail=f"Error reading file {filename}: {str(e)}")
     
     async def process_file(self, job_id: str, file_content: bytes, filename: str, 
                           user_id: str, supabase: Client) -> Dict[str, Any]:
@@ -1240,11 +1261,19 @@ class ExcelProcessor:
         # Step 1: Read the file
         await manager.send_update(job_id, {
             "step": "reading",
-            "message": "📖 Reading and parsing your document...",
+            "message": f"📖 Reading and parsing your {filename}...",
             "progress": 10
         })
         
-        sheets = await self.read_excel_file(file_content, filename)
+        try:
+            sheets = await self.read_file(file_content, filename)
+        except Exception as e:
+            await manager.send_update(job_id, {
+                "step": "error",
+                "message": f"❌ Error reading file: {str(e)}",
+                "progress": 0
+            })
+            raise HTTPException(status_code=400, detail=f"Failed to read file: {str(e)}")
         
         # Step 2: Detect platform and document type
         await manager.send_update(job_id, {
@@ -1273,7 +1302,7 @@ class ExcelProcessor:
             'user_id': user_id,
             'file_name': filename,
             'file_size': len(file_content),
-            'source': 'excel_upload',
+            'source': 'file_upload',
             'content': {
                 'sheets': list(sheets.keys()),
                 'platform_detection': platform_info,
@@ -1462,7 +1491,8 @@ class ExcelProcessor:
                 'file_hash': file_hash,
                 'processing_mode': 'batch_optimized',
                 'batch_size': 20,
-                'ai_calls_reduced': f"{(total_rows - (total_rows // 20)) / total_rows * 100:.1f}%"
+                'ai_calls_reduced': f"{(total_rows - (total_rows // 20)) / total_rows * 100:.1f}%",
+                'file_type': filename.split('.')[-1].lower() if '.' in filename else 'unknown'
             },
             'errors': errors
         })
