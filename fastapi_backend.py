@@ -1236,7 +1236,7 @@ class RowProcessor:
 
 class ExcelProcessor:
     def __init__(self):
-        self.openai = openai.OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
+        self.openai = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
         self.analyzer = DocumentAnalyzer(self.openai)
         self.platform_detector = PlatformDetector()
         # Entity resolver and AI classifier will be initialized per request with Supabase client
