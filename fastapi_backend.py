@@ -880,6 +880,12 @@ class BatchAIRowClassifier:
         self.batch_size = 20  # Process 20 rows at once
         self.max_concurrent_batches = 3  # Process 3 batches simultaneously
     
+    async def classify_row_with_ai(self, row: pd.Series, platform_info: Dict, column_names: List[str]) -> Dict[str, Any]:
+        """Individual row classification - wrapper for batch processing compatibility"""
+        # For individual row processing, we'll use the fallback classification
+        # This maintains compatibility with the existing RowProcessor
+        return self._fallback_classification(row, platform_info, column_names)
+    
     async def classify_rows_batch(self, rows: List[pd.Series], platform_info: Dict, column_names: List[str]) -> List[Dict[str, Any]]:
         """Classify multiple rows in a single AI call for efficiency"""
         try:
