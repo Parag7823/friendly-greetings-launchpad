@@ -89,7 +89,7 @@ class DocumentAnalyzer:
             date_columns = [col for col in column_names if any(word in col.lower() for word in ['date', 'time', 'period', 'month', 'year'])]
             
             # Simplified prompt that's more likely to return valid JSON
-        prompt = f"""
+            prompt = f"""
             Analyze this financial document and return a JSON response.
             
             FILENAME: {filename}
@@ -675,7 +675,7 @@ class PlatformDetector:
         }
 
 class AIRowClassifier:
-    def __init__(self, openai_client, entity_resolver: EntityResolver = None):
+    def __init__(self, openai_client, entity_resolver = None):
         self.openai = openai_client
         self.entity_resolver = entity_resolver
     
