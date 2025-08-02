@@ -89,7 +89,7 @@ class DocumentAnalyzer:
             date_columns = [col for col in column_names if any(word in col.lower() for word in ['date', 'time', 'period', 'month', 'year'])]
             
             # Simplified prompt that's more likely to return valid JSON
-            prompt = f"""
+        prompt = f"""
             Analyze this financial document and return a JSON response.
             
             FILENAME: {filename}
@@ -674,8 +674,6 @@ class PlatformDetector:
             'confidence_threshold': 0.0
         }
 
-
-
 class AIRowClassifier:
     def __init__(self, openai_client, entity_resolver: EntityResolver = None):
         self.openai = openai_client
@@ -839,7 +837,7 @@ class AIRowClassifier:
         # Extract entities using regex
         entities = self.extract_entities_from_text(row_str)
         
-        return {
+            return {
             'row_type': row_type,
             'category': category,
             'subcategory': subcategory,
@@ -1062,7 +1060,7 @@ class BatchAIRowClassifier:
         # Extract entities using regex
         entities = self._extract_entities_from_text(row_str)
         
-        return {
+            return {
             'row_type': row_type,
             'category': category,
             'subcategory': subcategory,
@@ -1289,7 +1287,7 @@ class ExcelProcessor:
                 df = pd.read_csv(file_stream)
                 if not df.empty:
                     return {'Sheet1': df}
-                else:
+            else:
                     raise HTTPException(status_code=400, detail="CSV file is empty")
             else:
                 # Handle Excel files
@@ -1629,11 +1627,11 @@ async def process_excel(request: ProcessRequest, background_tasks: BackgroundTas
         try:
             # Try to update existing job
             result = supabase.table('ingestion_jobs').update({
-                'status': 'processing',
-                'started_at': datetime.utcnow().isoformat(),
-                'progress': 10
-            }).eq('id', request.job_id).execute()
-            
+            'status': 'processing',
+            'started_at': datetime.utcnow().isoformat(),
+            'progress': 10
+        }).eq('id', request.job_id).execute()
+        
             # If no rows were updated, create the job
             if not result.data:
                 supabase.table('ingestion_jobs').insert({
