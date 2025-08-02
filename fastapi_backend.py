@@ -1060,7 +1060,7 @@ class BatchAIRowClassifier:
         # Extract entities using regex
         entities = self._extract_entities_from_text(row_str)
         
-            return {
+        return {
             'row_type': row_type,
             'category': category,
             'subcategory': subcategory,
@@ -1287,7 +1287,7 @@ class ExcelProcessor:
                 df = pd.read_csv(file_stream)
                 if not df.empty:
                     return {'Sheet1': df}
-            else:
+                else:
                     raise HTTPException(status_code=400, detail="CSV file is empty")
             else:
                 # Handle Excel files
