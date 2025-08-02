@@ -270,7 +270,7 @@ END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
 -- Function to search entities by name similarity
-CREATE OR REPLACE FUNCTION search_entities_by_name(user_uuid UUID, search_term TEXT, entity_type TEXT DEFAULT NULL)
+CREATE OR REPLACE FUNCTION search_entities_by_name(user_uuid UUID, search_term TEXT, p_entity_type TEXT DEFAULT NULL)
 RETURNS TABLE(
     id UUID,
     entity_type TEXT,
@@ -308,7 +308,7 @@ BEGIN
         ) as similarity_score
     FROM public.normalized_entities ne
     WHERE ne.user_id = user_uuid
-    AND (entity_type IS NULL OR ne.entity_type = entity_type)
+    AND (p_entity_type IS NULL OR ne.entity_type = p_entity_type)
     AND (
         ne.canonical_name ILIKE '%' || search_term || '%'
         OR ne.aliases && ARRAY[search_term]

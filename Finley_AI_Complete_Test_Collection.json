@@ -1,0 +1,350 @@
+{
+  "info": {
+    "name": "Finley AI - Complete Feature Test Suite",
+    "description": "Comprehensive test collection for all Finley AI platform features including Entity Resolution, AI Classification, Platform Detection, and Batch Processing",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "https://friendly-greetings-launchpad.onrender.com",
+      "type": "string"
+    },
+    {
+      "key": "test_user_id",
+      "value": "test-user-123",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "1. Health Check",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/health",
+          "host": ["{{base_url}}"],
+          "path": ["health"]
+        },
+        "description": "Test basic API health and connectivity"
+      }
+    },
+    {
+      "name": "2. Test Simple Endpoint",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/test-simple",
+          "host": ["{{base_url}}"],
+          "path": ["test-simple"]
+        },
+        "description": "Test basic API functionality"
+      }
+    },
+    {
+      "name": "3. Test Database Connection",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/test-database",
+          "host": ["{{base_url}}"],
+          "path": ["test-database"]
+        },
+        "description": "Test database connectivity and basic operations"
+      }
+    },
+    {
+      "name": "4. Test Platform Detection",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/test-platform-detection",
+          "host": ["{{base_url}}"],
+          "path": ["test-platform-detection"]
+        },
+        "description": "Test enhanced platform detection with multiple platforms"
+      }
+    },
+    {
+      "name": "5. Test AI Row Classification",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/test-ai-row-classification",
+          "host": ["{{base_url}}"],
+          "path": ["test-ai-row-classification"]
+        },
+        "description": "Test AI-powered row classification and entity extraction"
+      }
+    },
+    {
+      "name": "6. Test Batch Processing",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/test-batch-processing",
+          "host": ["{{base_url}}"],
+          "path": ["test-batch-processing"]
+        },
+        "description": "Test batch processing optimization and AI cost reduction"
+      }
+    },
+    {
+      "name": "7. Test Entity Resolution",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/test-entity-resolution",
+          "host": ["{{base_url}}"],
+          "path": ["test-entity-resolution"]
+        },
+        "description": "Test Entity Resolution system with sample data"
+      }
+    },
+    {
+      "name": "8. Test Entity Search",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/test-entity-search/{{test_user_id}}?search_term=Abhishek&entity_type=employee",
+          "host": ["{{base_url}}"],
+          "path": ["test-entity-search", "{{test_user_id}}"],
+          "query": [
+            {
+              "key": "search_term",
+              "value": "Abhishek"
+            },
+            {
+              "key": "entity_type",
+              "value": "employee"
+            }
+          ]
+        },
+        "description": "Test entity search functionality with similarity matching"
+      }
+    },
+    {
+      "name": "9. Test Entity Stats",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/test-entity-stats/{{test_user_id}}",
+          "host": ["{{base_url}}"],
+          "path": ["test-entity-stats", "{{test_user_id}}"]
+        },
+        "description": "Test entity resolution statistics"
+      }
+    },
+    {
+      "name": "10. Test Raw Events Stats",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/test-raw-events/{{test_user_id}}",
+          "host": ["{{base_url}}"],
+          "path": ["test-raw-events", "{{test_user_id}}"]
+        },
+        "description": "Test raw events statistics and processing results"
+      }
+    },
+    {
+      "name": "11. Upload Payroll Sample (Entity Resolution Test)",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "formdata",
+          "formdata": [
+            {
+              "key": "file",
+              "type": "file",
+              "src": "test_files/payroll_sample.csv"
+            },
+            {
+              "key": "user_id",
+              "value": "{{test_user_id}}",
+              "type": "text"
+            }
+          ]
+        },
+        "url": {
+          "raw": "{{base_url}}/upload-and-process",
+          "host": ["{{base_url}}"],
+          "path": ["upload-and-process"]
+        },
+        "description": "Upload payroll file to test employee entity resolution (Abhishek A. vs Abhishek Arora)"
+      }
+    },
+    {
+      "name": "12. Upload Vendor Payments (Entity Resolution Test)",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "formdata",
+          "formdata": [
+            {
+              "key": "file",
+              "type": "file",
+              "src": "test_files/vendor_payments.csv"
+            },
+            {
+              "key": "user_id",
+              "value": "{{test_user_id}}",
+              "type": "text"
+            }
+          ]
+        },
+        "url": {
+          "raw": "{{base_url}}/upload-and-process",
+          "host": ["{{base_url}}"],
+          "path": ["upload-and-process"]
+        },
+        "description": "Upload vendor payments to test vendor entity resolution (Razorpay Payout vs Razorpay Payments Pvt. Ltd.)"
+      }
+    },
+    {
+      "name": "13. Upload Income Statement (Document Type Detection)",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "formdata",
+          "formdata": [
+            {
+              "key": "file",
+              "type": "file",
+              "src": "test_files/income_statement.xlsx"
+            },
+            {
+              "key": "user_id",
+              "value": "{{test_user_id}}",
+              "type": "text"
+            }
+          ]
+        },
+        "url": {
+          "raw": "{{base_url}}/upload-and-process",
+          "host": ["{{base_url}}"],
+          "path": ["upload-and-process"]
+        },
+        "description": "Upload income statement to test document type detection and AI classification"
+      }
+    },
+    {
+      "name": "14. Upload Large Cash Flow (Batch Processing Test)",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "formdata",
+          "formdata": [
+            {
+              "key": "file",
+              "type": "file",
+              "src": "test_files/cash_flow_large.csv"
+            },
+            {
+              "key": "user_id",
+              "value": "{{test_user_id}}",
+              "type": "text"
+            }
+          ]
+        },
+        "url": {
+          "raw": "{{base_url}}/upload-and-process",
+          "host": ["{{base_url}}"],
+          "path": ["upload-and-process"]
+        },
+        "description": "Upload large cash flow file to test batch processing optimization and performance"
+      }
+    },
+    {
+      "name": "15. Upload Balance Sheet (Document Type Detection)",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "formdata",
+          "formdata": [
+            {
+              "key": "file",
+              "type": "file",
+              "src": "test_files/balance_sheet.csv"
+            },
+            {
+              "key": "user_id",
+              "value": "{{test_user_id}}",
+              "type": "text"
+            }
+          ]
+        },
+        "url": {
+          "raw": "{{base_url}}/upload-and-process",
+          "host": ["{{base_url}}"],
+          "path": ["upload-and-process"]
+        },
+        "description": "Upload balance sheet to test balance sheet document type detection"
+      }
+    },
+    {
+      "name": "16. Test Entity Search - Vendors",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/test-entity-search/{{test_user_id}}?search_term=Razorpay&entity_type=vendor",
+          "host": ["{{base_url}}"],
+          "path": ["test-entity-search", "{{test_user_id}}"],
+          "query": [
+            {
+              "key": "search_term",
+              "value": "Razorpay"
+            },
+            {
+              "key": "entity_type",
+              "value": "vendor"
+            }
+          ]
+        },
+        "description": "Test entity search for vendors after uploading vendor files"
+      }
+    },
+    {
+      "name": "17. Test Entity Stats After Uploads",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/test-entity-stats/{{test_user_id}}",
+          "host": ["{{base_url}}"],
+          "path": ["test-entity-stats", "{{test_user_id}}"]
+        },
+        "description": "Test entity resolution statistics after uploading multiple files"
+      }
+    },
+    {
+      "name": "18. Test Raw Events Stats After Uploads",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/test-raw-events/{{test_user_id}}",
+          "host": ["{{base_url}}"],
+          "path": ["test-raw-events", "{{test_user_id}}"]
+        },
+        "description": "Test raw events statistics after uploading multiple files"
+      }
+    }
+  ]
+} 

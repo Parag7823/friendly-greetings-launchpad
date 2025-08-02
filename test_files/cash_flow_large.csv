@@ -1,0 +1,32 @@
+Date,Description,Amount,Category,Platform
+2024-01-01,Client Payment - ABC Corp,25000,Revenue,Stripe
+2024-01-02,Office Rent Payment,-5000,Expense,Landlord
+2024-01-03,Employee Salary - Abhishek A.,-5000,Expense,Gusto
+2024-01-04,Software Subscription,-200,Expense,Stripe
+2024-01-05,Client Payment - XYZ Inc,30000,Revenue,Stripe
+2024-01-06,Internet Bill,-150,Expense,ISP
+2024-01-07,Employee Salary - John Smith,-4500,Expense,Gusto
+2024-01-08,Marketing Campaign,-3000,Expense,Google Ads
+2024-01-09,Client Payment - DEF Ltd,18000,Revenue,Stripe
+2024-01-10,Office Supplies,-500,Expense,Office Depot
+2024-01-11,Employee Salary - Sarah Johnson,-4200,Expense,Gusto
+2024-01-12,Cloud Services,-2500,Expense,AWS
+2024-01-13,Client Payment - GHI Corp,22000,Revenue,Stripe
+2024-01-14,Travel Expenses,-800,Expense,Expedia
+2024-01-15,Employee Salary - Mike Wilson,-4800,Expense,Gusto
+2024-01-16,Legal Services,-2000,Expense,Law Firm
+2024-01-17,Client Payment - JKL Inc,28000,Revenue,Stripe
+2024-01-18,Insurance Premium,-1200,Expense,Insurance Co
+2024-01-19,Employee Salary - Abhishek Arora,-5000,Expense,Gusto
+2024-01-20,Equipment Purchase,-3000,Expense,Apple Store
+2024-01-21,Client Payment - MNO Corp,32000,Revenue,Stripe
+2024-01-22,Utilities Payment,-400,Expense,Utility Co
+2024-01-23,Employee Salary - John Smith,-4500,Expense,Gusto
+2024-01-24,Advertising Expenses,-2500,Expense,Facebook Ads
+2024-01-25,Client Payment - PQR Ltd,19000,Revenue,Stripe
+2024-01-26,Maintenance Services,-600,Expense,Maintenance Co
+2024-01-27,Employee Salary - Sarah Johnson,-4200,Expense,Gusto
+2024-01-28,Professional Development,-1500,Expense,Coursera
+2024-01-29,Client Payment - STU Corp,26000,Revenue,Stripe
+2024-01-30,Employee Salary - Mike Wilson,-4800,Expense,Gusto
+2024-01-31,Year-end Bonus - Abhishek A.,-10000,Expense,Gusto 
