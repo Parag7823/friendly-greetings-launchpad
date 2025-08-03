@@ -741,7 +741,7 @@ class AIRowClassifier:
             """
             
             # Get AI response
-            response = await self.openai.chat.completions.create(
+            response = self.openai.chat.completions.create(
                 model="gpt-4o-mini",
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.1,
@@ -993,7 +993,7 @@ class BatchAIRowClassifier:
             """
             
             # Get AI response
-            response = await self.openai.chat.completions.create(
+            response = self.openai.chat.completions.create(
                 model="gpt-4o-mini",
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.1,
