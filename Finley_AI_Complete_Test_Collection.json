@@ -12,7 +12,7 @@
     },
     {
       "key": "test_user_id",
-      "value": "test-user-123",
+      "value": "550e8400-e29b-41d4-a716-446655440000",
       "type": "string"
     },
     {
@@ -179,7 +179,7 @@
         ],
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"job_id\": \"payroll-test-001\",\n  \"storage_path\": \"test_files/payroll_sample.csv\",\n  \"file_name\": \"payroll_sample.csv\",\n  \"supabase_url\": \"{{supabase_url}}\",\n  \"supabase_key\": \"{{supabase_key}}\",\n  \"user_id\": \"{{test_user_id}}\"\n}"
+          "raw": "{\n  \"job_id\": \"payroll-test-001\",\n  \"storage_path\": \"payroll_sample.csv\",\n  \"file_name\": \"payroll_sample.csv\",\n  \"supabase_url\": \"{{supabase_url}}\",\n  \"supabase_key\": \"{{supabase_key}}\",\n  \"user_id\": \"{{test_user_id}}\"\n}"
         },
         "url": {
           "raw": "{{base_url}}/process-excel",
@@ -201,7 +201,7 @@
         ],
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"job_id\": \"vendor-test-001\",\n  \"storage_path\": \"test_files/vendor_payments.csv\",\n  \"file_name\": \"vendor_payments.csv\",\n  \"supabase_url\": \"{{supabase_url}}\",\n  \"supabase_key\": \"{{supabase_key}}\",\n  \"user_id\": \"{{test_user_id}}\"\n}"
+          "raw": "{\n  \"job_id\": \"vendor-test-001\",\n  \"storage_path\": \"vendor_payments.csv\",\n  \"file_name\": \"vendor_payments.csv\",\n  \"supabase_url\": \"{{supabase_url}}\",\n  \"supabase_key\": \"{{supabase_key}}\",\n  \"user_id\": \"{{test_user_id}}\"\n}"
         },
         "url": {
           "raw": "{{base_url}}/process-excel",
@@ -223,7 +223,7 @@
         ],
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"job_id\": \"income-test-001\",\n  \"storage_path\": \"test_files/income_statement.xlsx\",\n  \"file_name\": \"income_statement.xlsx\",\n  \"supabase_url\": \"{{supabase_url}}\",\n  \"supabase_key\": \"{{supabase_key}}\",\n  \"user_id\": \"{{test_user_id}}\"\n}"
+          "raw": "{\n  \"job_id\": \"income-test-001\",\n  \"storage_path\": \"income_statement.xlsx\",\n  \"file_name\": \"income_statement.xlsx\",\n  \"supabase_url\": \"{{supabase_url}}\",\n  \"supabase_key\": \"{{supabase_key}}\",\n  \"user_id\": \"{{test_user_id}}\"\n}"
         },
         "url": {
           "raw": "{{base_url}}/process-excel",
@@ -245,7 +245,7 @@
         ],
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"job_id\": \"cashflow-test-001\",\n  \"storage_path\": \"test_files/cash_flow_large.csv\",\n  \"file_name\": \"cash_flow_large.csv\",\n  \"supabase_url\": \"{{supabase_url}}\",\n  \"supabase_key\": \"{{supabase_key}}\",\n  \"user_id\": \"{{test_user_id}}\"\n}"
+          "raw": "{\n  \"job_id\": \"cashflow-test-001\",\n  \"storage_path\": \"cash_flow_large.csv\",\n  \"file_name\": \"cash_flow_large.csv\",\n  \"supabase_url\": \"{{supabase_url}}\",\n  \"supabase_key\": \"{{supabase_key}}\",\n  \"user_id\": \"{{test_user_id}}\"\n}"
         },
         "url": {
           "raw": "{{base_url}}/process-excel",
@@ -267,7 +267,7 @@
         ],
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"job_id\": \"balance-test-001\",\n  \"storage_path\": \"test_files/balance_sheet.csv\",\n  \"file_name\": \"balance_sheet.csv\",\n  \"supabase_url\": \"{{supabase_url}}\",\n  \"supabase_key\": \"{{supabase_key}}\",\n  \"user_id\": \"{{test_user_id}}\"\n}"
+          "raw": "{\n  \"job_id\": \"balance-test-001\",\n  \"storage_path\": \"balance_sheet.csv\",\n  \"file_name\": \"balance_sheet.csv\",\n  \"supabase_url\": \"{{supabase_url}}\",\n  \"supabase_key\": \"{{supabase_key}}\",\n  \"user_id\": \"{{test_user_id}}\"\n}"
         },
         "url": {
           "raw": "{{base_url}}/process-excel",
