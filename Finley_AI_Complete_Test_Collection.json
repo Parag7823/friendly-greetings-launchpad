@@ -14,6 +14,16 @@
       "key": "test_user_id",
       "value": "test-user-123",
       "type": "string"
+    },
+    {
+      "key": "supabase_url",
+      "value": "https://your-project.supabase.co",
+      "type": "string"
+    },
+    {
+      "key": "supabase_key",
+      "value": "your-supabase-anon-key",
+      "type": "string"
     }
   ],
   "item": [
@@ -158,143 +168,113 @@
       }
     },
     {
-      "name": "11. Upload Payroll Sample (Entity Resolution Test)",
+      "name": "11. Process Payroll Sample (Entity Resolution Test)",
       "request": {
         "method": "POST",
-        "header": [],
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
         "body": {
-          "mode": "formdata",
-          "formdata": [
-            {
-              "key": "file",
-              "type": "file",
-              "src": "test_files/payroll_sample.csv"
-            },
-            {
-              "key": "user_id",
-              "value": "{{test_user_id}}",
-              "type": "text"
-            }
-          ]
+          "mode": "raw",
+          "raw": "{\n  \"job_id\": \"payroll-test-001\",\n  \"storage_path\": \"test_files/payroll_sample.csv\",\n  \"file_name\": \"payroll_sample.csv\",\n  \"supabase_url\": \"{{supabase_url}}\",\n  \"supabase_key\": \"{{supabase_key}}\",\n  \"user_id\": \"{{test_user_id}}\"\n}"
         },
         "url": {
-          "raw": "{{base_url}}/upload-and-process",
+          "raw": "{{base_url}}/process-excel",
           "host": ["{{base_url}}"],
-          "path": ["upload-and-process"]
+          "path": ["process-excel"]
         },
-        "description": "Upload payroll file to test employee entity resolution (Abhishek A. vs Abhishek Arora)"
+        "description": "Process payroll file to test employee entity resolution (Abhishek A. vs Abhishek Arora)"
       }
     },
     {
-      "name": "12. Upload Vendor Payments (Entity Resolution Test)",
+      "name": "12. Process Vendor Payments (Entity Resolution Test)",
       "request": {
         "method": "POST",
-        "header": [],
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
         "body": {
-          "mode": "formdata",
-          "formdata": [
-            {
-              "key": "file",
-              "type": "file",
-              "src": "test_files/vendor_payments.csv"
-            },
-            {
-              "key": "user_id",
-              "value": "{{test_user_id}}",
-              "type": "text"
-            }
-          ]
+          "mode": "raw",
+          "raw": "{\n  \"job_id\": \"vendor-test-001\",\n  \"storage_path\": \"test_files/vendor_payments.csv\",\n  \"file_name\": \"vendor_payments.csv\",\n  \"supabase_url\": \"{{supabase_url}}\",\n  \"supabase_key\": \"{{supabase_key}}\",\n  \"user_id\": \"{{test_user_id}}\"\n}"
         },
         "url": {
-          "raw": "{{base_url}}/upload-and-process",
+          "raw": "{{base_url}}/process-excel",
           "host": ["{{base_url}}"],
-          "path": ["upload-and-process"]
+          "path": ["process-excel"]
         },
-        "description": "Upload vendor payments to test vendor entity resolution (Razorpay Payout vs Razorpay Payments Pvt. Ltd.)"
+        "description": "Process vendor payments to test vendor entity resolution (Razorpay Payout vs Razorpay Payments Pvt. Ltd.)"
       }
     },
     {
-      "name": "13. Upload Income Statement (Document Type Detection)",
+      "name": "13. Process Income Statement (Document Type Detection)",
       "request": {
         "method": "POST",
-        "header": [],
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
         "body": {
-          "mode": "formdata",
-          "formdata": [
-            {
-              "key": "file",
-              "type": "file",
-              "src": "test_files/income_statement.xlsx"
-            },
-            {
-              "key": "user_id",
-              "value": "{{test_user_id}}",
-              "type": "text"
-            }
-          ]
+          "mode": "raw",
+          "raw": "{\n  \"job_id\": \"income-test-001\",\n  \"storage_path\": \"test_files/income_statement.xlsx\",\n  \"file_name\": \"income_statement.xlsx\",\n  \"supabase_url\": \"{{supabase_url}}\",\n  \"supabase_key\": \"{{supabase_key}}\",\n  \"user_id\": \"{{test_user_id}}\"\n}"
         },
         "url": {
-          "raw": "{{base_url}}/upload-and-process",
+          "raw": "{{base_url}}/process-excel",
           "host": ["{{base_url}}"],
-          "path": ["upload-and-process"]
+          "path": ["process-excel"]
         },
-        "description": "Upload income statement to test document type detection and AI classification"
+        "description": "Process income statement to test document type detection and AI classification"
       }
     },
     {
-      "name": "14. Upload Large Cash Flow (Batch Processing Test)",
+      "name": "14. Process Large Cash Flow (Batch Processing Test)",
       "request": {
         "method": "POST",
-        "header": [],
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
         "body": {
-          "mode": "formdata",
-          "formdata": [
-            {
-              "key": "file",
-              "type": "file",
-              "src": "test_files/cash_flow_large.csv"
-            },
-            {
-              "key": "user_id",
-              "value": "{{test_user_id}}",
-              "type": "text"
-            }
-          ]
+          "mode": "raw",
+          "raw": "{\n  \"job_id\": \"cashflow-test-001\",\n  \"storage_path\": \"test_files/cash_flow_large.csv\",\n  \"file_name\": \"cash_flow_large.csv\",\n  \"supabase_url\": \"{{supabase_url}}\",\n  \"supabase_key\": \"{{supabase_key}}\",\n  \"user_id\": \"{{test_user_id}}\"\n}"
         },
         "url": {
-          "raw": "{{base_url}}/upload-and-process",
+          "raw": "{{base_url}}/process-excel",
           "host": ["{{base_url}}"],
-          "path": ["upload-and-process"]
+          "path": ["process-excel"]
         },
-        "description": "Upload large cash flow file to test batch processing optimization and performance"
+        "description": "Process large cash flow file to test batch processing optimization and performance"
       }
     },
     {
-      "name": "15. Upload Balance Sheet (Document Type Detection)",
+      "name": "15. Process Balance Sheet (Document Type Detection)",
       "request": {
         "method": "POST",
-        "header": [],
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
         "body": {
-          "mode": "formdata",
-          "formdata": [
-            {
-              "key": "file",
-              "type": "file",
-              "src": "test_files/balance_sheet.csv"
-            },
-            {
-              "key": "user_id",
-              "value": "{{test_user_id}}",
-              "type": "text"
-            }
-          ]
+          "mode": "raw",
+          "raw": "{\n  \"job_id\": \"balance-test-001\",\n  \"storage_path\": \"test_files/balance_sheet.csv\",\n  \"file_name\": \"balance_sheet.csv\",\n  \"supabase_url\": \"{{supabase_url}}\",\n  \"supabase_key\": \"{{supabase_key}}\",\n  \"user_id\": \"{{test_user_id}}\"\n}"
         },
         "url": {
-          "raw": "{{base_url}}/upload-and-process",
+          "raw": "{{base_url}}/process-excel",
           "host": ["{{base_url}}"],
-          "path": ["upload-and-process"]
+          "path": ["process-excel"]
         },
-        "description": "Upload balance sheet to test balance sheet document type detection"
+        "description": "Process balance sheet to test balance sheet document type detection"
       }
     },
     {
@@ -317,11 +297,11 @@
             }
           ]
         },
-        "description": "Test entity search for vendors after uploading vendor files"
+        "description": "Test entity search for vendors after processing vendor files"
       }
     },
     {
-      "name": "17. Test Entity Stats After Uploads",
+      "name": "17. Test Entity Stats After Processing",
       "request": {
         "method": "GET",
         "header": [],
@@ -330,11 +310,11 @@
           "host": ["{{base_url}}"],
           "path": ["test-entity-stats", "{{test_user_id}}"]
         },
-        "description": "Test entity resolution statistics after uploading multiple files"
+        "description": "Test entity resolution statistics after processing multiple files"
       }
     },
     {
-      "name": "18. Test Raw Events Stats After Uploads",
+      "name": "18. Test Raw Events Stats After Processing",
       "request": {
         "method": "GET",
         "header": [],
@@ -343,7 +323,7 @@
           "host": ["{{base_url}}"],
           "path": ["test-raw-events", "{{test_user_id}}"]
         },
-        "description": "Test raw events statistics after uploading multiple files"
+        "description": "Test raw events statistics after processing multiple files"
       }
     }
   ]
