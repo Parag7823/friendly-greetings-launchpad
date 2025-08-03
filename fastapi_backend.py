@@ -1792,8 +1792,11 @@ async def upload_and_process(
         
         supabase: Client = create_client(supabase_url, supabase_key)
         
+        # Create ExcelProcessor instance
+        excel_processor = ExcelProcessor()
+        
         # Process the file directly
-        results = await processor.process_file(
+        results = await excel_processor.process_file(
             job_id, 
             file_content, 
             file.filename,
