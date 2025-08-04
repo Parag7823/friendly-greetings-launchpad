@@ -89,7 +89,7 @@ class DocumentAnalyzer:
             date_columns = [col for col in column_names if any(word in col.lower() for word in ['date', 'time', 'period', 'month', 'year'])]
             
             # Simplified prompt that's more likely to return valid JSON
-        prompt = f"""
+            prompt = f"""
             Analyze this financial document and return a JSON response.
             
             FILENAME: {filename}
