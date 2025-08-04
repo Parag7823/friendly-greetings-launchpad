@@ -1290,14 +1290,43 @@ class ExcelProcessor:
                 else:
                     raise HTTPException(status_code=400, detail="CSV file is empty")
             else:
-                # Handle Excel files
-                excel_file = pd.ExcelFile(file_stream)
-                sheets = {}
-                
-                for sheet_name in excel_file.sheet_names:
-                    df = pd.read_excel(file_stream, sheet_name=sheet_name)
-                    if not df.empty:
-                        sheets[sheet_name] = df
+                # Handle Excel files with explicit engine specification
+                try:
+                    # Try openpyxl first (for .xlsx files)
+                    excel_file = pd.ExcelFile(file_stream, engine='openpyxl')
+                    sheets = {}
+                    
+                    for sheet_name in excel_file.sheet_names:
+                        df = pd.read_excel(file_stream, sheet_name=sheet_name, engine='openpyxl')
+                        if not df.empty:
+                            sheets[sheet_name] = df
+                    
+                    return sheets
+                except Exception as e1:
+                    try:
+                        # Try xlrd for older .xls files
+                        file_stream.seek(0)  # Reset stream position
+                        excel_file = pd.ExcelFile(file_stream, engine='xlrd')
+                        sheets = {}
+                        
+                        for sheet_name in excel_file.sheet_names:
+                            df = pd.read_excel(file_stream, sheet_name=sheet_name, engine='xlrd')
+                            if not df.empty:
+                                sheets[sheet_name] = df
+                        
+                        return sheets
+                    except Exception as e2:
+                        # If both fail, try with default engine
+                        file_stream.seek(0)  # Reset stream position
+                        excel_file = pd.ExcelFile(file_stream)
+                        sheets = {}
+                        
+                        for sheet_name in excel_file.sheet_names:
+                            df = pd.read_excel(file_stream, sheet_name=sheet_name)
+                            if not df.empty:
+                                sheets[sheet_name] = df
+                        
+                        return sheets
                 
                 return sheets
                 
