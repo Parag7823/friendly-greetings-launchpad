@@ -14,11 +14,75 @@ export type Database = {
   }
   public: {
     Tables: {
+      entity_matches: {
+        Row: {
+          created_at: string | null
+          id: string
+          match_confidence: number
+          match_reason: string
+          matched_fields: string[] | null
+          normalized_entity_id: string | null
+          similarity_score: number | null
+          source_entity_name: string
+          source_entity_type: string
+          source_file: string
+          source_platform: string
+          source_row_id: string | null
+          user_id: string | null
+        }
+        Insert: {
+          created_at?: string | null
+          id?: string
+          match_confidence: number
+          match_reason: string
+          matched_fields?: string[] | null
+          normalized_entity_id?: string | null
+          similarity_score?: number | null
+          source_entity_name: string
+          source_entity_type: string
+          source_file: string
+          source_platform: string
+          source_row_id?: string | null
+          user_id?: string | null
+        }
+        Update: {
+          created_at?: string | null
+          id?: string
+          match_confidence?: number
+          match_reason?: string
+          matched_fields?: string[] | null
+          normalized_entity_id?: string | null
+          similarity_score?: number | null
+          source_entity_name?: string
+          source_entity_type?: string
+          source_file?: string
+          source_platform?: string
+          source_row_id?: string | null
+          user_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "entity_matches_normalized_entity_id_fkey"
+            columns: ["normalized_entity_id"]
+            isOneToOne: false
+            referencedRelation: "normalized_entities"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "entity_matches_source_row_id_fkey"
+            columns: ["source_row_id"]
+            isOneToOne: false
+            referencedRelation: "raw_events"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       ingestion_jobs: {
         Row: {
           completed_at: string | null
           created_at: string | null
           error_message: string | null
+          file_id: string | null
           id: string
           job_type: string
           progress: number | null
@@ -26,12 +90,14 @@ export type Database = {
           result: Json | null
           started_at: string | null
           status: string | null
+          updated_at: string | null
           user_id: string | null
         }
         Insert: {
           completed_at?: string | null
           created_at?: string | null
           error_message?: string | null
+          file_id?: string | null
           id?: string
           job_type: string
           progress?: number | null
@@ -39,12 +105,14 @@ export type Database = {
           result?: Json | null
           started_at?: string | null
           status?: string | null
+          updated_at?: string | null
           user_id?: string | null
         }
         Update: {
           completed_at?: string | null
           created_at?: string | null
           error_message?: string | null
+          file_id?: string | null
           id?: string
           job_type?: string
           progress?: number | null
@@ -52,9 +120,18 @@ export type Database = {
           result?: Json | null
           started_at?: string | null
           status?: string | null
+          updated_at?: string | null
           user_id?: string | null
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "ingestion_jobs_file_id_fkey"
+            columns: ["file_id"]
+            isOneToOne: false
+            referencedRelation: "raw_records"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       integration_test_logs: {
         Row: {
@@ -142,81 +219,143 @@ export type Database = {
           },
         ]
       }
+      normalized_entities: {
+        Row: {
+          aliases: string[] | null
+          bank_account: string | null
+          canonical_name: string
+          confidence_score: number | null
+          created_at: string | null
+          email: string | null
+          entity_type: string
+          first_seen_at: string | null
+          id: string
+          last_seen_at: string | null
+          phone: string | null
+          platform_sources: string[] | null
+          source_files: string[] | null
+          tax_id: string | null
+          updated_at: string | null
+          user_id: string | null
+        }
+        Insert: {
+          aliases?: string[] | null
+          bank_account?: string | null
+          canonical_name: string
+          confidence_score?: number | null
+          created_at?: string | null
+          email?: string | null
+          entity_type: string
+          first_seen_at?: string | null
+          id?: string
+          last_seen_at?: string | null
+          phone?: string | null
+          platform_sources?: string[] | null
+          source_files?: string[] | null
+          tax_id?: string | null
+          updated_at?: string | null
+          user_id?: string | null
+        }
+        Update: {
+          aliases?: string[] | null
+          bank_account?: string | null
+          canonical_name?: string
+          confidence_score?: number | null
+          created_at?: string | null
+          email?: string | null
+          entity_type?: string
+          first_seen_at?: string | null
+          id?: string
+          last_seen_at?: string | null
+          phone?: string | null
+          platform_sources?: string[] | null
+          source_files?: string[] | null
+          tax_id?: string | null
+          updated_at?: string | null
+          user_id?: string | null
+        }
+        Relationships: []
+      }
       raw_events: {
         Row: {
-          id: string
-          user_id: string | null
+          category: string | null
+          classification_metadata: Json | null
+          confidence_score: number | null
+          created_at: string | null
+          entities: Json | null
+          error_message: string | null
           file_id: string | null
+          id: string
+          ingest_ts: string | null
           job_id: string | null
-          provider: string
           kind: string
-          source_platform: string | null
           payload: Json
+          processed_at: string | null
+          provider: string
+          relationships: Json | null
           row_index: number
           sheet_name: string | null
           source_filename: string
-          uploader: string | null
-          ingest_ts: string | null
-          processed_at: string | null
+          source_platform: string | null
           status: string | null
-          error_message: string | null
-          confidence_score: number | null
-          classification_metadata: Json | null
-          created_at: string | null
+          subcategory: string | null
           updated_at: string | null
+          uploader: string | null
+          user_id: string | null
         }
         Insert: {
-          id?: string
-          user_id?: string | null
+          category?: string | null
+          classification_metadata?: Json | null
+          confidence_score?: number | null
+          created_at?: string | null
+          entities?: Json | null
+          error_message?: string | null
           file_id?: string | null
+          id?: string
+          ingest_ts?: string | null
           job_id?: string | null
-          provider: string
           kind: string
-          source_platform?: string | null
           payload: Json
+          processed_at?: string | null
+          provider: string
+          relationships?: Json | null
           row_index: number
           sheet_name?: string | null
           source_filename: string
-          uploader?: string | null
-          ingest_ts?: string | null
-          processed_at?: string | null
+          source_platform?: string | null
           status?: string | null
-          error_message?: string | null
-          confidence_score?: number | null
-          classification_metadata?: Json | null
-          created_at?: string | null
+          subcategory?: string | null
           updated_at?: string | null
+          uploader?: string | null
+          user_id?: string | null
         }
         Update: {
-          id?: string
-          user_id?: string | null
+          category?: string | null
+          classification_metadata?: Json | null
+          confidence_score?: number | null
+          created_at?: string | null
+          entities?: Json | null
+          error_message?: string | null
           file_id?: string | null
+          id?: string
+          ingest_ts?: string | null
           job_id?: string | null
-          provider?: string
           kind?: string
-          source_platform?: string | null
           payload?: Json
+          processed_at?: string | null
+          provider?: string
+          relationships?: Json | null
           row_index?: number
           sheet_name?: string | null
           source_filename?: string
-          uploader?: string | null
-          ingest_ts?: string | null
-          processed_at?: string | null
+          source_platform?: string | null
           status?: string | null
-          error_message?: string | null
-          confidence_score?: number | null
-          classification_metadata?: Json | null
-          created_at?: string | null
+          subcategory?: string | null
           updated_at?: string | null
+          uploader?: string | null
+          user_id?: string | null
         }
         Relationships: [
-          {
-            foreignKeyName: "raw_events_user_id_fkey"
-            columns: ["user_id"]
-            isOneToOne: false
-            referencedRelation: "users"
-            referencedColumns: ["id"]
-          },
           {
             foreignKeyName: "raw_events_file_id_fkey"
             columns: ["file_id"]
@@ -230,7 +369,7 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "ingestion_jobs"
             referencedColumns: ["id"]
-          }
+          },
         ]
       }
       raw_records: {
@@ -283,7 +422,98 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      find_or_create_entity: {
+        Args: {
+          p_user_id: string
+          p_entity_name: string
+          p_entity_type: string
+          p_platform: string
+          p_email?: string
+          p_bank_account?: string
+          p_phone?: string
+          p_tax_id?: string
+          p_source_file?: string
+        }
+        Returns: string
+      }
+      get_entity_details: {
+        Args: { user_uuid: string; entity_id: string }
+        Returns: {
+          entity_info: Json
+          related_events: Json
+          match_history: Json
+        }[]
+      }
+      get_entity_resolution_stats: {
+        Args: { user_uuid: string }
+        Returns: {
+          total_entities: number
+          employees_count: number
+          vendors_count: number
+          customers_count: number
+          projects_count: number
+          total_matches: number
+          exact_matches: number
+          fuzzy_matches: number
+          email_matches: number
+          bank_matches: number
+          new_entities: number
+          avg_confidence: number
+        }[]
+      }
+      get_entity_stats: {
+        Args: { user_uuid: string }
+        Returns: {
+          total_employees: number
+          total_vendors: number
+          total_customers: number
+          total_projects: number
+          employee_names: string[]
+          vendor_names: string[]
+          customer_names: string[]
+          project_names: string[]
+        }[]
+      }
+      get_raw_events_stats: {
+        Args: { user_uuid: string }
+        Returns: {
+          total_events: number
+          processed_events: number
+          failed_events: number
+          pending_events: number
+          unique_files: number
+          unique_platforms: string[]
+          category_breakdown: Json
+          kind_breakdown: Json
+        }[]
+      }
+      search_entities_by_name: {
+        Args: { user_uuid: string; search_term: string; p_entity_type?: string }
+        Returns: {
+          id: string
+          entity_type: string
+          canonical_name: string
+          aliases: string[]
+          email: string
+          platform_sources: string[]
+          confidence_score: number
+          similarity_score: number
+        }[]
+      }
+      search_events_by_entity: {
+        Args: { user_uuid: string; entity_type: string; entity_name: string }
+        Returns: {
+          id: string
+          kind: string
+          category: string
+          subcategory: string
+          source_platform: string
+          payload: Json
+          classification_metadata: Json
+          entities: Json
+          created_at: string
+        }[]
+      }
     }
     Enums: {
       [_ in never]: never
@@ -416,89 +646,3 @@ export const Constants = {
     Enums: {},
   },
 } as const
-
-// Entity Resolution System Types
-export interface NormalizedEntity {
-  id: string;
-  user_id: string;
-  entity_type: 'employee' | 'vendor' | 'customer' | 'project';
-  canonical_name: string;
-  aliases: string[];
-  email?: string;
-  phone?: string;
-  bank_account?: string;
-  tax_id?: string;
-  platform_sources: string[];
-  source_files: string[];
-  confidence_score: number;
-  first_seen_at: string;
-  last_seen_at: string;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface EntityMatch {
-  id: string;
-  user_id: string;
-  source_entity_name: string;
-  source_entity_type: string;
-  source_platform: string;
-  source_file: string;
-  source_row_id: string;
-  normalized_entity_id: string;
-  match_confidence: number;
-  match_reason: 'exact_match' | 'fuzzy_match' | 'email_match' | 'bank_match' | 'new_entity' | 'manual';
-  similarity_score?: number;
-  matched_fields: string[];
-  created_at: string;
-}
-
-export interface EntityResolutionStats {
-  total_entities: number;
-  employees_count: number;
-  vendors_count: number;
-  customers_count: number;
-  projects_count: number;
-  total_matches: number;
-  exact_matches: number;
-  fuzzy_matches: number;
-  email_matches: number;
-  bank_matches: number;
-  new_entities: number;
-  avg_confidence: number;
-}
-
-export interface EntitySearchResult {
-  id: string;
-  entity_type: string;
-  canonical_name: string;
-  aliases: string[];
-  email?: string;
-  platform_sources: string[];
-  confidence_score: number;
-  similarity_score: number;
-}
-
-export interface EntityDetails {
-  entity_info: NormalizedEntity;
-  related_events: RawEvent[];
-  match_history: EntityMatch[];
-}
-
-export interface ResolvedEntity {
-  name: string;
-  entity_id: string;
-  resolved_name: string;
-}
-
-export interface EntityResolutionResult {
-  resolved_entities: {
-    employees: ResolvedEntity[];
-    vendors: ResolvedEntity[];
-    customers: ResolvedEntity[];
-    projects: ResolvedEntity[];
-  };
-  resolution_results: any[];
-  total_resolved: number;
-  total_attempted: number;
-}

@@ -1,4 +1,5 @@
-export interface RawEvent {
+// Database types to avoid conflicts with auto-generated Supabase types
+export interface DatabaseRawEvent {
   id: string;
   user_id?: string;
   file_id?: string;
