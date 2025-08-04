@@ -1060,7 +1060,7 @@ class BatchAIRowClassifier:
         # Extract entities using regex
         entities = self._extract_entities_from_text(row_str)
         
-            return {
+        return {
             'row_type': row_type,
             'category': category,
             'subcategory': subcategory,
