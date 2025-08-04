@@ -1,6 +1,7 @@
 import { useState, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
+import { RawEvent, FileProcessingEvent } from '@/types/database';
 
 interface SheetMetadata {
   name: string;
@@ -118,8 +119,8 @@ export class FastAPIProcessor {
         job_id: jobData.id,
         storage_path: fileName,
         file_name: file.name,
-        supabase_url: process.env.REACT_APP_SUPABASE_URL || '',
-        supabase_key: process.env.REACT_APP_SUPABASE_ANON_KEY || '',
+        supabase_url: "https://gnrbafqifucxlaihtyuv.supabase.co",
+        supabase_key: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImducmJhZnFpZnVjeGxhaWh0eXV2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTMxMTM5OTksImV4cCI6MjA2ODY4OTk5OX0.Lb5Fuu1ktYuPKBgx0Oxla9SXot-TWI-bPhsML9EkRwE",
         user_id: user.id
       };
 
@@ -182,6 +183,29 @@ export class FastAPIProcessor {
 
         if (rawRecordError) {
           console.error('Failed to store raw record:', rawRecordError);
+        }
+
+        // Create raw_events from backend results if row-level data exists
+        if (rawRecord?.id && backendResult.results?.processed_events) {
+          const rawEvents = this.createRawEventsFromBackend(
+            backendResult.results.processed_events,
+            jobData.id,
+            user.id,
+            file.name,
+            rawRecord.id
+          );
+
+          if (rawEvents.length > 0) {
+            const { error: eventsError } = await supabase
+              .from('raw_events')
+              .insert(rawEvents);
+
+            if (eventsError) {
+              console.error('Failed to store raw events:', eventsError);
+            } else {
+              console.log(`Created ${rawEvents.length} raw events from backend processing`);
+            }
+          }
         }
 
         // Extract and store metrics from backend results
@@ -307,6 +331,29 @@ export class FastAPIProcessor {
 
         if (rawRecordError) {
           console.error('Failed to store raw record:', rawRecordError);
+        }
+
+        // Create raw_events from local processing
+        if (rawRecord?.id) {
+          const rawEvents = this.createRawEventsFromLocal(
+            sheets,
+            jobData.id,
+            user.id,
+            file.name,
+            rawRecord.id
+          );
+
+          if (rawEvents.length > 0) {
+            const { error: eventsError } = await supabase
+              .from('raw_events')
+              .insert(rawEvents);
+
+            if (eventsError) {
+              console.error('Failed to store raw events:', eventsError);
+            } else {
+              console.log(`Created ${rawEvents.length} raw events from local processing`);
+            }
+          }
         }
 
         // Extract and store metrics for local processing
@@ -579,6 +626,136 @@ export class FastAPIProcessor {
     if (lowerKey.includes('asset') || lowerKey.includes('cash')) return 'asset';
     if (lowerKey.includes('liability') || lowerKey.includes('debt')) return 'liability';
     return 'other';
+  }
+
+  private createRawEventsFromBackend(
+    processedEvents: any[],
+    jobId: string,
+    userId: string,
+    fileName: string,
+    fileId: string
+  ): any[] {
+    const rawEvents: any[] = [];
+
+    processedEvents.forEach((event, index) => {
+      rawEvents.push({
+        user_id: userId,
+        file_id: fileId,
+        job_id: jobId,
+        provider: 'fastapi_backend',
+        kind: event.kind || 'financial_transaction',
+        source_platform: event.source_platform || 'unknown',
+        payload: event.payload || event,
+        row_index: event.row_index || index,
+        sheet_name: event.sheet_name || 'Unknown',
+        source_filename: fileName,
+        status: 'processed',
+        confidence_score: event.confidence_score || 0.8,
+        classification_metadata: event.classification_metadata || {},
+        category: event.category || 'financial_data',
+        subcategory: event.subcategory || 'transaction',
+        entities: event.entities || {},
+        relationships: event.relationships || {}
+      });
+    });
+
+    return rawEvents;
+  }
+
+  private createRawEventsFromLocal(
+    sheets: SheetMetadata[],
+    jobId: string,
+    userId: string,
+    fileName: string,
+    fileId: string
+  ): any[] {
+    const rawEvents: any[] = [];
+
+    sheets.forEach(sheet => {
+      if (sheet.preview && sheet.preview.length > 1) {
+        const headers = sheet.preview[0] as string[];
+        const dataRows = sheet.preview.slice(1);
+
+        dataRows.forEach((row: any[], rowIndex) => {
+          // Only create events for rows with meaningful data
+          if (row.some(cell => cell !== null && cell !== undefined && cell !== '')) {
+            const rowObject: any = {};
+            headers.forEach((header, colIndex) => {
+              if (header && row[colIndex] !== undefined) {
+                rowObject[header] = row[colIndex];
+              }
+            });
+
+            rawEvents.push({
+              user_id: userId,
+              file_id: fileId,
+              job_id: jobId,
+              provider: 'local_processing',
+              kind: 'financial_row',
+              source_platform: 'excel_upload',
+              payload: rowObject,
+              row_index: rowIndex + 1,
+              sheet_name: sheet.name,
+              source_filename: fileName,
+              status: 'processed',
+              confidence_score: sheet.confidenceScore,
+              classification_metadata: {
+                sheet_type: sheet.type,
+                detected_period: sheet.detectedPeriod,
+                has_numbers: sheet.hasNumbers
+              },
+              category: this.getRowCategory(rowObject, headers),
+              subcategory: sheet.type,
+              entities: this.extractRowEntities(rowObject, headers),
+              relationships: {}
+            });
+          }
+        });
+      }
+    });
+
+    return rawEvents;
+  }
+
+  private getRowCategory(rowData: any, headers: string[]): string {
+    const headerStr = headers.join(' ').toLowerCase();
+    const dataStr = Object.values(rowData).join(' ').toLowerCase();
+    
+    if (headerStr.includes('revenue') || headerStr.includes('income') || dataStr.includes('revenue')) return 'revenue';
+    if (headerStr.includes('expense') || headerStr.includes('cost') || dataStr.includes('expense')) return 'expense';
+    if (headerStr.includes('asset') || dataStr.includes('asset')) return 'asset';
+    if (headerStr.includes('liability') || dataStr.includes('liability')) return 'liability';
+    if (headerStr.includes('cash') || headerStr.includes('payment')) return 'cash_flow';
+    return 'financial_data';
+  }
+
+  private extractRowEntities(rowData: any, headers: string[]): any {
+    const entities: any = {};
+    
+    // Look for common entity patterns
+    Object.entries(rowData).forEach(([key, value]) => {
+      const keyLower = key.toLowerCase();
+      const valueStr = String(value);
+      
+      if (keyLower.includes('vendor') || keyLower.includes('supplier')) {
+        entities.vendors = entities.vendors || [];
+        if (valueStr && valueStr.trim()) entities.vendors.push(valueStr.trim());
+      }
+      if (keyLower.includes('customer') || keyLower.includes('client')) {
+        entities.customers = entities.customers || [];
+        if (valueStr && valueStr.trim()) entities.customers.push(valueStr.trim());
+      }
+      if (keyLower.includes('employee') || keyLower.includes('staff')) {
+        entities.employees = entities.employees || [];
+        if (valueStr && valueStr.trim()) entities.employees.push(valueStr.trim());
+      }
+      if (keyLower.includes('project') || keyLower.includes('job')) {
+        entities.projects = entities.projects || [];
+        if (valueStr && valueStr.trim()) entities.projects.push(valueStr.trim());
+      }
+    });
+
+    return entities;
   }
 
   // Get sheet-specific insights
