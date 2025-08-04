@@ -1308,7 +1308,7 @@ class ExcelProcessor:
                                 df = pd.read_excel(file_stream, sheet_name=sheet_name, engine=engine)
                                 if not df.empty:
                                     sheets[sheet_name] = df
-            else:
+                        else:
                             # Try with default engine (no engine specified)
                             excel_file = pd.ExcelFile(file_stream)
                             for sheet_name in excel_file.sheet_names:
