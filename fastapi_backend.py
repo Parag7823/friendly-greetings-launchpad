@@ -1274,7 +1274,7 @@ class ExcelProcessor:
                 return 'unknown'
         except Exception as e:
             logger.error(f"File type detection failed: {e}")
-                return 'unknown'
+            return 'unknown'
     
     async def read_file(self, file_content: bytes, filename: str) -> Dict[str, pd.DataFrame]:
         """Read Excel or CSV file and return dictionary of sheets"""
