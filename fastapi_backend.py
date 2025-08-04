@@ -2360,6 +2360,9 @@ async def test_entity_resolution():
         if not supabase_url or not supabase_key:
             raise Exception("SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY environment variables are required")
         
+        # Clean the key by removing any whitespace or newlines
+        supabase_key = supabase_key.strip()
+        
         supabase = create_client(supabase_url, supabase_key)
         
         # Initialize EntityResolver
@@ -2473,6 +2476,9 @@ async def test_entity_search(user_id: str, search_term: str = "Abhishek", entity
         if not supabase_url or not supabase_key:
             raise Exception("SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY environment variables are required")
         
+        # Clean the key by removing any whitespace or newlines
+        supabase_key = supabase_key.strip()
+        
         supabase = create_client(supabase_url, supabase_key)
         
         # Test entity search
@@ -2513,6 +2519,9 @@ async def test_entity_stats(user_id: str):
         
         if not supabase_url or not supabase_key:
             raise Exception("SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY environment variables are required")
+        
+        # Clean the key by removing any whitespace or newlines
+        supabase_key = supabase_key.strip()
         
         supabase = create_client(supabase_url, supabase_key)
         
