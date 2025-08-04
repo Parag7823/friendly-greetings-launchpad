@@ -89,7 +89,7 @@ class DocumentAnalyzer:
             date_columns = [col for col in column_names if any(word in col.lower() for word in ['date', 'time', 'period', 'month', 'year'])]
             
             # Simplified prompt that's more likely to return valid JSON
-            prompt = f"""
+        prompt = f"""
             Analyze this financial document and return a JSON response.
             
             FILENAME: {filename}
@@ -837,7 +837,7 @@ class AIRowClassifier:
         # Extract entities using regex
         entities = self.extract_entities_from_text(row_str)
         
-        return {
+            return {
             'row_type': row_type,
             'category': category,
             'subcategory': subcategory,
@@ -1060,7 +1060,7 @@ class BatchAIRowClassifier:
         # Extract entities using regex
         entities = self._extract_entities_from_text(row_str)
         
-        return {
+            return {
             'row_type': row_type,
             'category': category,
             'subcategory': subcategory,
@@ -1274,7 +1274,7 @@ class ExcelProcessor:
                 return 'unknown'
         except Exception as e:
             logger.error(f"File type detection failed: {e}")
-            return 'unknown'
+                return 'unknown'
     
     async def read_file(self, file_content: bytes, filename: str) -> Dict[str, pd.DataFrame]:
         """Read Excel or CSV file and return dictionary of sheets"""
@@ -1308,7 +1308,7 @@ class ExcelProcessor:
                                 df = pd.read_excel(file_stream, sheet_name=sheet_name, engine=engine)
                                 if not df.empty:
                                     sheets[sheet_name] = df
-                        else:
+            else:
                             # Try with default engine (no engine specified)
                             excel_file = pd.ExcelFile(file_stream)
                             for sheet_name in excel_file.sheet_names:
@@ -1730,7 +1730,7 @@ async def test_raw_events(user_id: str):
     try:
         # Initialize Supabase client (you'll need to provide credentials)
         supabase_url = os.environ.get("SUPABASE_URL")
-        supabase_key = os.environ.get("SUPABASE_SERVICE_KEY")
+        supabase_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
         
         if not supabase_url or not supabase_key:
             return {"error": "Supabase credentials not configured"}
@@ -1762,7 +1762,7 @@ async def health_check():
         # Check if OpenAI API key is configured
         openai_key = os.environ.get("OPENAI_API_KEY")
         supabase_url = os.environ.get("SUPABASE_URL")
-        supabase_key = os.environ.get("SUPABASE_SERVICE_KEY")
+        supabase_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
         
         status = "healthy"
         issues = []
@@ -1776,7 +1776,7 @@ async def health_check():
             status = "degraded"
             
         if not supabase_key:
-            issues.append("SUPABASE_SERVICE_KEY not configured")
+            issues.append("SUPABASE_SERVICE_ROLE_KEY not configured")
             status = "degraded"
         
         return {
@@ -1811,7 +1811,7 @@ async def upload_and_process(
         
         # Initialize Supabase client
         supabase_url = os.environ.get("SUPABASE_URL")
-        supabase_key = os.environ.get("SUPABASE_SERVICE_KEY")
+        supabase_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
         
         if not supabase_url or not supabase_key:
             raise HTTPException(status_code=500, detail="Supabase credentials not configured")
@@ -1883,7 +1883,7 @@ async def test_database():
     """Test database connection and basic operations"""
     try:
         supabase_url = os.environ.get("SUPABASE_URL")
-        supabase_key = os.environ.get("SUPABASE_SERVICE_KEY")
+        supabase_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
         
         if not supabase_url or not supabase_key:
             return {"error": "Supabase credentials not configured"}
