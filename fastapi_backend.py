@@ -993,14 +993,23 @@ class BatchAIRowClassifier:
             """
             
             # Get AI response
-            response = self.openai.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.1,
-                max_tokens=2000
-            )
-            
-            result = response.choices[0].message.content.strip()
+            try:
+                response = self.openai.chat.completions.create(
+                    model="gpt-4o-mini",
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=0.1,
+                    max_tokens=2000
+                )
+                
+                result = response.choices[0].message.content.strip()
+                
+                if not result:
+                    logger.warning("AI returned empty response, using fallback")
+                    return [self._fallback_classification(row, platform_info, column_names) for row in rows]
+                    
+            except Exception as ai_error:
+                logger.error(f"AI request failed: {ai_error}")
+                return [self._fallback_classification(row, platform_info, column_names) for row in rows]
             
             # Clean and parse JSON response
             cleaned_result = result.strip()
@@ -1008,6 +1017,9 @@ class BatchAIRowClassifier:
                 cleaned_result = cleaned_result[7:]
             if cleaned_result.endswith('```'):
                 cleaned_result = cleaned_result[:-3]
+            
+            # Additional cleaning for common AI response issues
+            cleaned_result = cleaned_result.replace('\n', ' ').replace('\r', ' ')
             
             # Parse JSON
             try:
@@ -1026,6 +1038,38 @@ class BatchAIRowClassifier:
             except json.JSONDecodeError as e:
                 logger.error(f"Batch AI classification JSON parsing failed: {e}")
                 logger.error(f"Raw AI response: {result}")
+                
+                # Try to extract partial JSON if possible
+                try:
+                    # Look for array start
+                    start_idx = cleaned_result.find('[')
+                    if start_idx != -1:
+                        # Try to find a complete array
+                        bracket_count = 0
+                        end_idx = start_idx
+                        for i, char in enumerate(cleaned_result[start_idx:], start_idx):
+                            if char == '[':
+                                bracket_count += 1
+                            elif char == ']':
+                                bracket_count -= 1
+                                if bracket_count == 0:
+                                    end_idx = i + 1
+                                    break
+                        
+                        if end_idx > start_idx:
+                            partial_json = cleaned_result[start_idx:end_idx]
+                            partial_classifications = json.loads(partial_json)
+                            logger.info(f"Successfully parsed partial JSON with {len(partial_classifications)} classifications")
+                            
+                            # Pad with fallback classifications
+                            while len(partial_classifications) < len(rows):
+                                partial_classifications.append(self._fallback_classification(rows[len(partial_classifications)], platform_info, column_names))
+                            partial_classifications = partial_classifications[:len(rows)]
+                            
+                            return partial_classifications
+                except Exception as partial_e:
+                    logger.error(f"Failed to parse partial JSON: {partial_e}")
+                
                 # Fallback to individual classifications
                 return [self._fallback_classification(row, platform_info, column_names) for row in rows]
                 
@@ -1324,8 +1368,25 @@ class ExcelProcessor:
                         logger.warning(f"Failed to read Excel with engine {engine}: {e}")
                         continue
                 
-                # If all engines failed, raise an error
-                raise HTTPException(status_code=400, detail="Could not read Excel file with any available engine")
+                # If all engines failed, try to read as CSV (some Excel files are actually CSV)
+                try:
+                    file_stream.seek(0)
+                    # Try to read as CSV with different encodings
+                    for encoding in ['utf-8', 'latin-1', 'cp1252']:
+                        try:
+                            file_stream.seek(0)
+                            df = pd.read_csv(file_stream, encoding=encoding)
+                            if not df.empty:
+                                logger.info(f"Successfully read file as CSV with encoding {encoding}")
+                                return {'Sheet1': df}
+                        except Exception as csv_e:
+                            logger.warning(f"Failed to read as CSV with encoding {encoding}: {csv_e}")
+                            continue
+                except Exception as csv_fallback_e:
+                    logger.warning(f"CSV fallback failed: {csv_fallback_e}")
+                
+                # If all attempts failed, raise an error
+                raise HTTPException(status_code=400, detail="Could not read Excel file with any available engine or as CSV")
                 
         except Exception as e:
             logger.error(f"Error reading file {filename}: {e}")
