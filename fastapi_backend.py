@@ -775,7 +775,7 @@ class AIRowClassifier:
                             resolution_result = await self.entity_resolver.resolve_entities_batch(
                                 classification['entities'], 
                                 platform_info.get('platform', 'unknown'),
-                                file_context.get('user_id', 'test-user-123'),
+                                file_context.get('user_id', '550e8400-e29b-41d4-a716-446655440000'),
                                 row_data,
                                 column_names,
                                 file_context.get('filename', 'test-file.xlsx'),
@@ -1797,7 +1797,7 @@ async def health_check():
 @app.post("/upload-and-process")
 async def upload_and_process(
     file: UploadFile = Form(...),
-    user_id: str = Form("test-user-123"),  # Default test user ID
+    user_id: str = Form("550e8400-e29b-41d4-a716-446655440000"),  # Default test user ID
     job_id: str = Form(None)  # Optional, will generate if not provided
 ):
     """Direct file upload and processing endpoint for testing"""
@@ -1891,7 +1891,7 @@ async def test_database():
         supabase: Client = create_client(supabase_url, supabase_key)
         
         # Test basic database operations
-        test_user_id = "test-user-123"
+        test_user_id = "550e8400-e29b-41d4-a716-446655440000"
         
         # Test raw_events table
         events_count = supabase.table('raw_events').select('id', count='exact').eq('user_id', test_user_id).execute()
