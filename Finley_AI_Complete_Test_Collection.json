@@ -325,6 +325,19 @@
         },
         "description": "Test raw events statistics after processing multiple files"
       }
+    },
+    {
+      "name": "19. Test Cross-File Relationships",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/test-cross-file-relationships/{{test_user_id}}",
+          "host": ["{{base_url}}"],
+          "path": ["test-cross-file-relationships", "{{test_user_id}}"]
+        },
+        "description": "Test cross-file relationship detection (payroll ↔ payout linking)"
+      }
     }
   ]
 } 

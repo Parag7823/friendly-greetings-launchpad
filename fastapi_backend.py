@@ -20,6 +20,7 @@ import re
 import asyncio
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
+from difflib import SequenceMatcher
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -2662,13 +2663,6 @@ async def test_entity_stats(user_id: str):
         # Create test Supabase client
         supabase_url = os.getenv('SUPABASE_URL')
         supabase_key = os.getenv('SUPABASE_SERVICE_ROLE_KEY')
-        
-        if not supabase_url or not supabase_key:
-            raise Exception("SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY environment variables are required")
-        
-        # Clean the key by removing any whitespace or newlines
-        supabase_key = supabase_key.strip()
-        
         supabase = create_client(supabase_url, supabase_key)
         
         # Get entity resolution stats
@@ -2692,6 +2686,281 @@ async def test_entity_stats(user_id: str):
             "stats": {},
             "success": False
         }
+
+@app.get("/test-cross-file-relationships/{user_id}")
+async def test_cross_file_relationships(user_id: str):
+    """Test cross-file relationship detection (payroll ↔ payout)"""
+    try:
+        # Create test Supabase client
+        supabase_url = os.getenv('SUPABASE_URL')
+        supabase_key = os.getenv('SUPABASE_SERVICE_ROLE_KEY')
+        supabase = create_client(supabase_url, supabase_key)
+        
+        # Initialize relationship detector
+        relationship_detector = CrossFileRelationshipDetector(supabase)
+        
+        # Detect relationships
+        results = await relationship_detector.detect_cross_file_relationships(user_id)
+        
+        return {
+            "message": "Cross-File Relationship Analysis",
+            "user_id": user_id,
+            "success": True,
+            **results
+        }
+        
+    except Exception as e:
+        logger.error(f"Cross-file relationship test failed: {e}")
+        return {
+            "message": "Cross-File Relationship Test Failed",
+            "error": str(e),
+            "user_id": user_id,
+            "relationships": [],
+            "success": False
+        }
+
+@app.get("/test-websocket/{job_id}")
+async def test_websocket(job_id: str):
+    """Test WebSocket functionality by sending messages to a specific job"""
+    try:
+        # Send test messages to the WebSocket
+        test_messages = [
+            {"step": "reading", "message": "📖 Reading and parsing your file...", "progress": 10},
+            {"step": "analyzing", "message": "🧠 Analyzing document structure...", "progress": 20},
+            {"step": "storing", "message": "💾 Storing file metadata...", "progress": 30},
+            {"step": "processing", "message": "⚙️ Processing rows...", "progress": 50},
+            {"step": "classifying", "message": "🏷️ Classifying data...", "progress": 70},
+            {"step": "resolving", "message": "🔗 Resolving entities...", "progress": 90},
+            {"step": "complete", "message": "✅ Processing complete!", "progress": 100}
+        ]
+        
+        # Send messages with delays
+        for i, message in enumerate(test_messages):
+            await manager.send_update(job_id, message)
+            await asyncio.sleep(1)  # Wait 1 second between messages
+        
+        return {
+            "message": "WebSocket test completed",
+            "job_id": job_id,
+            "messages_sent": len(test_messages),
+            "success": True
+        }
+        
+    except Exception as e:
+        logger.error(f"WebSocket test failed: {e}")
+        return {
+            "message": "WebSocket Test Failed",
+            "error": str(e),
+            "job_id": job_id,
+            "success": False
+        }
+
+class CrossFileRelationshipDetector:
+    """Detects relationships between different file types (payroll ↔ payout)"""
+    
+    def __init__(self, supabase_client: Client):
+        self.supabase = supabase_client
+        
+    async def detect_cross_file_relationships(self, user_id: str) -> Dict[str, Any]:
+        """Detect relationships between payroll and payout files"""
+        try:
+            # Get all raw events for the user
+            events = self.supabase.table('raw_events').select('*').eq('user_id', user_id).execute()
+            
+            if not events.data:
+                return {"relationships": [], "message": "No data found for cross-file analysis"}
+            
+            # Group events by platform and type
+            payroll_events = []
+            payout_events = []
+            
+            for event in events.data:
+                payload = event.get('payload', {})
+                platform = event.get('source_platform', 'unknown')
+                
+                # Identify payroll events
+                if platform in ['gusto', 'quickbooks'] and self._is_payroll_event(payload):
+                    payroll_events.append(event)
+                
+                # Identify payout events  
+                if platform in ['razorpay', 'stripe'] and self._is_payout_event(payload):
+                    payout_events.append(event)
+            
+            # Find relationships
+            relationships = await self._find_relationships(payroll_events, payout_events)
+            
+            return {
+                "relationships": relationships,
+                "total_payroll_events": len(payroll_events),
+                "total_payout_events": len(payout_events),
+                "total_relationships": len(relationships),
+                "message": "Cross-file relationship analysis completed"
+            }
+            
+        except Exception as e:
+            logger.error(f"Cross-file relationship detection failed: {e}")
+            return {"relationships": [], "error": str(e)}
+    
+    def _is_payroll_event(self, payload: Dict) -> bool:
+        """Check if event is a payroll entry"""
+        # Check for payroll indicators
+        text = str(payload).lower()
+        payroll_keywords = ['salary', 'payroll', 'wage', 'employee', 'payment']
+        return any(keyword in text for keyword in payroll_keywords)
+    
+    def _is_payout_event(self, payload: Dict) -> bool:
+        """Check if event is a payout entry"""
+        # Check for payout indicators
+        text = str(payload).lower()
+        payout_keywords = ['payout', 'transfer', 'bank', 'withdrawal', 'payment']
+        return any(keyword in text for keyword in payout_keywords)
+    
+    async def _find_relationships(self, payroll_events: List, payout_events: List) -> List[Dict]:
+        """Find relationships between payroll and payout events"""
+        relationships = []
+        
+        for payroll in payroll_events:
+            payroll_payload = payroll.get('payload', {})
+            payroll_amount = self._extract_amount(payroll_payload)
+            payroll_entities = self._extract_entities(payroll_payload)
+            payroll_date = self._extract_date(payroll_payload)
+            
+            for payout in payout_events:
+                payout_payload = payout.get('payload', {})
+                payout_amount = self._extract_amount(payout_payload)
+                payout_entities = self._extract_entities(payout_payload)
+                payout_date = self._extract_date(payout_payload)
+                
+                # Check for relationship indicators
+                relationship_score = self._calculate_relationship_score(
+                    payroll_amount, payout_amount,
+                    payroll_entities, payout_entities,
+                    payroll_date, payout_date
+                )
+                
+                if relationship_score > 0.7:  # High confidence threshold
+                    relationships.append({
+                        "payroll_event_id": payroll.get('id'),
+                        "payout_event_id": payout.get('id'),
+                        "payroll_platform": payroll.get('source_platform'),
+                        "payout_platform": payout.get('source_platform'),
+                        "relationship_score": relationship_score,
+                        "relationship_type": "salary_to_payout",
+                        "amount_match": abs(payroll_amount - payout_amount) < 1.0,
+                        "date_match": self._dates_are_close(payroll_date, payout_date),
+                        "entity_match": self._entities_match(payroll_entities, payout_entities),
+                        "payroll_amount": payroll_amount,
+                        "payout_amount": payout_amount,
+                        "payroll_date": payroll_date,
+                        "payout_date": payout_date
+                    })
+        
+        return relationships
+    
+    def _extract_amount(self, payload: Dict) -> float:
+        """Extract amount from payload"""
+        try:
+            # Look for amount fields
+            amount_fields = ['amount', 'total', 'value', 'sum', 'payment_amount']
+            for field in amount_fields:
+                if field in payload:
+                    value = payload[field]
+                    if isinstance(value, (int, float)):
+                        return float(value)
+                    elif isinstance(value, str):
+                        # Remove currency symbols and convert
+                        cleaned = value.replace('$', '').replace(',', '').strip()
+                        return float(cleaned)
+        except:
+            pass
+        return 0.0
+    
+    def _extract_entities(self, payload: Dict) -> List[str]:
+        """Extract entity names from payload"""
+        entities = []
+        try:
+            # Look for name fields
+            name_fields = ['employee_name', 'name', 'recipient', 'payee', 'description']
+            for field in name_fields:
+                if field in payload:
+                    value = payload[field]
+                    if isinstance(value, str) and value.strip():
+                        entities.append(value.strip())
+        except:
+            pass
+        return entities
+    
+    def _extract_date(self, payload: Dict) -> Optional[datetime]:
+        """Extract date from payload"""
+        try:
+            # Look for date fields
+            date_fields = ['date', 'payment_date', 'transaction_date', 'created_at']
+            for field in date_fields:
+                if field in payload:
+                    value = payload[field]
+                    if isinstance(value, str):
+                        return datetime.fromisoformat(value.replace('Z', '+00:00'))
+                    elif isinstance(value, datetime):
+                        return value
+        except:
+            pass
+        return None
+    
+    def _calculate_relationship_score(self, payroll_amount: float, payout_amount: float,
+                                   payroll_entities: List[str], payout_entities: List[str],
+                                   payroll_date: Optional[datetime], payout_date: Optional[datetime]) -> float:
+        """Calculate relationship confidence score"""
+        score = 0.0
+        
+        # Amount matching (40% weight)
+        if payroll_amount > 0 and payout_amount > 0:
+            amount_diff = abs(payroll_amount - payout_amount)
+            if amount_diff < 1.0:  # Exact match
+                score += 0.4
+            elif amount_diff < payroll_amount * 0.01:  # Within 1%
+                score += 0.3
+            elif amount_diff < payroll_amount * 0.05:  # Within 5%
+                score += 0.2
+        
+        # Entity matching (30% weight)
+        if payroll_entities and payout_entities:
+            entity_match_score = self._calculate_entity_match_score(payroll_entities, payout_entities)
+            score += entity_match_score * 0.3
+        
+        # Date matching (30% weight)
+        if payroll_date and payout_date:
+            date_diff = abs((payroll_date - payout_date).days)
+            if date_diff <= 1:  # Same day
+                score += 0.3
+            elif date_diff <= 7:  # Within a week
+                score += 0.2
+            elif date_diff <= 30:  # Within a month
+                score += 0.1
+        
+        return min(score, 1.0)
+    
+    def _calculate_entity_match_score(self, entities1: List[str], entities2: List[str]) -> float:
+        """Calculate entity name similarity score"""
+        if not entities1 or not entities2:
+            return 0.0
+        
+        max_score = 0.0
+        for entity1 in entities1:
+            for entity2 in entities2:
+                similarity = SequenceMatcher(None, entity1.lower(), entity2.lower()).ratio()
+                max_score = max(max_score, similarity)
+        
+        return max_score
+    
+    def _entities_match(self, entities1: List[str], entities2: List[str]) -> bool:
+        """Check if entities match"""
+        return self._calculate_entity_match_score(entities1, entities2) > 0.8
+    
+    def _dates_are_close(self, date1: Optional[datetime], date2: Optional[datetime]) -> bool:
+        """Check if dates are close (within 7 days)"""
+        if not date1 or not date2:
+            return False
+        return abs((date1 - date2).days) <= 7
 
 if __name__ == "__main__":
     import uvicorn
