@@ -336,11 +336,21 @@ class DocumentAnalyzer:
         analysis = {}
         for col in revenue_cols:
             if col in df.columns:
-                analysis[col] = {
-                    "total": float(df[col].sum()) if not df[col].empty else 0,
-                    "average": float(df[col].mean()) if not df[col].empty else 0,
-                    "growth_rate": self._calculate_growth_rate(df[col]) if len(df) > 1 else None
-                }
+                try:
+                    # Convert to numeric, coerce errors to NaN
+                    numeric_data = pd.to_numeric(df[col], errors='coerce')
+                    analysis[col] = {
+                        "total": float(numeric_data.sum()) if not numeric_data.empty else 0,
+                        "average": float(numeric_data.mean()) if not numeric_data.empty else 0,
+                        "growth_rate": self._calculate_growth_rate(numeric_data) if len(numeric_data) > 1 else None
+                    }
+                except Exception as e:
+                    logger.warning(f"Could not analyze revenue column {col}: {e}")
+                    analysis[col] = {
+                        "total": 0,
+                        "average": 0,
+                        "growth_rate": None
+                    }
         return analysis
     
     def _analyze_expense_data(self, df: pd.DataFrame) -> Dict[str, Any]:
@@ -352,11 +362,21 @@ class DocumentAnalyzer:
         analysis = {}
         for col in expense_cols:
             if col in df.columns:
-                analysis[col] = {
-                    "total": float(df[col].sum()) if not df[col].empty else 0,
-                    "average": float(df[col].mean()) if not df[col].empty else 0,
-                    "percentage_of_revenue": self._calculate_expense_ratio(df, col)
-                }
+                try:
+                    # Convert to numeric, coerce errors to NaN
+                    numeric_data = pd.to_numeric(df[col], errors='coerce')
+                    analysis[col] = {
+                        "total": float(numeric_data.sum()) if not numeric_data.empty else 0,
+                        "average": float(numeric_data.mean()) if not numeric_data.empty else 0,
+                        "percentage_of_revenue": self._calculate_expense_ratio(df, col)
+                    }
+                except Exception as e:
+                    logger.warning(f"Could not analyze expense column {col}: {e}")
+                    analysis[col] = {
+                        "total": 0,
+                        "average": 0,
+                        "percentage_of_revenue": 0
+                    }
         return analysis
     
     def _calculate_profitability_metrics(self, df: pd.DataFrame) -> Dict[str, Any]:
@@ -368,8 +388,28 @@ class DocumentAnalyzer:
         metrics = {}
         
         if revenue_cols and expense_cols:
-            total_revenue = sum(df[col].sum() for col in revenue_cols if col in df.columns)
-            total_expenses = sum(df[col].sum() for col in expense_cols if col in df.columns)
+            # Safe sum calculation with proper data type handling
+            total_revenue = 0
+            for col in revenue_cols:
+                if col in df.columns:
+                    try:
+                        # Convert to numeric, coerce errors to NaN, then sum
+                        numeric_data = pd.to_numeric(df[col], errors='coerce')
+                        total_revenue += numeric_data.sum() if not numeric_data.empty else 0
+                    except Exception as e:
+                        logger.warning(f"Could not process revenue column {col}: {e}")
+                        continue
+            
+            total_expenses = 0
+            for col in expense_cols:
+                if col in df.columns:
+                    try:
+                        # Convert to numeric, coerce errors to NaN, then sum
+                        numeric_data = pd.to_numeric(df[col], errors='coerce')
+                        total_expenses += numeric_data.sum() if not numeric_data.empty else 0
+                    except Exception as e:
+                        logger.warning(f"Could not process expense column {col}: {e}")
+                        continue
             
             if total_revenue > 0:
                 metrics["gross_margin"] = ((total_revenue - total_expenses) / total_revenue) * 100
@@ -378,7 +418,12 @@ class DocumentAnalyzer:
         if profit_cols:
             for col in profit_cols:
                 if col in df.columns:
-                    metrics[f"{col}_total"] = float(df[col].sum()) if not df[col].empty else 0
+                    try:
+                        numeric_data = pd.to_numeric(df[col], errors='coerce')
+                        metrics[f"{col}_total"] = float(numeric_data.sum()) if not numeric_data.empty else 0
+                    except Exception as e:
+                        logger.warning(f"Could not process profit column {col}: {e}")
+                        metrics[f"{col}_total"] = 0
         
         return metrics
     
@@ -413,22 +458,54 @@ class DocumentAnalyzer:
     def _analyze_assets(self, df: pd.DataFrame) -> Dict[str, Any]:
         """Analyze asset-related data"""
         asset_cols = [col for col in df.columns if any(word in col.lower() for word in ['asset', 'cash', 'receivable', 'inventory'])]
-        return {"asset_columns": asset_cols, "total_assets": sum(df[col].sum() for col in asset_cols if col in df.columns)}
+        total_assets = 0
+        for col in asset_cols:
+            if col in df.columns:
+                try:
+                    numeric_data = pd.to_numeric(df[col], errors='coerce')
+                    total_assets += numeric_data.sum() if not numeric_data.empty else 0
+                except Exception as e:
+                    logger.warning(f"Could not process asset column {col}: {e}")
+        return {"asset_columns": asset_cols, "total_assets": total_assets}
     
     def _analyze_liabilities(self, df: pd.DataFrame) -> Dict[str, Any]:
         """Analyze liability-related data"""
         liability_cols = [col for col in df.columns if any(word in col.lower() for word in ['liability', 'payable', 'debt', 'loan'])]
-        return {"liability_columns": liability_cols, "total_liabilities": sum(df[col].sum() for col in liability_cols if col in df.columns)}
+        total_liabilities = 0
+        for col in liability_cols:
+            if col in df.columns:
+                try:
+                    numeric_data = pd.to_numeric(df[col], errors='coerce')
+                    total_liabilities += numeric_data.sum() if not numeric_data.empty else 0
+                except Exception as e:
+                    logger.warning(f"Could not process liability column {col}: {e}")
+        return {"liability_columns": liability_cols, "total_liabilities": total_liabilities}
     
     def _analyze_equity(self, df: pd.DataFrame) -> Dict[str, Any]:
         """Analyze equity-related data"""
         equity_cols = [col for col in df.columns if any(word in col.lower() for word in ['equity', 'capital', 'retained'])]
-        return {"equity_columns": equity_cols, "total_equity": sum(df[col].sum() for col in equity_cols if col in df.columns)}
+        total_equity = 0
+        for col in equity_cols:
+            if col in df.columns:
+                try:
+                    numeric_data = pd.to_numeric(df[col], errors='coerce')
+                    total_equity += numeric_data.sum() if not numeric_data.empty else 0
+                except Exception as e:
+                    logger.warning(f"Could not process equity column {col}: {e}")
+        return {"equity_columns": equity_cols, "total_equity": total_equity}
     
     def _analyze_payroll_data(self, df: pd.DataFrame) -> Dict[str, Any]:
         """Analyze payroll-related data"""
         payroll_cols = [col for col in df.columns if any(word in col.lower() for word in ['pay', 'salary', 'wage', 'gross', 'net'])]
-        return {"payroll_columns": payroll_cols, "total_payroll": sum(df[col].sum() for col in payroll_cols if col in df.columns)}
+        total_payroll = 0
+        for col in payroll_cols:
+            if col in df.columns:
+                try:
+                    numeric_data = pd.to_numeric(df[col], errors='coerce')
+                    total_payroll += numeric_data.sum() if not numeric_data.empty else 0
+                except Exception as e:
+                    logger.warning(f"Could not process payroll column {col}: {e}")
+        return {"payroll_columns": payroll_cols, "total_payroll": total_payroll}
     
     def _analyze_employee_data(self, df: pd.DataFrame) -> Dict[str, Any]:
         """Analyze employee-related data"""
@@ -438,7 +515,15 @@ class DocumentAnalyzer:
     def _analyze_tax_data(self, df: pd.DataFrame) -> Dict[str, Any]:
         """Analyze tax-related data"""
         tax_cols = [col for col in df.columns if any(word in col.lower() for word in ['tax', 'withholding', 'deduction'])]
-        return {"tax_columns": tax_cols, "total_taxes": sum(df[col].sum() for col in tax_cols if col in df.columns)}
+        total_taxes = 0
+        for col in tax_cols:
+            if col in df.columns:
+                try:
+                    numeric_data = pd.to_numeric(df[col], errors='coerce')
+                    total_taxes += numeric_data.sum() if not numeric_data.empty else 0
+                except Exception as e:
+                    logger.warning(f"Could not process tax column {col}: {e}")
+        return {"tax_columns": tax_cols, "total_taxes": total_taxes}
 
 class PlatformDetector:
     """Enhanced platform detection for financial systems"""
