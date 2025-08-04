@@ -1,6 +1,6 @@
 -- Run this in your Supabase SQL Editor to fix the issues
 
--- 1. Create the test user
+-- 1. Create the test user in auth.users (this is the main users table)
 INSERT INTO auth.users (
     id,
     email,
@@ -100,17 +100,4 @@ BEGIN
         v_new_entities,
         v_avg_confidence;
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
-
--- 3. Also insert into public.users table if it exists
-INSERT INTO public.users (
-    id,
-    email,
-    created_at,
-    updated_at
-) VALUES (
-    '550e8400-e29b-41d4-a716-446655440000',
-    'test@finley.ai',
-    now(),
-    now()
-) ON CONFLICT (id) DO NOTHING; 
+$$ LANGUAGE plpgsql SECURITY DEFINER; 

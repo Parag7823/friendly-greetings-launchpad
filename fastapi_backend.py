@@ -1243,6 +1243,7 @@ class ExcelProcessor:
         self.entity_resolver = None
         self.ai_classifier = None
         self.row_processor = None
+        self.batch_classifier = BatchAIRowClassifier(self.openai)
     
     async def detect_file_type(self, file_content: bytes, filename: str) -> str:
         """Detect file type using magic numbers and filetype library"""
@@ -1291,44 +1292,40 @@ class ExcelProcessor:
                     raise HTTPException(status_code=400, detail="CSV file is empty")
             else:
                 # Handle Excel files with explicit engine specification
-                try:
-                    # Try openpyxl first (for .xlsx files)
-                    excel_file = pd.ExcelFile(file_stream, engine='openpyxl')
-                    sheets = {}
-                    
-                    for sheet_name in excel_file.sheet_names:
-                        df = pd.read_excel(file_stream, sheet_name=sheet_name, engine='openpyxl')
-                        if not df.empty:
-                            sheets[sheet_name] = df
-                    
-                    return sheets
-                except Exception as e1:
-                    try:
-                        # Try xlrd for older .xls files
-                        file_stream.seek(0)  # Reset stream position
-                        excel_file = pd.ExcelFile(file_stream, engine='xlrd')
-                        sheets = {}
-                        
-                        for sheet_name in excel_file.sheet_names:
-                            df = pd.read_excel(file_stream, sheet_name=sheet_name, engine='xlrd')
-                            if not df.empty:
-                                sheets[sheet_name] = df
-                        
-                        return sheets
-                    except Exception as e2:
-                        # If both fail, try with default engine
-                        file_stream.seek(0)  # Reset stream position
-                        excel_file = pd.ExcelFile(file_stream)
-                        sheets = {}
-                        
-                        for sheet_name in excel_file.sheet_names:
-                            df = pd.read_excel(file_stream, sheet_name=sheet_name)
-                            if not df.empty:
-                                sheets[sheet_name] = df
-                        
-                        return sheets
+                sheets = {}
                 
-                return sheets
+                # Try different engines in order of preference
+                engines_to_try = ['openpyxl', 'xlrd', None]  # None means default engine
+                
+                for engine in engines_to_try:
+                    try:
+                        file_stream.seek(0)  # Reset stream position for each attempt
+                        
+                        if engine:
+                            # Try with specific engine
+                            excel_file = pd.ExcelFile(file_stream, engine=engine)
+                            for sheet_name in excel_file.sheet_names:
+                                df = pd.read_excel(file_stream, sheet_name=sheet_name, engine=engine)
+                                if not df.empty:
+                                    sheets[sheet_name] = df
+                        else:
+                            # Try with default engine (no engine specified)
+                            excel_file = pd.ExcelFile(file_stream)
+                            for sheet_name in excel_file.sheet_names:
+                                df = pd.read_excel(file_stream, sheet_name=sheet_name)
+                                if not df.empty:
+                                    sheets[sheet_name] = df
+                        
+                        # If we successfully read any sheets, return them
+                        if sheets:
+                            return sheets
+                            
+                    except Exception as e:
+                        logger.warning(f"Failed to read Excel with engine {engine}: {e}")
+                        continue
+                
+                # If all engines failed, raise an error
+                raise HTTPException(status_code=400, detail="Could not read Excel file with any available engine")
                 
         except Exception as e:
             logger.error(f"Error reading file {filename}: {e}")
