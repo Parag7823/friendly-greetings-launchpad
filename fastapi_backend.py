@@ -2373,7 +2373,7 @@ async def test_entity_resolution():
                     "projects": ["Project Alpha", "Alpha Initiative"]
                 },
                 "platform": "gusto",
-                "user_id": "test-user-123",
+                "user_id": "550e8400-e29b-41d4-a716-446655440000",
                 "row_data": {
                     "employee_name": "Abhishek A.",
                     "email": "abhishek@company.com",
@@ -2393,7 +2393,7 @@ async def test_entity_resolution():
                     "projects": []
                 },
                 "platform": "razorpay",
-                "user_id": "test-user-123",
+                "user_id": "550e8400-e29b-41d4-a716-446655440000",
                 "row_data": {
                     "vendor_name": "Razorpay Payout",
                     "bank_account": "1234567890",
