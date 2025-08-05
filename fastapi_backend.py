@@ -21,6 +21,8 @@ import asyncio
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from difflib import SequenceMatcher
+import aiohttp
+import requests
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -40,6 +42,560 @@ app.add_middleware(
 
 # Initialize OpenAI client
 openai = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+
+class CurrencyNormalizer:
+    """Handles currency detection, conversion, and normalization"""
+    
+    def __init__(self):
+        self.exchange_api_base = "https://api.exchangerate-api.com/v4/latest/"
+        self.rates_cache = {}
+        self.cache_duration = timedelta(hours=24)
+    
+    async def detect_currency(self, amount: str, description: str, platform: str) -> str:
+        """Detect currency from amount, description, and platform context"""
+        try:
+            # Remove currency symbols and clean amount
+            cleaned_amount = re.sub(r'[^\d.-]', '', str(amount))
+            
+            # Platform-specific currency detection
+            platform_currencies = {
+                'razorpay': 'INR',
+                'stripe': 'USD',
+                'paypal': 'USD',
+                'gusto': 'USD',
+                'quickbooks': 'USD',
+                'xero': 'USD'
+            }
+            
+            # Check for currency symbols in description
+            currency_symbols = {
+                '$': 'USD',
+                '₹': 'INR',
+                '€': 'EUR',
+                '£': 'GBP',
+                '¥': 'JPY'
+            }
+            
+            for symbol, currency in currency_symbols.items():
+                if symbol in str(description):
+                    return currency
+            
+            # Check for currency codes in description
+            currency_codes = ['USD', 'INR', 'EUR', 'GBP', 'JPY', 'CAD', 'AUD']
+            for code in currency_codes:
+                if code.lower() in str(description).lower():
+                    return code
+            
+            # Platform-based default
+            if platform in platform_currencies:
+                return platform_currencies[platform]
+            
+            # Default to USD
+            return 'USD'
+            
+        except Exception as e:
+            logger.error(f"Currency detection failed: {e}")
+            return 'USD'
+    
+    async def get_exchange_rate(self, from_currency: str, to_currency: str = 'USD', date: str = None) -> float:
+        """Get exchange rate for currency conversion"""
+        try:
+            # Use current date if not provided
+            if not date:
+                date = datetime.now().strftime('%Y-%m-%d')
+            
+            # Check cache first
+            cache_key = f"{from_currency}_{to_currency}_{date}"
+            if cache_key in self.rates_cache:
+                cached_rate, cached_time = self.rates_cache[cache_key]
+                if datetime.now() - cached_time < self.cache_duration:
+                    return cached_rate
+            
+            # Fetch from API
+            if from_currency == to_currency:
+                rate = 1.0
+            else:
+                url = f"{self.exchange_api_base}{from_currency}"
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(url) as response:
+                        if response.status == 200:
+                            data = await response.json()
+                            rate = data['rates'].get(to_currency, 1.0)
+                        else:
+                            # Fallback to hardcoded rates for common currencies
+                            fallback_rates = {
+                                'INR': 0.012,
+                                'EUR': 1.08,
+                                'GBP': 1.26,
+                                'JPY': 0.0067,
+                                'CAD': 0.74,
+                                'AUD': 0.66
+                            }
+                            rate = fallback_rates.get(from_currency, 1.0)
+            
+            # Cache the rate
+            self.rates_cache[cache_key] = (rate, datetime.now())
+            return rate
+            
+        except Exception as e:
+            logger.error(f"Exchange rate fetch failed: {e}")
+            # Return fallback rate
+            fallback_rates = {
+                'INR': 0.012,
+                'EUR': 1.08,
+                'GBP': 1.26,
+                'JPY': 0.0067,
+                'CAD': 0.74,
+                'AUD': 0.66
+            }
+            return fallback_rates.get(from_currency, 1.0)
+    
+    async def normalize_currency(self, amount: float, currency: str, description: str, platform: str, date: str = None) -> Dict[str, Any]:
+        """Normalize currency and convert to USD"""
+        try:
+            # Detect currency if not provided
+            if not currency:
+                currency = await self.detect_currency(amount, description, platform)
+            
+            # Get exchange rate
+            exchange_rate = await self.get_exchange_rate(currency, 'USD', date)
+            
+            # Convert to USD
+            amount_usd = amount * exchange_rate
+            
+            return {
+                "amount_original": amount,
+                "amount_usd": round(amount_usd, 2),
+                "currency": currency,
+                "exchange_rate": round(exchange_rate, 6),
+                "exchange_date": date or datetime.now().strftime('%Y-%m-%d')
+            }
+            
+        except Exception as e:
+            logger.error(f"Currency normalization failed: {e}")
+            return {
+                "amount_original": amount,
+                "amount_usd": amount,
+                "currency": currency or 'USD',
+                "exchange_rate": 1.0,
+                "exchange_date": date or datetime.now().strftime('%Y-%m-%d')
+            }
+
+class VendorStandardizer:
+    """Handles vendor name standardization and cleaning"""
+    
+    def __init__(self, openai_client):
+        self.openai = openai_client
+        self.vendor_cache = {}
+        self.common_suffixes = [
+            ' inc', ' corp', ' llc', ' ltd', ' co', ' company', ' pvt', ' private',
+            ' limited', ' corporation', ' incorporated', ' enterprises', ' solutions',
+            ' services', ' systems', ' technologies', ' tech', ' group', ' holdings'
+        ]
+    
+    async def standardize_vendor(self, vendor_name: str, platform: str = None) -> Dict[str, Any]:
+        """Standardize vendor name using AI and rule-based cleaning"""
+        try:
+            if not vendor_name or vendor_name.strip() == '':
+                return {
+                    "vendor_raw": vendor_name,
+                    "vendor_standard": "",
+                    "confidence": 0.0,
+                    "cleaning_method": "empty"
+                }
+            
+            # Check cache first
+            cache_key = f"{vendor_name}_{platform}"
+            if cache_key in self.vendor_cache:
+                return self.vendor_cache[cache_key]
+            
+            # Rule-based cleaning first
+            cleaned_name = self._rule_based_cleaning(vendor_name)
+            
+            # If rule-based cleaning is sufficient, use it
+            if cleaned_name != vendor_name:
+                result = {
+                    "vendor_raw": vendor_name,
+                    "vendor_standard": cleaned_name,
+                    "confidence": 0.8,
+                    "cleaning_method": "rule_based"
+                }
+                self.vendor_cache[cache_key] = result
+                return result
+            
+            # Use AI for complex cases
+            ai_result = await self._ai_standardization(vendor_name, platform)
+            self.vendor_cache[cache_key] = ai_result
+            return ai_result
+            
+        except Exception as e:
+            logger.error(f"Vendor standardization failed: {e}")
+            return {
+                "vendor_raw": vendor_name,
+                "vendor_standard": vendor_name,
+                "confidence": 0.5,
+                "cleaning_method": "fallback"
+            }
+    
+    def _rule_based_cleaning(self, vendor_name: str) -> str:
+        """Rule-based vendor name cleaning"""
+        try:
+            # Convert to lowercase and clean
+            cleaned = vendor_name.lower().strip()
+            
+            # Remove common suffixes
+            for suffix in self.common_suffixes:
+                if cleaned.endswith(suffix):
+                    cleaned = cleaned[:-len(suffix)]
+            
+            # Remove extra whitespace
+            cleaned = ' '.join(cleaned.split())
+            
+            # Capitalize properly
+            cleaned = cleaned.title()
+            
+            # Handle common abbreviations
+            abbreviations = {
+                'Ggl': 'Google',
+                'Msoft': 'Microsoft',
+                'Msft': 'Microsoft',
+                'Amzn': 'Amazon',
+                'Aapl': 'Apple',
+                'Nflx': 'Netflix',
+                'Tsla': 'Tesla'
+            }
+            
+            if cleaned in abbreviations:
+                cleaned = abbreviations[cleaned]
+            
+            return cleaned
+            
+        except Exception as e:
+            logger.error(f"Rule-based cleaning failed: {e}")
+            return vendor_name
+    
+    async def _ai_standardization(self, vendor_name: str, platform: str = None) -> Dict[str, Any]:
+        """AI-powered vendor name standardization"""
+        try:
+            prompt = f"""
+            Standardize this vendor name to a clean, canonical form.
+            
+            VENDOR NAME: {vendor_name}
+            PLATFORM: {platform or 'unknown'}
+            
+            Rules:
+            1. Remove legal suffixes (Inc, Corp, LLC, Ltd, etc.)
+            2. Standardize common company names
+            3. Handle abbreviations and variations
+            4. Return a clean, professional name
+            
+            Examples:
+            - "Google LLC" → "Google"
+            - "Microsoft Corporation" → "Microsoft"
+            - "AMAZON.COM INC" → "Amazon"
+            - "Apple Inc." → "Apple"
+            - "Netflix, Inc." → "Netflix"
+            
+            Return ONLY a valid JSON object:
+            {{
+                "standard_name": "cleaned_vendor_name",
+                "confidence": 0.95,
+                "reasoning": "brief_explanation"
+            }}
+            """
+            
+            response = self.openai.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.1,
+                max_tokens=200
+            )
+            
+            result = response.choices[0].message.content.strip()
+            
+            # Clean and parse JSON
+            cleaned_result = result.strip()
+            if cleaned_result.startswith('```json'):
+                cleaned_result = cleaned_result[7:]
+            if cleaned_result.endswith('```'):
+                cleaned_result = cleaned_result[:-3]
+            
+            parsed = json.loads(cleaned_result)
+            
+            return {
+                "vendor_raw": vendor_name,
+                "vendor_standard": parsed.get('standard_name', vendor_name),
+                "confidence": parsed.get('confidence', 0.7),
+                "cleaning_method": "ai_powered",
+                "reasoning": parsed.get('reasoning', 'AI standardization')
+            }
+            
+        except Exception as e:
+            logger.error(f"AI vendor standardization failed: {e}")
+            return {
+                "vendor_raw": vendor_name,
+                "vendor_standard": vendor_name,
+                "confidence": 0.5,
+                "cleaning_method": "ai_fallback"
+            }
+
+class PlatformIDExtractor:
+    """Extracts platform-specific IDs and metadata"""
+    
+    def __init__(self):
+        self.platform_patterns = {
+            'razorpay': {
+                'payment_id': r'pay_[a-zA-Z0-9]{14}',
+                'order_id': r'order_[a-zA-Z0-9]{14}',
+                'refund_id': r'rfnd_[a-zA-Z0-9]{14}',
+                'settlement_id': r'setl_[a-zA-Z0-9]{14}'
+            },
+            'stripe': {
+                'charge_id': r'ch_[a-zA-Z0-9]{24}',
+                'payment_intent': r'pi_[a-zA-Z0-9]{24}',
+                'customer_id': r'cus_[a-zA-Z0-9]{14}',
+                'invoice_id': r'in_[a-zA-Z0-9]{24}'
+            },
+            'gusto': {
+                'employee_id': r'emp_[a-zA-Z0-9]{8}',
+                'payroll_id': r'pay_[a-zA-Z0-9]{12}',
+                'timesheet_id': r'ts_[a-zA-Z0-9]{10}'
+            },
+            'quickbooks': {
+                'transaction_id': r'txn_[a-zA-Z0-9]{12}',
+                'invoice_id': r'inv_[a-zA-Z0-9]{10}',
+                'vendor_id': r'ven_[a-zA-Z0-9]{8}',
+                'customer_id': r'cust_[a-zA-Z0-9]{8}'
+            },
+            'xero': {
+                'invoice_id': r'INV-[0-9]{4}-[0-9]{6}',
+                'contact_id': r'[a-zA-Z0-9]{8}-[a-zA-Z0-9]{4}-[a-zA-Z0-9]{4}',
+                'bank_transaction_id': r'BT-[0-9]{8}'
+            }
+        }
+    
+    def extract_platform_ids(self, row_data: Dict, platform: str, column_names: List[str]) -> Dict[str, Any]:
+        """Extract platform-specific IDs from row data"""
+        try:
+            extracted_ids = {}
+            platform_lower = platform.lower()
+            
+            # Get patterns for this platform
+            patterns = self.platform_patterns.get(platform_lower, {})
+            
+            # Search in all text fields
+            all_text = ' '.join(str(val) for val in row_data.values() if val)
+            
+            for id_type, pattern in patterns.items():
+                matches = re.findall(pattern, all_text, re.IGNORECASE)
+                if matches:
+                    extracted_ids[id_type] = matches[0]  # Take first match
+            
+            # Also check column names for ID patterns
+            for col_name in column_names:
+                col_lower = col_name.lower()
+                if any(id_type in col_lower for id_type in ['id', 'reference', 'number']):
+                    col_value = row_data.get(col_name)
+                    if col_value:
+                        # Check if this column value matches any pattern
+                        for id_type, pattern in patterns.items():
+                            if re.match(pattern, str(col_value), re.IGNORECASE):
+                                extracted_ids[id_type] = str(col_value)
+                                break
+            
+            # Generate a unique platform ID if none found
+            if not extracted_ids:
+                extracted_ids['platform_generated_id'] = f"{platform_lower}_{hash(str(row_data)) % 10000:04d}"
+            
+            return {
+                "platform": platform,
+                "extracted_ids": extracted_ids,
+                "total_ids_found": len(extracted_ids)
+            }
+            
+        except Exception as e:
+            logger.error(f"Platform ID extraction failed: {e}")
+            return {
+                "platform": platform,
+                "extracted_ids": {},
+                "total_ids_found": 0,
+                "error": str(e)
+            }
+
+class DataEnrichmentProcessor:
+    """Orchestrates all data enrichment processes"""
+    
+    def __init__(self, openai_client):
+        self.currency_normalizer = CurrencyNormalizer()
+        self.vendor_standardizer = VendorStandardizer(openai_client)
+        self.platform_id_extractor = PlatformIDExtractor()
+    
+    async def enrich_row_data(self, row_data: Dict, platform_info: Dict, column_names: List[str], 
+                            ai_classification: Dict, file_context: Dict) -> Dict[str, Any]:
+        """Enrich row data with currency, vendor, and platform information"""
+        try:
+            # Extract basic information
+            amount = self._extract_amount(row_data)
+            description = self._extract_description(row_data)
+            platform = platform_info.get('platform', 'unknown')
+            date = self._extract_date(row_data)
+            
+            # 1. Currency normalization
+            currency_info = await self.currency_normalizer.normalize_currency(
+                amount=amount,
+                currency=None,  # Will be detected
+                description=description,
+                platform=platform,
+                date=date
+            )
+            
+            # 2. Vendor standardization
+            vendor_name = self._extract_vendor_name(row_data, column_names)
+            vendor_info = await self.vendor_standardizer.standardize_vendor(
+                vendor_name=vendor_name,
+                platform=platform
+            )
+            
+            # 3. Platform ID extraction
+            platform_ids = self.platform_id_extractor.extract_platform_ids(
+                row_data=row_data,
+                platform=platform,
+                column_names=column_names
+            )
+            
+            # 4. Create enhanced payload
+            enriched_payload = {
+                # Basic classification
+                "kind": ai_classification.get('row_type', 'transaction'),
+                "category": ai_classification.get('category', 'other'),
+                "subcategory": ai_classification.get('subcategory', 'general'),
+                
+                # Currency information
+                "currency": currency_info.get('currency', 'USD'),
+                "amount_original": currency_info.get('amount_original', amount),
+                "amount_usd": currency_info.get('amount_usd', amount),
+                "exchange_rate": currency_info.get('exchange_rate', 1.0),
+                "exchange_date": currency_info.get('exchange_date'),
+                
+                # Vendor information
+                "vendor_raw": vendor_info.get('vendor_raw', vendor_name),
+                "vendor_standard": vendor_info.get('vendor_standard', vendor_name),
+                "vendor_confidence": vendor_info.get('confidence', 0.0),
+                "vendor_cleaning_method": vendor_info.get('cleaning_method', 'none'),
+                
+                # Platform information
+                "platform": platform,
+                "platform_confidence": platform_info.get('confidence', 0.0),
+                "platform_ids": platform_ids.get('extracted_ids', {}),
+                
+                # Enhanced metadata
+                "standard_description": self._clean_description(description),
+                "ingested_on": datetime.utcnow().isoformat(),
+                "file_source": file_context.get('filename', 'unknown'),
+                "row_index": file_context.get('row_index', 0),
+                
+                # AI classification metadata
+                "ai_confidence": ai_classification.get('confidence', 0.0),
+                "ai_reasoning": ai_classification.get('reasoning', ''),
+                "entities": ai_classification.get('entities', {}),
+                "relationships": ai_classification.get('relationships', {})
+            }
+            
+            return enriched_payload
+            
+        except Exception as e:
+            logger.error(f"Data enrichment failed: {e}")
+            # Return basic payload if enrichment fails
+            return {
+                "kind": ai_classification.get('row_type', 'transaction'),
+                "category": ai_classification.get('category', 'other'),
+                "amount_original": self._extract_amount(row_data),
+                "amount_usd": self._extract_amount(row_data),
+                "currency": "USD",
+                "vendor_raw": self._extract_vendor_name(row_data, column_names),
+                "vendor_standard": self._extract_vendor_name(row_data, column_names),
+                "platform": platform_info.get('platform', 'unknown'),
+                "ingested_on": datetime.utcnow().isoformat(),
+                "enrichment_error": str(e)
+            }
+    
+    def _extract_amount(self, row_data: Dict) -> float:
+        """Extract amount from row data"""
+        try:
+            # Look for amount fields
+            amount_fields = ['amount', 'total', 'value', 'sum', 'payment_amount', 'price']
+            for field in amount_fields:
+                if field in row_data:
+                    value = row_data[field]
+                    if isinstance(value, (int, float)):
+                        return float(value)
+                    elif isinstance(value, str):
+                        # Remove currency symbols and convert
+                        cleaned = re.sub(r'[^\d.-]', '', value)
+                        return float(cleaned) if cleaned else 0.0
+        except:
+            pass
+        return 0.0
+    
+    def _extract_description(self, row_data: Dict) -> str:
+        """Extract description from row data"""
+        desc_fields = ['description', 'memo', 'notes', 'details', 'comment']
+        for field in desc_fields:
+            if field in row_data:
+                return str(row_data[field])
+        return ""
+    
+    def _extract_vendor_name(self, row_data: Dict, column_names: List[str]) -> str:
+        """Extract vendor name from row data"""
+        vendor_fields = ['vendor', 'vendor_name', 'payee', 'recipient', 'company', 'merchant']
+        for field in vendor_fields:
+            if field in row_data:
+                return str(row_data[field])
+        
+        # Check column names for vendor patterns
+        for col in column_names:
+            if any(vendor_word in col.lower() for vendor_word in ['vendor', 'payee', 'recipient', 'company']):
+                if col in row_data:
+                    return str(row_data[col])
+        
+        return ""
+    
+    def _extract_date(self, row_data: Dict) -> str:
+        """Extract date from row data"""
+        date_fields = ['date', 'payment_date', 'transaction_date', 'created_at', 'timestamp']
+        for field in date_fields:
+            if field in row_data:
+                date_val = row_data[field]
+                if isinstance(date_val, str):
+                    return date_val
+                elif isinstance(date_val, datetime):
+                    return date_val.strftime('%Y-%m-%d')
+        return datetime.now().strftime('%Y-%m-%d')
+    
+    def _clean_description(self, description: str) -> str:
+        """Clean and standardize description"""
+        try:
+            if not description:
+                return ""
+            
+            # Remove extra whitespace
+            cleaned = ' '.join(description.split())
+            
+            # Remove common prefixes
+            prefixes_to_remove = ['Payment for ', 'Transaction for ', 'Invoice for ']
+            for prefix in prefixes_to_remove:
+                if cleaned.startswith(prefix):
+                    cleaned = cleaned[len(prefix):]
+            
+            # Capitalize first letter
+            if cleaned:
+                cleaned = cleaned[0].upper() + cleaned[1:]
+            
+            return cleaned
+            
+        except Exception as e:
+            logger.error(f"Description cleaning failed: {e}")
+            return description
 
 # WebSocket connection manager
 class ConnectionManager:
@@ -1287,37 +1843,50 @@ class RowProcessor:
     
     async def process_row(self, row: pd.Series, row_index: int, sheet_name: str, 
                    platform_info: Dict, file_context: Dict, column_names: List[str]) -> Dict[str, Any]:
-        """Process a single row and create an event with AI-powered classification"""
+        """Process a single row and create an event with AI-powered classification and enrichment"""
         
         # AI-powered row classification
         ai_classification = await self.ai_classifier.classify_row_with_ai(row, platform_info, column_names, file_context)
         
         # Convert row to JSON-serializable format
-        payload = self._convert_row_to_json_serializable(row)
+        row_data = self._convert_row_to_json_serializable(row)
+        
+        # Update file context with row index
+        file_context['row_index'] = row_index
+        
+        # Data enrichment - create enhanced payload
+        enriched_payload = await self.enrichment_processor.enrich_row_data(
+            row_data=row_data,
+            platform_info=platform_info,
+            column_names=column_names,
+            ai_classification=ai_classification,
+            file_context=file_context
+        )
         
         # Create the event payload with enhanced metadata
         event = {
             "provider": "excel-upload",
-            "kind": ai_classification.get('row_type', 'general_row'),
+            "kind": enriched_payload.get('kind', 'transaction'),
             "source_platform": platform_info.get('platform', 'unknown'),
-            "payload": payload,
+            "payload": enriched_payload,  # Use enriched payload instead of raw
             "row_index": row_index,
             "sheet_name": sheet_name,
             "source_filename": file_context['filename'],
             "uploader": file_context['user_id'],
             "ingest_ts": datetime.utcnow().isoformat(),
             "status": "pending",
-            "confidence_score": ai_classification.get('confidence', 0.5),
+            "confidence_score": enriched_payload.get('ai_confidence', 0.5),
             "classification_metadata": {
                 "platform_detection": platform_info,
                 "ai_classification": ai_classification,
-                "row_type": ai_classification.get('row_type', 'general_row'),
-                "category": ai_classification.get('category', 'other'),
-                "subcategory": ai_classification.get('subcategory', 'general'),
-                "entities": ai_classification.get('entities', {}),
-                "relationships": ai_classification.get('relationships', {}),
-                "description": ai_classification.get('description', ''),
-                "reasoning": ai_classification.get('reasoning', ''),
+                "enrichment_data": enriched_payload,
+                "row_type": enriched_payload.get('kind', 'transaction'),
+                "category": enriched_payload.get('category', 'other'),
+                "subcategory": enriched_payload.get('subcategory', 'general'),
+                "entities": enriched_payload.get('entities', {}),
+                "relationships": enriched_payload.get('relationships', {}),
+                "description": enriched_payload.get('standard_description', ''),
+                "reasoning": enriched_payload.get('ai_reasoning', ''),
                 "sheet_name": sheet_name,
                 "file_context": file_context
             }
@@ -1374,6 +1943,8 @@ class ExcelProcessor:
         self.ai_classifier = None
         self.row_processor = None
         self.batch_classifier = BatchAIRowClassifier(self.openai)
+        # Initialize data enrichment processor
+        self.enrichment_processor = DataEnrichmentProcessor(self.openai)
     
     async def detect_file_type(self, file_content: bytes, filename: str) -> str:
         """Detect file type using magic numbers and filetype library"""
@@ -1626,7 +2197,8 @@ class ExcelProcessor:
                                 ai_classification = batch_classifications[i]
                                 event['classification_metadata'].update(ai_classification)
                             
-                            # Store event in raw_events table
+                            # Store event in raw_events table with enrichment fields
+                            enriched_payload = event['payload']  # This is now the enriched payload
                             event_result = supabase.table('raw_events').insert({
                                 'user_id': user_id,
                                 'file_id': file_id,
@@ -1646,7 +2218,20 @@ class ExcelProcessor:
                                 'confidence_score': event['confidence_score'],
                                 'classification_metadata': event['classification_metadata'],
                                 'entities': event['classification_metadata'].get('entities', {}),
-                                'relationships': event['classification_metadata'].get('relationships', {})
+                                'relationships': event['classification_metadata'].get('relationships', {}),
+                                # Enrichment fields
+                                'amount_original': enriched_payload.get('amount_original'),
+                                'amount_usd': enriched_payload.get('amount_usd'),
+                                'currency': enriched_payload.get('currency'),
+                                'exchange_rate': enriched_payload.get('exchange_rate'),
+                                'exchange_date': enriched_payload.get('exchange_date'),
+                                'vendor_raw': enriched_payload.get('vendor_raw'),
+                                'vendor_standard': enriched_payload.get('vendor_standard'),
+                                'vendor_confidence': enriched_payload.get('vendor_confidence'),
+                                'vendor_cleaning_method': enriched_payload.get('vendor_cleaning_method'),
+                                'platform_ids': enriched_payload.get('platform_ids', {}),
+                                'standard_description': enriched_payload.get('standard_description'),
+                                'ingested_on': enriched_payload.get('ingested_on')
                             }).execute()
                             
                             if event_result.data:
@@ -3052,6 +3637,303 @@ async def debug_environment():
             "message": "Debug Environment Failed",
             "error": str(e),
             "timestamp": datetime.utcnow().isoformat()
+        }
+
+@app.get("/test-currency-normalization")
+async def test_currency_normalization():
+    """Test currency normalization with sample data"""
+    try:
+        currency_normalizer = CurrencyNormalizer()
+        
+        test_cases = [
+            {
+                "amount": 9000,
+                "description": "Google Cloud Services ₹9000",
+                "platform": "razorpay",
+                "expected_currency": "INR"
+            },
+            {
+                "amount": 150.50,
+                "description": "Stripe payment $150.50",
+                "platform": "stripe",
+                "expected_currency": "USD"
+            },
+            {
+                "amount": 2000,
+                "description": "Office rent €2000",
+                "platform": "quickbooks",
+                "expected_currency": "EUR"
+            }
+        ]
+        
+        results = []
+        for test_case in test_cases:
+            try:
+                # Test currency detection
+                detected_currency = await currency_normalizer.detect_currency(
+                    test_case["amount"],
+                    test_case["description"],
+                    test_case["platform"]
+                )
+                
+                # Test currency normalization
+                normalized = await currency_normalizer.normalize_currency(
+                    amount=test_case["amount"],
+                    currency=detected_currency,
+                    description=test_case["description"],
+                    platform=test_case["platform"]
+                )
+                
+                results.append({
+                    "test_case": test_case,
+                    "detected_currency": detected_currency,
+                    "normalized_data": normalized,
+                    "success": True
+                })
+                
+            except Exception as e:
+                results.append({
+                    "test_case": test_case,
+                    "error": str(e),
+                    "success": False
+                })
+        
+        return {
+            "message": "Currency Normalization Test Results",
+            "total_tests": len(test_cases),
+            "successful_tests": len([r for r in results if r["success"]]),
+            "test_results": results
+        }
+        
+    except Exception as e:
+        logger.error(f"Currency normalization test failed: {e}")
+        return {
+            "message": "Currency Normalization Test Failed",
+            "error": str(e),
+            "test_results": []
+        }
+
+@app.get("/test-vendor-standardization")
+async def test_vendor_standardization():
+    """Test vendor standardization with sample data"""
+    try:
+        vendor_standardizer = VendorStandardizer(openai)
+        
+        test_cases = [
+            {
+                "vendor_name": "Google LLC",
+                "platform": "razorpay",
+                "expected_standard": "Google"
+            },
+            {
+                "vendor_name": "Microsoft Corporation",
+                "platform": "stripe",
+                "expected_standard": "Microsoft"
+            },
+            {
+                "vendor_name": "AMAZON.COM INC",
+                "platform": "quickbooks",
+                "expected_standard": "Amazon"
+            },
+            {
+                "vendor_name": "Apple Inc.",
+                "platform": "gusto",
+                "expected_standard": "Apple"
+            }
+        ]
+        
+        results = []
+        for test_case in test_cases:
+            try:
+                standardized = await vendor_standardizer.standardize_vendor(
+                    vendor_name=test_case["vendor_name"],
+                    platform=test_case["platform"]
+                )
+                
+                results.append({
+                    "test_case": test_case,
+                    "standardized_data": standardized,
+                    "success": True
+                })
+                
+            except Exception as e:
+                results.append({
+                    "test_case": test_case,
+                    "error": str(e),
+                    "success": False
+                })
+        
+        return {
+            "message": "Vendor Standardization Test Results",
+            "total_tests": len(test_cases),
+            "successful_tests": len([r for r in results if r["success"]]),
+            "test_results": results
+        }
+        
+    except Exception as e:
+        logger.error(f"Vendor standardization test failed: {e}")
+        return {
+            "message": "Vendor Standardization Test Failed",
+            "error": str(e),
+            "test_results": []
+        }
+
+@app.get("/test-platform-id-extraction")
+async def test_platform_id_extraction():
+    """Test platform ID extraction with sample data"""
+    try:
+        platform_id_extractor = PlatformIDExtractor()
+        
+        test_cases = [
+            {
+                "row_data": {
+                    "payment_id": "pay_12345678901234",
+                    "order_id": "order_98765432109876",
+                    "amount": 1000,
+                    "description": "Payment for services"
+                },
+                "platform": "razorpay",
+                "column_names": ["payment_id", "order_id", "amount", "description"]
+            },
+            {
+                "row_data": {
+                    "charge_id": "ch_123456789012345678901234",
+                    "customer_id": "cus_12345678901234",
+                    "amount": 50.00,
+                    "description": "Stripe payment"
+                },
+                "platform": "stripe",
+                "column_names": ["charge_id", "customer_id", "amount", "description"]
+            },
+            {
+                "row_data": {
+                    "employee_id": "emp_12345678",
+                    "payroll_id": "pay_123456789012",
+                    "amount": 5000,
+                    "description": "Salary payment"
+                },
+                "platform": "gusto",
+                "column_names": ["employee_id", "payroll_id", "amount", "description"]
+            }
+        ]
+        
+        results = []
+        for test_case in test_cases:
+            try:
+                extracted = platform_id_extractor.extract_platform_ids(
+                    row_data=test_case["row_data"],
+                    platform=test_case["platform"],
+                    column_names=test_case["column_names"]
+                )
+                
+                results.append({
+                    "test_case": test_case,
+                    "extracted_data": extracted,
+                    "success": True
+                })
+                
+            except Exception as e:
+                results.append({
+                    "test_case": test_case,
+                    "error": str(e),
+                    "success": False
+                })
+        
+        return {
+            "message": "Platform ID Extraction Test Results",
+            "total_tests": len(test_cases),
+            "successful_tests": len([r for r in results if r["success"]]),
+            "test_results": results
+        }
+        
+    except Exception as e:
+        logger.error(f"Platform ID extraction test failed: {e}")
+        return {
+            "message": "Platform ID Extraction Test Failed",
+            "error": str(e),
+            "test_results": []
+        }
+
+@app.get("/test-data-enrichment")
+async def test_data_enrichment():
+    """Test complete data enrichment pipeline"""
+    try:
+        enrichment_processor = DataEnrichmentProcessor(openai)
+        
+        test_cases = [
+            {
+                "row_data": {
+                    "vendor_name": "Google LLC",
+                    "amount": 9000,
+                    "description": "Google Cloud Services ₹9000",
+                    "payment_id": "pay_12345678901234"
+                },
+                "platform_info": {"platform": "razorpay", "confidence": 0.9},
+                "column_names": ["vendor_name", "amount", "description", "payment_id"],
+                "ai_classification": {
+                    "row_type": "operating_expense",
+                    "category": "expense",
+                    "subcategory": "infrastructure",
+                    "confidence": 0.95
+                },
+                "file_context": {"filename": "test-payments.csv", "user_id": "test-user"}
+            },
+            {
+                "row_data": {
+                    "vendor_name": "Microsoft Corporation",
+                    "amount": 150.50,
+                    "description": "Stripe payment $150.50 for software",
+                    "charge_id": "ch_123456789012345678901234"
+                },
+                "platform_info": {"platform": "stripe", "confidence": 0.9},
+                "column_names": ["vendor_name", "amount", "description", "charge_id"],
+                "ai_classification": {
+                    "row_type": "operating_expense",
+                    "category": "expense",
+                    "subcategory": "software",
+                    "confidence": 0.9
+                },
+                "file_context": {"filename": "test-payments.csv", "user_id": "test-user"}
+            }
+        ]
+        
+        results = []
+        for test_case in test_cases:
+            try:
+                enriched = await enrichment_processor.enrich_row_data(
+                    row_data=test_case["row_data"],
+                    platform_info=test_case["platform_info"],
+                    column_names=test_case["column_names"],
+                    ai_classification=test_case["ai_classification"],
+                    file_context=test_case["file_context"]
+                )
+                
+                results.append({
+                    "test_case": test_case,
+                    "enriched_data": enriched,
+                    "success": True
+                })
+                
+            except Exception as e:
+                results.append({
+                    "test_case": test_case,
+                    "error": str(e),
+                    "success": False
+                })
+        
+        return {
+            "message": "Data Enrichment Test Results",
+            "total_tests": len(test_cases),
+            "successful_tests": len([r for r in results if r["success"]]),
+            "test_results": results
+        }
+        
+    except Exception as e:
+        logger.error(f"Data enrichment test failed: {e}")
+        return {
+            "message": "Data Enrichment Test Failed",
+            "error": str(e),
+            "test_results": []
         }
 
 if __name__ == "__main__":
