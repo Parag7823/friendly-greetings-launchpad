@@ -1877,7 +1877,11 @@ async def test_raw_events(user_id: str):
     try:
         # Initialize Supabase client (you'll need to provide credentials)
         supabase_url = os.environ.get("SUPABASE_URL")
-        supabase_key = os.environ.get("SUPABASE_SERVICE_KEY")
+        supabase_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
+        
+        # Clean the JWT token (remove newlines and whitespace)
+        if supabase_key:
+            supabase_key = supabase_key.strip().replace('\n', '').replace('\r', '')
         
         if not supabase_url or not supabase_key:
             return {"error": "Supabase credentials not configured"}
@@ -1909,7 +1913,7 @@ async def health_check():
         # Check if OpenAI API key is configured
         openai_key = os.environ.get("OPENAI_API_KEY")
         supabase_url = os.environ.get("SUPABASE_URL")
-        supabase_key = os.environ.get("SUPABASE_SERVICE_KEY")
+        supabase_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
         
         status = "healthy"
         issues = []
@@ -1923,7 +1927,7 @@ async def health_check():
             status = "degraded"
             
         if not supabase_key:
-            issues.append("SUPABASE_SERVICE_KEY not configured")
+            issues.append("SUPABASE_SERVICE_ROLE_KEY not configured")
             status = "degraded"
         
         return {
@@ -1958,7 +1962,11 @@ async def upload_and_process(
         
         # Initialize Supabase client
         supabase_url = os.environ.get("SUPABASE_URL")
-        supabase_key = os.environ.get("SUPABASE_SERVICE_KEY")
+        supabase_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
+        
+        # Clean the JWT token (remove newlines and whitespace)
+        if supabase_key:
+            supabase_key = supabase_key.strip().replace('\n', '').replace('\r', '')
         
         if not supabase_url or not supabase_key:
             raise HTTPException(status_code=500, detail="Supabase credentials not configured")
@@ -2618,21 +2626,19 @@ async def test_entity_search(user_id: str, search_term: str = "Abhishek", entity
     try:
         # Create test Supabase client
         supabase_url = os.getenv('SUPABASE_URL')
-        supabase_key = os.getenv('SUPABASE_SERVICE_KEY')
+        supabase_key = os.getenv('SUPABASE_SERVICE_ROLE_KEY')
         
-        if not supabase_url or not supabase_key:
-            raise Exception("SUPABASE_URL and SUPABASE_SERVICE_KEY environment variables are required")
-        
-        # Clean the key by removing any whitespace or newlines
-        supabase_key = supabase_key.strip()
+        # Clean the JWT token (remove newlines and whitespace)
+        if supabase_key:
+            supabase_key = supabase_key.strip().replace('\n', '').replace('\r', '')
         
         supabase = create_client(supabase_url, supabase_key)
         
-        # Test entity search
+        # Test entity search with correct parameter name
         search_result = supabase.rpc('search_entities_by_name', {
             'user_uuid': user_id,
             'search_term': search_term,
-            'entity_type': entity_type
+            'p_entity_type': entity_type  # Fixed parameter name
         }).execute()
         
         return {
@@ -2662,7 +2668,12 @@ async def test_entity_stats(user_id: str):
     try:
         # Create test Supabase client
         supabase_url = os.getenv('SUPABASE_URL')
-        supabase_key = os.getenv('SUPABASE_SERVICE_KEY')
+        supabase_key = os.getenv('SUPABASE_SERVICE_ROLE_KEY')
+        
+        # Clean the JWT token (remove newlines and whitespace)
+        if supabase_key:
+            supabase_key = supabase_key.strip().replace('\n', '').replace('\r', '')
+        
         supabase = create_client(supabase_url, supabase_key)
         
         # Get entity resolution stats
@@ -2693,7 +2704,12 @@ async def test_cross_file_relationships(user_id: str):
     try:
         # Create test Supabase client
         supabase_url = os.getenv('SUPABASE_URL')
-        supabase_key = os.getenv('SUPABASE_SERVICE_KEY')
+        supabase_key = os.getenv('SUPABASE_SERVICE_ROLE_KEY')
+        
+        # Clean the JWT token (remove newlines and whitespace)
+        if supabase_key:
+            supabase_key = supabase_key.strip().replace('\n', '').replace('\r', '')
+        
         supabase = create_client(supabase_url, supabase_key)
         
         # Initialize relationship detector
