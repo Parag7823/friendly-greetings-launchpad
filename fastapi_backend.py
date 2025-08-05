@@ -3936,6 +3936,130 @@ async def test_data_enrichment():
             "test_results": []
         }
 
+@app.get("/test-enrichment-stats/{user_id}")
+async def test_enrichment_stats(user_id: str):
+    """Test enrichment statistics for a user"""
+    try:
+        # Initialize Supabase client
+        supabase_url = os.getenv('SUPABASE_URL')
+        supabase_key = os.getenv('SUPABASE_KEY')
+        
+        if not supabase_url or not supabase_key:
+            return {
+                "message": "Supabase credentials not configured",
+                "timestamp": datetime.utcnow().isoformat()
+            }
+        
+        supabase = create_client(supabase_url, supabase_key)
+        
+        # Call the database function
+        result = supabase.rpc('get_enrichment_stats', {'user_uuid': user_id}).execute()
+        
+        if result.data:
+            return {
+                "message": "Enrichment Statistics Retrieved Successfully",
+                "stats": result.data[0] if result.data else {},
+                "timestamp": datetime.utcnow().isoformat()
+            }
+        else:
+            return {
+                "message": "No enrichment statistics found",
+                "stats": {},
+                "timestamp": datetime.utcnow().isoformat()
+            }
+        
+    except Exception as e:
+        return {
+            "message": "Enrichment Statistics Test Failed",
+            "error": str(e),
+            "timestamp": datetime.utcnow().isoformat()
+        }
+
+@app.get("/test-vendor-search/{user_id}")
+async def test_vendor_search(user_id: str, vendor_name: str = "Google"):
+    """Test vendor search functionality"""
+    try:
+        # Initialize Supabase client
+        supabase_url = os.getenv('SUPABASE_URL')
+        supabase_key = os.getenv('SUPABASE_KEY')
+        
+        if not supabase_url or not supabase_key:
+            return {
+                "message": "Supabase credentials not configured",
+                "timestamp": datetime.utcnow().isoformat()
+            }
+        
+        supabase = create_client(supabase_url, supabase_key)
+        
+        # Call the database function
+        result = supabase.rpc('search_events_by_vendor', {
+            'user_uuid': user_id,
+            'vendor_name': vendor_name
+        }).execute()
+        
+        if result.data:
+            return {
+                "message": "Vendor Search Results Retrieved Successfully",
+                "vendor_name": vendor_name,
+                "results": result.data,
+                "count": len(result.data),
+                "timestamp": datetime.utcnow().isoformat()
+            }
+        else:
+            return {
+                "message": "No vendor search results found",
+                "vendor_name": vendor_name,
+                "results": [],
+                "count": 0,
+                "timestamp": datetime.utcnow().isoformat()
+            }
+        
+    except Exception as e:
+        return {
+            "message": "Vendor Search Test Failed",
+            "error": str(e),
+            "timestamp": datetime.utcnow().isoformat()
+        }
+
+@app.get("/test-currency-summary/{user_id}")
+async def test_currency_summary(user_id: str):
+    """Test currency conversion summary"""
+    try:
+        # Initialize Supabase client
+        supabase_url = os.getenv('SUPABASE_URL')
+        supabase_key = os.getenv('SUPABASE_KEY')
+        
+        if not supabase_url or not supabase_key:
+            return {
+                "message": "Supabase credentials not configured",
+                "timestamp": datetime.utcnow().isoformat()
+            }
+        
+        supabase = create_client(supabase_url, supabase_key)
+        
+        # Call the database function
+        result = supabase.rpc('get_currency_summary', {'user_uuid': user_id}).execute()
+        
+        if result.data:
+            return {
+                "message": "Currency Summary Retrieved Successfully",
+                "summary": result.data,
+                "timestamp": datetime.utcnow().isoformat()
+            }
+        else:
+            return {
+                "message": "No currency summary found",
+                "summary": [],
+                "timestamp": datetime.utcnow().isoformat()
+            }
+        
+    except Exception as e:
+        return {
+            "message": "Currency Summary Test Failed",
+            "error": str(e),
+            "timestamp": datetime.utcnow().isoformat()
+        }
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", 8000)))

@@ -351,6 +351,103 @@
         },
         "description": "Test cross-file relationship detection (payroll ↔ payout linking)"
       }
+    },
+    {
+      "name": "20. Test Currency Normalization",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/test-currency-normalization",
+          "host": ["{{base_url}}"],
+          "path": ["test-currency-normalization"]
+        },
+        "description": "Test currency normalization with sample data from different platforms"
+      }
+    },
+    {
+      "name": "21. Test Vendor Standardization",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/test-vendor-standardization",
+          "host": ["{{base_url}}"],
+          "path": ["test-vendor-standardization"]
+        },
+        "description": "Test vendor name standardization with AI-powered cleaning"
+      }
+    },
+    {
+      "name": "22. Test Platform ID Extraction",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/test-platform-id-extraction",
+          "host": ["{{base_url}}"],
+          "path": ["test-platform-id-extraction"]
+        },
+        "description": "Test platform-specific ID extraction (payment IDs, invoice IDs, etc.)"
+      }
+    },
+    {
+      "name": "23. Test Data Enrichment Pipeline",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/test-data-enrichment",
+          "host": ["{{base_url}}"],
+          "path": ["test-data-enrichment"]
+        },
+        "description": "Test complete data enrichment pipeline with sample financial data"
+      }
+    },
+    {
+      "name": "24. Test Enrichment Statistics",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/test-enrichment-stats/{{test_user_id}}",
+          "host": ["{{base_url}}"],
+          "path": ["test-enrichment-stats", "{{test_user_id}}"]
+        },
+        "description": "Test enrichment statistics and metrics for processed data"
+      }
+    },
+    {
+      "name": "25. Test Vendor Search",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/test-vendor-search/{{test_user_id}}?vendor_name=Google",
+          "host": ["{{base_url}}"],
+          "path": ["test-vendor-search", "{{test_user_id}}"],
+          "query": [
+            {
+              "key": "vendor_name",
+              "value": "Google"
+            }
+          ]
+        },
+        "description": "Test vendor search functionality with standardized vendor names"
+      }
+    },
+    {
+      "name": "26. Test Currency Summary",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/test-currency-summary/{{test_user_id}}",
+          "host": ["{{base_url}}"],
+          "path": ["test-currency-summary", "{{test_user_id}}"]
+        },
+        "description": "Test currency conversion summary and exchange rate statistics"
+      }
     }
   ]
 } 
