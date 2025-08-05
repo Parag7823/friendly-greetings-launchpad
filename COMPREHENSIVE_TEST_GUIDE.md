@@ -1,7 +1,7 @@
 # Comprehensive Test Guide for Finley AI Platform
 
 ## Overview
-This guide provides comprehensive testing instructions for all Finley AI platform features, including the new AI-powered relationship detection system.
+This guide provides comprehensive testing instructions for all Finley AI platform features, including the new AI-powered relationship detection system and Dynamic Platform Detection system.
 
 ## Prerequisites
 1. **Environment Setup**: Ensure all environment variables are configured
@@ -28,226 +28,288 @@ This guide provides comprehensive testing instructions for all Finley AI platfor
 - **Platform ID Extraction**: Test ID extraction from various platforms
 - **Data Enrichment Pipeline**: Test complete enrichment workflow
 
-### 4. **NEW: AI-Powered Relationship Detection Tests** 🚀
+### 4. AI-Powered Relationship Detection Tests
+- **AI Relationship Detection**: Test comprehensive relationship detection
+- **Relationship Type Discovery**: Test AI-powered discovery of relationship types
+- **AI Relationship Scoring**: Test multi-dimensional relationship scoring
+- **Relationship Validation**: Test relationship validation and filtering
 
-#### **27. Test AI Relationship Detection**
-**Purpose**: Test comprehensive AI-powered relationship detection for ANY financial data
+### 5. **NEW: Dynamic Platform Detection Tests** 🚀
+
+#### **31. Test Dynamic Platform Detection**
+**Purpose**: Test AI-powered dynamic platform detection with sample data
 
 **What it tests**:
-- Universal relationship detection across all platforms
-- AI-powered relationship type discovery
-- Multi-dimensional relationship scoring
-- Dynamic pattern learning from user data
-- Relationship validation and confidence scoring
+- AI analysis of financial data to detect platforms
+- Dynamic pattern learning from column names and data
+- Platform detection for known and unknown platforms
+- Confidence scoring for platform detection
+- Fallback detection when AI fails
 
 **Expected Response**:
 ```json
 {
-  "message": "AI Relationship Detection Test Completed",
-  "result": {
-    "relationships": [
-      {
-        "source_event_id": "uuid",
-        "target_event_id": "uuid", 
-        "relationship_type": "invoice_to_payment",
-        "confidence_score": 0.85,
-        "source_platform": "stripe",
-        "target_platform": "razorpay",
-        "amount_match": true,
-        "date_match": true,
-        "entity_match": true,
-        "detection_method": "ai_discovered"
+  "message": "Dynamic Platform Detection Test Completed",
+  "results": {
+    "stripe_sample": {
+      "platform": "stripe",
+      "confidence_score": 0.85,
+      "reasoning": "Detected Stripe-specific column names and data patterns",
+      "key_indicators": ["charge_id", "amount", "currency"],
+      "detection_method": "ai_dynamic",
+      "learned_patterns": 3,
+      "platform_info": {
+        "name": "stripe",
+        "detection_confidence": 0.85,
+        "is_custom": false,
+        "detection_count": 1
       }
-    ],
-    "total_relationships": 15,
-    "relationship_types": ["invoice_to_payment", "fee_to_transaction", "refund_to_original"],
-    "ai_discovered_count": 8,
-    "message": "Comprehensive AI-powered relationship analysis completed"
+    },
+    "razorpay_sample": {
+      "platform": "razorpay",
+      "confidence_score": 0.82,
+      "reasoning": "Detected Razorpay-specific patterns and terminology",
+      "key_indicators": ["payment_id", "amount", "currency"],
+      "detection_method": "ai_dynamic"
+    },
+    "custom_sample": {
+      "platform": "custom_payment_platform",
+      "confidence_score": 0.65,
+      "reasoning": "Detected custom patterns not matching known platforms",
+      "key_indicators": ["transaction_id", "amount", "currency"],
+      "detection_method": "ai_dynamic"
+    }
   }
 }
 ```
 
-#### **28. Test Relationship Type Discovery**
-**Purpose**: Test AI-powered discovery of relationship types in financial data
+#### **32. Test Platform Learning**
+**Purpose**: Test AI-powered platform learning from user data
 
 **What it tests**:
-- AI analysis of financial events to identify relationship patterns
-- Dynamic discovery of new relationship types
-- Platform-agnostic relationship type detection
-- Context-aware relationship classification
+- Learning platform patterns from historical user data
+- Extracting platform-specific characteristics
+- Building platform knowledge base
+- Storing learned patterns for future use
+- Analyzing platform usage statistics
 
 **Expected Response**:
 ```json
 {
-  "message": "Relationship Type Discovery Test Completed",
-  "discovered_types": [
-    "invoice_to_payment",
-    "fee_to_transaction", 
-    "refund_to_original",
-    "payroll_to_payout",
-    "tax_to_income",
-    "expense_to_reimbursement"
-  ],
-  "total_events": 50
-}
-```
-
-#### **29. Test AI Relationship Scoring**
-**Purpose**: Test multi-dimensional relationship scoring with AI-powered analysis
-
-**What it tests**:
-- Amount matching with intelligent tolerance
-- Date matching with configurable windows
-- Entity matching with fuzzy logic
-- ID matching with pattern recognition
-- Context matching with semantic analysis
-- Comprehensive scoring algorithm
-
-**Expected Response**:
-```json
-{
-  "message": "AI Relationship Scoring Test Completed",
-  "scoring_results": [
-    {
-      "relationship_type": "invoice_to_payment",
-      "comprehensive_score": 0.85,
-      "amount_score": 1.0,
-      "date_score": 0.8,
-      "entity_score": 0.9,
-      "id_score": 0.6,
-      "context_score": 0.7,
-      "event1_id": "uuid",
-      "event2_id": "uuid"
+  "message": "Platform Learning Test Completed",
+  "result": {
+    "message": "Platform learning completed",
+    "learned_patterns": 3,
+    "platforms_analyzed": ["stripe", "razorpay", "quickbooks"],
+    "patterns": {
+      "stripe": {
+        "platform": "stripe",
+        "event_count": 150,
+        "event_types": {
+          "payment": 100,
+          "refund": 30,
+          "fee": 20
+        },
+        "amount_patterns": {
+          "min": 1.0,
+          "max": 10000.0,
+          "avg": 250.5,
+          "count": 150
+        },
+        "terminology_patterns": {
+          "payment_terms": ["payment", "charge", "transaction"],
+          "id_terms": ["id", "reference", "transaction_id"]
+        }
+      }
     }
-  ]
+  }
 }
 ```
 
-#### **30. Test Relationship Validation**
-**Purpose**: Test relationship validation and filtering with confidence scoring
+#### **33. Test Platform Discovery**
+**Purpose**: Test AI-powered discovery of new platforms
 
 **What it tests**:
-- Relationship existence validation
-- Confidence score filtering
-- Event validation in database
-- Relationship metadata validation
-- Quality assurance for discovered relationships
+- Discovering new or custom platforms in user data
+- Identifying unique platform patterns and terminology
+- Detecting platforms not in standard list
+- Building knowledge of custom platforms
+- Storing platform discoveries for future reference
 
 **Expected Response**:
 ```json
 {
-  "message": "Relationship Validation Test Completed",
-  "total_relationships": 10,
-  "validated_relationships": 8,
-  "validation_results": [
-    {
-      "source_event_id": "uuid",
-      "target_event_id": "uuid",
-      "relationship_type": "test_relationship",
-      "confidence_score": 0.8,
-      "validated": true,
-      "validation_score": 0.8
-    }
-  ]
+  "message": "Platform Discovery Test Completed",
+  "result": {
+    "message": "Platform discovery completed",
+    "new_platforms": [
+      {
+        "name": "custom_accounting_system",
+        "reason": "Detected unique column patterns and terminology",
+        "confidence": 0.75
+      },
+      {
+        "name": "local_bank_platform",
+        "reason": "Found bank-specific transaction patterns",
+        "confidence": 0.68
+      }
+    ],
+    "total_platforms": 2
+  }
 }
 ```
 
-### **Key Features of AI Relationship Detection** 🧠
+#### **34. Test Platform Insights**
+**Purpose**: Test platform insights and analysis for specific platform
 
-#### **1. Universal Relationship Types**
-- **Invoice ↔ Payment** (any platform)
-- **Fee ↔ Transaction** (any platform)
-- **Refund ↔ Original** (any platform)
-- **Payroll ↔ Payout** (any platform)
-- **Tax ↔ Income** (any platform)
-- **Expense ↔ Reimbursement** (any platform)
-- **Subscription ↔ Payment** (any platform)
-- **Loan ↔ Payment** (any platform)
-- **Investment ↔ Return** (any platform)
-- **Custom relationships** discovered by AI
+**What it tests**:
+- Detailed platform characteristics analysis
+- Platform usage statistics
+- Custom indicators for platform detection
+- Platform confidence scoring
+- Historical platform detection data
 
-#### **2. Multi-Dimensional Scoring**
-- **Amount Matching** (30% weight): Intelligent tolerance per relationship type
-- **Date Matching** (20% weight): Configurable windows (1 day to 1 year)
-- **Entity Matching** (20% weight): Fuzzy logic with semantic similarity
-- **ID Matching** (15% weight): Pattern recognition for platform IDs
-- **Context Matching** (15% weight): Semantic analysis of descriptions
+**Expected Response**:
+```json
+{
+  "message": "Platform Insights Test Completed",
+  "insights": {
+    "platform": "stripe",
+    "learned_patterns": {
+      "detection_count": 5,
+      "last_detected": "2024-01-15T10:30:00Z",
+      "column_patterns": {
+        "columns": ["charge_id", "amount", "currency", "description"],
+        "data_types": {"charge_id": "object", "amount": "int64"},
+        "unique_values": {
+          "currency": ["usd", "eur"],
+          "description": ["Stripe payment", "Stripe charge"]
+        }
+      }
+    },
+    "detection_confidence": 0.85,
+    "key_characteristics": {
+      "platform": "stripe",
+      "column_patterns": {...},
+      "event_types": {"payment": 100, "refund": 30},
+      "amount_patterns": {"min": 1.0, "max": 10000.0, "avg": 250.5},
+      "terminology_patterns": {
+        "payment_terms": ["payment", "charge", "transaction"],
+        "id_terms": ["id", "reference", "transaction_id"]
+      }
+    },
+    "usage_statistics": {
+      "total_events": 150,
+      "unique_users": 3,
+      "last_used": "2024-01-15T10:30:00Z"
+    },
+    "custom_indicators": [
+      "Column: charge_id",
+      "Column: amount",
+      "payment_terms: payment, charge, transaction",
+      "id_terms: id, reference, transaction_id"
+    ]
+  }
+}
+```
 
-#### **3. AI-Powered Discovery**
-- **Dynamic Relationship Types**: AI discovers new relationship patterns
-- **Pattern Learning**: Learns from user's historical data
-- **Context Awareness**: Understands financial context and terminology
-- **Platform Agnostic**: Works with any financial platform or data source
+### **Key Features of Dynamic Platform Detection** 🧠
 
-#### **4. Intelligent Tolerance**
-- **Invoice to Payment**: Exact amount match (0.001 tolerance)
-- **Fee to Transaction**: 1% tolerance
-- **Refund to Original**: Exact amount match
-- **Payroll to Payout**: 5% tolerance
-- **Tax to Income**: 2% tolerance
-- **Investment to Return**: 10% tolerance
+#### **1. AI-Powered Platform Detection**
+- **Dynamic Analysis**: Uses AI to analyze any financial data
+- **Pattern Learning**: Learns from column names, data types, and values
+- **Context Awareness**: Understands financial terminology and structure
+- **Confidence Scoring**: Provides confidence scores for detections
 
-#### **5. Configurable Date Windows**
-- **Invoice to Payment**: 7 days
-- **Fee to Transaction**: Same day
-- **Refund to Original**: 30 days
-- **Payroll to Payout**: 3 days
-- **Tax to Income**: 90 days
-- **Investment to Return**: 1 year
+#### **2. Platform Learning System**
+- **Historical Analysis**: Learns from user's historical data
+- **Pattern Extraction**: Extracts platform-specific patterns
+- **Characteristic Building**: Builds comprehensive platform knowledge
+- **Usage Statistics**: Tracks platform usage over time
+
+#### **3. New Platform Discovery**
+- **Custom Platform Detection**: Discovers platforms not in standard list
+- **Unique Pattern Recognition**: Identifies custom patterns and terminology
+- **Platform Classification**: Categorizes new platforms automatically
+- **Knowledge Building**: Stores discoveries for future use
+
+#### **4. Platform Insights**
+- **Detailed Analysis**: Provides comprehensive platform characteristics
+- **Usage Statistics**: Shows platform usage patterns
+- **Custom Indicators**: Lists platform-specific detection indicators
+- **Confidence Metrics**: Shows detection confidence over time
+
+#### **5. Intelligent Fallback**
+- **Rule-based Detection**: Falls back to rule-based detection when AI fails
+- **Keyword Matching**: Uses platform-specific keywords
+- **Filename Analysis**: Analyzes filename patterns
+- **Column Pattern Matching**: Matches column name patterns
 
 ### **Testing Strategy** 📋
 
-#### **Phase 1: Basic Functionality**
-1. Run **Test 27** to verify AI relationship detection works
-2. Check for any errors in relationship discovery
-3. Verify that relationships are being detected
+#### **Phase 1: Basic Platform Detection**
+1. Run **Test 31** to verify dynamic platform detection works
+2. Check for accurate platform detection with sample data
+3. Verify confidence scores are reasonable
+4. Test with different platform types
 
-#### **Phase 2: Relationship Discovery**
-1. Run **Test 28** to test relationship type discovery
-2. Verify AI is discovering appropriate relationship types
-3. Check for new relationship types not in predefined list
+#### **Phase 2: Platform Learning**
+1. Run **Test 32** to test platform learning from user data
+2. Verify patterns are being learned correctly
+3. Check that platform characteristics are extracted
+4. Verify learning improves detection accuracy
 
-#### **Phase 3: Scoring Analysis**
-1. Run **Test 29** to test relationship scoring
-2. Analyze scoring results for different relationship types
-3. Verify scoring logic is working correctly
+#### **Phase 3: Platform Discovery**
+1. Run **Test 33** to test discovery of new platforms
+2. Verify AI can discover custom platforms
+3. Check that new platforms are properly categorized
+4. Verify discovery confidence scores
 
-#### **Phase 4: Validation**
-1. Run **Test 30** to test relationship validation
-2. Verify relationships are being properly validated
-3. Check confidence scores are reasonable
+#### **Phase 4: Platform Insights**
+1. Run **Test 34** to test platform insights
+2. Verify detailed platform analysis
+3. Check usage statistics are accurate
+4. Verify custom indicators are helpful
 
 #### **Phase 5: Integration Testing**
-1. Upload sample financial files
-2. Run complete relationship detection
-3. Verify relationships are discovered and stored
-4. Test with different platforms and data types
+1. Upload files from different platforms
+2. Test platform detection with real data
+3. Verify learning improves over time
+4. Test with completely new platforms
 
 ### **Expected Behaviors** ✅
 
-#### **For Invoice to Payment Relationships**:
-- Should detect when invoice amount matches payment amount
-- Should consider date proximity (within 7 days)
-- Should match vendor/entity names
-- Should have high confidence for exact matches
+#### **For Known Platforms (Stripe, Razorpay, etc.)**:
+- Should detect platform with high confidence (>0.8)
+- Should identify platform-specific column names
+- Should recognize platform terminology
+- Should provide detailed reasoning
 
-#### **For Fee to Transaction Relationships**:
-- Should detect fee amounts within transaction amounts
-- Should match same-day transactions
-- Should consider platform-specific patterns
+#### **For Custom Platforms**:
+- Should detect as custom platform
+- Should provide reasonable confidence score
+- Should identify unique patterns
+- Should store for future learning
 
-#### **For AI-Discovered Relationships**:
-- Should find relationships not in predefined types
-- Should provide confidence scores for new relationships
-- Should learn from user's data patterns
+#### **For Platform Learning**:
+- Should extract patterns from historical data
+- Should build platform characteristics
+- Should improve detection accuracy over time
+- Should store patterns for future use
+
+#### **For Platform Discovery**:
+- Should identify new platform types
+- Should provide discovery reasoning
+- Should categorize custom platforms
+- Should build knowledge base
 
 ### **Troubleshooting** 🔧
 
 #### **Common Issues**:
-1. **No relationships found**: Check if user has sufficient data
-2. **Low confidence scores**: Verify data quality and completeness
+1. **Low confidence scores**: Check data quality and completeness
+2. **Platform not detected**: Verify data has clear platform indicators
 3. **AI errors**: Check OpenAI API key and connectivity
-4. **Database errors**: Verify Supabase connection and permissions
+4. **Learning not working**: Ensure sufficient historical data exists
 
 #### **Debug Steps**:
 1. Run environment debug test first
@@ -258,47 +320,48 @@ This guide provides comprehensive testing instructions for all Finley AI platfor
 ### **Performance Considerations** ⚡
 
 #### **Optimization Features**:
-- **Caching**: Relationship patterns are cached for performance
-- **Batch Processing**: Multiple relationships processed together
-- **Intelligent Filtering**: Only high-confidence relationships stored
-- **Lazy Loading**: Relationships computed on-demand
+- **Caching**: Platform patterns are cached for performance
+- **Batch Learning**: Multiple patterns learned together
+- **Intelligent Analysis**: Only relevant data analyzed
+- **Efficient Storage**: Optimized pattern storage
 
 #### **Scalability**:
 - **Platform Agnostic**: Works with any financial platform
-- **Dynamic Discovery**: Adapts to new relationship types
-- **Configurable Thresholds**: Adjustable confidence levels
+- **Dynamic Discovery**: Adapts to new platforms automatically
+- **Configurable Analysis**: Adjustable analysis depth
 - **Efficient Algorithms**: Optimized for large datasets
 
 ## Advanced Testing
 
 ### Cross-Platform Testing
 Test with data from multiple platforms:
-- Stripe payments with Razorpay invoices
-- QuickBooks payroll with bank statements
-- Multiple payment processors
-- Different currencies and formats
+- Stripe payments and charges
+- Razorpay transactions
+- QuickBooks accounting data
+- Custom accounting systems
+- Bank statement data
 
 ### Edge Cases
-- Missing data fields
-- Inconsistent date formats
-- Currency conversion issues
-- Duplicate transactions
-- Partial matches
+- Missing column names
+- Inconsistent data formats
+- Mixed platform data
+- Custom terminology
+- Unusual data structures
 
 ### Performance Testing
-- Large datasets (1000+ events)
-- Multiple relationship types
+- Large datasets (1000+ rows)
+- Multiple platform types
 - Concurrent processing
 - Memory usage optimization
 
 ## Conclusion
 
-The AI-powered relationship detection system provides a **completely flexible and extensible** solution for discovering ANY type of financial relationship across different platforms and data sources. It uses advanced AI techniques to:
+The Dynamic Platform Detection system provides a **completely flexible and extensible** solution for detecting ANY financial platform automatically. It uses advanced AI techniques to:
 
-1. **Discover new relationship types** automatically
-2. **Score relationships** using multiple dimensions
-3. **Learn from user data** to improve over time
-4. **Handle any financial platform** or data format
-5. **Provide confidence scores** for relationship quality
+1. **Detect any platform** automatically using AI analysis
+2. **Learn from user data** to improve detection accuracy
+3. **Discover new platforms** that weren't programmed
+4. **Build platform knowledge** dynamically
+5. **Provide detailed insights** for each platform
 
-This system eliminates the limitations of hardcoded relationship types and provides a truly intelligent solution for early-stage finance teams who need to understand complex financial relationships across their entire data ecosystem. 
+This system eliminates the limitations of hardcoded platform patterns and provides a truly intelligent solution for early-stage finance teams who need to work with any financial platform or data source. 

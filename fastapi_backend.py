@@ -5302,6 +5302,507 @@ class AIRelationshipDetector:
             except Exception as e:
                 logger.error(f"Failed to store relationship: {e}")
 
+class DynamicPlatformDetector:
+    """AI-powered dynamic platform detection that learns from ANY financial data"""
+    
+    def __init__(self, openai_client, supabase_client: Client):
+        self.openai = openai_client
+        self.supabase = supabase_client
+        self.learned_patterns = {}
+        self.platform_knowledge = {}
+        self.detection_cache = {}
+        
+    async def detect_platform_dynamically(self, df: pd.DataFrame, filename: str) -> Dict[str, Any]:
+        """Dynamically detect platform using AI analysis"""
+        try:
+            # Create comprehensive context for AI analysis
+            context = self._create_platform_context(df, filename)
+            
+            # Use AI to analyze and detect platform
+            ai_response = await self.openai.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[{
+                    "role": "system",
+                    "content": "You are a financial data analyst specializing in platform detection. Analyze the financial data and identify the platform. Consider column names, data patterns, terminology, and file structure. Return a JSON object with platform name, confidence score, reasoning, and key indicators."
+                }, {
+                    "role": "user",
+                    "content": f"Analyze this financial data and detect the platform: {context}"
+                }],
+                temperature=0.1
+            )
+            
+            # Parse AI response
+            response_text = ai_response.choices[0].message.content
+            platform_analysis = self._parse_platform_analysis(response_text)
+            
+            # Learn from this detection
+            await self._learn_platform_patterns(df, filename, platform_analysis)
+            
+            # Get platform information
+            platform_info = await self._get_platform_info(platform_analysis['platform'])
+            
+            return {
+                "platform": platform_analysis['platform'],
+                "confidence_score": platform_analysis['confidence_score'],
+                "reasoning": platform_analysis['reasoning'],
+                "key_indicators": platform_analysis['key_indicators'],
+                "detection_method": "ai_dynamic",
+                "learned_patterns": len(self.learned_patterns),
+                "platform_info": platform_info
+            }
+            
+        except Exception as e:
+            logger.error(f"Dynamic platform detection failed: {e}")
+            return self._fallback_detection(df, filename)
+    
+    async def learn_from_user_data(self, user_id: str) -> Dict[str, Any]:
+        """Learn platform patterns from user's historical data"""
+        try:
+            # Get all events for the user
+            events = self.supabase.table('raw_events').select('*').eq('user_id', user_id).execute()
+            
+            if not events.data:
+                return {"message": "No data found for platform learning", "learned_patterns": 0}
+            
+            # Group events by platform
+            platform_groups = {}
+            for event in events.data:
+                platform = event.get('source_platform', 'unknown')
+                if platform not in platform_groups:
+                    platform_groups[platform] = []
+                platform_groups[platform].append(event)
+            
+            # Learn patterns for each platform
+            learned_patterns = {}
+            for platform, platform_events in platform_groups.items():
+                if platform != 'unknown':
+                    patterns = await self._extract_platform_patterns(platform_events, platform)
+                    learned_patterns[platform] = patterns
+            
+            # Store learned patterns
+            await self._store_learned_patterns(learned_patterns, user_id)
+            
+            return {
+                "message": "Platform learning completed",
+                "learned_patterns": len(learned_patterns),
+                "platforms_analyzed": list(learned_patterns.keys()),
+                "patterns": learned_patterns
+            }
+            
+        except Exception as e:
+            logger.error(f"Platform learning failed: {e}")
+            return {"message": "Platform learning failed", "error": str(e)}
+    
+    async def discover_new_platforms(self, user_id: str) -> Dict[str, Any]:
+        """Discover new platforms in user's data"""
+        try:
+            # Get all events for the user
+            events = self.supabase.table('raw_events').select('*').eq('user_id', user_id).execute()
+            
+            if not events.data:
+                return {"message": "No data found for platform discovery", "new_platforms": []}
+            
+            # Use AI to discover new platforms
+            context = self._create_discovery_context(events.data)
+            
+            ai_response = await self.openai.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[{
+                    "role": "system",
+                    "content": "You are a financial data analyst. Analyze the financial events and identify any new or custom platforms that might not be in the standard list. Look for unique patterns, terminology, or data structures that suggest a custom platform."
+                }, {
+                    "role": "user",
+                    "content": f"Analyze these financial events and discover any new platforms: {context}"
+                }],
+                temperature=0.2
+            )
+            
+            # Parse AI discoveries
+            response_text = ai_response.choices[0].message.content
+            new_platforms = self._parse_new_platforms(response_text)
+            
+            # Store new platform discoveries
+            await self._store_new_platforms(new_platforms, user_id)
+            
+            return {
+                "message": "Platform discovery completed",
+                "new_platforms": new_platforms,
+                "total_platforms": len(new_platforms)
+            }
+            
+        except Exception as e:
+            logger.error(f"Platform discovery failed: {e}")
+            return {"message": "Platform discovery failed", "error": str(e)}
+    
+    async def get_platform_insights(self, platform: str, user_id: str = None) -> Dict[str, Any]:
+        """Get detailed insights about a platform"""
+        try:
+            insights = {
+                "platform": platform,
+                "learned_patterns": self.learned_patterns.get(platform, {}),
+                "detection_confidence": self._calculate_platform_confidence(platform),
+                "key_characteristics": await self._get_platform_characteristics(platform),
+                "usage_statistics": await self._get_platform_usage_stats(platform, user_id),
+                "custom_indicators": await self._get_custom_indicators(platform)
+            }
+            
+            return insights
+            
+        except Exception as e:
+            logger.error(f"Platform insights failed: {e}")
+            return {"platform": platform, "error": str(e)}
+    
+    def _create_platform_context(self, df: pd.DataFrame, filename: str) -> str:
+        """Create comprehensive context for platform detection"""
+        context_parts = []
+        
+        # File information
+        context_parts.append(f"Filename: {filename}")
+        
+        # Column analysis
+        columns = list(df.columns)
+        context_parts.append(f"Columns: {columns}")
+        
+        # Data sample analysis
+        sample_data = df.head(5).to_dict('records')
+        context_parts.append(f"Sample data: {sample_data}")
+        
+        # Data type analysis
+        dtypes = df.dtypes.to_dict()
+        context_parts.append(f"Data types: {dtypes}")
+        
+        # Value analysis
+        for col in df.columns:
+            if df[col].dtype in ['object', 'string']:
+                unique_values = df[col].dropna().unique()[:10]
+                context_parts.append(f"Column '{col}' unique values: {list(unique_values)}")
+        
+        return '\n'.join(context_parts)
+    
+    def _create_discovery_context(self, events: List[Dict]) -> str:
+        """Create context for platform discovery"""
+        context_parts = []
+        
+        # Group by platform
+        platform_groups = {}
+        for event in events:
+            platform = event.get('source_platform', 'unknown')
+            if platform not in platform_groups:
+                platform_groups[platform] = []
+            platform_groups[platform].append(event)
+        
+        # Create context for each platform
+        for platform, platform_events in platform_groups.items():
+            context_parts.append(f"\nPlatform: {platform}")
+            context_parts.append(f"Event count: {len(platform_events)}")
+            
+            # Sample events
+            for event in platform_events[:3]:
+                context_parts.append(f"- {event.get('kind')}: {event.get('payload', {}).get('description', '')}")
+        
+        return '\n'.join(context_parts)
+    
+    def _parse_platform_analysis(self, response_text: str) -> Dict[str, Any]:
+        """Parse platform analysis from AI response"""
+        try:
+            # Try to extract JSON
+            if '{' in response_text and '}' in response_text:
+                start = response_text.find('{')
+                end = response_text.rfind('}') + 1
+                json_str = response_text[start:end]
+                analysis = json.loads(json_str)
+                
+                return {
+                    'platform': analysis.get('platform', 'unknown'),
+                    'confidence_score': analysis.get('confidence_score', 0.5),
+                    'reasoning': analysis.get('reasoning', ''),
+                    'key_indicators': analysis.get('key_indicators', [])
+                }
+        except:
+            pass
+        
+        # Fallback parsing
+        platform = 'unknown'
+        confidence = 0.5
+        reasoning = 'AI analysis failed, using fallback detection'
+        indicators = []
+        
+        # Try to extract platform name
+        platform_keywords = ['stripe', 'razorpay', 'quickbooks', 'gusto', 'paypal', 'square']
+        response_lower = response_text.lower()
+        
+        for keyword in platform_keywords:
+            if keyword in response_lower:
+                platform = keyword
+                confidence = 0.7
+                break
+        
+        return {
+            'platform': platform,
+            'confidence_score': confidence,
+            'reasoning': reasoning,
+            'key_indicators': indicators
+        }
+    
+    def _parse_new_platforms(self, response_text: str) -> List[Dict]:
+        """Parse new platform discoveries from AI response"""
+        try:
+            # Try to extract JSON array
+            if '[' in response_text and ']' in response_text:
+                start = response_text.find('[')
+                end = response_text.rfind(']') + 1
+                json_str = response_text[start:end]
+                platforms = json.loads(json_str)
+                
+                return platforms
+        except:
+            pass
+        
+        return []
+    
+    async def _learn_platform_patterns(self, df: pd.DataFrame, filename: str, platform_analysis: Dict):
+        """Learn patterns from detected platform"""
+        platform = platform_analysis['platform']
+        
+        if platform not in self.learned_patterns:
+            self.learned_patterns[platform] = {}
+        
+        # Learn column patterns
+        column_patterns = {
+            'columns': list(df.columns),
+            'data_types': df.dtypes.to_dict(),
+            'unique_values': {}
+        }
+        
+        # Learn unique value patterns
+        for col in df.columns:
+            if df[col].dtype in ['object', 'string']:
+                unique_vals = df[col].dropna().unique()[:20]
+                column_patterns['unique_values'][col] = list(unique_vals)
+        
+        self.learned_patterns[platform]['column_patterns'] = column_patterns
+        self.learned_patterns[platform]['detection_count'] = self.learned_patterns[platform].get('detection_count', 0) + 1
+        self.learned_patterns[platform]['last_detected'] = datetime.utcnow().isoformat()
+    
+    async def _extract_platform_patterns(self, events: List[Dict], platform: str) -> Dict[str, Any]:
+        """Extract patterns from platform events"""
+        patterns = {
+            'platform': platform,
+            'event_count': len(events),
+            'event_types': {},
+            'amount_patterns': {},
+            'date_patterns': {},
+            'entity_patterns': {},
+            'terminology_patterns': {}
+        }
+        
+        # Analyze event types
+        for event in events:
+            event_type = event.get('kind', 'unknown')
+            if event_type not in patterns['event_types']:
+                patterns['event_types'][event_type] = 0
+            patterns['event_types'][event_type] += 1
+        
+        # Analyze amount patterns
+        amounts = []
+        for event in events:
+            payload = event.get('payload', {})
+            amount = self._extract_amount(payload)
+            if amount > 0:
+                amounts.append(amount)
+        
+        if amounts:
+            patterns['amount_patterns'] = {
+                'min': min(amounts),
+                'max': max(amounts),
+                'avg': sum(amounts) / len(amounts),
+                'count': len(amounts)
+            }
+        
+        # Analyze terminology patterns
+        all_text = ' '.join([str(event.get('payload', {})) for event in events])
+        patterns['terminology_patterns'] = self._extract_terminology_patterns(all_text)
+        
+        return patterns
+    
+    def _extract_terminology_patterns(self, text: str) -> Dict[str, Any]:
+        """Extract terminology patterns from text"""
+        text_lower = text.lower()
+        
+        # Common financial terms
+        financial_terms = {
+            'payment_terms': ['payment', 'charge', 'transaction', 'transfer'],
+            'invoice_terms': ['invoice', 'bill', 'receivable', 'due'],
+            'fee_terms': ['fee', 'commission', 'charge', 'cost'],
+            'refund_terms': ['refund', 'return', 'reversal', 'credit'],
+            'tax_terms': ['tax', 'withholding', 'deduction', 'gst', 'vat'],
+            'currency_terms': ['usd', 'inr', 'eur', 'currency', 'exchange'],
+            'date_terms': ['date', 'created', 'due', 'payment_date'],
+            'id_terms': ['id', 'reference', 'transaction_id', 'invoice_id']
+        }
+        
+        patterns = {}
+        for category, terms in financial_terms.items():
+            found_terms = [term for term in terms if term in text_lower]
+            if found_terms:
+                patterns[category] = found_terms
+        
+        return patterns
+    
+    async def _get_platform_info(self, platform: str) -> Dict[str, Any]:
+        """Get information about a platform"""
+        platform_info = {
+            'name': platform,
+            'learned_patterns': self.learned_patterns.get(platform, {}),
+            'detection_confidence': self._calculate_platform_confidence(platform),
+            'is_custom': platform not in ['stripe', 'razorpay', 'quickbooks', 'gusto', 'paypal', 'square'],
+            'last_detected': self.learned_patterns.get(platform, {}).get('last_detected'),
+            'detection_count': self.learned_patterns.get(platform, {}).get('detection_count', 0)
+        }
+        
+        return platform_info
+    
+    def _calculate_platform_confidence(self, platform: str) -> float:
+        """Calculate confidence score for platform detection"""
+        patterns = self.learned_patterns.get(platform, {})
+        
+        if not patterns:
+            return 0.5
+        
+        # Factors that increase confidence
+        detection_count = patterns.get('detection_count', 0)
+        has_column_patterns = 'column_patterns' in patterns
+        
+        confidence = 0.5  # Base confidence
+        
+        if detection_count > 0:
+            confidence += min(detection_count * 0.1, 0.3)
+        
+        if has_column_patterns:
+            confidence += 0.2
+        
+        return min(confidence, 1.0)
+    
+    async def _get_platform_characteristics(self, platform: str) -> Dict[str, Any]:
+        """Get characteristics of a platform"""
+        patterns = self.learned_patterns.get(platform, {})
+        
+        characteristics = {
+            'platform': platform,
+            'column_patterns': patterns.get('column_patterns', {}),
+            'event_types': patterns.get('event_types', {}),
+            'amount_patterns': patterns.get('amount_patterns', {}),
+            'terminology_patterns': patterns.get('terminology_patterns', {})
+        }
+        
+        return characteristics
+    
+    async def _get_platform_usage_stats(self, platform: str, user_id: str = None) -> Dict[str, Any]:
+        """Get usage statistics for a platform"""
+        try:
+            query = self.supabase.table('raw_events').select('*').eq('source_platform', platform)
+            
+            if user_id:
+                query = query.eq('user_id', user_id)
+            
+            result = query.execute()
+            
+            if not result.data:
+                return {'total_events': 0, 'unique_users': 0}
+            
+            total_events = len(result.data)
+            unique_users = len(set(event.get('user_id') for event in result.data))
+            
+            return {
+                'total_events': total_events,
+                'unique_users': unique_users,
+                'last_used': max(event.get('created_at', '') for event in result.data) if result.data else None
+            }
+            
+        except Exception as e:
+            logger.error(f"Failed to get platform usage stats: {e}")
+            return {'total_events': 0, 'unique_users': 0}
+    
+    async def _get_custom_indicators(self, platform: str) -> List[str]:
+        """Get custom indicators for a platform"""
+        patterns = self.learned_patterns.get(platform, {})
+        indicators = []
+        
+        # Column-based indicators
+        column_patterns = patterns.get('column_patterns', {})
+        if column_patterns:
+            columns = column_patterns.get('columns', [])
+            indicators.extend([f"Column: {col}" for col in columns[:5]])
+        
+        # Terminology-based indicators
+        terminology = patterns.get('terminology_patterns', {})
+        for category, terms in terminology.items():
+            indicators.extend([f"{category}: {', '.join(terms[:3])}"])
+        
+        return indicators[:10]  # Limit to 10 indicators
+    
+    async def _store_learned_patterns(self, patterns: Dict[str, Any], user_id: str):
+        """Store learned patterns in database"""
+        try:
+            for platform, platform_patterns in patterns.items():
+                await self.supabase.table('platform_patterns').upsert({
+                    'user_id': user_id,
+                    'platform': platform,
+                    'patterns': platform_patterns,
+                    'created_at': datetime.utcnow().isoformat(),
+                    'updated_at': datetime.utcnow().isoformat()
+                }).execute()
+        except Exception as e:
+            logger.error(f"Failed to store learned patterns: {e}")
+    
+    async def _store_new_platforms(self, new_platforms: List[Dict], user_id: str):
+        """Store new platform discoveries"""
+        try:
+            for platform_info in new_platforms:
+                await self.supabase.table('discovered_platforms').insert({
+                    'user_id': user_id,
+                    'platform_name': platform_info.get('name', 'unknown'),
+                    'discovery_reason': platform_info.get('reason', ''),
+                    'confidence_score': platform_info.get('confidence', 0.5),
+                    'discovered_at': datetime.utcnow().isoformat()
+                }).execute()
+        except Exception as e:
+            logger.error(f"Failed to store new platforms: {e}")
+    
+    def _fallback_detection(self, df: pd.DataFrame, filename: str) -> Dict[str, Any]:
+        """Fallback platform detection when AI fails"""
+        # Simple rule-based detection
+        columns = [col.lower() for col in df.columns]
+        filename_lower = filename.lower()
+        
+        # Check for platform indicators
+        if any('stripe' in col or 'stripe' in filename_lower for col in columns):
+            return {"platform": "stripe", "confidence_score": 0.6, "detection_method": "fallback"}
+        elif any('razorpay' in col or 'razorpay' in filename_lower for col in columns):
+            return {"platform": "razorpay", "confidence_score": 0.6, "detection_method": "fallback"}
+        elif any('quickbooks' in col or 'quickbooks' in filename_lower for col in columns):
+            return {"platform": "quickbooks", "confidence_score": 0.6, "detection_method": "fallback"}
+        elif any('gusto' in col or 'gusto' in filename_lower for col in columns):
+            return {"platform": "gusto", "confidence_score": 0.6, "detection_method": "fallback"}
+        else:
+            return {"platform": "unknown", "confidence_score": 0.3, "detection_method": "fallback"}
+    
+    def _extract_amount(self, payload: Dict) -> float:
+        """Extract amount from payload"""
+        try:
+            amount_fields = ['amount', 'total', 'value', 'sum', 'payment_amount', 'charge_amount']
+            for field in amount_fields:
+                if field in payload:
+                    value = payload[field]
+                    if isinstance(value, (int, float)):
+                        return float(value)
+                    elif isinstance(value, str):
+                        cleaned = value.replace('$', '').replace(',', '').strip()
+                        return float(cleaned)
+        except:
+            pass
+        return 0.0
+
 @app.get("/test-ai-relationship-detection/{user_id}")
 async def test_ai_relationship_detection(user_id: str):
     """Test AI-powered relationship detection"""
@@ -5511,6 +6012,177 @@ async def test_relationship_validation(user_id: str):
     except Exception as e:
         return {
             "message": "Relationship Validation Test Failed",
+            "error": str(e),
+            "timestamp": datetime.utcnow().isoformat()
+        }
+
+@app.get("/test-dynamic-platform-detection")
+async def test_dynamic_platform_detection():
+    """Test AI-powered dynamic platform detection"""
+    try:
+        # Initialize OpenAI and Supabase clients
+        openai_client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
+        supabase_url = os.getenv('SUPABASE_URL')
+        supabase_key = os.getenv('SUPABASE_KEY')
+        
+        if not supabase_url or not supabase_key:
+            return {
+                "message": "Supabase credentials not configured",
+                "timestamp": datetime.utcnow().isoformat()
+            }
+        
+        supabase = create_client(supabase_url, supabase_key)
+        
+        # Initialize Dynamic Platform Detector
+        dynamic_detector = DynamicPlatformDetector(openai_client, supabase)
+        
+        # Create sample data for testing
+        sample_data = {
+            'stripe_sample': pd.DataFrame({
+                'charge_id': ['ch_123', 'ch_456'],
+                'amount': [1000, 2000],
+                'currency': ['usd', 'usd'],
+                'description': ['Stripe payment', 'Stripe charge'],
+                'created': ['2024-01-01', '2024-01-02']
+            }),
+            'razorpay_sample': pd.DataFrame({
+                'payment_id': ['pay_789', 'pay_012'],
+                'amount': [5000, 7500],
+                'currency': ['inr', 'inr'],
+                'description': ['Razorpay payment', 'Razorpay transaction'],
+                'created_at': ['2024-01-01', '2024-01-02']
+            }),
+            'custom_sample': pd.DataFrame({
+                'transaction_id': ['txn_001', 'txn_002'],
+                'amount': [1500, 3000],
+                'currency': ['usd', 'usd'],
+                'description': ['Custom payment', 'Custom transaction'],
+                'date': ['2024-01-01', '2024-01-02']
+            })
+        }
+        
+        results = {}
+        for platform_name, df in sample_data.items():
+            result = await dynamic_detector.detect_platform_dynamically(df, f"{platform_name}.csv")
+            results[platform_name] = result
+        
+        return {
+            "message": "Dynamic Platform Detection Test Completed",
+            "results": results,
+            "timestamp": datetime.utcnow().isoformat()
+        }
+        
+    except Exception as e:
+        return {
+            "message": "Dynamic Platform Detection Test Failed",
+            "error": str(e),
+            "timestamp": datetime.utcnow().isoformat()
+        }
+
+@app.get("/test-platform-learning/{user_id}")
+async def test_platform_learning(user_id: str):
+    """Test AI-powered platform learning from user data"""
+    try:
+        # Initialize OpenAI and Supabase clients
+        openai_client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
+        supabase_url = os.getenv('SUPABASE_URL')
+        supabase_key = os.getenv('SUPABASE_KEY')
+        
+        if not supabase_url or not supabase_key:
+            return {
+                "message": "Supabase credentials not configured",
+                "timestamp": datetime.utcnow().isoformat()
+            }
+        
+        supabase = create_client(supabase_url, supabase_key)
+        
+        # Initialize Dynamic Platform Detector
+        dynamic_detector = DynamicPlatformDetector(openai_client, supabase)
+        
+        # Learn from user data
+        result = await dynamic_detector.learn_from_user_data(user_id)
+        
+        return {
+            "message": "Platform Learning Test Completed",
+            "result": result,
+            "timestamp": datetime.utcnow().isoformat()
+        }
+        
+    except Exception as e:
+        return {
+            "message": "Platform Learning Test Failed",
+            "error": str(e),
+            "timestamp": datetime.utcnow().isoformat()
+        }
+
+@app.get("/test-platform-discovery/{user_id}")
+async def test_platform_discovery(user_id: str):
+    """Test AI-powered discovery of new platforms"""
+    try:
+        # Initialize OpenAI and Supabase clients
+        openai_client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
+        supabase_url = os.getenv('SUPABASE_URL')
+        supabase_key = os.getenv('SUPABASE_KEY')
+        
+        if not supabase_url or not supabase_key:
+            return {
+                "message": "Supabase credentials not configured",
+                "timestamp": datetime.utcnow().isoformat()
+            }
+        
+        supabase = create_client(supabase_url, supabase_key)
+        
+        # Initialize Dynamic Platform Detector
+        dynamic_detector = DynamicPlatformDetector(openai_client, supabase)
+        
+        # Discover new platforms
+        result = await dynamic_detector.discover_new_platforms(user_id)
+        
+        return {
+            "message": "Platform Discovery Test Completed",
+            "result": result,
+            "timestamp": datetime.utcnow().isoformat()
+        }
+        
+    except Exception as e:
+        return {
+            "message": "Platform Discovery Test Failed",
+            "error": str(e),
+            "timestamp": datetime.utcnow().isoformat()
+        }
+
+@app.get("/test-platform-insights/{platform}")
+async def test_platform_insights(platform: str, user_id: str = None):
+    """Test platform insights and analysis"""
+    try:
+        # Initialize OpenAI and Supabase clients
+        openai_client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
+        supabase_url = os.getenv('SUPABASE_URL')
+        supabase_key = os.getenv('SUPABASE_KEY')
+        
+        if not supabase_url or not supabase_key:
+            return {
+                "message": "Supabase credentials not configured",
+                "timestamp": datetime.utcnow().isoformat()
+            }
+        
+        supabase = create_client(supabase_url, supabase_key)
+        
+        # Initialize Dynamic Platform Detector
+        dynamic_detector = DynamicPlatformDetector(openai_client, supabase)
+        
+        # Get platform insights
+        insights = await dynamic_detector.get_platform_insights(platform, user_id)
+        
+        return {
+            "message": "Platform Insights Test Completed",
+            "insights": insights,
+            "timestamp": datetime.utcnow().isoformat()
+        }
+        
+    except Exception as e:
+        return {
+            "message": "Platform Insights Test Failed",
             "error": str(e),
             "timestamp": datetime.utcnow().isoformat()
         }

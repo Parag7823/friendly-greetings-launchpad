@@ -500,6 +500,58 @@
         },
         "description": "Test relationship validation and filtering with confidence scoring"
       }
+    },
+    {
+      "name": "31. Test Dynamic Platform Detection",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/test-dynamic-platform-detection",
+          "host": ["{{base_url}}"],
+          "path": ["test-dynamic-platform-detection"]
+        },
+        "description": "Test AI-powered dynamic platform detection with sample data"
+      }
+    },
+    {
+      "name": "32. Test Platform Learning",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/test-platform-learning/{{test_user_id}}",
+          "host": ["{{base_url}}"],
+          "path": ["test-platform-learning", "{{test_user_id}}"]
+        },
+        "description": "Test AI-powered platform learning from user data"
+      }
+    },
+    {
+      "name": "33. Test Platform Discovery",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/test-platform-discovery/{{test_user_id}}",
+          "host": ["{{base_url}}"],
+          "path": ["test-platform-discovery", "{{test_user_id}}"]
+        },
+        "description": "Test AI-powered discovery of new platforms"
+      }
+    },
+    {
+      "name": "34. Test Platform Insights",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/test-platform-insights/stripe",
+          "host": ["{{base_url}}"],
+          "path": ["test-platform-insights", "stripe"]
+        },
+        "description": "Test platform insights and analysis for specific platform"
+      }
     }
   ]
 } 
