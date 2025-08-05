@@ -1877,7 +1877,7 @@ async def test_raw_events(user_id: str):
     try:
         # Initialize Supabase client (you'll need to provide credentials)
         supabase_url = os.environ.get("SUPABASE_URL")
-        supabase_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
+        supabase_key = os.environ.get("SUPABASE_SERVICE_KEY")
         
         if not supabase_url or not supabase_key:
             return {"error": "Supabase credentials not configured"}
@@ -1909,7 +1909,7 @@ async def health_check():
         # Check if OpenAI API key is configured
         openai_key = os.environ.get("OPENAI_API_KEY")
         supabase_url = os.environ.get("SUPABASE_URL")
-        supabase_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
+        supabase_key = os.environ.get("SUPABASE_SERVICE_KEY")
         
         status = "healthy"
         issues = []
@@ -1923,7 +1923,7 @@ async def health_check():
             status = "degraded"
             
         if not supabase_key:
-            issues.append("SUPABASE_SERVICE_ROLE_KEY not configured")
+            issues.append("SUPABASE_SERVICE_KEY not configured")
             status = "degraded"
         
         return {
@@ -1958,7 +1958,7 @@ async def upload_and_process(
         
         # Initialize Supabase client
         supabase_url = os.environ.get("SUPABASE_URL")
-        supabase_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
+        supabase_key = os.environ.get("SUPABASE_SERVICE_KEY")
         
         if not supabase_url or not supabase_key:
             raise HTTPException(status_code=500, detail="Supabase credentials not configured")
@@ -2030,7 +2030,7 @@ async def test_database():
     """Test database connection and basic operations"""
     try:
         supabase_url = os.environ.get("SUPABASE_URL")
-        supabase_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
+        supabase_key = os.environ.get("SUPABASE_SERVICE_KEY")
         
         if not supabase_url or not supabase_key:
             return {"error": "Supabase credentials not configured"}
@@ -2502,10 +2502,10 @@ async def test_entity_resolution():
     try:
         # Create test Supabase client
         supabase_url = os.getenv('SUPABASE_URL')
-        supabase_key = os.getenv('SUPABASE_SERVICE_ROLE_KEY')
+        supabase_key = os.getenv('SUPABASE_SERVICE_KEY')
         
         if not supabase_url or not supabase_key:
-            raise Exception("SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY environment variables are required")
+            raise Exception("SUPABASE_URL and SUPABASE_SERVICE_KEY environment variables are required")
         
         # Clean the key by removing any whitespace or newlines
         supabase_key = supabase_key.strip()
@@ -2618,10 +2618,10 @@ async def test_entity_search(user_id: str, search_term: str = "Abhishek", entity
     try:
         # Create test Supabase client
         supabase_url = os.getenv('SUPABASE_URL')
-        supabase_key = os.getenv('SUPABASE_SERVICE_ROLE_KEY')
+        supabase_key = os.getenv('SUPABASE_SERVICE_KEY')
         
         if not supabase_url or not supabase_key:
-            raise Exception("SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY environment variables are required")
+            raise Exception("SUPABASE_URL and SUPABASE_SERVICE_KEY environment variables are required")
         
         # Clean the key by removing any whitespace or newlines
         supabase_key = supabase_key.strip()
