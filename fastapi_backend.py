@@ -2662,7 +2662,7 @@ async def test_entity_stats(user_id: str):
     try:
         # Create test Supabase client
         supabase_url = os.getenv('SUPABASE_URL')
-        supabase_key = os.getenv('SUPABASE_SERVICE_ROLE_KEY')
+        supabase_key = os.getenv('SUPABASE_SERVICE_KEY')
         supabase = create_client(supabase_url, supabase_key)
         
         # Get entity resolution stats
@@ -2693,7 +2693,7 @@ async def test_cross_file_relationships(user_id: str):
     try:
         # Create test Supabase client
         supabase_url = os.getenv('SUPABASE_URL')
-        supabase_key = os.getenv('SUPABASE_SERVICE_ROLE_KEY')
+        supabase_key = os.getenv('SUPABASE_SERVICE_KEY')
         supabase = create_client(supabase_url, supabase_key)
         
         # Initialize relationship detector
