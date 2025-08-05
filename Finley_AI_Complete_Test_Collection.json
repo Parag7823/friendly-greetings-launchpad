@@ -41,6 +41,19 @@
       }
     },
     {
+      "name": "1.5. Debug Environment Variables",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/debug-env",
+          "host": ["{{base_url}}"],
+          "path": ["debug-env"]
+        },
+        "description": "Debug environment variables to check if Supabase keys are set"
+      }
+    },
+    {
       "name": "2. Test Simple Endpoint",
       "request": {
         "method": "GET",

@@ -2626,11 +2626,33 @@ async def test_entity_search(user_id: str, search_term: str = "Abhishek", entity
     try:
         # Create test Supabase client
         supabase_url = os.getenv('SUPABASE_URL')
-        supabase_key = os.getenv('SUPABASE_SERVICE_ROLE_KEY')
+        supabase_key = os.getenv('SUPABASE_SERVICE_KEY')
+        
+        # Debug: Check if environment variables are set
+        if not supabase_url:
+            return {
+                "message": "Entity Search Test Failed",
+                "error": "SUPABASE_URL environment variable not found",
+                "search_term": search_term,
+                "entity_type": entity_type,
+                "user_id": user_id,
+                "results": [],
+                "total_results": 0
+            }
+        
+        if not supabase_key:
+            return {
+                "message": "Entity Search Test Failed", 
+                "error": "SUPABASE_SERVICE_KEY environment variable not found",
+                "search_term": search_term,
+                "entity_type": entity_type,
+                "user_id": user_id,
+                "results": [],
+                "total_results": 0
+            }
         
         # Clean the JWT token (remove newlines and whitespace)
-        if supabase_key:
-            supabase_key = supabase_key.strip().replace('\n', '').replace('\r', '')
+        supabase_key = supabase_key.strip().replace('\n', '').replace('\r', '')
         
         supabase = create_client(supabase_url, supabase_key)
         
@@ -2668,11 +2690,29 @@ async def test_entity_stats(user_id: str):
     try:
         # Create test Supabase client
         supabase_url = os.getenv('SUPABASE_URL')
-        supabase_key = os.getenv('SUPABASE_SERVICE_ROLE_KEY')
+        supabase_key = os.getenv('SUPABASE_SERVICE_KEY')
+        
+        # Debug: Check if environment variables are set
+        if not supabase_url:
+            return {
+                "message": "Entity Stats Test Failed",
+                "error": "SUPABASE_URL environment variable not found",
+                "user_id": user_id,
+                "stats": {},
+                "success": False
+            }
+        
+        if not supabase_key:
+            return {
+                "message": "Entity Stats Test Failed",
+                "error": "SUPABASE_SERVICE_KEY environment variable not found", 
+                "user_id": user_id,
+                "stats": {},
+                "success": False
+            }
         
         # Clean the JWT token (remove newlines and whitespace)
-        if supabase_key:
-            supabase_key = supabase_key.strip().replace('\n', '').replace('\r', '')
+        supabase_key = supabase_key.strip().replace('\n', '').replace('\r', '')
         
         supabase = create_client(supabase_url, supabase_key)
         
@@ -2704,7 +2744,7 @@ async def test_cross_file_relationships(user_id: str):
     try:
         # Create test Supabase client
         supabase_url = os.getenv('SUPABASE_URL')
-        supabase_key = os.getenv('SUPABASE_SERVICE_ROLE_KEY')
+        supabase_key = os.getenv('SUPABASE_SERVICE_KEY')
         
         # Clean the JWT token (remove newlines and whitespace)
         if supabase_key:
@@ -2977,6 +3017,42 @@ class CrossFileRelationshipDetector:
         if not date1 or not date2:
             return False
         return abs((date1 - date2).days) <= 7
+
+@app.get("/debug-env")
+async def debug_environment():
+    """Debug endpoint to check environment variables"""
+    try:
+        env_vars = {
+            "SUPABASE_URL": os.getenv('SUPABASE_URL', 'NOT_SET'),
+            "SUPABASE_SERVICE_KEY": os.getenv('SUPABASE_SERVICE_KEY', 'NOT_SET'),
+            "SUPABASE_KEY": os.getenv('SUPABASE_KEY', 'NOT_SET'),
+            "OPENAI_API_KEY": os.getenv('OPENAI_API_KEY', 'NOT_SET')
+        }
+        
+        # Check if keys are actually set (not just placeholder)
+        key_status = {}
+        for key, value in env_vars.items():
+            if value == 'NOT_SET':
+                key_status[key] = "NOT_SET"
+            elif value.startswith('eyJ') and len(value) > 100:
+                key_status[key] = "SET (JWT token)"
+            elif len(value) > 10:
+                key_status[key] = "SET (other value)"
+            else:
+                key_status[key] = "SET (short value)"
+        
+        return {
+            "message": "Environment Variables Debug",
+            "environment_variables": key_status,
+            "timestamp": datetime.utcnow().isoformat()
+        }
+        
+    except Exception as e:
+        return {
+            "message": "Debug Environment Failed",
+            "error": str(e),
+            "timestamp": datetime.utcnow().isoformat()
+        }
 
 if __name__ == "__main__":
     import uvicorn
