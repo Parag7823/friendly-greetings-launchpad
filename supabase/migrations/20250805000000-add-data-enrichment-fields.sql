@@ -34,7 +34,18 @@ RETURNS TABLE(
     vendor_standardization_accuracy DECIMAL(3,2),
     avg_exchange_rate DECIMAL(10,6)
 ) AS $$
+DECLARE
+    currency_breakdown_result JSONB;
 BEGIN
+    -- Get currency breakdown separately to avoid nested aggregates
+    SELECT jsonb_object_agg(currency, count) INTO currency_breakdown_result
+    FROM (
+        SELECT currency, COUNT(*) as count
+        FROM public.raw_events
+        WHERE user_id = user_uuid AND currency IS NOT NULL
+        GROUP BY currency
+    ) currency_counts;
+    
     RETURN QUERY
     SELECT 
         COUNT(*) as total_events,
@@ -42,7 +53,7 @@ BEGIN
         COUNT(*) FILTER (WHERE vendor_standard IS NOT NULL AND vendor_standard != vendor_raw) as events_with_vendor_standardization,
         COUNT(*) FILTER (WHERE platform_ids != '{}') as events_with_platform_ids,
         COALESCE(SUM(amount_usd), 0) as total_amount_usd,
-        jsonb_object_agg(currency, COUNT(*)) FILTER (WHERE currency IS NOT NULL) as currency_breakdown,
+        COALESCE(currency_breakdown_result, '{}'::jsonb) as currency_breakdown,
         AVG(vendor_confidence) FILTER (WHERE vendor_confidence IS NOT NULL) as vendor_standardization_accuracy,
         AVG(exchange_rate) FILTER (WHERE exchange_rate IS NOT NULL) as avg_exchange_rate
     FROM public.raw_events

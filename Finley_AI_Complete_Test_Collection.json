@@ -448,6 +448,58 @@
         },
         "description": "Test currency conversion summary and exchange rate statistics"
       }
+    },
+    {
+      "name": "27. Test AI Relationship Detection",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/test-ai-relationship-detection/{{test_user_id}}",
+          "host": ["{{base_url}}"],
+          "path": ["test-ai-relationship-detection", "{{test_user_id}}"]
+        },
+        "description": "Test comprehensive AI-powered relationship detection for ANY financial data"
+      }
+    },
+    {
+      "name": "28. Test Relationship Type Discovery",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/test-relationship-discovery/{{test_user_id}}",
+          "host": ["{{base_url}}"],
+          "path": ["test-relationship-discovery", "{{test_user_id}}"]
+        },
+        "description": "Test AI-powered discovery of relationship types in financial data"
+      }
+    },
+    {
+      "name": "29. Test AI Relationship Scoring",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/test-ai-relationship-scoring/{{test_user_id}}",
+          "host": ["{{base_url}}"],
+          "path": ["test-ai-relationship-scoring", "{{test_user_id}}"]
+        },
+        "description": "Test multi-dimensional relationship scoring with AI-powered analysis"
+      }
+    },
+    {
+      "name": "30. Test Relationship Validation",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/test-relationship-validation/{{test_user_id}}",
+          "host": ["{{base_url}}"],
+          "path": ["test-relationship-validation", "{{test_user_id}}"]
+        },
+        "description": "Test relationship validation and filtering with confidence scoring"
+      }
     }
   ]
 } 
