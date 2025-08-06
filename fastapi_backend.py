@@ -5319,7 +5319,7 @@ class DynamicPlatformDetector:
             context = self._create_platform_context(df, filename)
             
             # Use AI to analyze and detect platform
-            ai_response = await self.openai.chat.completions.create(
+            ai_response = self.openai.chat.completions.create(
                 model="gpt-4o-mini",
                 messages=[{
                     "role": "system",
@@ -5330,6 +5330,9 @@ class DynamicPlatformDetector:
                 }],
                 temperature=0.1
             )
+            
+            # Wait for the response
+            ai_response = await ai_response
             
             # Parse AI response
             response_text = ai_response.choices[0].message.content
@@ -5405,7 +5408,7 @@ class DynamicPlatformDetector:
             # Use AI to discover new platforms
             context = self._create_discovery_context(events.data)
             
-            ai_response = await self.openai.chat.completions.create(
+            ai_response = self.openai.chat.completions.create(
                 model="gpt-4o-mini",
                 messages=[{
                     "role": "system",
@@ -5416,6 +5419,9 @@ class DynamicPlatformDetector:
                 }],
                 temperature=0.2
             )
+            
+            # Wait for the response
+            ai_response = await ai_response
             
             # Parse AI discoveries
             response_text = ai_response.choices[0].message.content
@@ -5437,13 +5443,24 @@ class DynamicPlatformDetector:
     async def get_platform_insights(self, platform: str, user_id: str = None) -> Dict[str, Any]:
         """Get detailed insights about a platform"""
         try:
+            # Get learned patterns from database if not in memory
+            if platform not in self.learned_patterns:
+                try:
+                    result = self.supabase.table('platform_patterns').select('*').eq('platform', platform).execute()
+                    if result.data:
+                        self.learned_patterns[platform] = result.data[0].get('patterns', {})
+                except Exception as e:
+                    logger.error(f"Failed to load platform patterns from database: {e}")
+            
             insights = {
                 "platform": platform,
                 "learned_patterns": self.learned_patterns.get(platform, {}),
                 "detection_confidence": self._calculate_platform_confidence(platform),
                 "key_characteristics": await self._get_platform_characteristics(platform),
                 "usage_statistics": await self._get_platform_usage_stats(platform, user_id),
-                "custom_indicators": await self._get_custom_indicators(platform)
+                "custom_indicators": await self._get_custom_indicators(platform),
+                "is_known_platform": platform in ['stripe', 'razorpay', 'quickbooks', 'gusto', 'paypal', 'square'],
+                "total_learned_patterns": len(self.learned_patterns)
             }
             
             return insights
@@ -6039,25 +6056,30 @@ async def test_dynamic_platform_detection():
         # Create sample data for testing
         sample_data = {
             'stripe_sample': pd.DataFrame({
-                'charge_id': ['ch_123', 'ch_456'],
+                'charge_id': ['ch_1234567890abcdef', 'ch_0987654321fedcba'],
                 'amount': [1000, 2000],
                 'currency': ['usd', 'usd'],
-                'description': ['Stripe payment', 'Stripe charge'],
-                'created': ['2024-01-01', '2024-01-02']
+                'description': ['Stripe payment for subscription', 'Stripe charge for service'],
+                'created': ['2024-01-01', '2024-01-02'],
+                'status': ['succeeded', 'succeeded'],
+                'payment_method': ['card', 'card']
             }),
             'razorpay_sample': pd.DataFrame({
-                'payment_id': ['pay_789', 'pay_012'],
+                'payment_id': ['pay_1234567890abcdef', 'pay_0987654321fedcba'],
                 'amount': [5000, 7500],
                 'currency': ['inr', 'inr'],
-                'description': ['Razorpay payment', 'Razorpay transaction'],
-                'created_at': ['2024-01-01', '2024-01-02']
+                'description': ['Razorpay payment for invoice', 'Razorpay transaction for service'],
+                'created_at': ['2024-01-01', '2024-01-02'],
+                'status': ['captured', 'captured'],
+                'method': ['card', 'netbanking']
             }),
             'custom_sample': pd.DataFrame({
                 'transaction_id': ['txn_001', 'txn_002'],
                 'amount': [1500, 3000],
                 'currency': ['usd', 'usd'],
-                'description': ['Custom payment', 'Custom transaction'],
-                'date': ['2024-01-01', '2024-01-02']
+                'description': ['Custom payment system', 'Custom transaction platform'],
+                'date': ['2024-01-01', '2024-01-02'],
+                'type': ['payment', 'refund']
             })
         }
         
