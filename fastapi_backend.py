@@ -3655,7 +3655,7 @@ class AIRelationshipDetector:
             # Create context for AI analysis
             event_summary = self._create_event_summary(events)
             
-            ai_response = await self.openai.chat.completions.create(
+            ai_response = self.openai.chat.completions.create(
                 model="gpt-4o-mini",
                 messages=[{
                     "role": "system",
@@ -3724,7 +3724,7 @@ class AIRelationshipDetector:
             # Create comprehensive context
             context = self._create_comprehensive_context(events)
             
-            ai_response = await self.openai.chat.completions.create(
+            ai_response = self.openai.chat.completions.create(
                 model="gpt-4o-mini",
                 messages=[{
                     "role": "system",
@@ -4686,7 +4686,7 @@ class DynamicPlatformDetector:
             
             # Use AI to analyze and detect platform
             try:
-                ai_response = await self.openai.chat.completions.create(
+                ai_response = self.openai.chat.completions.create(
                     model="gpt-4o-mini",
                     messages=[{
                         "role": "system",
@@ -4777,7 +4777,7 @@ class DynamicPlatformDetector:
             context = self._create_discovery_context(events.data)
             
             try:
-                ai_response = await self.openai.chat.completions.create(
+                ai_response = self.openai.chat.completions.create(
                     model="gpt-4o-mini",
                     messages=[{
                         "role": "system",
