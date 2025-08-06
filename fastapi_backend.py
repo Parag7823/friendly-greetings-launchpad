@@ -5319,20 +5319,42 @@ class DynamicPlatformDetector:
             context = self._create_platform_context(df, filename)
             
             # Use AI to analyze and detect platform
-            ai_response = self.openai.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[{
-                    "role": "system",
-                    "content": "You are a financial data analyst specializing in platform detection. Analyze the financial data and identify the platform. Consider column names, data patterns, terminology, and file structure. Return a JSON object with platform name, confidence score, reasoning, and key indicators."
-                }, {
-                    "role": "user",
-                    "content": f"Analyze this financial data and detect the platform: {context}"
-                }],
-                temperature=0.1
-            )
-            
-            # Wait for the response
-            ai_response = await ai_response
+            try:
+                ai_response = await self.openai.chat.completions.create(
+                    model="gpt-4o-mini",
+                    messages=[{
+                        "role": "system",
+                        "content": "You are a financial data analyst specializing in platform detection. Analyze the financial data and identify the platform. Consider column names, data patterns, terminology, and file structure. Return a JSON object with platform name, confidence score, reasoning, and key indicators."
+                    }, {
+                        "role": "user",
+                        "content": f"Analyze this financial data and detect the platform: {context}"
+                    }],
+                    temperature=0.1
+                )
+                
+                # Parse AI response
+                response_text = ai_response.choices[0].message.content
+                platform_analysis = self._parse_platform_analysis(response_text)
+                
+                # Learn from this detection
+                await self._learn_platform_patterns(df, filename, platform_analysis)
+                
+                # Get platform information
+                platform_info = await self._get_platform_info(platform_analysis['platform'])
+                
+                return {
+                    "platform": platform_analysis['platform'],
+                    "confidence_score": platform_analysis['confidence_score'],
+                    "reasoning": platform_analysis['reasoning'],
+                    "key_indicators": platform_analysis['key_indicators'],
+                    "detection_method": "ai_dynamic",
+                    "learned_patterns": len(self.learned_patterns),
+                    "platform_info": platform_info
+                }
+                
+            except Exception as ai_error:
+                logger.error(f"AI detection failed, using fallback: {ai_error}")
+                return self._fallback_detection(df, filename)
             
             # Parse AI response
             response_text = ai_response.choices[0].message.content
@@ -5408,20 +5430,39 @@ class DynamicPlatformDetector:
             # Use AI to discover new platforms
             context = self._create_discovery_context(events.data)
             
-            ai_response = self.openai.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[{
-                    "role": "system",
-                    "content": "You are a financial data analyst. Analyze the financial events and identify any new or custom platforms that might not be in the standard list. Look for unique patterns, terminology, or data structures that suggest a custom platform."
-                }, {
-                    "role": "user",
-                    "content": f"Analyze these financial events and discover any new platforms: {context}"
-                }],
-                temperature=0.2
-            )
-            
-            # Wait for the response
-            ai_response = await ai_response
+            try:
+                ai_response = await self.openai.chat.completions.create(
+                    model="gpt-4o-mini",
+                    messages=[{
+                        "role": "system",
+                        "content": "You are a financial data analyst. Analyze the financial events and identify any new or custom platforms that might not be in the standard list. Look for unique patterns, terminology, or data structures that suggest a custom platform."
+                    }, {
+                        "role": "user",
+                        "content": f"Analyze these financial events and discover any new platforms: {context}"
+                    }],
+                    temperature=0.2
+                )
+                
+                # Parse AI discoveries
+                response_text = ai_response.choices[0].message.content
+                new_platforms = self._parse_new_platforms(response_text)
+                
+                # Store new platform discoveries
+                await self._store_new_platforms(new_platforms, user_id)
+                
+                return {
+                    "message": "Platform discovery completed",
+                    "new_platforms": new_platforms,
+                    "total_platforms": len(new_platforms)
+                }
+                
+            except Exception as ai_error:
+                logger.error(f"Platform discovery failed: {ai_error}")
+                return {
+                    "message": "Platform discovery failed",
+                    "error": str(ai_error),
+                    "new_platforms": []
+                }
             
             # Parse AI discoveries
             response_text = ai_response.choices[0].message.content
@@ -5704,13 +5745,57 @@ class DynamicPlatformDetector:
         """Get characteristics of a platform"""
         patterns = self.learned_patterns.get(platform, {})
         
-        characteristics = {
-            'platform': platform,
-            'column_patterns': patterns.get('column_patterns', {}),
-            'event_types': patterns.get('event_types', {}),
-            'amount_patterns': patterns.get('amount_patterns', {}),
-            'terminology_patterns': patterns.get('terminology_patterns', {})
+        # Add default characteristics for known platforms
+        default_characteristics = {
+            'stripe': {
+                'column_patterns': {
+                    'columns': ['charge_id', 'amount', 'currency', 'description', 'created', 'status', 'payment_method'],
+                    'data_types': {'charge_id': 'object', 'amount': 'int64', 'currency': 'object'},
+                    'unique_values': {
+                        'currency': ['usd', 'eur'],
+                        'status': ['succeeded', 'failed', 'pending'],
+                        'payment_method': ['card', 'bank_transfer']
+                    }
+                },
+                'event_types': {'payment': 100, 'refund': 20, 'fee': 10},
+                'amount_patterns': {'min': 0.5, 'max': 10000.0, 'avg': 250.0},
+                'terminology_patterns': {
+                    'payment_terms': ['payment', 'charge', 'transaction'],
+                    'id_terms': ['charge_id', 'payment_intent_id'],
+                    'status_terms': ['succeeded', 'failed', 'pending']
+                }
+            },
+            'razorpay': {
+                'column_patterns': {
+                    'columns': ['payment_id', 'amount', 'currency', 'description', 'created_at', 'status', 'method'],
+                    'data_types': {'payment_id': 'object', 'amount': 'int64', 'currency': 'object'},
+                    'unique_values': {
+                        'currency': ['inr', 'usd'],
+                        'status': ['captured', 'failed', 'pending'],
+                        'method': ['card', 'netbanking', 'upi']
+                    }
+                },
+                'event_types': {'payment': 80, 'refund': 15, 'fee': 5},
+                'amount_patterns': {'min': 1.0, 'max': 50000.0, 'avg': 500.0},
+                'terminology_patterns': {
+                    'payment_terms': ['payment', 'transaction'],
+                    'id_terms': ['payment_id', 'order_id'],
+                    'status_terms': ['captured', 'failed', 'pending']
+                }
+            }
         }
+        
+        # Use learned patterns if available, otherwise use defaults
+        if platform in default_characteristics and not patterns:
+            characteristics = default_characteristics[platform]
+        else:
+            characteristics = {
+                'platform': platform,
+                'column_patterns': patterns.get('column_patterns', {}),
+                'event_types': patterns.get('event_types', {}),
+                'amount_patterns': patterns.get('amount_patterns', {}),
+                'terminology_patterns': patterns.get('terminology_patterns', {})
+            }
         
         return characteristics
     
@@ -5755,6 +5840,38 @@ class DynamicPlatformDetector:
         terminology = patterns.get('terminology_patterns', {})
         for category, terms in terminology.items():
             indicators.extend([f"{category}: {', '.join(terms[:3])}"])
+        
+        # Platform-specific indicators
+        platform_indicators = {
+            'stripe': [
+                'Stripe-specific charge_id pattern',
+                'Payment method field present',
+                'Status field with succeeded/failed values',
+                'USD/EUR currency support'
+            ],
+            'razorpay': [
+                'Razorpay-specific payment_id pattern',
+                'Method field with card/netbanking/upi',
+                'Status field with captured/failed values',
+                'INR currency support'
+            ],
+            'quickbooks': [
+                'QuickBooks transaction patterns',
+                'Account-based categorization',
+                'Class and location fields',
+                'QB-specific terminology'
+            ],
+            'gusto': [
+                'Gusto payroll patterns',
+                'Employee-based transactions',
+                'Payroll-specific fields',
+                'Tax withholding patterns'
+            ]
+        }
+        
+        # Add platform-specific indicators
+        if platform in platform_indicators:
+            indicators.extend(platform_indicators[platform])
         
         return indicators[:10]  # Limit to 10 indicators
     
