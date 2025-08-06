@@ -4859,7 +4859,7 @@ class DynamicPlatformDetector:
         context_parts.append(f"Sample data: {sample_data}")
         
         # Data type analysis
-        dtypes = df.dtypes.to_dict()
+        dtypes = {col: str(dtype) for col, dtype in df.dtypes.to_dict().items()}
         context_parts.append(f"Data types: {dtypes}")
         
         # Value analysis
@@ -5577,6 +5577,19 @@ async def test_relationship_validation(user_id: str):
             "timestamp": datetime.utcnow().isoformat()
         }
 
+def ensure_json_serializable(obj):
+    """Ensure an object is JSON serializable by converting problematic types"""
+    if isinstance(obj, dict):
+        return {k: ensure_json_serializable(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [ensure_json_serializable(item) for item in obj]
+    elif hasattr(obj, 'dtype'):  # numpy/pandas types
+        return str(obj)
+    elif hasattr(obj, '__dict__'):
+        return str(obj)
+    else:
+        return obj
+
 @app.get("/test-dynamic-platform-detection")
 async def test_dynamic_platform_detection():
     """Test AI-powered dynamic platform detection"""
@@ -5630,7 +5643,7 @@ async def test_dynamic_platform_detection():
         results = {}
         for platform_name, df in sample_data.items():
             result = await dynamic_detector.detect_platform_dynamically(df, f"{platform_name}.csv")
-            results[platform_name] = result
+            results[platform_name] = ensure_json_serializable(result)
         
         return {
             "message": "Dynamic Platform Detection Test Completed",
