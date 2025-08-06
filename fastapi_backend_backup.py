@@ -4668,6 +4668,640 @@ async def test_currency_summary(user_id: str):
             "timestamp": datetime.utcnow().isoformat()
         }
 
+class AIRelationshipDetector:
+    """AI-powered universal relationship detection for ANY financial data"""
+    
+    def __init__(self, openai_client, supabase_client: Client):
+        self.openai = openai_client
+        self.supabase = supabase_client
+        self.relationship_cache = {}
+        self.learned_patterns = {}
+        
+    async def detect_all_relationships(self, user_id: str) -> Dict[str, Any]:
+        """Detect ALL possible relationships between financial events"""
+        try:
+            # Get all events for the user
+            events = self.supabase.table('raw_events').select('*').eq('user_id', user_id).execute()
+            
+            if not events.data:
+                return {"relationships": [], "message": "No data found for relationship analysis"}
+            
+            # Use AI to discover relationship types
+            relationship_types = await self._discover_relationship_types(events.data)
+            
+            # Detect relationships for each type
+            all_relationships = []
+            for rel_type in relationship_types:
+                type_relationships = await self._detect_relationships_by_type(events.data, rel_type)
+                all_relationships.extend(type_relationships)
+            
+            # Use AI to discover new relationship patterns
+            ai_discovered = await self._ai_discover_relationships(events.data)
+            all_relationships.extend(ai_discovered)
+            
+            # Validate and score relationships
+            validated_relationships = await self._validate_relationships(all_relationships)
+            
+            # Store relationships in database
+            await self._store_relationships(validated_relationships, user_id)
+            
+            return {
+                "relationships": validated_relationships,
+                "total_relationships": len(validated_relationships),
+                "relationship_types": relationship_types,
+                "ai_discovered_count": len(ai_discovered),
+                "message": "Comprehensive AI-powered relationship analysis completed"
+            }
+            
+        except Exception as e:
+            logger.error(f"AI relationship detection failed: {e}")
+            return {"relationships": [], "error": str(e)}
+    
+    async def _discover_relationship_types(self, events: List[Dict]) -> List[str]:
+        """Use AI to discover what types of relationships exist in the data"""
+        try:
+            # Create context for AI analysis
+            event_summary = self._create_event_summary(events)
+            
+            ai_response = await self.openai.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[{
+                    "role": "system",
+                    "content": "You are a financial data analyst. Analyze the financial events and identify what types of relationships might exist between them. Return only the relationship types as a JSON array."
+                }, {
+                    "role": "user",
+                    "content": f"Analyze these financial events and identify relationship types: {event_summary}"
+                }],
+                temperature=0.1
+            )
+            
+            # Parse AI response
+            response_text = ai_response.choices[0].message.content
+            relationship_types = self._parse_relationship_types(response_text)
+            
+            return relationship_types
+            
+        except Exception as e:
+            logger.error(f"AI relationship type discovery failed: {e}")
+            return ["invoice_to_payment", "fee_to_transaction", "refund_to_original"]
+    
+    async def _detect_relationships_by_type(self, events: List[Dict], relationship_type: str) -> List[Dict]:
+        """Detect relationships for a specific type"""
+        relationships = []
+        
+        # Get source and target event filters for this relationship type
+        source_filter, target_filter = self._get_relationship_filters(relationship_type)
+        
+        # Filter events
+        source_events = [e for e in events if self._matches_event_filter(e, source_filter)]
+        target_events = [e for e in events if self._matches_event_filter(e, target_filter)]
+        
+        # Find relationships
+        for source in source_events:
+            for target in target_events:
+                if source['id'] == target['id']:
+                    continue
+                
+                # Calculate comprehensive relationship score
+                score = await self._calculate_comprehensive_score(source, target, relationship_type)
+                
+                if score >= 0.6:  # Configurable threshold
+                    relationship = {
+                        "source_event_id": source['id'],
+                        "target_event_id": target['id'],
+                        "relationship_type": relationship_type,
+                        "confidence_score": score,
+                        "source_platform": source.get('source_platform'),
+                        "target_platform": target.get('source_platform'),
+                        "source_amount": self._extract_amount(source.get('payload', {})),
+                        "target_amount": self._extract_amount(target.get('payload', {})),
+                        "amount_match": self._check_amount_match(source, target),
+                        "date_match": self._check_date_match(source, target),
+                        "entity_match": self._check_entity_match(source, target),
+                        "id_match": self._check_id_match(source, target),
+                        "context_match": self._check_context_match(source, target),
+                        "detection_method": "rule_based"
+                    }
+                    relationships.append(relationship)
+        
+        return relationships
+    
+    async def _ai_discover_relationships(self, events: List[Dict]) -> List[Dict]:
+        """Use AI to discover relationships we haven't seen before"""
+        try:
+            # Create comprehensive context
+            context = self._create_comprehensive_context(events)
+            
+            ai_response = await self.openai.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[{
+                    "role": "system",
+                    "content": "You are a financial data analyst. Analyze the financial events and identify potential relationships between them that might not be obvious. Return the relationships as a JSON array with source_event_id, target_event_id, relationship_type, and confidence_score."
+                }, {
+                    "role": "user",
+                    "content": f"Analyze these financial events and identify ALL possible relationships: {context}"
+                }],
+                temperature=0.2
+            )
+            
+            # Parse AI discoveries
+            response_text = ai_response.choices[0].message.content
+            ai_relationships = self._parse_ai_relationships(response_text, events)
+            
+            return ai_relationships
+            
+        except Exception as e:
+            logger.error(f"AI relationship discovery failed: {e}")
+            return []
+    
+    async def _calculate_comprehensive_score(self, source: Dict, target: Dict, relationship_type: str) -> float:
+        """Calculate comprehensive relationship score using multiple dimensions"""
+        score = 0.0
+        
+        # Amount matching (30% weight)
+        amount_score = self._calculate_amount_score(source, target, relationship_type)
+        score += amount_score * 0.3
+        
+        # Date matching (20% weight)
+        date_score = self._calculate_date_score(source, target, relationship_type)
+        score += date_score * 0.2
+        
+        # Entity matching (20% weight)
+        entity_score = self._calculate_entity_score(source, target, relationship_type)
+        score += entity_score * 0.2
+        
+        # ID matching (15% weight)
+        id_score = self._calculate_id_score(source, target, relationship_type)
+        score += id_score * 0.15
+        
+        # Context matching (15% weight)
+        context_score = self._calculate_context_score(source, target, relationship_type)
+        score += context_score * 0.15
+        
+        return min(score, 1.0)
+    
+    def _calculate_amount_score(self, source: Dict, target: Dict, relationship_type: str) -> float:
+        """Calculate amount matching score with intelligent tolerance"""
+        source_amount = self._extract_amount(source.get('payload', {}))
+        target_amount = self._extract_amount(target.get('payload', {}))
+        
+        if source_amount == 0 or target_amount == 0:
+            return 0.0
+        
+        # Different tolerance based on relationship type
+        tolerance_map = {
+            'invoice_to_payment': 0.001,  # Exact match
+            'fee_to_transaction': 0.01,   # 1% tolerance
+            'refund_to_original': 0.001,  # Exact match
+            'payroll_to_payout': 0.05,    # 5% tolerance
+            'tax_to_income': 0.02,        # 2% tolerance
+            'expense_to_reimbursement': 0.001,  # Exact match
+            'subscription_to_payment': 0.001,   # Exact match
+            'loan_to_payment': 0.01,      # 1% tolerance
+            'investment_to_return': 0.1,  # 10% tolerance
+        }
+        
+        tolerance = tolerance_map.get(relationship_type, 0.01)
+        amount_diff = abs(source_amount - target_amount)
+        
+        if amount_diff <= tolerance:
+            return 1.0
+        elif amount_diff <= source_amount * tolerance:
+            return 0.8
+        elif amount_diff <= source_amount * tolerance * 2:
+            return 0.6
+        else:
+            return 0.0
+    
+    def _calculate_date_score(self, source: Dict, target: Dict, relationship_type: str) -> float:
+        """Calculate date matching score with configurable windows"""
+        source_date = self._extract_date(source.get('payload', {}))
+        target_date = self._extract_date(target.get('payload', {}))
+        
+        if not source_date or not target_date:
+            return 0.0
+        
+        # Different date windows based on relationship type
+        window_map = {
+            'invoice_to_payment': 7,      # 7 days
+            'fee_to_transaction': 1,      # Same day
+            'refund_to_original': 30,     # 30 days
+            'payroll_to_payout': 3,       # 3 days
+            'tax_to_income': 90,          # 90 days
+            'expense_to_reimbursement': 30,  # 30 days
+            'subscription_to_payment': 7,     # 7 days
+            'loan_to_payment': 1,         # Same day
+            'investment_to_return': 365,  # 1 year
+        }
+        
+        window_days = window_map.get(relationship_type, 7)
+        date_diff = abs((source_date - target_date).days)
+        
+        if date_diff == 0:
+            return 1.0
+        elif date_diff <= window_days:
+            return 0.8
+        elif date_diff <= window_days * 2:
+            return 0.6
+        else:
+            return 0.0
+    
+    def _calculate_entity_score(self, source: Dict, target: Dict, relationship_type: str) -> float:
+        """Calculate entity matching score with fuzzy logic"""
+        source_entities = self._extract_entities(source.get('payload', {}))
+        target_entities = self._extract_entities(target.get('payload', {}))
+        
+        if not source_entities or not target_entities:
+            return 0.0
+        
+        # Calculate similarity for each entity pair
+        max_similarity = 0.0
+        for source_entity in source_entities:
+            for target_entity in target_entities:
+                similarity = self._calculate_text_similarity(source_entity, target_entity)
+                max_similarity = max(max_similarity, similarity)
+        
+        return max_similarity
+    
+    def _calculate_id_score(self, source: Dict, target: Dict, relationship_type: str) -> float:
+        """Calculate ID matching score with pattern recognition"""
+        source_ids = source.get('platform_ids', {})
+        target_ids = target.get('platform_ids', {})
+        
+        if not source_ids or not target_ids:
+            return 0.0
+        
+        # Check for exact ID matches
+        for source_key, source_id in source_ids.items():
+            for target_key, target_id in target_ids.items():
+                if source_id == target_id:
+                    return 1.0
+                elif source_id in target_id or target_id in source_id:
+                    return 0.8
+        
+        # Check for pattern matches
+        for source_key, source_id in source_ids.items():
+            for target_key, target_id in target_ids.items():
+                if self._check_id_pattern_match(source_id, target_id, relationship_type):
+                    return 0.6
+        
+        return 0.0
+    
+    def _calculate_context_score(self, source: Dict, target: Dict, relationship_type: str) -> float:
+        """Calculate context matching score using semantic analysis"""
+        source_context = self._extract_context(source)
+        target_context = self._extract_context(target)
+        
+        if not source_context or not target_context:
+            return 0.0
+        
+        # Calculate semantic similarity
+        similarity = self._calculate_text_similarity(source_context, target_context)
+        
+        # Boost score for expected relationship contexts
+        context_boost = self._get_context_boost(source_context, target_context, relationship_type)
+        
+        return min(similarity + context_boost, 1.0)
+    
+    def _check_amount_match(self, source: Dict, target: Dict) -> bool:
+        """Check if amounts match within tolerance"""
+        return self._calculate_amount_score(source, target, "generic") > 0.8
+    
+    def _check_date_match(self, source: Dict, target: Dict) -> bool:
+        """Check if dates are within acceptable window"""
+        return self._calculate_date_score(source, target, "generic") > 0.8
+    
+    def _check_entity_match(self, source: Dict, target: Dict) -> bool:
+        """Check if entities match"""
+        return self._calculate_entity_score(source, target, "generic") > 0.8
+    
+    def _check_id_match(self, source: Dict, target: Dict) -> bool:
+        """Check if IDs match"""
+        return self._calculate_id_score(source, target, "generic") > 0.8
+    
+    def _check_context_match(self, source: Dict, target: Dict) -> bool:
+        """Check if contexts match"""
+        return self._calculate_context_score(source, target, "generic") > 0.8
+    
+    def _get_relationship_filters(self, relationship_type: str) -> Tuple[Dict, Dict]:
+        """Get source and target filters for a relationship type"""
+        filters = {
+            'invoice_to_payment': (
+                {'keywords': ['invoice', 'bill', 'receivable']},
+                {'keywords': ['payment', 'charge', 'transaction']}
+            ),
+            'fee_to_transaction': (
+                {'keywords': ['fee', 'commission', 'charge']},
+                {'keywords': ['transaction', 'payment', 'charge']}
+            ),
+            'refund_to_original': (
+                {'keywords': ['refund', 'return', 'reversal']},
+                {'keywords': ['payment', 'charge', 'transaction']}
+            ),
+            'payroll_to_payout': (
+                {'keywords': ['payroll', 'salary', 'wage', 'employee']},
+                {'keywords': ['payout', 'transfer', 'withdrawal']}
+            ),
+            'tax_to_income': (
+                {'keywords': ['tax', 'withholding', 'deduction']},
+                {'keywords': ['income', 'revenue', 'salary']}
+            ),
+            'expense_to_reimbursement': (
+                {'keywords': ['expense', 'cost', 'outlay']},
+                {'keywords': ['reimbursement', 'refund', 'return']}
+            ),
+            'subscription_to_payment': (
+                {'keywords': ['subscription', 'recurring', 'monthly']},
+                {'keywords': ['payment', 'charge', 'transaction']}
+            ),
+            'loan_to_payment': (
+                {'keywords': ['loan', 'credit', 'advance']},
+                {'keywords': ['payment', 'repayment', 'installment']}
+            ),
+            'investment_to_return': (
+                {'keywords': ['investment', 'purchase', 'buy']},
+                {'keywords': ['return', 'dividend', 'profit']}
+            )
+        }
+        
+        return filters.get(relationship_type, ({}, {}))
+    
+    def _matches_event_filter(self, event: Dict, filter_dict: Dict) -> bool:
+        """Check if event matches the filter criteria"""
+        if not filter_dict:
+            return True
+        
+        # Check keywords
+        if 'keywords' in filter_dict:
+            event_text = str(event.get('payload', {})).lower()
+            event_text += ' ' + str(event.get('kind', '')).lower()
+            event_text += ' ' + str(event.get('category', '')).lower()
+            
+            keywords = filter_dict['keywords']
+            if not any(keyword.lower() in event_text for keyword in keywords):
+                return False
+        
+        return True
+    
+    def _extract_amount(self, payload: Dict) -> float:
+        """Extract amount from payload"""
+        try:
+            amount_fields = ['amount', 'total', 'value', 'sum', 'payment_amount', 'charge_amount']
+            for field in amount_fields:
+                if field in payload:
+                    value = payload[field]
+                    if isinstance(value, (int, float)):
+                        return float(value)
+                    elif isinstance(value, str):
+                        cleaned = value.replace('$', '').replace(',', '').strip()
+                        return float(cleaned)
+        except:
+            pass
+        return 0.0
+    
+    def _extract_entities(self, payload: Dict) -> List[str]:
+        """Extract entity names from payload"""
+        entities = []
+        try:
+            name_fields = ['employee_name', 'name', 'recipient', 'payee', 'description', 'vendor_name']
+            for field in name_fields:
+                if field in payload:
+                    value = payload[field]
+                    if isinstance(value, str) and value.strip():
+                        entities.append(value.strip())
+        except:
+            pass
+        return entities
+    
+    def _extract_date(self, payload: Dict) -> Optional[datetime]:
+        """Extract date from payload"""
+        try:
+            date_fields = ['date', 'payment_date', 'transaction_date', 'created_at', 'due_date']
+            for field in date_fields:
+                if field in payload:
+                    value = payload[field]
+                    if isinstance(value, str):
+                        return datetime.fromisoformat(value.replace('Z', '+00:00'))
+                    elif isinstance(value, datetime):
+                        return value
+        except:
+            pass
+        return None
+    
+    def _extract_context(self, event: Dict) -> str:
+        """Extract context from event"""
+        context_parts = []
+        
+        # Add kind and category
+        if event.get('kind'):
+            context_parts.append(event['kind'])
+        if event.get('category'):
+            context_parts.append(event['category'])
+        
+        # Add payload description
+        payload = event.get('payload', {})
+        if 'description' in payload:
+            context_parts.append(payload['description'])
+        
+        # Add vendor information
+        if event.get('vendor_standard'):
+            context_parts.append(event['vendor_standard'])
+        
+        return ' '.join(context_parts)
+    
+    def _calculate_text_similarity(self, text1: str, text2: str) -> float:
+        """Calculate text similarity using SequenceMatcher"""
+        from difflib import SequenceMatcher
+        return SequenceMatcher(None, text1.lower(), text2.lower()).ratio()
+    
+    def _check_id_pattern_match(self, id1: str, id2: str, relationship_type: str) -> bool:
+        """Check if IDs match a pattern for the relationship type"""
+        import re
+        # Define patterns for different relationship types
+        patterns = {
+            'invoice_to_payment': [
+                (r'inv_(\w+)', r'pay_\1'),  # invoice_id to payment_id
+                (r'in_(\w+)', r'pi_\1'),    # invoice_id to payment_intent
+            ],
+            'fee_to_transaction': [
+                (r'fee_(\w+)', r'ch_\1'),   # fee_id to charge_id
+                (r'fee_(\w+)', r'txn_\1'),  # fee_id to transaction_id
+            ],
+            'refund_to_original': [
+                (r're_(\w+)', r'ch_\1'),    # refund_id to charge_id
+                (r'rfnd_(\w+)', r'pay_\1'), # refund_id to payment_id
+            ]
+        }
+        
+        pattern_list = patterns.get(relationship_type, [])
+        
+        for pattern1, pattern2 in pattern_list:
+            match1 = re.match(pattern1, id1)
+            match2 = re.match(pattern2, id2)
+            
+            if match1 and match2 and match1.group(1) == match2.group(1):
+                return True
+        
+        return False
+    
+    def _get_context_boost(self, context1: str, context2: str, relationship_type: str) -> float:
+        """Get context boost for expected relationship patterns"""
+        context_combinations = {
+            'invoice_to_payment': [
+                ('invoice', 'payment'),
+                ('bill', 'charge'),
+                ('receivable', 'transaction')
+            ],
+            'fee_to_transaction': [
+                ('fee', 'transaction'),
+                ('commission', 'payment'),
+                ('charge', 'transaction')
+            ],
+            'refund_to_original': [
+                ('refund', 'payment'),
+                ('return', 'charge'),
+                ('reversal', 'transaction')
+            ]
+        }
+        
+        combinations = context_combinations.get(relationship_type, [])
+        context_lower = context1.lower() + ' ' + context2.lower()
+        
+        for combo in combinations:
+            if combo[0] in context_lower and combo[1] in context_lower:
+                return 0.2
+        
+        return 0.0
+    
+    def _create_event_summary(self, events: List[Dict]) -> str:
+        """Create a summary of events for AI analysis"""
+        summary_parts = []
+        
+        for event in events[:10]:  # Limit to first 10 events
+            event_summary = {
+                'id': event.get('id'),
+                'kind': event.get('kind'),
+                'category': event.get('category'),
+                'platform': event.get('source_platform'),
+                'amount': self._extract_amount(event.get('payload', {})),
+                'vendor': event.get('vendor_standard'),
+                'description': event.get('payload', {}).get('description', '')
+            }
+            summary_parts.append(str(event_summary))
+        
+        return '\n'.join(summary_parts)
+    
+    def _create_comprehensive_context(self, events: List[Dict]) -> str:
+        """Create comprehensive context for AI analysis"""
+        context_parts = []
+        
+        # Group events by platform
+        platform_groups = {}
+        for event in events:
+            platform = event.get('source_platform', 'unknown')
+            if platform not in platform_groups:
+                platform_groups[platform] = []
+            platform_groups[platform].append(event)
+        
+        # Create context for each platform
+        for platform, platform_events in platform_groups.items():
+            context_parts.append(f"\nPlatform: {platform}")
+            for event in platform_events[:5]:  # Limit to 5 events per platform
+                context_parts.append(f"- {event.get('kind')}: {event.get('payload', {}).get('description', '')}")
+        
+        return '\n'.join(context_parts)
+    
+    def _parse_relationship_types(self, response_text: str) -> List[str]:
+        """Parse relationship types from AI response"""
+        try:
+            # Try to extract JSON array
+            if '[' in response_text and ']' in response_text:
+                start = response_text.find('[')
+                end = response_text.rfind(']') + 1
+                json_str = response_text[start:end]
+                return json.loads(json_str)
+        except:
+            pass
+        
+        # Fallback to common relationship types
+        return ["invoice_to_payment", "fee_to_transaction", "refund_to_original"]
+    
+    def _parse_ai_relationships(self, response_text: str, events: List[Dict]) -> List[Dict]:
+        """Parse AI-discovered relationships from response"""
+        try:
+            # Try to extract JSON array
+            if '[' in response_text and ']' in response_text:
+                start = response_text.find('[')
+                end = response_text.rfind(']') + 1
+                json_str = response_text[start:end]
+                ai_relationships = json.loads(json_str)
+                
+                # Convert to standard format
+                relationships = []
+                for rel in ai_relationships:
+                    relationship = {
+                        "source_event_id": rel.get('source_event_id'),
+                        "target_event_id": rel.get('target_event_id'),
+                        "relationship_type": rel.get('relationship_type', 'ai_discovered'),
+                        "confidence_score": rel.get('confidence_score', 0.5),
+                        "detection_method": "ai_discovered"
+                    }
+                    relationships.append(relationship)
+                
+                return relationships
+        except:
+            pass
+        
+        return []
+    
+    async def _validate_relationships(self, relationships: List[Dict]) -> List[Dict]:
+        """Validate and filter relationships"""
+        validated = []
+        
+        for relationship in relationships:
+            # Check if events exist
+            source_exists = await self._event_exists(relationship['source_event_id'])
+            target_exists = await self._event_exists(relationship['target_event_id'])
+            
+            if source_exists and target_exists:
+                # Add additional validation
+                relationship['validated'] = True
+                relationship['validation_score'] = relationship.get('confidence_score', 0.0)
+                validated.append(relationship)
+        
+        return validated
+    
+    async def _event_exists(self, event_id: str) -> bool:
+        """Check if event exists in database"""
+        try:
+            result = self.supabase.table('raw_events').select('id').eq('id', event_id).execute()
+            return len(result.data) > 0
+        except:
+            return False
+    
+    async def _store_relationships(self, relationships: List[Dict], user_id: str):
+        """Store relationships in database"""
+        for relationship in relationships:
+            try:
+                # Store in relationships table (if exists)
+                await self.supabase.table('relationships').insert({
+                    'user_id': user_id,
+                    'source_event_id': relationship['source_event_id'],
+                    'target_event_id': relationship['target_event_id'],
+                    'relationship_type': relationship['relationship_type'],
+                    'confidence_score': relationship['confidence_score'],
+                    'detection_method': relationship.get('detection_method', 'ai'),
+                    'metadata': {
+                        'amount_match': relationship.get('amount_match', False),
+                        'date_match': relationship.get('date_match', False),
+                        'entity_match': relationship.get('entity_match', False),
+                        'id_match': relationship.get('id_match', False),
+                        'context_match': relationship.get('context_match', False)
+                    }
+                }).execute()
+            except Exception as e:
+                logger.error(f"Failed to store relationship: {e}")
+
 class DynamicPlatformDetector:
     """AI-powered dynamic platform detection that learns from ANY financial data"""
     
