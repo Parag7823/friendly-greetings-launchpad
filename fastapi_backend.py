@@ -4715,7 +4715,7 @@ class DynamicPlatformDetector:
                     "key_indicators": platform_analysis['key_indicators'],
                     "detection_method": "ai_dynamic",
                     "learned_patterns": len(self.learned_patterns),
-                    "platform_info": platform_info
+                    "platform_info": ensure_json_serializable(platform_info)
                 }
                 
             except Exception as ai_error:
@@ -4961,7 +4961,7 @@ class DynamicPlatformDetector:
         # Learn column patterns
         column_patterns = {
             'columns': list(df.columns),
-            'data_types': df.dtypes.to_dict(),
+            'data_types': {col: str(dtype) for col, dtype in df.dtypes.to_dict().items()},
             'unique_values': {}
         }
         
@@ -5044,7 +5044,7 @@ class DynamicPlatformDetector:
         """Get information about a platform"""
         platform_info = {
             'name': platform,
-            'learned_patterns': self.learned_patterns.get(platform, {}),
+            'learned_patterns': ensure_json_serializable(self.learned_patterns.get(platform, {})),
             'detection_confidence': self._calculate_platform_confidence(platform),
             'is_custom': platform not in ['stripe', 'razorpay', 'quickbooks', 'gusto', 'paypal', 'square'],
             'last_detected': self.learned_patterns.get(platform, {}).get('last_detected'),
