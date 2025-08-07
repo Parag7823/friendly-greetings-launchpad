@@ -2547,7 +2547,7 @@ async def upload_and_process(
         
         # Initialize Supabase client
         supabase_url = os.environ.get("SUPABASE_URL")
-        supabase_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
+        supabase_key = os.environ.get("SUPABASE_SERVICE_KEY")
         
         # Clean the JWT token (remove newlines and whitespace)
         if supabase_key:
