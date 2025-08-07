@@ -94,7 +94,7 @@
 								{
 									"key": "file",
 									"type": "file",
-									"src": "C:\\Users\\91937\\Documents\\GitHub\\friendly-greetings-launchpad\\test_files\\company_bank_statements.csv"
+									"src": "test_files/company_bank_statements.csv"
 								}
 							]
 						},
@@ -120,7 +120,7 @@
 								{
 									"key": "file",
 									"type": "file",
-									"src": "C:\\Users\\91937\\Documents\\GitHub\\friendly-greetings-launchpad\\test_files\\company_invoices.csv"
+									"src": "test_files/company_invoices.csv"
 								}
 							]
 						},
@@ -146,7 +146,7 @@
 								{
 									"key": "file",
 									"type": "file",
-									"src": "C:\\Users\\91937\\Documents\\GitHub\\friendly-greetings-launchpad\\test_files\\company_expenses.csv"
+									"src": "test_files/company_expenses.csv"
 								}
 							]
 						},
@@ -172,7 +172,7 @@
 								{
 									"key": "file",
 									"type": "file",
-									"src": "C:\\Users\\91937\\Documents\\GitHub\\friendly-greetings-launchpad\\test_files\\company_revenue.csv"
+									"src": "test_files/company_revenue.csv"
 								}
 							]
 						},
@@ -198,7 +198,7 @@
 								{
 									"key": "file",
 									"type": "file",
-									"src": "C:\\Users\\91937\\Documents\\GitHub\\friendly-greetings-launchpad\\test_files\\company_tax_records.csv"
+									"src": "test_files/company_tax_records.csv"
 								}
 							]
 						},
@@ -224,7 +224,7 @@
 								{
 									"key": "file",
 									"type": "file",
-									"src": "C:\\Users\\91937\\Documents\\GitHub\\friendly-greetings-launchpad\\test_files\\company_accounts_receivable.csv"
+									"src": "test_files/company_accounts_receivable.csv"
 								}
 							]
 						},
@@ -250,7 +250,7 @@
 								{
 									"key": "file",
 									"type": "file",
-									"src": "C:\\Users\\91937\\Documents\\GitHub\\friendly-greetings-launchpad\\test_files\\comprehensive_payroll_data.csv"
+									"src": "test_files/comprehensive_payroll_data.csv"
 								}
 							]
 						},
@@ -276,7 +276,7 @@
 								{
 									"key": "file",
 									"type": "file",
-									"src": "C:\\Users\\91937\\Documents\\GitHub\\friendly-greetings-launchpad\\test_files\\comprehensive_vendor_payments.csv"
+									"src": "test_files/comprehensive_vendor_payments.csv"
 								}
 							]
 						},
@@ -302,7 +302,7 @@
 								{
 									"key": "file",
 									"type": "file",
-									"src": "C:\\Users\\91937\\Documents\\GitHub\\friendly-greetings-launchpad\\test_files\\comprehensive_cash_flow.csv"
+									"src": "test_files/comprehensive_cash_flow.csv"
 								}
 							]
 						},
@@ -328,7 +328,7 @@
 								{
 									"key": "file",
 									"type": "file",
-									"src": "C:\\Users\\91937\\Documents\\GitHub\\friendly-greetings-launchpad\\test_files\\comprehensive_income_statement.csv"
+									"src": "test_files/comprehensive_income_statement.csv"
 								}
 							]
 						},
