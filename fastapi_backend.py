@@ -1837,10 +1837,10 @@ class BatchAIRowClassifier:
 class RowProcessor:
     """Processes individual rows and creates events"""
     
-    def __init__(self, platform_detector: PlatformDetector, ai_classifier):
+    def __init__(self, platform_detector: PlatformDetector, ai_classifier, openai_client):
         self.platform_detector = platform_detector
         self.ai_classifier = ai_classifier
-        self.enrichment_processor = DataEnrichmentProcessor()
+        self.enrichment_processor = DataEnrichmentProcessor(openai_client)
     
     async def process_row(self, row: pd.Series, row_index: int, sheet_name: str, 
                    platform_info: Dict, file_context: Dict, column_names: List[str]) -> Dict[str, Any]:
@@ -2086,7 +2086,7 @@ class ExcelProcessor:
         # Initialize EntityResolver and AI classifier with Supabase client
         self.entity_resolver = EntityResolver(supabase)
         self.ai_classifier = AIRowClassifier(self.openai, self.entity_resolver)
-        self.row_processor = RowProcessor(self.platform_detector, self.ai_classifier)
+        self.row_processor = RowProcessor(self.platform_detector, self.ai_classifier, self.openai)
         
         # Step 3: Create raw_records entry
         await manager.send_update(job_id, {
