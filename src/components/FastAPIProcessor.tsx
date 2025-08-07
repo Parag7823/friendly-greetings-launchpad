@@ -61,6 +61,68 @@ export class FastAPIProcessor {
     }
   }
 
+  private setupWebSocketConnection(jobId: string): Promise<any> {
+    return new Promise((resolve, reject) => {
+      const wsUrl = `wss://friendly-greetings-launchpad.onrender.com/ws/${jobId}`;
+      console.log(`Connecting to WebSocket: ${wsUrl}`);
+      
+      const ws = new WebSocket(wsUrl);
+      let timeoutId: NodeJS.Timeout;
+
+      // Set a timeout for the connection
+      timeoutId = setTimeout(() => {
+        ws.close();
+        reject(new Error('WebSocket connection timeout'));
+      }, 30000); // 30 second timeout
+
+      ws.onopen = () => {
+        console.log('WebSocket connected for job:', jobId);
+        clearTimeout(timeoutId);
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          console.log('WebSocket progress update:', data);
+
+          if (data.status === 'completed') {
+            clearTimeout(timeoutId);
+            ws.close();
+            resolve(data.result || data);
+          } else if (data.status === 'error') {
+            clearTimeout(timeoutId);
+            ws.close();
+            reject(new Error(data.error || 'Processing failed'));
+          } else {
+            // Progress update
+            this.updateProgress(
+              data.step || 'processing',
+              data.message || 'Processing...',
+              data.progress || 0,
+              data.sheetProgress
+            );
+          }
+        } catch (error) {
+          console.error('Error parsing WebSocket message:', error);
+        }
+      };
+
+      ws.onerror = (error) => {
+        console.error('WebSocket error:', error);
+        clearTimeout(timeoutId);
+        reject(new Error('WebSocket connection failed'));
+      };
+
+      ws.onclose = (event) => {
+        console.log('WebSocket closed:', event.code, event.reason);
+        clearTimeout(timeoutId);
+        if (event.code !== 1000 && event.reason !== 'Processing completed') {
+          reject(new Error('WebSocket connection closed unexpectedly'));
+        }
+      };
+    });
+  }
+
   async processFile(
     file: File, 
     customPrompt?: string,
@@ -124,8 +186,9 @@ export class FastAPIProcessor {
         user_id: user.id
       };
 
-      // Call FastAPI backend for processing
+      // Start FastAPI backend processing and connect to WebSocket for real-time updates
       try {
+        // Start the processing job
         const response = await fetch(`${this.apiUrl}/process-excel`, {
           method: 'POST',
           headers: {
@@ -138,7 +201,22 @@ export class FastAPIProcessor {
           throw new Error(`Backend processing failed: ${response.statusText}`);
         }
 
-        const backendResult = await response.json();
+        const initialResponse = await response.json();
+        console.log('FastAPI processing started:', initialResponse);
+
+        // Connect to WebSocket for real-time progress updates
+        this.updateProgress('websocket', 'Connecting to real-time updates...', 35);
+        
+        let backendResult: any;
+        try {
+          backendResult = await this.setupWebSocketConnection(jobData.id);
+          console.log('WebSocket processing completed:', backendResult);
+        } catch (websocketError) {
+          console.log('WebSocket connection failed, falling back to initial response:', websocketError);
+          
+          // Fallback: Get result directly from initial response
+          backendResult = initialResponse;
+        }
         
         // Parse backend results into our format
         const sheets: SheetMetadata[] = [];
@@ -797,11 +875,16 @@ export const useFastAPIProcessor = () => {
         processor.setProgressCallback(onProgress);
       }
 
+      toast({
+        title: "Processing Started",
+        description: "Real-time WebSocket updates enabled"
+      });
+
       const result = await processor.processFile(file, customPrompt);
       
       toast({
         title: "Analysis Complete",
-        description: `Processed ${result.sheets.length} sheets with FastAPI intelligence`
+        description: `Processed ${result.sheets.length} sheets with real-time updates`
       });
 
       return result;
@@ -809,7 +892,7 @@ export const useFastAPIProcessor = () => {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       toast({
         variant: "destructive", 
-        title: "FastAPI Processing Failed",
+        title: "Processing Failed",
         description: errorMessage
       });
       throw error;
