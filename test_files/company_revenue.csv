@@ -1,0 +1,208 @@
+Date,Client Name,Amount,Service Type,Platform,Reference,Status,Description
+2024-01-02,ABC Corp,25000.00,Monthly Retainer,Stripe,ch_1234567890abcdef,Completed,Monthly retainer - Q1 2024
+2024-01-05,XYZ Inc,30000.00,Project Milestone,Stripe,ch_abcdef1234567890,Completed,Project milestone - Development work
+2024-01-09,DEF Ltd,18000.00,Consulting Fee,Stripe,ch_fedcba0987654321,Completed,Consulting fee - Strategy session
+2024-01-13,GHI Corp,22000.00,Development Work,Stripe,ch_1234567890abcdef,Completed,Development work - API integration
+2024-01-17,JKL Inc,28000.00,Project Completion,Stripe,ch_0987654321fedcba,Completed,Project completion - Mobile app
+2024-01-21,MNO Corp,32000.00,Enterprise Project,Stripe,ch_abcdef1234567890,Completed,Enterprise project - CRM system
+2024-01-25,PQR Ltd,19000.00,Consulting Work,Stripe,ch_fedcba0987654321,Completed,Consulting work - Process optimization
+2024-01-29,STU Corp,26000.00,Development Project,Stripe,ch_1234567890abcdef,Completed,Development project - E-commerce platform
+2024-02-02,VWX Corp,35000.00,New Client,Stripe,ch_0987654321fedcba,Completed,New client - Website redesign
+2024-02-06,YZA Inc,27000.00,Consulting Project,Stripe,ch_abcdef1234567890,Completed,Consulting project - Digital transformation
+2024-02-10,BCD Corp,24000.00,Development Work,Stripe,ch_fedcba0987654321,Completed,Development work - Database migration
+2024-02-14,EFG Ltd,31000.00,Enterprise Project,Stripe,ch_1234567890abcdef,Completed,Enterprise project - Cloud migration
+2024-02-18,HIJ Inc,29000.00,Project Milestone,Stripe,ch_0987654321fedcba,Completed,Project milestone - Testing phase
+2024-02-22,KLM Corp,33000.00,Large Project,Stripe,ch_abcdef1234567890,Completed,Large project - Analytics dashboard
+2024-02-26,NOP Ltd,21000.00,Consulting Work,Stripe,ch_fedcba0987654321,Completed,Consulting work - Security audit
+2024-03-01,QRS Corp,25000.00,Development Project,Stripe,ch_1234567890abcdef,Completed,Development project - API development
+2024-03-03,TUV Inc,36000.00,New Enterprise Client,Stripe,ch_0987654321fedcba,Completed,New enterprise client - Full stack development
+2024-03-07,WXY Corp,28000.00,Consulting Project,Stripe,ch_abcdef1234567890,Completed,Consulting project - Performance optimization
+2024-03-11,ZAB Ltd,23000.00,Development Work,Stripe,ch_fedcba0987654321,Completed,Development work - Mobile app updates
+2024-03-15,CDE Corp,34000.00,Enterprise Project,Stripe,ch_1234567890abcdef,Completed,Enterprise project - Data integration
+2024-03-19,FGH Inc,30000.00,Project Completion,Stripe,ch_0987654321fedcba,Completed,Project completion - Web application
+2024-03-23,IJK Corp,37000.00,Large Enterprise Project,Stripe,ch_abcdef1234567890,Completed,Large enterprise project - System architecture
+2024-03-27,LMN Ltd,22000.00,Consulting Work,Stripe,ch_fedcba0987654321,Completed,Consulting work - Technical review
+2024-03-31,OPQ Corp,26000.00,Development Project,Stripe,ch_1234567890abcdef,Completed,Development project - Backend services
+2024-04-01,RST Corp,38000.00,New Project,Stripe,ch_new_project_001,Pending,New project - AI integration
+2024-04-05,UVW Inc,29000.00,Consulting Project,Stripe,ch_new_project_002,Pending,Consulting project - Scalability assessment
+2024-04-09,XYZ Ltd,32000.00,Development Work,Stripe,ch_new_project_003,Pending,Development work - Microservices
+2024-04-13,ABC Corp,25000.00,Monthly Retainer,Stripe,ch_new_project_004,Pending,Monthly retainer - Q2 2024
+2024-04-17,DEF Inc,35000.00,Enterprise Project,Stripe,ch_new_project_005,Pending,Enterprise project - Legacy system migration
+2024-04-21,GHI Ltd,27000.00,Consulting Work,Stripe,ch_new_project_006,Pending,Consulting work - DevOps implementation
+2024-04-25,JKL Corp,31000.00,Development Project,Stripe,ch_new_project_007,Pending,Development project - Frontend redesign
+2024-04-29,MNO Inc,28000.00,Project Milestone,Stripe,ch_new_project_008,Pending,Project milestone - User testing
+2024-05-01,PQR Corp,33000.00,New Client,Stripe,ch_draft_001,Pending,New client - E-commerce platform
+2024-05-05,STU Inc,24000.00,Consulting Project,Stripe,ch_draft_002,Pending,Consulting project - Technical debt
+2024-05-09,VWX Ltd,36000.00,Large Project,Stripe,ch_draft_003,Pending,Large project - Machine learning integration
+2024-05-13,YZA Corp,29000.00,Development Work,Stripe,ch_draft_004,Pending,Development work - API gateway
+2024-05-17,BCD Inc,32000.00,Enterprise Project,Stripe,ch_draft_005,Pending,Enterprise project - Data warehouse
+2024-05-21,EFG Ltd,26000.00,Consulting Work,Stripe,ch_draft_006,Pending,Consulting work - Security implementation
+2024-05-25,HIJ Corp,34000.00,Development Project,Stripe,ch_draft_007,Pending,Development project - Real-time analytics
+2024-05-29,KLM Inc,30000.00,Project Completion,Stripe,ch_draft_008,Pending,Project completion - Mobile application
+2024-06-01,NOP Ltd,28000.00,Consulting Project,Stripe,ch_draft_009,Pending,Consulting project - Performance audit
+2024-06-05,PQR Corp,35000.00,New Enterprise Client,Stripe,ch_draft_010,Pending,New enterprise client - Full system overhaul
+2024-06-09,STU Inc,27000.00,Development Work,Stripe,ch_draft_011,Pending,Development work - Cloud native app
+2024-06-13,TUV Ltd,31000.00,Consulting Project,Stripe,ch_draft_012,Pending,Consulting project - Architecture review
+2024-06-17,UVW Corp,33000.00,Development Project,Stripe,ch_draft_013,Pending,Development project - IoT integration
+2024-06-21,XYZ Inc,29000.00,Enterprise Project,Stripe,ch_draft_014,Pending,Enterprise project - Cloud platform
+2024-06-25,ABC Ltd,36000.00,New Project,Stripe,ch_draft_015,Pending,New project - Blockchain implementation
+2024-06-29,DEF Corp,25000.00,Consulting Work,Stripe,ch_draft_016,Pending,Consulting work - Digital strategy
+2024-07-01,GHI Inc,32000.00,Development Work,Stripe,ch_draft_017,Pending,Development work - API marketplace
+2024-07-05,JKL Ltd,28000.00,Enterprise Project,Stripe,ch_draft_018,Pending,Enterprise project - Data pipeline
+2024-07-09,MNO Corp,34000.00,Consulting Work,Stripe,ch_draft_019,Pending,Consulting work - Architecture review
+2024-07-13,PQR Inc,27000.00,Development Project,Stripe,ch_draft_020,Pending,Development project - Real-time analytics
+2024-07-17,STU Ltd,35000.00,New Enterprise Client,Stripe,ch_draft_021,Pending,New enterprise client - Full system overhaul
+2024-07-21,TUV Corp,30000.00,Development Work,Stripe,ch_draft_022,Pending,Development work - Cloud native app
+2024-07-25,UVW Inc,31000.00,Consulting Project,Stripe,ch_draft_023,Pending,Consulting project - Architecture review
+2024-07-29,XYZ Ltd,33000.00,Development Project,Stripe,ch_draft_024,Pending,Development project - IoT integration
+2024-08-01,ABC Corp,29000.00,Enterprise Project,Stripe,ch_draft_025,Pending,Enterprise project - Cloud platform
+2024-08-05,DEF Inc,36000.00,New Project,Stripe,ch_draft_026,Pending,New project - Blockchain implementation
+2024-08-09,GHI Ltd,25000.00,Consulting Work,Stripe,ch_draft_027,Pending,Consulting work - Digital strategy
+2024-08-13,JKL Corp,32000.00,Development Work,Stripe,ch_draft_028,Pending,Development work - API marketplace
+2024-08-17,MNO Inc,28000.00,Enterprise Project,Stripe,ch_draft_029,Pending,Enterprise project - Data pipeline
+2024-08-21,PQR Ltd,34000.00,Consulting Work,Stripe,ch_draft_030,Pending,Consulting work - Architecture review
+2024-08-25,STU Corp,27000.00,Development Project,Stripe,ch_draft_031,Pending,Development project - Real-time analytics
+2024-08-29,TUV Inc,35000.00,New Enterprise Client,Stripe,ch_draft_032,Pending,New enterprise client - Full system overhaul
+2024-09-01,UVW Ltd,30000.00,Development Work,Stripe,ch_draft_033,Pending,Development work - Cloud native app
+2024-09-05,XYZ Corp,31000.00,Consulting Project,Stripe,ch_draft_034,Pending,Consulting project - Architecture review
+2024-09-09,ABC Inc,33000.00,Development Project,Stripe,ch_draft_035,Pending,Development project - IoT integration
+2024-09-13,DEF Ltd,29000.00,Enterprise Project,Stripe,ch_draft_036,Pending,Enterprise project - Cloud platform
+2024-09-17,GHI Corp,36000.00,New Project,Stripe,ch_draft_037,Pending,New project - Blockchain implementation
+2024-09-21,JKL Inc,25000.00,Consulting Work,Stripe,ch_draft_038,Pending,Consulting work - Digital strategy
+2024-09-25,MNO Ltd,32000.00,Development Work,Stripe,ch_draft_039,Pending,Development work - API marketplace
+2024-09-29,PQR Corp,28000.00,Enterprise Project,Stripe,ch_draft_040,Pending,Enterprise project - Data pipeline
+2024-10-01,STU Inc,34000.00,Consulting Work,Stripe,ch_draft_041,Pending,Consulting work - Architecture review
+2024-10-05,TUV Ltd,27000.00,Development Project,Stripe,ch_draft_042,Pending,Development project - Real-time analytics
+2024-10-09,UVW Corp,35000.00,New Enterprise Client,Stripe,ch_draft_043,Pending,New enterprise client - Full system overhaul
+2024-10-13,XYZ Inc,30000.00,Development Work,Stripe,ch_draft_044,Pending,Development work - Cloud native app
+2024-10-17,ABC Ltd,31000.00,Consulting Project,Stripe,ch_draft_045,Pending,Consulting project - Architecture review
+2024-10-21,DEF Corp,33000.00,Development Project,Stripe,ch_draft_046,Pending,Development project - IoT integration
+2024-10-25,GHI Inc,29000.00,Enterprise Project,Stripe,ch_draft_047,Pending,Enterprise project - Cloud platform
+2024-10-29,JKL Ltd,36000.00,New Project,Stripe,ch_draft_048,Pending,New project - Blockchain implementation
+2024-11-01,MNO Corp,25000.00,Consulting Work,Stripe,ch_draft_049,Pending,Consulting work - Digital strategy
+2024-11-05,PQR Inc,32000.00,Development Work,Stripe,ch_draft_050,Pending,Development work - API marketplace
+2024-11-09,STU Ltd,28000.00,Enterprise Project,Stripe,ch_draft_051,Pending,Enterprise project - Data pipeline
+2024-11-13,TUV Corp,34000.00,Consulting Work,Stripe,ch_draft_052,Pending,Consulting work - Architecture review
+2024-11-17,UVW Inc,27000.00,Development Project,Stripe,ch_draft_053,Pending,Development project - Real-time analytics
+2024-11-21,XYZ Ltd,35000.00,New Enterprise Client,Stripe,ch_draft_054,Pending,New enterprise client - Full system overhaul
+2024-11-25,ABC Corp,30000.00,Development Work,Stripe,ch_draft_055,Pending,Development work - Cloud native app
+2024-11-29,DEF Inc,31000.00,Consulting Project,Stripe,ch_draft_056,Pending,Consulting project - Architecture review
+2024-12-01,GHI Ltd,33000.00,Development Project,Stripe,ch_draft_057,Pending,Development project - IoT integration
+2024-12-05,JKL Corp,29000.00,Enterprise Project,Stripe,ch_draft_058,Pending,Enterprise project - Cloud platform
+2024-12-09,MNO Inc,36000.00,New Project,Stripe,ch_draft_059,Pending,New project - Blockchain implementation
+2024-12-13,PQR Ltd,25000.00,Consulting Work,Stripe,ch_draft_060,Pending,Consulting work - Digital strategy
+2024-12-17,STU Corp,32000.00,Development Work,Stripe,ch_draft_061,Pending,Development work - API marketplace
+2024-12-21,TUV Inc,28000.00,Enterprise Project,Stripe,ch_draft_062,Pending,Enterprise project - Data pipeline
+2024-12-25,UVW Ltd,34000.00,Consulting Work,Stripe,ch_draft_063,Pending,Consulting work - Architecture review
+2024-12-29,XYZ Corp,27000.00,Development Project,Stripe,ch_draft_064,Pending,Development project - Real-time analytics
+2025-01-01,ABC Inc,35000.00,New Enterprise Client,Stripe,ch_draft_065,Pending,New enterprise client - Full system overhaul
+2025-01-05,DEF Ltd,30000.00,Development Work,Stripe,ch_draft_066,Pending,Development work - Cloud native app
+2025-01-09,GHI Corp,31000.00,Consulting Project,Stripe,ch_draft_067,Pending,Consulting project - Digital transformation
+2025-01-13,JKL Inc,33000.00,Development Work,Stripe,ch_draft_068,Pending,Development work - Cloud native app
+2025-01-17,MNO Ltd,29000.00,Project Completion,Stripe,ch_draft_069,Pending,Project completion - Web application
+2025-01-21,PQR Corp,35000.00,Consulting Work,Stripe,ch_draft_070,Pending,Consulting work - Architecture design
+2025-01-25,STU Inc,27000.00,Development Project,Stripe,ch_draft_071,Pending,Development project - Real-time dashboard
+2025-01-29,TUV Ltd,33000.00,Enterprise Project,Stripe,ch_draft_072,Pending,Enterprise project - Data integration
+2025-02-01,UVW Corp,31000.00,New Project,Stripe,ch_draft_073,Pending,New project - AI chatbot
+2025-02-05,XYZ Inc,28000.00,Consulting Work,Stripe,ch_draft_074,Pending,Consulting work - Security review
+2025-02-09,ABC Ltd,36000.00,Large Project,Stripe,ch_draft_075,Pending,Large project - Machine learning platform
+2025-02-13,DEF Corp,30000.00,Development Work,Stripe,ch_draft_076,Pending,Development work - API documentation
+2025-02-17,GHI Inc,34000.00,Enterprise Project,Stripe,ch_draft_077,Pending,Enterprise project - Data visualization
+2025-02-21,JKL Ltd,29000.00,Consulting Work,Stripe,ch_draft_078,Pending,Consulting work - Performance audit
+2025-02-25,MNO Corp,35000.00,Development Project,Stripe,ch_draft_079,Pending,Development project - Mobile app
+2025-03-01,PQR Inc,27000.00,Project Milestone,Stripe,ch_draft_080,Pending,Project milestone - Beta testing
+2025-03-05,STU Ltd,33000.00,Consulting Work,Stripe,ch_draft_081,Pending,Consulting work - Technical assessment
+2025-03-09,TUV Corp,31000.00,Development Work,Stripe,ch_draft_082,Pending,Development work - Web platform
+2025-03-13,UVW Inc,28000.00,Enterprise Project,Stripe,ch_draft_083,Pending,Enterprise project - Cloud migration
+2025-03-17,XYZ Ltd,36000.00,New Client,Stripe,ch_draft_084,Pending,New client - Full stack development
+2025-03-21,ABC Corp,30000.00,Consulting Work,Stripe,ch_draft_085,Pending,Consulting work - Digital strategy
+2025-03-25,DEF Inc,34000.00,Development Work,Stripe,ch_draft_086,Pending,Development work - API gateway
+2025-03-29,GHI Ltd,29000.00,Project Completion,Stripe,ch_draft_087,Pending,Project completion - Data pipeline
+2025-04-01,JKL Corp,35000.00,Consulting Work,Stripe,ch_draft_088,Pending,Consulting work - Architecture review
+2025-04-05,MNO Inc,27000.00,Development Project,Stripe,ch_draft_089,Pending,Development project - Real-time analytics
+2025-04-09,PQR Ltd,33000.00,Enterprise Project,Stripe,ch_draft_090,Pending,Enterprise project - Cloud platform
+2025-04-13,STU Corp,31000.00,New Project,Stripe,ch_draft_091,Pending,New project - IoT solution
+2025-04-17,TUV Inc,28000.00,Consulting Work,Stripe,ch_draft_092,Pending,Consulting work - Security implementation
+2025-04-21,UVW Ltd,36000.00,Large Project,Stripe,ch_draft_093,Pending,Large project - Machine learning platform
+2025-04-25,XYZ Corp,30000.00,Development Work,Stripe,ch_draft_094,Pending,Development work - Web dashboard
+2025-04-29,ABC Inc,34000.00,Enterprise Project,Stripe,ch_draft_095,Pending,Enterprise project - Data warehouse
+2025-05-01,DEF Ltd,29000.00,Consulting Work,Stripe,ch_draft_096,Pending,Consulting work - Performance optimization
+2025-05-05,GHI Corp,35000.00,Development Project,Stripe,ch_draft_097,Pending,Development project - API marketplace
+2025-05-09,JKL Inc,27000.00,Project Milestone,Stripe,ch_draft_098,Pending,Project milestone - User acceptance
+2025-05-13,MNO Ltd,33000.00,Consulting Work,Stripe,ch_draft_099,Pending,Consulting work - Technical debt
+2025-05-17,PQR Corp,31000.00,Development Work,Stripe,ch_draft_100,Pending,Development work - Mobile backend
+2025-05-21,STU Inc,28000.00,New Client,Stripe,ch_draft_101,Pending,New client - E-commerce platform
+2025-05-25,TUV Ltd,36000.00,Enterprise Project,Stripe,ch_draft_102,Pending,Enterprise project - Full system overhaul
+2025-05-29,UVW Corp,30000.00,Consulting Project,Stripe,ch_draft_103,Pending,Consulting project - Digital transformation
+2025-06-01,XYZ Inc,34000.00,Development Work,Stripe,ch_draft_104,Pending,Development work - Cloud native app
+2025-06-05,ABC Ltd,29000.00,Project Completion,Stripe,ch_draft_105,Pending,Project completion - Web application
+2025-06-09,DEF Corp,35000.00,Consulting Work,Stripe,ch_draft_106,Pending,Consulting work - Architecture design
+2025-06-13,GHI Inc,27000.00,Development Project,Stripe,ch_draft_107,Pending,Development project - Real-time dashboard
+2025-06-17,JKL Ltd,33000.00,Enterprise Project,Stripe,ch_draft_108,Pending,Enterprise project - Data integration
+2025-06-21,MNO Corp,31000.00,New Project,Stripe,ch_draft_109,Pending,New project - AI chatbot
+2025-06-25,PQR Inc,28000.00,Consulting Work,Stripe,ch_draft_110,Pending,Consulting work - Security review
+2025-06-29,STU Ltd,36000.00,Large Project,Stripe,ch_draft_111,Pending,Large project - Machine learning platform
+2025-07-01,TUV Corp,30000.00,Development Work,Stripe,ch_draft_112,Pending,Development work - API documentation
+2025-07-05,UVW Inc,34000.00,Enterprise Project,Stripe,ch_draft_113,Pending,Enterprise project - Data visualization
+2025-07-09,XYZ Ltd,29000.00,Consulting Work,Stripe,ch_draft_114,Pending,Consulting work - Performance audit
+2025-07-13,ABC Corp,35000.00,Development Project,Stripe,ch_draft_115,Pending,Development project - Mobile app
+2025-07-17,DEF Inc,27000.00,Project Milestone,Stripe,ch_draft_116,Pending,Project milestone - Beta testing
+2025-07-21,GHI Ltd,33000.00,Consulting Work,Stripe,ch_draft_117,Pending,Consulting work - Technical assessment
+2025-07-25,JKL Corp,31000.00,Development Work,Stripe,ch_draft_118,Pending,Development work - Web platform
+2025-07-29,MNO Inc,28000.00,Enterprise Project,Stripe,ch_draft_119,Pending,Enterprise project - Cloud migration
+2025-08-01,PQR Ltd,36000.00,New Client,Stripe,ch_draft_120,Pending,New client - Full stack development
+2025-08-05,STU Corp,30000.00,Consulting Work,Stripe,ch_draft_121,Pending,Consulting work - Digital strategy
+2025-08-09,TUV Inc,34000.00,Development Work,Stripe,ch_draft_122,Pending,Development work - API gateway
+2025-08-13,UVW Ltd,29000.00,Project Completion,Stripe,ch_draft_123,Pending,Project completion - Data pipeline
+2025-08-17,XYZ Corp,35000.00,Consulting Work,Stripe,ch_draft_124,Pending,Consulting work - Architecture review
+2025-08-21,ABC Inc,27000.00,Development Project,Stripe,ch_draft_125,Pending,Development project - Real-time analytics
+2025-08-25,DEF Ltd,33000.00,Enterprise Project,Stripe,ch_draft_126,Pending,Enterprise project - Cloud platform
+2025-08-29,GHI Corp,31000.00,New Project,Stripe,ch_draft_127,Pending,New project - IoT solution
+2025-09-01,JKL Inc,28000.00,Consulting Work,Stripe,ch_draft_128,Pending,Consulting work - Security implementation
+2025-09-05,MNO Ltd,36000.00,Large Project,Stripe,ch_draft_129,Pending,Large project - Machine learning platform
+2025-09-09,PQR Corp,30000.00,Development Work,Stripe,ch_draft_130,Pending,Development work - Web dashboard
+2025-09-13,STU Inc,34000.00,Enterprise Project,Stripe,ch_draft_131,Pending,Enterprise project - Data warehouse
+2025-09-17,TUV Ltd,29000.00,Consulting Work,Stripe,ch_draft_132,Pending,Consulting work - Performance optimization
+2025-09-21,UVW Corp,35000.00,Development Project,Stripe,ch_draft_133,Pending,Development project - API marketplace
+2025-09-25,XYZ Inc,27000.00,Project Milestone,Stripe,ch_draft_134,Pending,Project milestone - User acceptance
+2025-09-29,ABC Ltd,33000.00,Consulting Work,Stripe,ch_draft_135,Pending,Consulting work - Technical debt
+2025-10-01,DEF Corp,31000.00,Development Work,Stripe,ch_draft_136,Pending,Development work - Mobile backend
+2025-10-05,GHI Inc,28000.00,New Client,Stripe,ch_draft_137,Pending,New client - E-commerce platform
+2025-10-09,JKL Ltd,36000.00,Enterprise Project,Stripe,ch_draft_138,Pending,Enterprise project - Full system overhaul
+2025-10-13,MNO Corp,30000.00,Consulting Project,Stripe,ch_draft_139,Pending,Consulting project - Digital transformation
+2025-10-17,PQR Inc,34000.00,Development Work,Stripe,ch_draft_140,Pending,Development work - Cloud native app
+2025-10-21,STU Ltd,29000.00,Project Completion,Stripe,ch_draft_141,Pending,Project completion - Web application
+2025-10-25,TUV Corp,35000.00,Consulting Work,Stripe,ch_draft_142,Pending,Consulting work - Architecture design
+2025-10-29,UVW Inc,27000.00,Development Project,Stripe,ch_draft_143,Pending,Development project - Real-time dashboard
+2025-11-01,XYZ Ltd,33000.00,Enterprise Project,Stripe,ch_draft_144,Pending,Enterprise project - Data integration
+2025-11-05,ABC Corp,31000.00,New Project,Stripe,ch_draft_145,Pending,New project - AI chatbot
+2025-11-09,DEF Inc,28000.00,Consulting Work,Stripe,ch_draft_146,Pending,Consulting work - Security review
+2025-11-13,GHI Ltd,36000.00,Large Project,Stripe,ch_draft_147,Pending,Large project - Machine learning platform
+2025-11-17,JKL Corp,30000.00,Development Work,Stripe,ch_draft_148,Pending,Development work - API documentation
+2025-11-21,MNO Inc,34000.00,Enterprise Project,Stripe,ch_draft_149,Pending,Enterprise project - Data visualization
+2025-11-25,PQR Ltd,29000.00,Consulting Work,Stripe,ch_draft_150,Pending,Consulting work - Performance audit
+2025-11-29,STU Corp,35000.00,Development Project,Stripe,ch_draft_151,Pending,Development project - Mobile app
+2025-12-01,TUV Inc,27000.00,Project Milestone,Stripe,ch_draft_152,Pending,Project milestone - Beta testing
+2025-12-05,UVW Ltd,33000.00,Consulting Work,Stripe,ch_draft_153,Pending,Consulting work - Technical assessment
+2025-12-09,XYZ Corp,31000.00,Development Work,Stripe,ch_draft_154,Pending,Development work - Web platform
+2025-12-13,ABC Inc,28000.00,Enterprise Project,Stripe,ch_draft_155,Pending,Enterprise project - Cloud migration
+2025-12-17,DEF Ltd,36000.00,New Client,Stripe,ch_draft_156,Pending,New client - Full stack development
+2025-12-21,GHI Corp,30000.00,Consulting Work,Stripe,ch_draft_157,Pending,Consulting work - Digital strategy
+2025-12-25,JKL Inc,34000.00,Development Work,Stripe,ch_draft_158,Pending,Development work - API gateway
+2025-12-29,MNO Ltd,29000.00,Project Completion,Stripe,ch_draft_159,Pending,Project completion - Data pipeline
+2026-01-01,PQR Corp,35000.00,Consulting Work,Stripe,ch_draft_160,Pending,Consulting work - Architecture review
+2026-01-05,STU Inc,27000.00,Development Project,Stripe,ch_draft_161,Pending,Development project - Real-time analytics
+2026-01-09,TUV Ltd,33000.00,Enterprise Project,Stripe,ch_draft_162,Pending,Enterprise project - Cloud platform
+2026-01-13,UVW Corp,31000.00,New Project,Stripe,ch_draft_163,Pending,New project - IoT solution
+2026-01-17,XYZ Inc,28000.00,Consulting Work,Stripe,ch_draft_164,Pending,Consulting work - Security implementation
+2026-01-21,ABC Ltd,36000.00,Large Project,Stripe,ch_draft_165,Pending,Large project - Machine learning platform
+2026-01-25,DEF Corp,30000.00,Development Work,Stripe,ch_draft_166,Pending,Development work - Web dashboard
+2026-01-29,GHI Inc,34000.00,Enterprise Project,Stripe,ch_draft_167,Pending,Enterprise project - Data warehouse
+2026-02-01,JKL Corp,29000.00,Consulting Work,Stripe,ch_draft_168,Pending,Consulting work - Performance optimization
+2026-02-05,MNO Inc,35000.00,Development Project,Stripe,ch_draft_169,Pending,Development project - API marketplace
+2026-02-09,PQR Ltd,27000.00,Project Milestone,Stripe,ch_draft_170,Pending,Project milestone - User acceptance
+2026-02-13,STU Corp,33000.00,Consulting Work,Stripe,ch_draft_171,Pending,Consulting work - Technical debt
+2026-02-17,TUV Inc,31000.00,Development Work,Stripe,ch_draft_172,Pending,Development work - Mobile backend
+2026-02-21,UVW Ltd,28000.00,New Client,Stripe,ch_draft_173,Pending,New client - E-commerce platform
+2026-02-25,XYZ Corp,36000.00,Enterprise Project,Stripe,ch_draft_174,Pending,Enterprise project - Full system overhaul
+2026-02-29,ABC Inc,30000.00,Consulting Project,Stripe,ch_draft_175,Pending,Consulting project - Digital transformation 

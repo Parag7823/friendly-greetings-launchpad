@@ -1,0 +1,170 @@
+Date,Category,Amount,Description,Vendor,Payment Method,Reference,Status
+2024-01-03,Office Rent,5000.00,Monthly office rent payment,Landlord,Check,LL-001,Paid
+2024-01-06,Software Subscription,200.00,Monthly Stripe subscription,Stripe,Credit Card,ch_0987654321fedcba,Paid
+2024-01-07,Internet,150.00,Monthly internet service,ISP,ACH,ISP-001,Paid
+2024-01-08,Marketing,3000.00,Google Ads campaign,Google Ads,Credit Card,GA-001,Paid
+2024-01-10,Office Supplies,500.00,Office supplies and equipment,Office Depot,Credit Card,OD-001,Paid
+2024-01-13,Cloud Services,2500.00,AWS infrastructure services,AWS,Credit Card,aws_001,Paid
+2024-01-14,Travel,800.00,Business travel expenses,Expedia,Credit Card,EXP-001,Paid
+2024-01-16,Legal Services,2000.00,Legal consultation services,Law Firm,Check,LF-001,Paid
+2024-01-18,Insurance,1200.00,Monthly business insurance,Insurance Co,ACH,INS-001,Paid
+2024-01-20,Equipment,3000.00,MacBook Pro purchase,Apple Store,Credit Card,AS-001,Paid
+2024-01-22,Utilities,400.00,Monthly utilities payment,Utility Co,ACH,UC-001,Paid
+2024-01-24,Advertising,2500.00,Facebook advertising campaign,Facebook Ads,Credit Card,FB-001,Paid
+2024-01-26,Maintenance,600.00,Office maintenance services,Maintenance Co,Check,MC-001,Paid
+2024-01-28,Professional Development,1500.00,Team training courses,Coursera,Credit Card,CR-001,Paid
+2024-02-03,Office Rent,5000.00,Monthly office rent payment,Landlord,Check,LL-002,Paid
+2024-02-05,Software License,800.00,Adobe Creative Cloud subscription,Adobe,Credit Card,AD-001,Paid
+2024-02-07,Internet,150.00,Monthly internet service,ISP,ACH,ISP-002,Paid
+2024-02-08,Marketing,3500.00,Google Ads campaign,Google Ads,Credit Card,GA-002,Paid
+2024-02-10,Office Supplies,600.00,Office supplies and equipment,Office Depot,Credit Card,OD-002,Paid
+2024-02-13,Cloud Services,2800.00,AWS infrastructure services,AWS,Credit Card,aws_002,Paid
+2024-02-14,Travel,1200.00,Business travel expenses,Expedia,Credit Card,EXP-002,Paid
+2024-02-16,Legal Services,2500.00,Legal consultation services,Law Firm,Check,LF-002,Paid
+2024-02-18,Insurance,1200.00,Monthly business insurance,Insurance Co,ACH,INS-002,Paid
+2024-02-20,Equipment,2500.00,iPad for design team,Apple Store,Credit Card,AS-002,Paid
+2024-02-22,Utilities,450.00,Monthly utilities payment,Utility Co,ACH,UC-002,Paid
+2024-02-24,Advertising,3000.00,Facebook advertising campaign,Facebook Ads,Credit Card,FB-002,Paid
+2024-02-26,Maintenance,700.00,Office maintenance services,Maintenance Co,Check,MC-002,Paid
+2024-02-28,Professional Development,2000.00,Advanced training courses,Coursera,Credit Card,CR-002,Paid
+2024-03-03,Office Rent,5000.00,Monthly office rent payment,Landlord,Check,LL-003,Paid
+2024-03-05,Software License,900.00,Adobe Creative Cloud subscription,Adobe,Credit Card,AD-002,Paid
+2024-03-07,Internet,150.00,Monthly internet service,ISP,ACH,ISP-003,Paid
+2024-03-09,Marketing,4000.00,Google Ads campaign,Google Ads,Credit Card,GA-003,Paid
+2024-03-11,Office Supplies,550.00,Office supplies and equipment,Office Depot,Credit Card,OD-003,Paid
+2024-03-13,Cloud Services,3000.00,AWS infrastructure services,AWS,Credit Card,aws_003,Paid
+2024-03-15,Travel,1500.00,Business travel expenses,Expedia,Credit Card,EXP-003,Paid
+2024-03-17,Legal Services,3000.00,Legal consultation services,Law Firm,Check,LF-003,Paid
+2024-03-19,Insurance,1200.00,Monthly business insurance,Insurance Co,ACH,INS-003,Paid
+2024-03-21,Equipment,4000.00,Mac Studio for development,Apple Store,Credit Card,AS-003,Paid
+2024-03-23,Utilities,500.00,Monthly utilities payment,Utility Co,ACH,UC-003,Paid
+2024-03-25,Advertising,3500.00,Facebook advertising campaign,Facebook Ads,Credit Card,FB-003,Paid
+2024-03-27,Maintenance,800.00,Office maintenance services,Maintenance Co,Check,MC-003,Paid
+2024-03-29,Professional Development,2500.00,Leadership training courses,Coursera,Credit Card,CR-003,Paid
+2024-04-01,Office Rent,5000.00,Monthly office rent payment,Landlord,Check,LL-004,Pending
+2024-04-03,Software License,1000.00,Adobe Creative Cloud subscription,Adobe,Credit Card,AD-003,Pending
+2024-04-05,Internet,150.00,Monthly internet service,ISP,ACH,ISP-004,Pending
+2024-04-07,Marketing,4500.00,Google Ads campaign,Google Ads,Credit Card,GA-004,Pending
+2024-04-09,Office Supplies,700.00,Office supplies and equipment,Office Depot,Credit Card,OD-004,Pending
+2024-04-11,Cloud Services,3200.00,AWS infrastructure services,AWS,Credit Card,aws_004,Pending
+2024-04-13,Travel,1800.00,Business travel expenses,Expedia,Credit Card,EXP-004,Pending
+2024-04-15,Legal Services,3500.00,Legal consultation services,Law Firm,Check,LF-004,Pending
+2024-04-17,Insurance,1200.00,Monthly business insurance,Insurance Co,ACH,INS-004,Pending
+2024-04-19,Equipment,5000.00,New development workstations,Apple Store,Credit Card,AS-004,Pending
+2024-04-21,Utilities,550.00,Monthly utilities payment,Utility Co,ACH,UC-004,Pending
+2024-04-23,Advertising,4000.00,Facebook advertising campaign,Facebook Ads,Credit Card,FB-004,Pending
+2024-04-25,Maintenance,900.00,Office maintenance services,Maintenance Co,Check,MC-004,Pending
+2024-04-27,Professional Development,3000.00,Advanced certification courses,Coursera,Credit Card,CR-004,Pending
+2024-05-01,Office Rent,5000.00,Monthly office rent payment,Landlord,Check,LL-005,Pending
+2024-05-03,Software License,1100.00,Adobe Creative Cloud subscription,Adobe,Credit Card,AD-004,Pending
+2024-05-05,Internet,150.00,Monthly internet service,ISP,ACH,ISP-005,Pending
+2024-05-07,Marketing,5000.00,Google Ads campaign,Google Ads,Credit Card,GA-005,Pending
+2024-05-09,Office Supplies,800.00,Office supplies and equipment,Office Depot,Credit Card,OD-005,Pending
+2024-05-11,Cloud Services,3500.00,AWS infrastructure services,AWS,Credit Card,aws_005,Pending
+2024-05-13,Travel,2000.00,Business travel expenses,Expedia,Credit Card,EXP-005,Pending
+2024-05-15,Legal Services,4000.00,Legal consultation services,Law Firm,Check,LF-005,Pending
+2024-05-17,Insurance,1200.00,Monthly business insurance,Insurance Co,ACH,INS-005,Pending
+2024-05-19,Equipment,6000.00,Server equipment purchase,Apple Store,Credit Card,AS-005,Pending
+2024-05-21,Utilities,600.00,Monthly utilities payment,Utility Co,ACH,UC-005,Pending
+2024-05-23,Advertising,4500.00,Facebook advertising campaign,Facebook Ads,Credit Card,FB-005,Pending
+2024-05-25,Maintenance,1000.00,Office maintenance services,Maintenance Co,Check,MC-005,Pending
+2024-05-27,Professional Development,3500.00,Executive training courses,Coursera,Credit Card,CR-005,Pending
+2024-06-01,Office Rent,5000.00,Monthly office rent payment,Landlord,Check,LL-006,Pending
+2024-06-03,Software License,1200.00,Adobe Creative Cloud subscription,Adobe,Credit Card,AD-005,Pending
+2024-06-05,Internet,150.00,Monthly internet service,ISP,ACH,ISP-006,Pending
+2024-06-07,Marketing,5500.00,Google Ads campaign,Google Ads,Credit Card,GA-006,Pending
+2024-06-09,Office Supplies,900.00,Office supplies and equipment,Office Depot,Credit Card,OD-006,Pending
+2024-06-11,Cloud Services,3800.00,AWS infrastructure services,AWS,Credit Card,aws_006,Pending
+2024-06-13,Travel,2200.00,Business travel expenses,Expedia,Credit Card,EXP-006,Pending
+2024-06-15,Legal Services,4500.00,Legal consultation services,Law Firm,Check,LF-006,Pending
+2024-06-17,Insurance,1200.00,Monthly business insurance,Insurance Co,ACH,INS-006,Pending
+2024-06-19,Equipment,7000.00,Advanced development tools,Apple Store,Credit Card,AS-006,Pending
+2024-06-21,Utilities,650.00,Monthly utilities payment,Utility Co,ACH,UC-006,Pending
+2024-06-23,Advertising,5000.00,Facebook advertising campaign,Facebook Ads,Credit Card,FB-006,Pending
+2024-06-25,Maintenance,1100.00,Office maintenance services,Maintenance Co,Check,MC-006,Pending
+2024-06-27,Professional Development,4000.00,Industry certification courses,Coursera,Credit Card,CR-006,Pending
+2024-07-01,Office Rent,5000.00,Monthly office rent payment,Landlord,Check,LL-007,Pending
+2024-07-03,Software License,1300.00,Adobe Creative Cloud subscription,Adobe,Credit Card,AD-006,Pending
+2024-07-05,Internet,150.00,Monthly internet service,ISP,ACH,ISP-007,Pending
+2024-07-07,Marketing,6000.00,Google Ads campaign,Google Ads,Credit Card,GA-007,Pending
+2024-07-09,Office Supplies,1000.00,Office supplies and equipment,Office Depot,Credit Card,OD-007,Pending
+2024-07-11,Cloud Services,4100.00,AWS infrastructure services,AWS,Credit Card,aws_007,Pending
+2024-07-13,Travel,2400.00,Business travel expenses,Expedia,Credit Card,EXP-007,Pending
+2024-07-15,Legal Services,5000.00,Legal consultation services,Law Firm,Check,LF-007,Pending
+2024-07-17,Insurance,1200.00,Monthly business insurance,Insurance Co,ACH,INS-007,Pending
+2024-07-19,Equipment,8000.00,High-performance workstations,Apple Store,Credit Card,AS-007,Pending
+2024-07-21,Utilities,700.00,Monthly utilities payment,Utility Co,ACH,UC-007,Pending
+2024-07-23,Advertising,5500.00,Facebook advertising campaign,Facebook Ads,Credit Card,FB-007,Pending
+2024-07-25,Maintenance,1200.00,Office maintenance services,Maintenance Co,Check,MC-007,Pending
+2024-07-27,Professional Development,4500.00,Advanced leadership courses,Coursera,Credit Card,CR-007,Pending
+2024-08-01,Office Rent,5000.00,Monthly office rent payment,Landlord,Check,LL-008,Pending
+2024-08-03,Software License,1400.00,Adobe Creative Cloud subscription,Adobe,Credit Card,AD-007,Pending
+2024-08-05,Internet,150.00,Monthly internet service,ISP,ACH,ISP-008,Pending
+2024-08-07,Marketing,6500.00,Google Ads campaign,Google Ads,Credit Card,GA-008,Pending
+2024-08-09,Office Supplies,1100.00,Office supplies and equipment,Office Depot,Credit Card,OD-008,Pending
+2024-08-11,Cloud Services,4400.00,AWS infrastructure services,AWS,Credit Card,aws_008,Pending
+2024-08-13,Travel,2600.00,Business travel expenses,Expedia,Credit Card,EXP-008,Pending
+2024-08-15,Legal Services,5500.00,Legal consultation services,Law Firm,Check,LF-008,Pending
+2024-08-17,Insurance,1200.00,Monthly business insurance,Insurance Co,ACH,INS-008,Pending
+2024-08-19,Equipment,9000.00,Enterprise development tools,Apple Store,Credit Card,AS-008,Pending
+2024-08-21,Utilities,750.00,Monthly utilities payment,Utility Co,ACH,UC-008,Pending
+2024-08-23,Advertising,6000.00,Facebook advertising campaign,Facebook Ads,Credit Card,FB-008,Pending
+2024-08-25,Maintenance,1300.00,Office maintenance services,Maintenance Co,Check,MC-008,Pending
+2024-08-27,Professional Development,5000.00,Executive certification courses,Coursera,Credit Card,CR-008,Pending
+2024-09-01,Office Rent,5000.00,Monthly office rent payment,Landlord,Check,LL-009,Pending
+2024-09-03,Software License,1500.00,Adobe Creative Cloud subscription,Adobe,Credit Card,AD-008,Pending
+2024-09-05,Internet,150.00,Monthly internet service,ISP,ACH,ISP-009,Pending
+2024-09-07,Marketing,7000.00,Google Ads campaign,Google Ads,Credit Card,GA-009,Pending
+2024-09-09,Office Supplies,1200.00,Office supplies and equipment,Office Depot,Credit Card,OD-009,Pending
+2024-09-11,Cloud Services,4700.00,AWS infrastructure services,AWS,Credit Card,aws_009,Pending
+2024-09-13,Travel,2800.00,Business travel expenses,Expedia,Credit Card,EXP-009,Pending
+2024-09-15,Legal Services,6000.00,Legal consultation services,Law Firm,Check,LF-009,Pending
+2024-09-17,Insurance,1200.00,Monthly business insurance,Insurance Co,ACH,INS-009,Pending
+2024-09-19,Equipment,10000.00,Advanced server infrastructure,Apple Store,Credit Card,AS-009,Pending
+2024-09-21,Utilities,800.00,Monthly utilities payment,Utility Co,ACH,UC-009,Pending
+2024-09-23,Advertising,6500.00,Facebook advertising campaign,Facebook Ads,Credit Card,FB-009,Pending
+2024-09-25,Maintenance,1400.00,Office maintenance services,Maintenance Co,Check,MC-009,Pending
+2024-09-27,Professional Development,5500.00,Industry expert courses,Coursera,Credit Card,CR-009,Pending
+2024-10-01,Office Rent,5000.00,Monthly office rent payment,Landlord,Check,LL-010,Pending
+2024-10-03,Software License,1600.00,Adobe Creative Cloud subscription,Adobe,Credit Card,AD-009,Pending
+2024-10-05,Internet,150.00,Monthly internet service,ISP,ACH,ISP-010,Pending
+2024-10-07,Marketing,7500.00,Google Ads campaign,Google Ads,Credit Card,GA-010,Pending
+2024-10-09,Office Supplies,1300.00,Office supplies and equipment,Office Depot,Credit Card,OD-010,Pending
+2024-10-11,Cloud Services,5000.00,AWS infrastructure services,AWS,Credit Card,aws_010,Pending
+2024-10-13,Travel,3000.00,Business travel expenses,Expedia,Credit Card,EXP-010,Pending
+2024-10-15,Legal Services,6500.00,Legal consultation services,Law Firm,Check,LF-010,Pending
+2024-10-17,Insurance,1200.00,Monthly business insurance,Insurance Co,ACH,INS-010,Pending
+2024-10-19,Equipment,11000.00,Enterprise development platform,Apple Store,Credit Card,AS-010,Pending
+2024-10-21,Utilities,850.00,Monthly utilities payment,Utility Co,ACH,UC-010,Pending
+2024-10-23,Advertising,7000.00,Facebook advertising campaign,Facebook Ads,Credit Card,FB-010,Pending
+2024-10-25,Maintenance,1500.00,Office maintenance services,Maintenance Co,Check,MC-010,Pending
+2024-10-27,Professional Development,6000.00,Advanced technical courses,Coursera,Credit Card,CR-010,Pending
+2024-11-01,Office Rent,5000.00,Monthly office rent payment,Landlord,Check,LL-011,Pending
+2024-11-03,Software License,1700.00,Adobe Creative Cloud subscription,Adobe,Credit Card,AD-010,Pending
+2024-11-05,Internet,150.00,Monthly internet service,ISP,ACH,ISP-011,Pending
+2024-11-07,Marketing,8000.00,Google Ads campaign,Google Ads,Credit Card,GA-011,Pending
+2024-11-09,Office Supplies,1400.00,Office supplies and equipment,Office Depot,Credit Card,OD-011,Pending
+2024-11-11,Cloud Services,5300.00,AWS infrastructure services,AWS,Credit Card,aws_011,Pending
+2024-11-13,Travel,3200.00,Business travel expenses,Expedia,Credit Card,EXP-011,Pending
+2024-11-15,Legal Services,7000.00,Legal consultation services,Law Firm,Check,LF-011,Pending
+2024-11-17,Insurance,1200.00,Monthly business insurance,Insurance Co,ACH,INS-011,Pending
+2024-11-19,Equipment,12000.00,High-end development tools,Apple Store,Credit Card,AS-011,Pending
+2024-11-21,Utilities,900.00,Monthly utilities payment,Utility Co,ACH,UC-011,Pending
+2024-11-23,Advertising,7500.00,Facebook advertising campaign,Facebook Ads,Credit Card,FB-011,Pending
+2024-11-25,Maintenance,1600.00,Office maintenance services,Maintenance Co,Check,MC-011,Pending
+2024-11-27,Professional Development,6500.00,Executive leadership courses,Coursera,Credit Card,CR-011,Pending
+2024-12-01,Office Rent,5000.00,Monthly office rent payment,Landlord,Check,LL-012,Pending
+2024-12-03,Software License,1800.00,Adobe Creative Cloud subscription,Adobe,Credit Card,AD-011,Pending
+2024-12-05,Internet,150.00,Monthly internet service,ISP,ACH,ISP-012,Pending
+2024-12-07,Marketing,8500.00,Google Ads campaign,Google Ads,Credit Card,GA-012,Pending
+2024-12-09,Office Supplies,1500.00,Office supplies and equipment,Office Depot,Credit Card,OD-012,Pending
+2024-12-11,Cloud Services,5600.00,AWS infrastructure services,AWS,Credit Card,aws_012,Pending
+2024-12-13,Travel,3400.00,Business travel expenses,Expedia,Credit Card,EXP-012,Pending
+2024-12-15,Legal Services,7500.00,Legal consultation services,Law Firm,Check,LF-012,Pending
+2024-12-17,Insurance,1200.00,Monthly business insurance,Insurance Co,ACH,INS-012,Pending
+2024-12-19,Equipment,13000.00,Enterprise infrastructure,Apple Store,Credit Card,AS-012,Pending
+2024-12-21,Utilities,950.00,Monthly utilities payment,Utility Co,ACH,UC-012,Pending
+2024-12-23,Advertising,8000.00,Facebook advertising campaign,Facebook Ads,Credit Card,FB-012,Pending
+2024-12-25,Maintenance,1700.00,Office maintenance services,Maintenance Co,Check,MC-012,Pending
+2024-12-27,Professional Development,7000.00,Advanced certification courses,Coursera,Credit Card,CR-012,Pending
+2024-12-29,Bank Fee,25.00,Monthly bank service fee,Bank,ACH,BANK-FEE-001,Paid 

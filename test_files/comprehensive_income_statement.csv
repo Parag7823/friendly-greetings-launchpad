@@ -1,0 +1,171 @@
+Period,Revenue Category,Revenue Amount,Expense Category,Expense Amount,Platform,Transaction ID,Currency,Status,Notes
+Q1 2024,Client Services,250000,Employee Salaries,180000,Internal,INT-001,USD,Completed,Q1 financial summary
+Q1 2024,Consulting Fees,120000,Office Rent,15000,Internal,INT-002,USD,Completed,Q1 consulting revenue
+Q1 2024,Software Licenses,45000,Cloud Services,12000,Internal,INT-003,USD,Completed,Q1 software revenue
+Q1 2024,Training Services,35000,Marketing Expenses,25000,Internal,INT-004,USD,Completed,Q1 training revenue
+Q1 2024,Support Contracts,28000,Travel Expenses,8000,Internal,INT-005,USD,Completed,Q1 support revenue
+Q1 2024,Implementation Fees,55000,Legal Services,5000,Internal,INT-006,USD,Completed,Q1 implementation
+Q1 2024,Maintenance Contracts,22000,Insurance Premiums,6000,Internal,INT-007,USD,Completed,Q1 maintenance
+Q1 2024,Professional Services,38000,Equipment Purchases,15000,Internal,INT-008,USD,Completed,Q1 professional services
+Q1 2024,Subscription Revenue,15000,Office Supplies,3000,Internal,INT-009,USD,Completed,Q1 subscriptions
+Q1 2024,One-time Projects,42000,Utilities,2000,Internal,INT-010,USD,Completed,Q1 projects
+Q2 2024,Client Services,280000,Employee Salaries,185000,Internal,INT-011,USD,Completed,Q2 financial summary
+Q2 2024,Consulting Fees,135000,Office Rent,15000,Internal,INT-012,USD,Completed,Q2 consulting revenue
+Q2 2024,Software Licenses,52000,Cloud Services,13500,Internal,INT-013,USD,Completed,Q2 software revenue
+Q2 2024,Training Services,40000,Marketing Expenses,28000,Internal,INT-014,USD,Completed,Q2 training revenue
+Q2 2024,Support Contracts,32000,Travel Expenses,9500,Internal,INT-015,USD,Completed,Q2 support revenue
+Q2 2024,Implementation Fees,62000,Legal Services,5500,Internal,INT-016,USD,Completed,Q2 implementation
+Q2 2024,Maintenance Contracts,25000,Insurance Premiums,6000,Internal,INT-017,USD,Completed,Q2 maintenance
+Q2 2024,Professional Services,42000,Equipment Purchases,18000,Internal,INT-018,USD,Completed,Q2 professional services
+Q2 2024,Subscription Revenue,18000,Office Supplies,3500,Internal,INT-019,USD,Completed,Q2 subscriptions
+Q2 2024,One-time Projects,48000,Utilities,2200,Internal,INT-020,USD,Completed,Q2 projects
+Q3 2024,Client Services,310000,Employee Salaries,190000,Internal,INT-021,USD,Completed,Q3 financial summary
+Q3 2024,Consulting Fees,150000,Office Rent,15000,Internal,INT-022,USD,Completed,Q3 consulting revenue
+Q3 2024,Software Licenses,58000,Cloud Services,15000,Internal,INT-023,USD,Completed,Q3 software revenue
+Q3 2024,Training Services,45000,Marketing Expenses,32000,Internal,INT-024,USD,Completed,Q3 training revenue
+Q3 2024,Support Contracts,35000,Travel Expenses,11000,Internal,INT-025,USD,Completed,Q3 support revenue
+Q3 2024,Implementation Fees,68000,Legal Services,6000,Internal,INT-026,USD,Completed,Q3 implementation
+Q3 2024,Maintenance Contracts,28000,Insurance Premiums,6000,Internal,INT-027,USD,Completed,Q3 maintenance
+Q3 2024,Professional Services,46000,Equipment Purchases,20000,Internal,INT-028,USD,Completed,Q3 professional services
+Q3 2024,Subscription Revenue,20000,Office Supplies,4000,Internal,INT-029,USD,Completed,Q3 subscriptions
+Q3 2024,One-time Projects,54000,Utilities,2400,Internal,INT-030,USD,Completed,Q3 projects
+Q4 2024,Client Services,340000,Employee Salaries,195000,Internal,INT-031,USD,Completed,Q4 financial summary
+Q4 2024,Consulting Fees,165000,Office Rent,15000,Internal,INT-032,USD,Completed,Q4 consulting revenue
+Q4 2024,Software Licenses,65000,Cloud Services,16500,Internal,INT-033,USD,Completed,Q4 software revenue
+Q4 2024,Training Services,50000,Marketing Expenses,35000,Internal,INT-034,USD,Completed,Q4 training revenue
+Q4 2024,Support Contracts,38000,Travel Expenses,12500,Internal,INT-035,USD,Completed,Q4 support revenue
+Q4 2024,Implementation Fees,75000,Legal Services,6500,Internal,INT-036,USD,Completed,Q4 implementation
+Q4 2024,Maintenance Contracts,32000,Insurance Premiums,6000,Internal,INT-037,USD,Completed,Q4 maintenance
+Q4 2024,Professional Services,50000,Equipment Purchases,22000,Internal,INT-038,USD,Completed,Q4 professional services
+Q4 2024,Subscription Revenue,22000,Office Supplies,4500,Internal,INT-039,USD,Completed,Q4 subscriptions
+Q4 2024,One-time Projects,60000,Utilities,2600,Internal,INT-040,USD,Completed,Q4 projects
+January 2024,Client Services,85000,Employee Salaries,60000,Internal,INT-041,USD,Completed,January summary
+January 2024,Consulting Fees,40000,Office Rent,5000,Internal,INT-042,USD,Completed,January consulting
+January 2024,Software Licenses,15000,Cloud Services,4000,Internal,INT-043,USD,Completed,January software
+January 2024,Training Services,12000,Marketing Expenses,8000,Internal,INT-044,USD,Completed,January training
+January 2024,Support Contracts,9000,Travel Expenses,2500,Internal,INT-045,USD,Completed,January support
+January 2024,Implementation Fees,18000,Legal Services,1500,Internal,INT-046,USD,Completed,January implementation
+January 2024,Maintenance Contracts,7000,Insurance Premiums,2000,Internal,INT-047,USD,Completed,January maintenance
+January 2024,Professional Services,13000,Equipment Purchases,5000,Internal,INT-048,USD,Completed,January professional
+January 2024,Subscription Revenue,5000,Office Supplies,1000,Internal,INT-049,USD,Completed,January subscriptions
+January 2024,One-time Projects,14000,Utilities,700,Internal,INT-050,USD,Completed,January projects
+February 2024,Client Services,88000,Employee Salaries,60500,Internal,INT-051,USD,Completed,February summary
+February 2024,Consulting Fees,42000,Office Rent,5000,Internal,INT-052,USD,Completed,February consulting
+February 2024,Software Licenses,16000,Cloud Services,4200,Internal,INT-053,USD,Completed,February software
+February 2024,Training Services,12500,Marketing Expenses,8500,Internal,INT-054,USD,Completed,February training
+February 2024,Support Contracts,9500,Travel Expenses,2700,Internal,INT-055,USD,Completed,February support
+February 2024,Implementation Fees,19000,Legal Services,1600,Internal,INT-056,USD,Completed,February implementation
+February 2024,Maintenance Contracts,7500,Insurance Premiums,2000,Internal,INT-057,USD,Completed,February maintenance
+February 2024,Professional Services,13500,Equipment Purchases,5200,Internal,INT-058,USD,Completed,February professional
+February 2024,Subscription Revenue,5200,Office Supplies,1100,Internal,INT-059,USD,Completed,February subscriptions
+February 2024,One-time Projects,14500,Utilities,750,Internal,INT-060,USD,Completed,February projects
+March 2024,Client Services,92000,Employee Salaries,61000,Internal,INT-061,USD,Completed,March summary
+March 2024,Consulting Fees,44000,Office Rent,5000,Internal,INT-062,USD,Completed,March consulting
+March 2024,Software Licenses,17000,Cloud Services,4400,Internal,INT-063,USD,Completed,March software
+March 2024,Training Services,13000,Marketing Expenses,9000,Internal,INT-064,USD,Completed,March training
+March 2024,Support Contracts,10000,Travel Expenses,2900,Internal,INT-065,USD,Completed,March support
+March 2024,Implementation Fees,20000,Legal Services,1700,Internal,INT-066,USD,Completed,March implementation
+March 2024,Maintenance Contracts,8000,Insurance Premiums,2000,Internal,INT-067,USD,Completed,March maintenance
+March 2024,Professional Services,14000,Equipment Purchases,5400,Internal,INT-068,USD,Completed,March professional
+March 2024,Subscription Revenue,5400,Office Supplies,1200,Internal,INT-069,USD,Completed,March subscriptions
+March 2024,One-time Projects,15000,Utilities,800,Internal,INT-070,USD,Completed,March projects
+April 2024,Client Services,95000,Employee Salaries,61500,Internal,INT-071,USD,Completed,April summary
+April 2024,Consulting Fees,46000,Office Rent,5000,Internal,INT-072,USD,Completed,April consulting
+April 2024,Software Licenses,18000,Cloud Services,4600,Internal,INT-073,USD,Completed,April software
+April 2024,Training Services,13500,Marketing Expenses,9500,Internal,INT-074,USD,Completed,April training
+April 2024,Support Contracts,10500,Travel Expenses,3100,Internal,INT-075,USD,Completed,April support
+April 2024,Implementation Fees,21000,Legal Services,1800,Internal,INT-076,USD,Completed,April implementation
+April 2024,Maintenance Contracts,8500,Insurance Premiums,2000,Internal,INT-077,USD,Completed,April maintenance
+April 2024,Professional Services,14500,Equipment Purchases,5600,Internal,INT-078,USD,Completed,April professional
+April 2024,Subscription Revenue,5600,Office Supplies,1300,Internal,INT-079,USD,Completed,April subscriptions
+April 2024,One-time Projects,15500,Utilities,850,Internal,INT-080,USD,Completed,April projects
+May 2024,Client Services,98000,Employee Salaries,62000,Internal,INT-081,USD,Completed,May summary
+May 2024,Consulting Fees,48000,Office Rent,5000,Internal,INT-082,USD,Completed,May consulting
+May 2024,Software Licenses,19000,Cloud Services,4800,Internal,INT-083,USD,Completed,May software
+May 2024,Training Services,14000,Marketing Expenses,10000,Internal,INT-084,USD,Completed,May training
+May 2024,Support Contracts,11000,Travel Expenses,3300,Internal,INT-085,USD,Completed,May support
+May 2024,Implementation Fees,22000,Legal Services,1900,Internal,INT-086,USD,Completed,May implementation
+May 2024,Maintenance Contracts,9000,Insurance Premiums,2000,Internal,INT-087,USD,Completed,May maintenance
+May 2024,Professional Services,15000,Equipment Purchases,5800,Internal,INT-088,USD,Completed,May professional
+May 2024,Subscription Revenue,5800,Office Supplies,1400,Internal,INT-089,USD,Completed,May subscriptions
+May 2024,One-time Projects,16000,Utilities,900,Internal,INT-090,USD,Completed,May projects
+June 2024,Client Services,101000,Employee Salaries,62500,Internal,INT-091,USD,Completed,June summary
+June 2024,Consulting Fees,50000,Office Rent,5000,Internal,INT-092,USD,Completed,June consulting
+June 2024,Software Licenses,20000,Cloud Services,5000,Internal,INT-093,USD,Completed,June software
+June 2024,Training Services,14500,Marketing Expenses,10500,Internal,INT-094,USD,Completed,June training
+June 2024,Support Contracts,11500,Travel Expenses,3500,Internal,INT-095,USD,Completed,June support
+June 2024,Implementation Fees,23000,Legal Services,2000,Internal,INT-096,USD,Completed,June implementation
+June 2024,Maintenance Contracts,9500,Insurance Premiums,2000,Internal,INT-097,USD,Completed,June maintenance
+June 2024,Professional Services,15500,Equipment Purchases,6000,Internal,INT-098,USD,Completed,June professional
+June 2024,Subscription Revenue,6000,Office Supplies,1500,Internal,INT-099,USD,Completed,June subscriptions
+June 2024,One-time Projects,16500,Utilities,950,Internal,INT-100,USD,Completed,June projects
+July 2024,Client Services,104000,Employee Salaries,63000,Internal,INT-101,USD,Completed,July summary
+July 2024,Consulting Fees,52000,Office Rent,5000,Internal,INT-102,USD,Completed,July consulting
+July 2024,Software Licenses,21000,Cloud Services,5200,Internal,INT-103,USD,Completed,July software
+July 2024,Training Services,15000,Marketing Expenses,11000,Internal,INT-104,USD,Completed,July training
+July 2024,Support Contracts,12000,Travel Expenses,3700,Internal,INT-105,USD,Completed,July support
+July 2024,Implementation Fees,24000,Legal Services,2100,Internal,INT-106,USD,Completed,July implementation
+July 2024,Maintenance Contracts,10000,Insurance Premiums,2000,Internal,INT-107,USD,Completed,July maintenance
+July 2024,Professional Services,16000,Equipment Purchases,6200,Internal,INT-108,USD,Completed,July professional
+July 2024,Subscription Revenue,6200,Office Supplies,1600,Internal,INT-109,USD,Completed,July subscriptions
+July 2024,One-time Projects,17000,Utilities,1000,Internal,INT-110,USD,Completed,July projects
+August 2024,Client Services,107000,Employee Salaries,63500,Internal,INT-111,USD,Completed,August summary
+August 2024,Consulting Fees,54000,Office Rent,5000,Internal,INT-112,USD,Completed,August consulting
+August 2024,Software Licenses,22000,Cloud Services,5400,Internal,INT-113,USD,Completed,August software
+August 2024,Training Services,15500,Marketing Expenses,11500,Internal,INT-114,USD,Completed,August training
+August 2024,Support Contracts,12500,Travel Expenses,3900,Internal,INT-115,USD,Completed,August support
+August 2024,Implementation Fees,25000,Legal Services,2200,Internal,INT-116,USD,Completed,August implementation
+August 2024,Maintenance Contracts,10500,Insurance Premiums,2000,Internal,INT-117,USD,Completed,August maintenance
+August 2024,Professional Services,16500,Equipment Purchases,6400,Internal,INT-118,USD,Completed,August professional
+August 2024,Subscription Revenue,6400,Office Supplies,1700,Internal,INT-119,USD,Completed,August subscriptions
+August 2024,One-time Projects,17500,Utilities,1050,Internal,INT-120,USD,Completed,August projects
+September 2024,Client Services,110000,Employee Salaries,64000,Internal,INT-121,USD,Completed,September summary
+September 2024,Consulting Fees,56000,Office Rent,5000,Internal,INT-122,USD,Completed,September consulting
+September 2024,Software Licenses,23000,Cloud Services,5600,Internal,INT-123,USD,Completed,September software
+September 2024,Training Services,16000,Marketing Expenses,12000,Internal,INT-124,USD,Completed,September training
+September 2024,Support Contracts,13000,Travel Expenses,4100,Internal,INT-125,USD,Completed,September support
+September 2024,Implementation Fees,26000,Legal Services,2300,Internal,INT-126,USD,Completed,September implementation
+September 2024,Maintenance Contracts,11000,Insurance Premiums,2000,Internal,INT-127,USD,Completed,September maintenance
+September 2024,Professional Services,17000,Equipment Purchases,6600,Internal,INT-128,USD,Completed,September professional
+September 2024,Subscription Revenue,6600,Office Supplies,1800,Internal,INT-129,USD,Completed,September subscriptions
+September 2024,One-time Projects,18000,Utilities,1100,Internal,INT-130,USD,Completed,September projects
+October 2024,Client Services,113000,Employee Salaries,64500,Internal,INT-131,USD,Completed,October summary
+October 2024,Consulting Fees,58000,Office Rent,5000,Internal,INT-132,USD,Completed,October consulting
+October 2024,Software Licenses,24000,Cloud Services,5800,Internal,INT-133,USD,Completed,October software
+October 2024,Training Services,16500,Marketing Expenses,12500,Internal,INT-134,USD,Completed,October training
+October 2024,Support Contracts,13500,Travel Expenses,4300,Internal,INT-135,USD,Completed,October support
+October 2024,Implementation Fees,27000,Legal Services,2400,Internal,INT-136,USD,Completed,October implementation
+October 2024,Maintenance Contracts,11500,Insurance Premiums,2000,Internal,INT-137,USD,Completed,October maintenance
+October 2024,Professional Services,17500,Equipment Purchases,6800,Internal,INT-138,USD,Completed,October professional
+October 2024,Subscription Revenue,6800,Office Supplies,1900,Internal,INT-139,USD,Completed,October subscriptions
+October 2024,One-time Projects,18500,Utilities,1150,Internal,INT-140,USD,Completed,October projects
+November 2024,Client Services,116000,Employee Salaries,65000,Internal,INT-141,USD,Completed,November summary
+November 2024,Consulting Fees,60000,Office Rent,5000,Internal,INT-142,USD,Completed,November consulting
+November 2024,Software Licenses,25000,Cloud Services,6000,Internal,INT-143,USD,Completed,November software
+November 2024,Training Services,17000,Marketing Expenses,13000,Internal,INT-144,USD,Completed,November training
+November 2024,Support Contracts,14000,Travel Expenses,4500,Internal,INT-145,USD,Completed,November support
+November 2024,Implementation Fees,28000,Legal Services,2500,Internal,INT-146,USD,Completed,November implementation
+November 2024,Maintenance Contracts,12000,Insurance Premiums,2000,Internal,INT-147,USD,Completed,November maintenance
+November 2024,Professional Services,18000,Equipment Purchases,7000,Internal,INT-148,USD,Completed,November professional
+November 2024,Subscription Revenue,7000,Office Supplies,2000,Internal,INT-149,USD,Completed,November subscriptions
+November 2024,One-time Projects,19000,Utilities,1200,Internal,INT-150,USD,Completed,November projects
+December 2024,Client Services,119000,Employee Salaries,65500,Internal,INT-151,USD,Completed,December summary
+December 2024,Consulting Fees,62000,Office Rent,5000,Internal,INT-152,USD,Completed,December consulting
+December 2024,Software Licenses,26000,Cloud Services,6200,Internal,INT-153,USD,Completed,December software
+December 2024,Training Services,17500,Marketing Expenses,13500,Internal,INT-154,USD,Completed,December training
+December 2024,Support Contracts,14500,Travel Expenses,4700,Internal,INT-155,USD,Completed,December support
+December 2024,Implementation Fees,29000,Legal Services,2600,Internal,INT-156,USD,Completed,December implementation
+December 2024,Maintenance Contracts,12500,Insurance Premiums,2000,Internal,INT-157,USD,Completed,December maintenance
+December 2024,Professional Services,18500,Equipment Purchases,7200,Internal,INT-158,USD,Completed,December professional
+December 2024,Subscription Revenue,7200,Office Supplies,2100,Internal,INT-159,USD,Completed,December subscriptions
+December 2024,One-time Projects,19500,Utilities,1250,Internal,INT-160,USD,Completed,December projects
+2024-01-15,Invalid Revenue,,Invalid Expense,,Invalid Platform,INV-001,USD,Failed,Missing amounts test
+2024-01-16,Test Revenue,5000,,Test Platform,ch_test123,USD,Completed,Missing expense category
+2024-01-17,Sample Revenue,3000,Sample Expense,,pay_sample,USD,Completed,Missing platform
+2024-01-18,Demo Revenue,2000,Demo Expense,Stripe,,USD,Completed,Missing transaction ID
+2024-01-19,Example Revenue,4000,Example Expense,Stripe,ch_example,INR,Completed,Different currency
+2024-01-20,Test Revenue,1000,Test Expense,Stripe,ch_test456,EUR,Completed,European currency
+2024-01-21,Sample Revenue,6000,Sample Expense,Stripe,pay_sample2,GBP,Completed,British currency
+2024-01-22,Demo Revenue,3500,Demo Expense,Stripe,ch_demo789,CAD,Completed,Canadian currency
+2024-01-23,Example Revenue,4500,Example Expense,Stripe,pay_example2,AUD,Completed,Australian currency
+2024-01-24,Test Revenue,2800,Test Expense,Stripe,ch_test789,JPY,Completed,Japanese currency 

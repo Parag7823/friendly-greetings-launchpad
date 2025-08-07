@@ -1,0 +1,126 @@
+Vendor Name,Bank Account,Amount,Payment Date,Description,Platform,Invoice ID,Payment Method,Currency,Tax Amount,Status,Notes
+Razorpay Payout,1234567890,10000,2024-01-10,Payment Gateway Fees,Razorpay,INV-001,Wire Transfer,INR,1800,Paid,Regular monthly fees
+Razorpay Payments Pvt. Ltd.,1234567890,15000,2024-02-10,Transaction Fees,Razorpay,INV-002,Wire Transfer,INR,2700,Paid,Increased transaction volume
+Razorpay Payments Pvt. Ltd.,1234567890,12000,2024-03-10,Transaction Fees,Razorpay,INV-003,Wire Transfer,INR,2160,Paid,March fees
+Stripe Inc,9876543210,8000,2024-01-15,Payment Processing,Stripe,INV-004,ACH,USD,0,Paid,US payment processing
+Stripe Inc,9876543210,8500,2024-02-15,Payment Processing,Stripe,INV-005,ACH,USD,0,Paid,February processing
+Stripe Inc,9876543210,9000,2024-03-15,Payment Processing,Stripe,INV-006,ACH,USD,0,Paid,March processing
+AWS Services,5556667777,2500,2024-01-20,Cloud Infrastructure,AWS,INV-007,Credit Card,USD,0,Paid,EC2 and S3 services
+AWS Services,5556667777,2800,2024-02-20,Cloud Infrastructure,AWS,INV-008,Credit Card,USD,0,Paid,Increased usage
+AWS Services,5556667777,3200,2024-03-20,Cloud Infrastructure,AWS,INV-009,Credit Card,USD,0,Paid,New services added
+Office Rent,1112223333,5000,2024-01-25,Monthly Rent,Landlord,INV-010,Check,USD,0,Paid,Office space rent
+Office Rent,1112223333,5000,2024-02-25,Monthly Rent,Landlord,INV-011,Check,USD,0,Paid,February rent
+Office Rent,1112223333,5000,2024-03-25,Monthly Rent,Landlord,INV-012,Check,USD,0,Paid,March rent
+Google LLC,4445556666,3000,2024-01-05,Google Ads Campaign,Google,INV-013,Credit Card,USD,0,Paid,Marketing campaign
+Google LLC,4445556666,3500,2024-02-05,Google Ads Campaign,Google,INV-014,Credit Card,USD,0,Paid,Increased ad spend
+Google LLC,4445556666,4000,2024-03-05,Google Ads Campaign,Google,INV-015,Credit Card,USD,0,Paid,March campaign
+Facebook Inc,7778889999,2000,2024-01-08,Facebook Ads,Facebook,INV-016,Credit Card,USD,0,Paid,Social media ads
+Facebook Inc,7778889999,2500,2024-02-08,Facebook Ads,Facebook,INV-017,Credit Card,USD,0,Paid,February ads
+Facebook Inc,7778889999,3000,2024-03-08,Facebook Ads,Facebook,INV-018,Credit Card,USD,0,Paid,March ads
+Microsoft Corp,1113335555,1500,2024-01-12,Office 365 Subscription,Microsoft,INV-019,Credit Card,USD,0,Paid,Office software
+Microsoft Corp,1113335555,1500,2024-02-12,Office 365 Subscription,Microsoft,INV-020,Credit Card,USD,0,Paid,February subscription
+Microsoft Corp,1113335555,1500,2024-03-12,Office 365 Subscription,Microsoft,INV-021,Credit Card,USD,0,Paid,March subscription
+Adobe Inc,2224446666,800,2024-01-18,Creative Cloud,Adobe,INV-022,Credit Card,USD,0,Paid,Design software
+Adobe Inc,2224446666,800,2024-02-18,Creative Cloud,Adobe,INV-023,Credit Card,USD,0,Paid,February subscription
+Adobe Inc,2224446666,800,2024-03-18,Creative Cloud,Adobe,INV-024,Credit Card,USD,0,Paid,March subscription
+Slack Technologies,3335557777,1200,2024-01-22,Slack Pro Plan,Slack,INV-025,Credit Card,USD,0,Paid,Team communication
+Slack Technologies,3335557777,1200,2024-02-22,Slack Pro Plan,Slack,INV-026,Credit Card,USD,0,Paid,February subscription
+Slack Technologies,3335557777,1200,2024-03-22,Slack Pro Plan,Slack,INV-027,Credit Card,USD,0,Paid,March subscription
+Zoom Video,4446668888,600,2024-01-28,Zoom Pro Plan,Zoom,INV-028,Credit Card,USD,0,Paid,Video conferencing
+Zoom Video,4446668888,600,2024-02-28,Zoom Pro Plan,Zoom,INV-029,Credit Card,USD,0,Paid,February subscription
+Zoom Video,4446668888,600,2024-03-28,Zoom Pro Plan,Zoom,INV-030,Credit Card,USD,0,Paid,March subscription
+Notion Labs,5557779999,400,2024-01-30,Notion Team Plan,Notion,INV-031,Credit Card,USD,0,Paid,Project management
+Notion Labs,5557779999,400,2024-02-30,Notion Team Plan,Notion,INV-032,Credit Card,USD,0,Paid,February subscription
+Notion Labs,5557779999,400,2024-03-30,Notion Team Plan,Notion,INV-033,Credit Card,USD,0,Paid,March subscription
+Figma Inc,6668880000,300,2024-01-03,Figma Professional,Figma,INV-034,Credit Card,USD,0,Paid,Design collaboration
+Figma Inc,6668880000,300,2024-02-03,Figma Professional,Figma,INV-035,Credit Card,USD,0,Paid,February subscription
+Figma Inc,6668880000,300,2024-03-03,Figma Professional,Figma,INV-036,Credit Card,USD,0,Paid,March subscription
+GitHub Inc,7779991111,500,2024-01-07,GitHub Team Plan,GitHub,INV-037,Credit Card,USD,0,Paid,Code repository
+GitHub Inc,7779991111,500,2024-02-07,GitHub Team Plan,GitHub,INV-038,Credit Card,USD,0,Paid,February subscription
+GitHub Inc,7779991111,500,2024-03-07,GitHub Team Plan,GitHub,INV-039,Credit Card,USD,0,Paid,March subscription
+Atlassian Corp,8880002222,1000,2024-01-14,Jira Software,Atlassian,INV-040,Credit Card,USD,0,Paid,Project tracking
+Atlassian Corp,8880002222,1000,2024-02-14,Jira Software,Atlassian,INV-041,Credit Card,USD,0,Paid,February subscription
+Atlassian Corp,8880002222,1000,2024-03-14,Jira Software,Atlassian,INV-042,Credit Card,USD,0,Paid,March subscription
+Salesforce Inc,9991113333,2000,2024-01-16,Salesforce CRM,Salesforce,INV-043,Credit Card,USD,0,Paid,CRM platform
+Salesforce Inc,9991113333,2000,2024-02-16,Salesforce CRM,Salesforce,INV-044,Credit Card,USD,0,Paid,February subscription
+Salesforce Inc,9991113333,2000,2024-03-16,Salesforce CRM,Salesforce,INV-045,Credit Card,USD,0,Paid,March subscription
+HubSpot Inc,0002224444,1500,2024-01-19,HubSpot Marketing Hub,HubSpot,INV-046,Credit Card,USD,0,Paid,Marketing automation
+HubSpot Inc,0002224444,1500,2024-02-19,HubSpot Marketing Hub,HubSpot,INV-047,Credit Card,USD,0,Paid,February subscription
+HubSpot Inc,0002224444,1500,2024-03-19,HubSpot Marketing Hub,HubSpot,INV-048,Credit Card,USD,0,Paid,March subscription
+Mailchimp Inc,1113335555,800,2024-01-24,Mailchimp Pro,Mailchimp,INV-049,Credit Card,USD,0,Paid,Email marketing
+Mailchimp Inc,1113335555,800,2024-02-24,Mailchimp Pro,Mailchimp,INV-050,Credit Card,USD,0,Paid,February subscription
+Mailchimp Inc,1113335555,800,2024-03-24,Mailchimp Pro,Mailchimp,INV-051,Credit Card,USD,0,Paid,March subscription
+Intercom Inc,2224446666,1200,2024-01-26,Intercom Support,Intercom,INV-052,Credit Card,USD,0,Paid,Customer support
+Intercom Inc,2224446666,1200,2024-02-26,Intercom Support,Intercom,INV-053,Credit Card,USD,0,Paid,February subscription
+Intercom Inc,2224446666,1200,2024-03-26,Intercom Support,Intercom,INV-054,Credit Card,USD,0,Paid,March subscription
+Zendesk Inc,3335557777,1000,2024-01-29,Zendesk Support,Zendesk,INV-055,Credit Card,USD,0,Paid,Help desk software
+Zendesk Inc,3335557777,1000,2024-02-29,Zendesk Support,Zendesk,INV-056,Credit Card,USD,0,Paid,February subscription
+Zendesk Inc,3335557777,1000,2024-03-29,Zendesk Support,Zendesk,INV-057,Credit Card,USD,0,Paid,March subscription
+Dropbox Inc,4446668888,600,2024-01-31,Dropbox Business,Dropbox,INV-058,Credit Card,USD,0,Paid,File storage
+Dropbox Inc,4446668888,600,2024-02-31,Dropbox Business,Dropbox,INV-059,Credit Card,USD,0,Paid,February subscription
+Dropbox Inc,4446668888,600,2024-03-31,Dropbox Business,Dropbox,INV-060,Credit Card,USD,0,Paid,March subscription
+Box Inc,5557779999,500,2024-01-02,Box Business,Box,INV-061,Credit Card,USD,0,Paid,Enterprise storage
+Box Inc,5557779999,500,2024-02-02,Box Business,Box,INV-062,Credit Card,USD,0,Paid,February subscription
+Box Inc,5557779999,500,2024-03-02,Box Business,Box,INV-063,Credit Card,USD,0,Paid,March subscription
+Trello Inc,6668880000,400,2024-01-06,Trello Business,Trello,INV-064,Credit Card,USD,0,Paid,Project management
+Trello Inc,6668880000,400,2024-02-06,Trello Business,Trello,INV-065,Credit Card,USD,0,Paid,February subscription
+Trello Inc,6668880000,400,2024-03-06,Trello Business,Trello,INV-066,Credit Card,USD,0,Paid,March subscription
+Asana Inc,7779991111,800,2024-01-09,Asana Business,Asana,INV-067,Credit Card,USD,0,Paid,Work management
+Asana Inc,7779991111,800,2024-02-09,Asana Business,Asana,INV-068,Credit Card,USD,0,Paid,February subscription
+Asana Inc,7779991111,800,2024-03-09,Asana Business,Asana,INV-069,Credit Card,USD,0,Paid,March subscription
+Monday.com,8880002222,600,2024-01-11,Monday.com Pro,Monday,INV-070,Credit Card,USD,0,Paid,Work OS
+Monday.com,8880002222,600,2024-02-11,Monday.com Pro,Monday,INV-071,Credit Card,USD,0,Paid,February subscription
+Monday.com,8880002222,600,2024-03-11,Monday.com Pro,Monday,INV-072,Credit Card,USD,0,Paid,March subscription
+ClickUp Inc,9991113333,700,2024-01-13,ClickUp Business,ClickUp,INV-073,Credit Card,USD,0,Paid,Productivity platform
+ClickUp Inc,9991113333,700,2024-02-13,ClickUp Business,ClickUp,INV-074,Credit Card,USD,0,Paid,February subscription
+ClickUp Inc,9991113333,700,2024-03-13,ClickUp Business,ClickUp,INV-075,Credit Card,USD,0,Paid,March subscription
+Linear Inc,0002224444,300,2024-01-17,Linear Pro,Linear,INV-076,Credit Card,USD,0,Paid,Issue tracking
+Linear Inc,0002224444,300,2024-02-17,Linear Pro,Linear,INV-077,Credit Card,USD,0,Paid,February subscription
+Linear Inc,0002224444,300,2024-03-17,Linear Pro,Linear,INV-078,Credit Card,USD,0,Paid,March subscription
+Figma Inc,1113335555,200,2024-01-21,Figma Dev Mode,Figma,INV-079,Credit Card,USD,0,Paid,Developer handoff
+Figma Inc,1113335555,200,2024-02-21,Figma Dev Mode,Figma,INV-080,Credit Card,USD,0,Paid,February subscription
+Figma Inc,1113335555,200,2024-03-21,Figma Dev Mode,Figma,INV-081,Credit Card,USD,0,Paid,March subscription
+Sketch Inc,2224446666,100,2024-01-23,Sketch Business,Sketch,INV-082,Credit Card,USD,0,Paid,Design software
+Sketch Inc,2224446666,100,2024-02-23,Sketch Business,Sketch,INV-083,Credit Card,USD,0,Paid,February subscription
+Sketch Inc,2224446666,100,2024-03-23,Sketch Business,Sketch,INV-084,Credit Card,USD,0,Paid,March subscription
+InVision Inc,3335557777,150,2024-01-27,InVision Pro,InVision,INV-085,Credit Card,USD,0,Paid,Prototyping
+InVision Inc,3335557777,150,2024-02-27,InVision Pro,InVision,INV-086,Credit Card,USD,0,Paid,February subscription
+InVision Inc,3335557777,150,2024-03-27,InVision Pro,InVision,INV-087,Credit Card,USD,0,Paid,March subscription
+Marvel App,4446668888,50,2024-01-01,Marvel Pro,Marvel,INV-088,Credit Card,USD,0,Paid,Prototyping tool
+Marvel App,4446668888,50,2024-02-01,Marvel Pro,Marvel,INV-089,Credit Card,USD,0,Paid,February subscription
+Marvel App,4446668888,50,2024-03-01,Marvel Pro,Marvel,INV-090,Credit Card,USD,0,Paid,March subscription
+Principle Inc,5557779999,80,2024-01-04,Principle Pro,Principle,INV-091,Credit Card,USD,0,Paid,Animation software
+Principle Inc,5557779999,80,2024-02-04,Principle Pro,Principle,INV-092,Credit Card,USD,0,Paid,February subscription
+Principle Inc,5557779999,80,2024-03-04,Principle Pro,Principle,INV-093,Credit Card,USD,0,Paid,March subscription
+Framer Inc,6668880000,120,2024-01-08,Framer Pro,Framer,INV-094,Credit Card,USD,0,Paid,Design tool
+Framer Inc,6668880000,120,2024-02-08,Framer Pro,Framer,INV-095,Credit Card,USD,0,Paid,February subscription
+Framer Inc,6668880000,120,2024-03-08,Framer Pro,Framer,INV-096,Credit Card,USD,0,Paid,March subscription
+Webflow Inc,7779991111,250,2024-01-12,Webflow CMS,Webflow,INV-097,Credit Card,USD,0,Paid,Website builder
+Webflow Inc,7779991111,250,2024-02-12,Webflow CMS,Webflow,INV-098,Credit Card,USD,0,Paid,February subscription
+Webflow Inc,7779991111,250,2024-03-12,Webflow CMS,Webflow,INV-099,Credit Card,USD,0,Paid,March subscription
+Squarespace Inc,8880002222,180,2024-01-15,Squarespace Business,Squarespace,INV-100,Credit Card,USD,0,Paid,Website hosting
+Squarespace Inc,8880002222,180,2024-02-15,Squarespace Business,Squarespace,INV-101,Credit Card,USD,0,Paid,February subscription
+Squarespace Inc,8880002222,180,2024-03-15,Squarespace Business,Squarespace,INV-102,Credit Card,USD,0,Paid,March subscription
+Wix.com Inc,9991113333,200,2024-01-18,Wix Business,Wix,INV-103,Credit Card,USD,0,Paid,Website platform
+Wix.com Inc,9991113333,200,2024-02-18,Wix Business,Wix,INV-104,Credit Card,USD,0,Paid,February subscription
+Wix.com Inc,9991113333,200,2024-03-18,Wix Business,Wix,INV-105,Credit Card,USD,0,Paid,March subscription
+Shopify Inc,0002224444,300,2024-01-20,Shopify Basic,Shopify,INV-106,Credit Card,USD,0,Paid,E-commerce platform
+Shopify Inc,0002224444,300,2024-02-20,Shopify Basic,Shopify,INV-107,Credit Card,USD,0,Paid,February subscription
+Shopify Inc,0002224444,300,2024-03-20,Shopify Basic,Shopify,INV-108,Credit Card,USD,0,Paid,March subscription
+WooCommerce,1113335555,0,2024-01-22,WooCommerce Plugin,WooCommerce,INV-109,Free,USD,0,Paid,Open source
+WooCommerce,1113335555,0,2024-02-22,WooCommerce Plugin,WooCommerce,INV-110,Free,USD,0,Paid,No cost
+WooCommerce,1113335555,0,2024-03-22,WooCommerce Plugin,WooCommerce,INV-111,Free,USD,0,Paid,Free plugin
+Magento Inc,2224446666,500,2024-01-25,Magento Commerce,Magento,INV-112,Credit Card,USD,0,Paid,Enterprise e-commerce
+Magento Inc,2224446666,500,2024-02-25,Magento Commerce,Magento,INV-113,Credit Card,USD,0,Paid,February subscription
+Magento Inc,2224446666,500,2024-03-25,Magento Commerce,Magento,INV-114,Credit Card,USD,0,Paid,March subscription
+BigCommerce Inc,3335557777,400,2024-01-28,BigCommerce Standard,BigCommerce,INV-115,Credit Card,USD,0,Paid,E-commerce platform
+BigCommerce Inc,3335557777,400,2024-02-28,BigCommerce Standard,BigCommerce,INV-116,Credit Card,USD,0,Paid,February subscription
+BigCommerce Inc,3335557777,400,2024-03-28,BigCommerce Standard,BigCommerce,INV-117,Credit Card,USD,0,Paid,March subscription
+PrestaShop,4446668888,0,2024-01-30,PrestaShop Community,PrestaShop,INV-118,Free,USD,0,Paid,Open source
+PrestaShop,4446668888,0,2024-02-30,PrestaShop Community,PrestaShop,INV-119,Free,USD,0,Paid,No cost
+PrestaShop,4446668888,0,2024-03-30,PrestaShop Community,PrestaShop,INV-120,Free,USD,0,Paid,Free platform
+,1234567890,5000,2024-01-15,Unknown Vendor,Unknown,INV-999,Check,USD,0,Paid,Missing vendor name
+Test Vendor,,3000,2024-01-20,Test Payment,Test Platform,INV-998,Wire Transfer,USD,0,Paid,Missing bank account
+Sample Corp,9876543210,,2024-01-25,Sample Invoice,Sample Platform,INV-997,Credit Card,USD,0,Paid,Missing amount
+Demo LLC,5556667777,2000,,Demo Payment,Demo Platform,INV-996,ACH,USD,0,Paid,Missing date
+Example Inc,1112223333,1500,2024-01-10,Example Invoice,Example Platform,,Credit Card,USD,0,Paid,Missing invoice ID 

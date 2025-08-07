@@ -1,0 +1,96 @@
+Employee Name,Email,Department,Salary,Payment Date,Platform,Employee ID,Payment Method,Bonus,Benefits,Status,Notes
+Abhishek A.,abhishek@company.com,Engineering,5000,2024-01-15,Gusto,EMP001,Direct Deposit,1000,Health Insurance,Active,Regular payment
+Abhishek Arora,abhishek@company.com,Engineering,5000,2024-02-15,Gusto,EMP001,Direct Deposit,0,Health Insurance,Active,Name variation
+Abhishek Arora,abhishek@company.com,Engineering,5000,2024-03-15,Gusto,EMP001,Direct Deposit,500,Health Insurance,Active,March payment
+John Smith,john.smith@company.com,Marketing,4500,2024-01-15,Gusto,EMP002,Direct Deposit,800,Health Insurance,Active,Marketing lead
+John Smith,john.smith@company.com,Marketing,4500,2024-02-15,Gusto,EMP002,Direct Deposit,0,Health Insurance,Active,Regular payment
+Sarah Johnson,sarah.j@company.com,HR,4200,2024-01-15,Gusto,EMP003,Direct Deposit,600,Health Insurance,Active,HR manager
+Sarah Johnson,sarah.j@company.com,HR,4200,2024-02-15,Gusto,EMP003,Direct Deposit,0,Health Insurance,Active,Regular payment
+Mike Wilson,mike.w@company.com,Sales,4800,2024-01-15,Gusto,EMP004,Direct Deposit,1200,Health Insurance,Active,Sales commission
+Mike Wilson,mike.w@company.com,Sales,4800,2024-02-15,Gusto,EMP004,Direct Deposit,0,Health Insurance,Active,Regular payment
+Emily Davis,emily.d@company.com,Engineering,5200,2024-01-15,Gusto,EMP005,Direct Deposit,900,Health Insurance,Active,Senior engineer
+Emily Davis,emily.d@company.com,Engineering,5200,2024-02-15,Gusto,EMP005,Direct Deposit,0,Health Insurance,Active,Regular payment
+David Brown,david.b@company.com,Marketing,4300,2024-01-15,Gusto,EMP006,Direct Deposit,700,Health Insurance,Active,Marketing specialist
+David Brown,david.b@company.com,Marketing,4300,2024-02-15,Gusto,EMP006,Direct Deposit,0,Health Insurance,Active,Regular payment
+Lisa Chen,lisa.c@company.com,HR,4100,2024-01-15,Gusto,EMP007,Direct Deposit,500,Health Insurance,Active,HR assistant
+Lisa Chen,lisa.c@company.com,HR,4100,2024-02-15,Gusto,EMP007,Direct Deposit,0,Health Insurance,Active,Regular payment
+Tom Anderson,tom.a@company.com,Sales,4700,2024-01-15,Gusto,EMP008,Direct Deposit,1100,Health Insurance,Active,Sales rep
+Tom Anderson,tom.a@company.com,Sales,4700,2024-02-15,Gusto,EMP008,Direct Deposit,0,Health Insurance,Active,Regular payment
+Rachel Green,rachel.g@company.com,Engineering,5100,2024-01-15,Gusto,EMP009,Direct Deposit,850,Health Insurance,Active,Frontend dev
+Rachel Green,rachel.g@company.com,Engineering,5100,2024-02-15,Gusto,EMP009,Direct Deposit,0,Health Insurance,Active,Regular payment
+James Wilson,james.w@company.com,Marketing,4400,2024-01-15,Gusto,EMP010,Direct Deposit,750,Health Insurance,Active,Content creator
+James Wilson,james.w@company.com,Marketing,4400,2024-02-15,Gusto,EMP010,Direct Deposit,0,Health Insurance,Active,Regular payment
+Maria Garcia,maria.g@company.com,HR,4150,2024-01-15,Gusto,EMP011,Direct Deposit,550,Health Insurance,Active,Recruiter
+Maria Garcia,maria.g@company.com,HR,4150,2024-02-15,Gusto,EMP011,Direct Deposit,0,Health Insurance,Active,Regular payment
+Alex Johnson,alex.j@company.com,Sales,4850,2024-01-15,Gusto,EMP012,Direct Deposit,1300,Health Insurance,Active,Sales manager
+Alex Johnson,alex.j@company.com,Sales,4850,2024-02-15,Gusto,EMP012,Direct Deposit,0,Health Insurance,Active,Regular payment
+Sophie Lee,sophie.l@company.com,Engineering,5300,2024-01-15,Gusto,EMP013,Direct Deposit,950,Health Insurance,Active,Backend dev
+Sophie Lee,sophie.l@company.com,Engineering,5300,2024-02-15,Gusto,EMP013,Direct Deposit,0,Health Insurance,Active,Regular payment
+Chris Martinez,chris.m@company.com,Marketing,4350,2024-01-15,Gusto,EMP014,Direct Deposit,650,Health Insurance,Active,SEO specialist
+Chris Martinez,chris.m@company.com,Marketing,4350,2024-02-15,Gusto,EMP014,Direct Deposit,0,Health Insurance,Active,Regular payment
+Anna Taylor,anna.t@company.com,HR,4180,2024-01-15,Gusto,EMP015,Direct Deposit,480,Health Insurance,Active,Benefits admin
+Anna Taylor,anna.t@company.com,HR,4180,2024-02-15,Gusto,EMP015,Direct Deposit,0,Health Insurance,Active,Regular payment
+Ryan Clark,ryan.c@company.com,Sales,4900,2024-01-15,Gusto,EMP016,Direct Deposit,1400,Health Insurance,Active,Enterprise sales
+Ryan Clark,ryan.c@company.com,Sales,4900,2024-02-15,Gusto,EMP016,Direct Deposit,0,Health Insurance,Active,Regular payment
+Jessica White,jessica.w@company.com,Engineering,5400,2024-01-15,Gusto,EMP017,Direct Deposit,1000,Health Insurance,Active,DevOps engineer
+Jessica White,jessica.w@company.com,Engineering,5400,2024-02-15,Gusto,EMP017,Direct Deposit,0,Health Insurance,Active,Regular payment
+Kevin Rodriguez,kevin.r@company.com,Marketing,4380,2024-01-15,Gusto,EMP018,Direct Deposit,620,Health Insurance,Active,Social media
+Kevin Rodriguez,kevin.r@company.com,Marketing,4380,2024-02-15,Gusto,EMP018,Direct Deposit,0,Health Insurance,Active,Regular payment
+Laura Thompson,laura.t@company.com,HR,4120,2024-01-15,Gusto,EMP019,Direct Deposit,520,Health Insurance,Active,Payroll specialist
+Laura Thompson,laura.t@company.com,HR,4120,2024-02-15,Gusto,EMP019,Direct Deposit,0,Health Insurance,Active,Regular payment
+Mark Davis,mark.d@company.com,Sales,4950,2024-01-15,Gusto,EMP020,Direct Deposit,1500,Health Insurance,Active,Regional manager
+Mark Davis,mark.d@company.com,Sales,4950,2024-02-15,Gusto,EMP020,Direct Deposit,0,Health Insurance,Active,Regular payment
+Nina Patel,nina.p@company.com,Engineering,5500,2024-01-15,Gusto,EMP021,Direct Deposit,1100,Health Insurance,Active,Lead developer
+Nina Patel,nina.p@company.com,Engineering,5500,2024-02-15,Gusto,EMP021,Direct Deposit,0,Health Insurance,Active,Regular payment
+Daniel Kim,daniel.k@company.com,Marketing,4420,2024-01-15,Gusto,EMP022,Direct Deposit,680,Health Insurance,Active,Analytics
+Daniel Kim,daniel.k@company.com,Marketing,4420,2024-02-15,Gusto,EMP022,Direct Deposit,0,Health Insurance,Active,Regular payment
+Samantha Brown,samantha.b@company.com,HR,4140,2024-01-15,Gusto,EMP023,Direct Deposit,540,Health Insurance,Active,Training coordinator
+Samantha Brown,samantha.b@company.com,HR,4140,2024-02-15,Gusto,EMP023,Direct Deposit,0,Health Insurance,Active,Regular payment
+Robert Wilson,robert.w@company.com,Sales,5000,2024-01-15,Gusto,EMP024,Direct Deposit,1600,Health Insurance,Active,VP Sales
+Robert Wilson,robert.w@company.com,Sales,5000,2024-02-15,Gusto,EMP024,Direct Deposit,0,Health Insurance,Active,Regular payment
+Jennifer Lee,jennifer.l@company.com,Engineering,5600,2024-01-15,Gusto,EMP025,Direct Deposit,1200,Health Insurance,Active,Architect
+Jennifer Lee,jennifer.l@company.com,Engineering,5600,2024-02-15,Gusto,EMP025,Direct Deposit,0,Health Insurance,Active,Regular payment
+Michael Chen,michael.c@company.com,Marketing,4450,2024-01-15,Gusto,EMP026,Direct Deposit,720,Health Insurance,Active,Brand manager
+Michael Chen,michael.c@company.com,Marketing,4450,2024-02-15,Gusto,EMP026,Direct Deposit,0,Health Insurance,Active,Regular payment
+Amanda Garcia,amanda.g@company.com,HR,4160,2024-01-15,Gusto,EMP027,Direct Deposit,560,Health Insurance,Active,Compensation
+Amanda Garcia,amanda.g@company.com,HR,4160,2024-02-15,Gusto,EMP027,Direct Deposit,0,Health Insurance,Active,Regular payment
+Thomas Anderson,thomas.a@company.com,Sales,5050,2024-01-15,Gusto,EMP028,Direct Deposit,1700,Health Insurance,Active,Strategic sales
+Thomas Anderson,thomas.a@company.com,Sales,5050,2024-02-15,Gusto,EMP028,Direct Deposit,0,Health Insurance,Active,Regular payment
+Stephanie Johnson,stephanie.j@company.com,Engineering,5700,2024-01-15,Gusto,EMP029,Direct Deposit,1300,Health Insurance,Active,Principal engineer
+Stephanie Johnson,stephanie.j@company.com,Engineering,5700,2024-02-15,Gusto,EMP029,Direct Deposit,0,Health Insurance,Active,Regular payment
+Andrew Martinez,andrew.m@company.com,Marketing,4480,2024-01-15,Gusto,EMP030,Direct Deposit,760,Health Insurance,Active,Product marketing
+Andrew Martinez,andrew.m@company.com,Marketing,4480,2024-02-15,Gusto,EMP030,Direct Deposit,0,Health Insurance,Active,Regular payment
+Rebecca Taylor,rebecca.t@company.com,HR,4180,2024-01-15,Gusto,EMP031,Direct Deposit,580,Health Insurance,Active,Employee relations
+Rebecca Taylor,rebecca.t@company.com,HR,4180,2024-02-15,Gusto,EMP031,Direct Deposit,0,Health Insurance,Active,Regular payment
+Christopher Lee,christopher.l@company.com,Sales,5100,2024-01-15,Gusto,EMP032,Direct Deposit,1800,Health Insurance,Active,Channel sales
+Christopher Lee,christopher.l@company.com,Sales,5100,2024-02-15,Gusto,EMP032,Direct Deposit,0,Health Insurance,Active,Regular payment
+Michelle Wang,michelle.w@company.com,Engineering,5800,2024-01-15,Gusto,EMP033,Direct Deposit,1400,Health Insurance,Active,Engineering manager
+Michelle Wang,michelle.w@company.com,Engineering,5800,2024-02-15,Gusto,EMP033,Direct Deposit,0,Health Insurance,Active,Regular payment
+Jonathan Rodriguez,jonathan.r@company.com,Marketing,4510,2024-01-15,Gusto,EMP034,Direct Deposit,800,Health Insurance,Active,Digital marketing
+Jonathan Rodriguez,jonathan.r@company.com,Marketing,4510,2024-02-15,Gusto,EMP034,Direct Deposit,0,Health Insurance,Active,Regular payment
+Nicole Thompson,nicole.t@company.com,HR,4200,2024-01-15,Gusto,EMP035,Direct Deposit,600,Health Insurance,Active,HR director
+Nicole Thompson,nicole.t@company.com,HR,4200,2024-02-15,Gusto,EMP035,Direct Deposit,0,Health Insurance,Active,Regular payment
+Brandon Davis,brandon.d@company.com,Sales,5150,2024-01-15,Gusto,EMP036,Direct Deposit,1900,Health Insurance,Active,Sales director
+Brandon Davis,brandon.d@company.com,Sales,5150,2024-02-15,Gusto,EMP036,Direct Deposit,0,Health Insurance,Active,Regular payment
+Ashley Kim,ashley.k@company.com,Engineering,5900,2024-01-15,Gusto,EMP037,Direct Deposit,1500,Health Insurance,Active,Tech lead
+Ashley Kim,ashley.k@company.com,Engineering,5900,2024-02-15,Gusto,EMP037,Direct Deposit,0,Health Insurance,Active,Regular payment
+Joshua Brown,joshua.b@company.com,Marketing,4540,2024-01-15,Gusto,EMP038,Direct Deposit,840,Health Insurance,Active,Marketing director
+Joshua Brown,joshua.b@company.com,Marketing,4540,2024-02-15,Gusto,EMP038,Direct Deposit,0,Health Insurance,Active,Regular payment
+Melissa Wilson,melissa.w@company.com,HR,4220,2024-01-15,Gusto,EMP039,Direct Deposit,620,Health Insurance,Active,VP HR
+Melissa Wilson,melissa.w@company.com,HR,4220,2024-02-15,Gusto,EMP039,Direct Deposit,0,Health Insurance,Active,Regular payment
+Justin Garcia,justin.g@company.com,Sales,5200,2024-01-15,Gusto,EMP040,Direct Deposit,2000,Health Insurance,Active,Chief Revenue Officer
+Justin Garcia,justin.g@company.com,Sales,5200,2024-02-15,Gusto,EMP040,Direct Deposit,0,Health Insurance,Active,Regular payment
+Katherine Lee,katherine.l@company.com,Engineering,6000,2024-01-15,Gusto,EMP041,Direct Deposit,1600,Health Insurance,Active,CTO
+Katherine Lee,katherine.l@company.com,Engineering,6000,2024-02-15,Gusto,EMP041,Direct Deposit,0,Health Insurance,Active,Regular payment
+Tyler Chen,tyler.c@company.com,Marketing,4570,2024-01-15,Gusto,EMP042,Direct Deposit,880,Health Insurance,Active,CMO
+Tyler Chen,tyler.c@company.com,Marketing,4570,2024-02-15,Gusto,EMP042,Direct Deposit,0,Health Insurance,Active,Regular payment
+Hannah Martinez,hannah.m@company.com,HR,4240,2024-01-15,Gusto,EMP043,Direct Deposit,640,Health Insurance,Active,CHRO
+Hannah Martinez,hannah.m@company.com,HR,4240,2024-02-15,Gusto,EMP043,Direct Deposit,0,Health Insurance,Active,Regular payment
+Zachary Johnson,zachary.j@company.com,Sales,5250,2024-01-15,Gusto,EMP044,Direct Deposit,2100,Health Insurance,Active,CEO
+Zachary Johnson,zachary.j@company.com,Sales,5250,2024-02-15,Gusto,EMP044,Direct Deposit,0,Health Insurance,Active,Regular payment
+,invalid@email,Unknown,0,2024-01-15,Gusto,EMP999,Check,0,None,Terminated,Missing data test
+John Doe,,Sales,3000,2024-01-15,Gusto,EMP998,Direct Deposit,0,Health Insurance,Active,Missing email
+Jane Smith,jane@company.com,,4000,2024-01-15,Gusto,EMP997,Direct Deposit,500,Health Insurance,Active,Missing department
+Bob Wilson,bob@company.com,Engineering,,2024-01-15,Gusto,EMP996,Direct Deposit,0,Health Insurance,Active,Missing salary
+Alice Brown,alice@company.com,Marketing,3500,,Gusto,EMP995,Direct Deposit,0,Health Insurance,Active,Missing date
+Charlie Davis,charlie@company.com,HR,3800,2024-01-15,,EMP994,Direct Deposit,0,Health Insurance,Active,Missing platform 

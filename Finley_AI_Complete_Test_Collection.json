@@ -1,609 +1,794 @@
 {
-  "info": {
-    "name": "Finley AI - Complete Feature Test Suite",
-    "description": "Comprehensive test collection for all Finley AI platform features including Entity Resolution, AI Classification, Platform Detection, and Batch Processing",
-    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
-  },
-  "variable": [
-    {
-      "key": "base_url",
-      "value": "https://friendly-greetings-launchpad.onrender.com",
-      "type": "string"
-    },
-    {
-      "key": "test_user_id",
-      "value": "550e8400-e29b-41d4-a716-446655440000",
-      "type": "string"
-    },
-    {
-      "key": "supabase_url",
-      "value": "https://your-project.supabase.co",
-      "type": "string"
-    },
-    {
-      "key": "supabase_key",
-      "value": "your-supabase-anon-key",
-      "type": "string"
-    }
-  ],
-  "item": [
-    {
-      "name": "1. Health Check",
-      "request": {
-        "method": "GET",
-        "header": [],
-        "url": {
-          "raw": "{{base_url}}/health",
-          "host": ["{{base_url}}"],
-          "path": ["health"]
-        },
-        "description": "Test basic API health and connectivity"
-      }
-    },
-    {
-      "name": "1.5. Debug Environment Variables",
-      "request": {
-        "method": "GET",
-        "header": [],
-        "url": {
-          "raw": "{{base_url}}/debug-env",
-          "host": ["{{base_url}}"],
-          "path": ["debug-env"]
-        },
-        "description": "Debug environment variables to check if Supabase keys are set"
-      }
-    },
-    {
-      "name": "2. Test Simple Endpoint",
-      "request": {
-        "method": "GET",
-        "header": [],
-        "url": {
-          "raw": "{{base_url}}/test-simple",
-          "host": ["{{base_url}}"],
-          "path": ["test-simple"]
-        },
-        "description": "Test basic API functionality"
-      }
-    },
-    {
-      "name": "3. Test Database Connection",
-      "request": {
-        "method": "GET",
-        "header": [],
-        "url": {
-          "raw": "{{base_url}}/test-database",
-          "host": ["{{base_url}}"],
-          "path": ["test-database"]
-        },
-        "description": "Test database connectivity and basic operations"
-      }
-    },
-    {
-      "name": "4. Test Platform Detection",
-      "request": {
-        "method": "GET",
-        "header": [],
-        "url": {
-          "raw": "{{base_url}}/test-platform-detection",
-          "host": ["{{base_url}}"],
-          "path": ["test-platform-detection"]
-        },
-        "description": "Test enhanced platform detection with multiple platforms"
-      }
-    },
-    {
-      "name": "5. Test AI Row Classification",
-      "request": {
-        "method": "GET",
-        "header": [],
-        "url": {
-          "raw": "{{base_url}}/test-ai-row-classification",
-          "host": ["{{base_url}}"],
-          "path": ["test-ai-row-classification"]
-        },
-        "description": "Test AI-powered row classification and entity extraction"
-      }
-    },
-    {
-      "name": "6. Test Batch Processing",
-      "request": {
-        "method": "GET",
-        "header": [],
-        "url": {
-          "raw": "{{base_url}}/test-batch-processing",
-          "host": ["{{base_url}}"],
-          "path": ["test-batch-processing"]
-        },
-        "description": "Test batch processing optimization and AI cost reduction"
-      }
-    },
-    {
-      "name": "7. Test Entity Resolution",
-      "request": {
-        "method": "GET",
-        "header": [],
-        "url": {
-          "raw": "{{base_url}}/test-entity-resolution",
-          "host": ["{{base_url}}"],
-          "path": ["test-entity-resolution"]
-        },
-        "description": "Test Entity Resolution system with sample data"
-      }
-    },
-    {
-      "name": "8. Test Entity Search",
-      "request": {
-        "method": "GET",
-        "header": [],
-        "url": {
-          "raw": "{{base_url}}/test-entity-search/{{test_user_id}}?search_term=Abhishek&entity_type=employee",
-          "host": ["{{base_url}}"],
-          "path": ["test-entity-search", "{{test_user_id}}"],
-          "query": [
-            {
-              "key": "search_term",
-              "value": "Abhishek"
-            },
-            {
-              "key": "entity_type",
-              "value": "employee"
-            }
-          ]
-        },
-        "description": "Test entity search functionality with similarity matching"
-      }
-    },
-    {
-      "name": "9. Test Entity Stats",
-      "request": {
-        "method": "GET",
-        "header": [],
-        "url": {
-          "raw": "{{base_url}}/test-entity-stats/{{test_user_id}}",
-          "host": ["{{base_url}}"],
-          "path": ["test-entity-stats", "{{test_user_id}}"]
-        },
-        "description": "Test entity resolution statistics"
-      }
-    },
-    {
-      "name": "10. Test Raw Events Stats",
-      "request": {
-        "method": "GET",
-        "header": [],
-        "url": {
-          "raw": "{{base_url}}/test-raw-events/{{test_user_id}}",
-          "host": ["{{base_url}}"],
-          "path": ["test-raw-events", "{{test_user_id}}"]
-        },
-        "description": "Test raw events statistics and processing results"
-      }
-    },
-    {
-      "name": "11. Process Payroll Sample (Entity Resolution Test)",
-      "request": {
-        "method": "POST",
-        "header": [
-          {
-            "key": "Content-Type",
-            "value": "application/json"
-          }
-        ],
-        "body": {
-          "mode": "raw",
-          "raw": "{\n  \"job_id\": \"550e8400-e29b-41d4-a716-446655440001\",\n  \"storage_path\": \"payroll_sample.csv\",\n  \"file_name\": \"payroll_sample.csv\",\n  \"supabase_url\": \"{{supabase_url}}\",\n  \"supabase_key\": \"{{supabase_key}}\",\n  \"user_id\": \"{{test_user_id}}\"\n}"
-        },
-        "url": {
-          "raw": "{{base_url}}/process-excel",
-          "host": ["{{base_url}}"],
-          "path": ["process-excel"]
-        },
-        "description": "Process payroll file to test employee entity resolution (Abhishek A. vs Abhishek Arora)"
-      }
-    },
-    {
-      "name": "12. Process Vendor Payments (Entity Resolution Test)",
-      "request": {
-        "method": "POST",
-        "header": [
-          {
-            "key": "Content-Type",
-            "value": "application/json"
-          }
-        ],
-        "body": {
-          "mode": "raw",
-          "raw": "{\n  \"job_id\": \"550e8400-e29b-41d4-a716-446655440002\",\n  \"storage_path\": \"vendor_payments.csv\",\n  \"file_name\": \"vendor_payments.csv\",\n  \"supabase_url\": \"{{supabase_url}}\",\n  \"supabase_key\": \"{{supabase_key}}\",\n  \"user_id\": \"{{test_user_id}}\"\n}"
-        },
-        "url": {
-          "raw": "{{base_url}}/process-excel",
-          "host": ["{{base_url}}"],
-          "path": ["process-excel"]
-        },
-        "description": "Process vendor payments to test vendor entity resolution (Razorpay Payout vs Razorpay Payments Pvt. Ltd.)"
-      }
-    },
-    {
-      "name": "13. Process Income Statement (Document Type Detection)",
-      "request": {
-        "method": "POST",
-        "header": [
-          {
-            "key": "Content-Type",
-            "value": "application/json"
-          }
-        ],
-        "body": {
-          "mode": "raw",
-          "raw": "{\n  \"job_id\": \"550e8400-e29b-41d4-a716-446655440003\",\n  \"storage_path\": \"income_statement.xlsx\",\n  \"file_name\": \"income_statement.xlsx\",\n  \"supabase_url\": \"{{supabase_url}}\",\n  \"supabase_key\": \"{{supabase_key}}\",\n  \"user_id\": \"{{test_user_id}}\"\n}"
-        },
-        "url": {
-          "raw": "{{base_url}}/process-excel",
-          "host": ["{{base_url}}"],
-          "path": ["process-excel"]
-        },
-        "description": "Process income statement to test document type detection and AI classification"
-      }
-    },
-    {
-      "name": "14. Process Large Cash Flow (Batch Processing Test)",
-      "request": {
-        "method": "POST",
-        "header": [
-          {
-            "key": "Content-Type",
-            "value": "application/json"
-          }
-        ],
-        "body": {
-          "mode": "raw",
-          "raw": "{\n  \"job_id\": \"550e8400-e29b-41d4-a716-446655440004\",\n  \"storage_path\": \"cash_flow_large.csv\",\n  \"file_name\": \"cash_flow_large.csv\",\n  \"supabase_url\": \"{{supabase_url}}\",\n  \"supabase_key\": \"{{supabase_key}}\",\n  \"user_id\": \"{{test_user_id}}\"\n}"
-        },
-        "url": {
-          "raw": "{{base_url}}/process-excel",
-          "host": ["{{base_url}}"],
-          "path": ["process-excel"]
-        },
-        "description": "Process large cash flow file to test batch processing optimization and performance"
-      }
-    },
-    {
-      "name": "15. Process Balance Sheet (Document Type Detection)",
-      "request": {
-        "method": "POST",
-        "header": [
-          {
-            "key": "Content-Type",
-            "value": "application/json"
-          }
-        ],
-        "body": {
-          "mode": "raw",
-          "raw": "{\n  \"job_id\": \"550e8400-e29b-41d4-a716-446655440005\",\n  \"storage_path\": \"balance_sheet.csv\",\n  \"file_name\": \"balance_sheet.csv\",\n  \"supabase_url\": \"{{supabase_url}}\",\n  \"supabase_key\": \"{{supabase_key}}\",\n  \"user_id\": \"{{test_user_id}}\"\n}"
-        },
-        "url": {
-          "raw": "{{base_url}}/process-excel",
-          "host": ["{{base_url}}"],
-          "path": ["process-excel"]
-        },
-        "description": "Process balance sheet to test balance sheet document type detection"
-      }
-    },
-    {
-      "name": "16. Test Entity Search - Vendors",
-      "request": {
-        "method": "GET",
-        "header": [],
-        "url": {
-          "raw": "{{base_url}}/test-entity-search/{{test_user_id}}?search_term=Razorpay&entity_type=vendor",
-          "host": ["{{base_url}}"],
-          "path": ["test-entity-search", "{{test_user_id}}"],
-          "query": [
-            {
-              "key": "search_term",
-              "value": "Razorpay"
-            },
-            {
-              "key": "entity_type",
-              "value": "vendor"
-            }
-          ]
-        },
-        "description": "Test entity search for vendors after processing vendor files"
-      }
-    },
-    {
-      "name": "17. Test Entity Stats After Processing",
-      "request": {
-        "method": "GET",
-        "header": [],
-        "url": {
-          "raw": "{{base_url}}/test-entity-stats/{{test_user_id}}",
-          "host": ["{{base_url}}"],
-          "path": ["test-entity-stats", "{{test_user_id}}"]
-        },
-        "description": "Test entity resolution statistics after processing multiple files"
-      }
-    },
-    {
-      "name": "18. Test Raw Events Stats After Processing",
-      "request": {
-        "method": "GET",
-        "header": [],
-        "url": {
-          "raw": "{{base_url}}/test-raw-events/{{test_user_id}}",
-          "host": ["{{base_url}}"],
-          "path": ["test-raw-events", "{{test_user_id}}"]
-        },
-        "description": "Test raw events statistics after processing multiple files"
-      }
-    },
-    {
-      "name": "19. Test Cross-File Relationships",
-      "request": {
-        "method": "GET",
-        "header": [],
-        "url": {
-          "raw": "{{base_url}}/test-cross-file-relationships/{{test_user_id}}",
-          "host": ["{{base_url}}"],
-          "path": ["test-cross-file-relationships", "{{test_user_id}}"]
-        },
-        "description": "Test cross-file relationship detection (payroll ↔ payout linking)"
-      }
-    },
-    {
-      "name": "20. Test Currency Normalization",
-      "request": {
-        "method": "GET",
-        "header": [],
-        "url": {
-          "raw": "{{base_url}}/test-currency-normalization",
-          "host": ["{{base_url}}"],
-          "path": ["test-currency-normalization"]
-        },
-        "description": "Test currency normalization with sample data from different platforms"
-      }
-    },
-    {
-      "name": "21. Test Vendor Standardization",
-      "request": {
-        "method": "GET",
-        "header": [],
-        "url": {
-          "raw": "{{base_url}}/test-vendor-standardization",
-          "host": ["{{base_url}}"],
-          "path": ["test-vendor-standardization"]
-        },
-        "description": "Test vendor name standardization with AI-powered cleaning"
-      }
-    },
-    {
-      "name": "22. Test Platform ID Extraction",
-      "request": {
-        "method": "GET",
-        "header": [],
-        "url": {
-          "raw": "{{base_url}}/test-platform-id-extraction",
-          "host": ["{{base_url}}"],
-          "path": ["test-platform-id-extraction"]
-        },
-        "description": "Test platform-specific ID extraction (payment IDs, invoice IDs, etc.)"
-      }
-    },
-    {
-      "name": "23. Test Data Enrichment Pipeline",
-      "request": {
-        "method": "GET",
-        "header": [],
-        "url": {
-          "raw": "{{base_url}}/test-data-enrichment",
-          "host": ["{{base_url}}"],
-          "path": ["test-data-enrichment"]
-        },
-        "description": "Test complete data enrichment pipeline with sample financial data"
-      }
-    },
-    {
-      "name": "24. Test Enrichment Statistics",
-      "request": {
-        "method": "GET",
-        "header": [],
-        "url": {
-          "raw": "{{base_url}}/test-enrichment-stats/{{test_user_id}}",
-          "host": ["{{base_url}}"],
-          "path": ["test-enrichment-stats", "{{test_user_id}}"]
-        },
-        "description": "Test enrichment statistics and metrics for processed data"
-      }
-    },
-    {
-      "name": "25. Test Vendor Search",
-      "request": {
-        "method": "GET",
-        "header": [],
-        "url": {
-          "raw": "{{base_url}}/test-vendor-search/{{test_user_id}}?vendor_name=Google",
-          "host": ["{{base_url}}"],
-          "path": ["test-vendor-search", "{{test_user_id}}"],
-          "query": [
-            {
-              "key": "vendor_name",
-              "value": "Google"
-            }
-          ]
-        },
-        "description": "Test vendor search functionality with standardized vendor names"
-      }
-    },
-    {
-      "name": "26. Test Currency Summary",
-      "request": {
-        "method": "GET",
-        "header": [],
-        "url": {
-          "raw": "{{base_url}}/test-currency-summary/{{test_user_id}}",
-          "host": ["{{base_url}}"],
-          "path": ["test-currency-summary", "{{test_user_id}}"]
-        },
-        "description": "Test currency conversion summary and exchange rate statistics"
-      }
-    },
-    {
-      "name": "27. Test AI Relationship Detection",
-      "request": {
-        "method": "GET",
-        "header": [],
-        "url": {
-          "raw": "{{base_url}}/test-ai-relationship-detection/{{test_user_id}}",
-          "host": ["{{base_url}}"],
-          "path": ["test-ai-relationship-detection", "{{test_user_id}}"]
-        },
-        "description": "Test comprehensive AI-powered relationship detection for ANY financial data"
-      }
-    },
-    {
-      "name": "28. Test Relationship Type Discovery",
-      "request": {
-        "method": "GET",
-        "header": [],
-        "url": {
-          "raw": "{{base_url}}/test-relationship-discovery/{{test_user_id}}",
-          "host": ["{{base_url}}"],
-          "path": ["test-relationship-discovery", "{{test_user_id}}"]
-        },
-        "description": "Test AI-powered discovery of relationship types in financial data"
-      }
-    },
-    {
-      "name": "29. Test AI Relationship Scoring",
-      "request": {
-        "method": "GET",
-        "header": [],
-        "url": {
-          "raw": "{{base_url}}/test-ai-relationship-scoring/{{test_user_id}}",
-          "host": ["{{base_url}}"],
-          "path": ["test-ai-relationship-scoring", "{{test_user_id}}"]
-        },
-        "description": "Test multi-dimensional relationship scoring with AI-powered analysis"
-      }
-    },
-    {
-      "name": "30. Test Relationship Validation",
-      "request": {
-        "method": "GET",
-        "header": [],
-        "url": {
-          "raw": "{{base_url}}/test-relationship-validation/{{test_user_id}}",
-          "host": ["{{base_url}}"],
-          "path": ["test-relationship-validation", "{{test_user_id}}"]
-        },
-        "description": "Test relationship validation and filtering with confidence scoring"
-      }
-    },
-    {
-      "name": "31. Test Dynamic Platform Detection",
-      "request": {
-        "method": "GET",
-        "header": [],
-        "url": {
-          "raw": "{{base_url}}/test-dynamic-platform-detection",
-          "host": ["{{base_url}}"],
-          "path": ["test-dynamic-platform-detection"]
-        },
-        "description": "Test AI-powered dynamic platform detection with sample data"
-      }
-    },
-    {
-      "name": "32. Test Platform Learning",
-      "request": {
-        "method": "GET",
-        "header": [],
-        "url": {
-          "raw": "{{base_url}}/test-platform-learning/{{test_user_id}}",
-          "host": ["{{base_url}}"],
-          "path": ["test-platform-learning", "{{test_user_id}}"]
-        },
-        "description": "Test AI-powered platform learning from user data"
-      }
-    },
-    {
-      "name": "33. Test Platform Discovery",
-      "request": {
-        "method": "GET",
-        "header": [],
-        "url": {
-          "raw": "{{base_url}}/test-platform-discovery/{{test_user_id}}",
-          "host": ["{{base_url}}"],
-          "path": ["test-platform-discovery", "{{test_user_id}}"]
-        },
-        "description": "Test AI-powered discovery of new platforms"
-      }
-    },
-    {
-      "name": "34. Test Platform Insights",
-      "request": {
-        "method": "GET",
-        "header": [],
-        "url": {
-          "raw": "{{base_url}}/test-platform-insights/stripe",
-          "host": ["{{base_url}}"],
-          "path": ["test-platform-insights", "stripe"]
-        },
-        "description": "Test platform insights and analysis for specific platform"
-      }
-    },
-    {
-      "name": "35. Test Flexible Relationship Discovery",
-      "request": {
-        "method": "GET",
-        "header": [],
-        "url": {
-          "raw": "{{base_url}}/test-flexible-relationship-discovery/{{test_user_id}}",
-          "host": ["{{base_url}}"],
-          "path": ["test-flexible-relationship-discovery", "{{test_user_id}}"]
-        },
-        "description": "Test the flexible relationship discovery engine that can detect ANY type of financial relationship"
-      }
-    },
-    {
-      "name": "36. Test Relationship Pattern Learning",
-      "request": {
-        "method": "GET",
-        "header": [],
-        "url": {
-          "raw": "{{base_url}}/test-relationship-pattern-learning/{{test_user_id}}",
-          "host": ["{{base_url}}"],
-          "path": ["test-relationship-pattern-learning", "{{test_user_id}}"]
-        },
-        "description": "Test relationship pattern learning capabilities and AI-powered pattern extraction"
-      }
-    },
-    {
-      "name": "37. Test Cross-Platform Relationship Mapping",
-      "request": {
-        "method": "GET",
-        "header": [],
-        "url": {
-          "raw": "{{base_url}}/test-cross-platform-relationship-mapping/{{test_user_id}}",
-          "host": ["{{base_url}}"],
-          "path": ["test-cross-platform-relationship-mapping", "{{test_user_id}}"]
-        },
-        "description": "Test cross-platform relationship mapping and platform compatibility assessment"
-      }
-    },
-    {
-      "name": "38. Test Relationship Patterns Storage",
-      "request": {
-        "method": "GET",
-        "header": [],
-        "url": {
-          "raw": "{{base_url}}/test-relationship-patterns/{{test_user_id}}",
-          "host": ["{{base_url}}"],
-          "path": ["test-relationship-patterns", "{{test_user_id}}"]
-        },
-        "description": "Test relationship pattern storage and retrieval from database"
-      }
-    }
-  ]
+	"info": {
+		"_postman_id": "complete-finley-ai-test-suite",
+		"name": "Finley AI Complete Test Collection",
+		"description": "Comprehensive test suite for Finley AI system including file upload, processing, data enrichment, relationship detection, and dynamic platform detection",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"variable": [
+		{
+			"key": "base_url",
+			"value": "https://friendly-greetings-launchpad.onrender.com",
+			"type": "string"
+		},
+		{
+			"key": "test_user_id",
+			"value": "550e8400-e29b-41d4-a716-446655440000",
+			"type": "string"
+		},
+		{
+			"key": "supabase_url",
+			"value": "https://your-project.supabase.co",
+			"type": "string"
+		},
+		{
+			"key": "supabase_key",
+			"value": "your-supabase-anon-key",
+			"type": "string"
+		}
+	],
+	"item": [
+		{
+			"name": "🔧 SYSTEM CHECKS",
+			"item": [
+				{
+					"name": "1. Health Check",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/health",
+							"host": ["{{base_url}}"],
+							"path": ["health"]
+						},
+						"description": "Test basic API health and connectivity"
+					}
+				},
+				{
+					"name": "2. Test Database Connection",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/test-database",
+							"host": ["{{base_url}}"],
+							"path": ["test-database"]
+						},
+						"description": "Test database connectivity and basic operations"
+					}
+				},
+				{
+					"name": "3. Test Simple Endpoint",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/test-simple",
+							"host": ["{{base_url}}"],
+							"path": ["test-simple"]
+						},
+						"description": "Test basic API functionality"
+					}
+				}
+			]
+		},
+		{
+			"name": "📁 FILE UPLOADS (All 10 Files)",
+			"item": [
+				{
+					"name": "1. Upload Bank Statements",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "multipart/form-data"
+							}
+						],
+						"body": {
+							"mode": "formdata",
+							"formdata": [
+								{
+									"key": "file",
+									"type": "file",
+									"src": "test_files/company_bank_statements.csv"
+								}
+							]
+						},
+						"url": {
+							"raw": "{{base_url}}/process_excel",
+							"host": ["{{base_url}}"],
+							"path": ["process_excel"]
+						},
+						"description": "Upload company bank statements file"
+					}
+				},
+				{
+					"name": "2. Upload Invoices",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "multipart/form-data"
+							}
+						],
+						"body": {
+							"mode": "formdata",
+							"formdata": [
+								{
+									"key": "file",
+									"type": "file",
+									"src": "test_files/company_invoices.csv"
+								}
+							]
+						},
+						"url": {
+							"raw": "{{base_url}}/process_excel",
+							"host": ["{{base_url}}"],
+							"path": ["process_excel"]
+						},
+						"description": "Upload company invoices file"
+					}
+				},
+				{
+					"name": "3. Upload Expenses",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "multipart/form-data"
+							}
+						],
+						"body": {
+							"mode": "formdata",
+							"formdata": [
+								{
+									"key": "file",
+									"type": "file",
+									"src": "test_files/company_expenses.csv"
+								}
+							]
+						},
+						"url": {
+							"raw": "{{base_url}}/process_excel",
+							"host": ["{{base_url}}"],
+							"path": ["process_excel"]
+						},
+						"description": "Upload company expenses file"
+					}
+				},
+				{
+					"name": "4. Upload Revenue",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "multipart/form-data"
+							}
+						],
+						"body": {
+							"mode": "formdata",
+							"formdata": [
+								{
+									"key": "file",
+									"type": "file",
+									"src": "test_files/company_revenue.csv"
+								}
+							]
+						},
+						"url": {
+							"raw": "{{base_url}}/process_excel",
+							"host": ["{{base_url}}"],
+							"path": ["process_excel"]
+						},
+						"description": "Upload company revenue file"
+					}
+				},
+				{
+					"name": "5. Upload Tax Records",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "multipart/form-data"
+							}
+						],
+						"body": {
+							"mode": "formdata",
+							"formdata": [
+								{
+									"key": "file",
+									"type": "file",
+									"src": "test_files/company_tax_records.csv"
+								}
+							]
+						},
+						"url": {
+							"raw": "{{base_url}}/process_excel",
+							"host": ["{{base_url}}"],
+							"path": ["process_excel"]
+						},
+						"description": "Upload company tax records file"
+					}
+				},
+				{
+					"name": "6. Upload Accounts Receivable",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "multipart/form-data"
+							}
+						],
+						"body": {
+							"mode": "formdata",
+							"formdata": [
+								{
+									"key": "file",
+									"type": "file",
+									"src": "test_files/company_accounts_receivable.csv"
+								}
+							]
+						},
+						"url": {
+							"raw": "{{base_url}}/process_excel",
+							"host": ["{{base_url}}"],
+							"path": ["process_excel"]
+						},
+						"description": "Upload company accounts receivable file"
+					}
+				},
+				{
+					"name": "7. Upload Payroll Data",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "multipart/form-data"
+							}
+						],
+						"body": {
+							"mode": "formdata",
+							"formdata": [
+								{
+									"key": "file",
+									"type": "file",
+									"src": "test_files/comprehensive_payroll_data.csv"
+								}
+							]
+						},
+						"url": {
+							"raw": "{{base_url}}/process_excel",
+							"host": ["{{base_url}}"],
+							"path": ["process_excel"]
+						},
+						"description": "Upload comprehensive payroll data file"
+					}
+				},
+				{
+					"name": "8. Upload Vendor Payments",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "multipart/form-data"
+							}
+						],
+						"body": {
+							"mode": "formdata",
+							"formdata": [
+								{
+									"key": "file",
+									"type": "file",
+									"src": "test_files/comprehensive_vendor_payments.csv"
+								}
+							]
+						},
+						"url": {
+							"raw": "{{base_url}}/process_excel",
+							"host": ["{{base_url}}"],
+							"path": ["process_excel"]
+						},
+						"description": "Upload comprehensive vendor payments file"
+					}
+				},
+				{
+					"name": "9. Upload Cash Flow",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "multipart/form-data"
+							}
+						],
+						"body": {
+							"mode": "formdata",
+							"formdata": [
+								{
+									"key": "file",
+									"type": "file",
+									"src": "test_files/comprehensive_cash_flow.csv"
+								}
+							]
+						},
+						"url": {
+							"raw": "{{base_url}}/process_excel",
+							"host": ["{{base_url}}"],
+							"path": ["process_excel"]
+						},
+						"description": "Upload comprehensive cash flow file"
+					}
+				},
+				{
+					"name": "10. Upload Income Statement",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "multipart/form-data"
+							}
+						],
+						"body": {
+							"mode": "formdata",
+							"formdata": [
+								{
+									"key": "file",
+									"type": "file",
+									"src": "test_files/comprehensive_income_statement.csv"
+								}
+							]
+						},
+						"url": {
+							"raw": "{{base_url}}/process_excel",
+							"host": ["{{base_url}}"],
+							"path": ["process_excel"]
+						},
+						"description": "Upload comprehensive income statement file"
+					}
+				}
+			]
+		},
+		{
+			"name": "📊 DATA ANALYSIS (After Uploads)",
+			"item": [
+				{
+					"name": "1. Check All Uploaded Data",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/test-raw-events/{{test_user_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["test-raw-events", "{{test_user_id}}"]
+						},
+						"description": "Check all uploaded data and processing results"
+					}
+				},
+				{
+					"name": "2. Check Entity Resolution Stats",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/test-entity-stats/{{test_user_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["test-entity-stats", "{{test_user_id}}"]
+						},
+						"description": "Check entity resolution statistics"
+					}
+				},
+				{
+					"name": "3. Check Raw Events Stats",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/test-raw-events/{{test_user_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["test-raw-events", "{{test_user_id}}"]
+						},
+						"description": "Check raw events statistics after processing multiple files"
+					}
+				}
+			]
+		},
+		{
+			"name": "🧠 AI FEATURES TESTING",
+			"item": [
+				{
+					"name": "1. Test Platform Detection",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/test-platform-detection",
+							"host": ["{{base_url}}"],
+							"path": ["test-platform-detection"]
+						},
+						"description": "Test enhanced platform detection with multiple platforms"
+					}
+				},
+				{
+					"name": "2. Test AI Row Classification",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/test-ai-row-classification",
+							"host": ["{{base_url}}"],
+							"path": ["test-ai-row-classification"]
+						},
+						"description": "Test AI-powered row classification and entity extraction"
+					}
+				},
+				{
+					"name": "3. Test Entity Resolution",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/test-entity-resolution",
+							"host": ["{{base_url}}"],
+							"path": ["test-entity-resolution"]
+						},
+						"description": "Test Entity Resolution system with sample data"
+					}
+				},
+				{
+					"name": "4. Test Entity Search",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/test-entity-search/{{test_user_id}}?search_term=Abhishek&entity_type=employee",
+							"host": ["{{base_url}}"],
+							"path": ["test-entity-search", "{{test_user_id}}"],
+							"query": [
+								{
+									"key": "search_term",
+									"value": "Abhishek"
+								},
+								{
+									"key": "entity_type",
+									"value": "employee"
+								}
+							]
+						},
+						"description": "Test entity search functionality with similarity matching"
+					}
+				},
+				{
+					"name": "5. Test Entity Search - Vendors",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/test-entity-search/{{test_user_id}}?search_term=Razorpay&entity_type=vendor",
+							"host": ["{{base_url}}"],
+							"path": ["test-entity-search", "{{test_user_id}}"],
+							"query": [
+								{
+									"key": "search_term",
+									"value": "Razorpay"
+								},
+								{
+									"key": "entity_type",
+									"value": "vendor"
+								}
+							]
+						},
+						"description": "Test entity search for vendors after processing vendor files"
+					}
+				}
+			]
+		},
+		{
+			"name": "🔗 RELATIONSHIP DETECTION",
+			"item": [
+				{
+					"name": "1. Test Cross-File Relationships",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/test-cross-file-relationships/{{test_user_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["test-cross-file-relationships", "{{test_user_id}}"]
+						},
+						"description": "Test cross-file relationship detection (payroll ↔ payout linking)"
+					}
+				},
+				{
+					"name": "2. Test AI Relationship Detection",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/test-ai-relationship-detection/{{test_user_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["test-ai-relationship-detection", "{{test_user_id}}"]
+						},
+						"description": "Test comprehensive AI-powered relationship detection for ANY financial data"
+					}
+				},
+				{
+					"name": "3. Test Relationship Type Discovery",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/test-relationship-discovery/{{test_user_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["test-relationship-discovery", "{{test_user_id}}"]
+						},
+						"description": "Test AI-powered discovery of relationship types in financial data"
+					}
+				},
+				{
+					"name": "4. Test AI Relationship Scoring",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/test-ai-relationship-scoring/{{test_user_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["test-ai-relationship-scoring", "{{test_user_id}}"]
+						},
+						"description": "Test multi-dimensional relationship scoring with AI-powered analysis"
+					}
+				},
+				{
+					"name": "5. Test Relationship Validation",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/test-relationship-validation/{{test_user_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["test-relationship-validation", "{{test_user_id}}"]
+						},
+						"description": "Test relationship validation and filtering with confidence scoring"
+					}
+				},
+				{
+					"name": "6. Test Flexible Relationship Discovery",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/test-flexible-relationship-discovery/{{test_user_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["test-flexible-relationship-discovery", "{{test_user_id}}"]
+						},
+						"description": "Test the flexible relationship discovery engine that can detect ANY type of financial relationship"
+					}
+				},
+				{
+					"name": "7. Test Relationship Pattern Learning",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/test-relationship-pattern-learning/{{test_user_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["test-relationship-pattern-learning", "{{test_user_id}}"]
+						},
+						"description": "Test relationship pattern learning capabilities and AI-powered pattern extraction"
+					}
+				},
+				{
+					"name": "8. Test Cross-Platform Relationship Mapping",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/test-cross-platform-relationship-mapping/{{test_user_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["test-cross-platform-relationship-mapping", "{{test_user_id}}"]
+						},
+						"description": "Test cross-platform relationship mapping and platform compatibility assessment"
+					}
+				},
+				{
+					"name": "9. Test Relationship Patterns Storage",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/test-relationship-patterns/{{test_user_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["test-relationship-patterns", "{{test_user_id}}"]
+						},
+						"description": "Test relationship pattern storage and retrieval from database"
+					}
+				}
+			]
+		},
+		{
+			"name": "💰 DATA ENRICHMENT",
+			"item": [
+				{
+					"name": "1. Test Currency Normalization",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/test-currency-normalization",
+							"host": ["{{base_url}}"],
+							"path": ["test-currency-normalization"]
+						},
+						"description": "Test currency normalization with sample data from different platforms"
+					}
+				},
+				{
+					"name": "2. Test Vendor Standardization",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/test-vendor-standardization",
+							"host": ["{{base_url}}"],
+							"path": ["test-vendor-standardization"]
+						},
+						"description": "Test vendor name standardization with AI-powered cleaning"
+					}
+				},
+				{
+					"name": "3. Test Platform ID Extraction",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/test-platform-id-extraction",
+							"host": ["{{base_url}}"],
+							"path": ["test-platform-id-extraction"]
+						},
+						"description": "Test platform-specific ID extraction (payment IDs, invoice IDs, etc.)"
+					}
+				},
+				{
+					"name": "4. Test Data Enrichment Pipeline",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/test-data-enrichment",
+							"host": ["{{base_url}}"],
+							"path": ["test-data-enrichment"]
+						},
+						"description": "Test complete data enrichment pipeline with sample financial data"
+					}
+				},
+				{
+					"name": "5. Test Enrichment Statistics",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/test-enrichment-stats/{{test_user_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["test-enrichment-stats", "{{test_user_id}}"]
+						},
+						"description": "Test enrichment statistics and metrics for processed data"
+					}
+				},
+				{
+					"name": "6. Test Vendor Search",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/test-vendor-search/{{test_user_id}}?vendor_name=Google",
+							"host": ["{{base_url}}"],
+							"path": ["test-vendor-search", "{{test_user_id}}"],
+							"query": [
+								{
+									"key": "vendor_name",
+									"value": "Google"
+								}
+							]
+						},
+						"description": "Test vendor search functionality with standardized vendor names"
+					}
+				},
+				{
+					"name": "7. Test Currency Summary",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/test-currency-summary/{{test_user_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["test-currency-summary", "{{test_user_id}}"]
+						},
+						"description": "Test currency conversion summary and exchange rate statistics"
+					}
+				}
+			]
+		},
+		{
+			"name": "🤖 DYNAMIC PLATFORM DETECTION",
+			"item": [
+				{
+					"name": "1. Test Dynamic Platform Detection",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/test-dynamic-platform-detection",
+							"host": ["{{base_url}}"],
+							"path": ["test-dynamic-platform-detection"]
+						},
+						"description": "Test AI-powered dynamic platform detection with sample data"
+					}
+				},
+				{
+					"name": "2. Test Platform Learning",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/test-platform-learning/{{test_user_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["test-platform-learning", "{{test_user_id}}"]
+						},
+						"description": "Test AI-powered platform learning from user data"
+					}
+				},
+				{
+					"name": "3. Test Platform Discovery",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/test-platform-discovery/{{test_user_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["test-platform-discovery", "{{test_user_id}}"]
+						},
+						"description": "Test AI-powered discovery of new platforms"
+					}
+				},
+				{
+					"name": "4. Test Platform Insights",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/test-platform-insights/stripe",
+							"host": ["{{base_url}}"],
+							"path": ["test-platform-insights", "stripe"]
+						},
+						"description": "Test platform insights and analysis for specific platform"
+					}
+				}
+			]
+		},
+		{
+			"name": "⚡ PERFORMANCE & BATCH PROCESSING",
+			"item": [
+				{
+					"name": "1. Test Batch Processing",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/test-batch-processing",
+							"host": ["{{base_url}}"],
+							"path": ["test-batch-processing"]
+						},
+						"description": "Test batch processing optimization and AI cost reduction"
+					}
+				}
+			]
+		}
+	]
 } 

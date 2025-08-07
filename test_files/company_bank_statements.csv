@@ -1,0 +1,94 @@
+Date,Description,Amount,Type,Account,Reference,Category,Balance
+2024-01-01,Opening Balance,0.00,Credit,Main Account,OPENING,Starting Balance,50000.00
+2024-01-02,Client Payment - ABC Corp,25000.00,Credit,Main Account,INV-001,Revenue,75000.00
+2024-01-03,Office Rent Payment,-5000.00,Debit,Main Account,LL-001,Expense,70000.00
+2024-01-04,Employee Salary - Abhishek A.,-5000.00,Debit,Main Account,pay_001,Payroll,65000.00
+2024-01-05,Client Payment - XYZ Inc,30000.00,Credit,Main Account,INV-002,Revenue,95000.00
+2024-01-06,Software Subscription - Stripe,-200.00,Debit,Main Account,ch_0987654321fedcba,Expense,94800.00
+2024-01-07,Internet Bill,-150.00,Debit,Main Account,ISP-001,Expense,94650.00
+2024-01-08,Employee Salary - John Smith,-4500.00,Debit,Main Account,pay_002,Payroll,90150.00
+2024-01-09,Marketing Campaign - Google Ads,-3000.00,Debit,Main Account,GA-001,Expense,87150.00
+2024-01-10,Client Payment - DEF Ltd,18000.00,Credit,Main Account,INV-003,Revenue,105150.00
+2024-01-11,Office Supplies,-500.00,Debit,Main Account,OD-001,Expense,104650.00
+2024-01-12,Employee Salary - Sarah Johnson,-4200.00,Debit,Main Account,pay_003,Payroll,100450.00
+2024-01-13,Cloud Services - AWS,-2500.00,Debit,Main Account,aws_001,Expense,97950.00
+2024-01-14,Client Payment - GHI Corp,22000.00,Credit,Main Account,INV-004,Revenue,119950.00
+2024-01-15,Travel Expenses,-800.00,Debit,Main Account,EXP-001,Expense,119150.00
+2024-01-16,Employee Salary - Mike Wilson,-4800.00,Debit,Main Account,pay_004,Payroll,114350.00
+2024-01-17,Legal Services,-2000.00,Debit,Main Account,LF-001,Expense,112350.00
+2024-01-18,Client Payment - JKL Inc,28000.00,Credit,Main Account,INV-005,Revenue,140350.00
+2024-01-19,Insurance Premium,-1200.00,Debit,Main Account,INS-001,Expense,139150.00
+2024-01-20,Employee Salary - Abhishek Arora,-5000.00,Debit,Main Account,pay_005,Payroll,134150.00
+2024-01-21,Equipment Purchase - Apple Store,-3000.00,Debit,Main Account,AS-001,Expense,131150.00
+2024-01-22,Client Payment - MNO Corp,32000.00,Credit,Main Account,INV-006,Revenue,163150.00
+2024-01-23,Utilities Payment,-400.00,Debit,Main Account,UC-001,Expense,162750.00
+2024-01-24,Employee Salary - John Smith,-4500.00,Debit,Main Account,pay_006,Payroll,158250.00
+2024-01-25,Advertising Expenses - Facebook,-2500.00,Debit,Main Account,FB-001,Expense,155750.00
+2024-01-26,Client Payment - PQR Ltd,19000.00,Credit,Main Account,INV-007,Revenue,174750.00
+2024-01-27,Maintenance Services,-600.00,Debit,Main Account,MC-001,Expense,174150.00
+2024-01-28,Employee Salary - Sarah Johnson,-4200.00,Debit,Main Account,pay_007,Payroll,169950.00
+2024-01-29,Professional Development - Coursera,-1500.00,Debit,Main Account,CR-001,Expense,168450.00
+2024-01-30,Client Payment - STU Corp,26000.00,Credit,Main Account,INV-008,Revenue,194450.00
+2024-01-31,Employee Salary - Mike Wilson,-4800.00,Debit,Main Account,pay_008,Payroll,189650.00
+2024-02-01,Year-end Bonus - Abhishek A.,-10000.00,Debit,Main Account,pay_009,Bonus,179650.00
+2024-02-02,Client Payment - VWX Corp,35000.00,Credit,Main Account,INV-009,Revenue,214650.00
+2024-02-03,Office Rent Payment,-5000.00,Debit,Main Account,LL-002,Expense,209650.00
+2024-02-04,Employee Salary - Emily Davis,-5200.00,Debit,Main Account,pay_010,Payroll,204450.00
+2024-02-05,Software License - Adobe,-800.00,Debit,Main Account,AD-001,Expense,203650.00
+2024-02-06,Client Payment - YZA Inc,27000.00,Credit,Main Account,INV-010,Revenue,230650.00
+2024-02-07,Internet Bill,-150.00,Debit,Main Account,ISP-002,Expense,230500.00
+2024-02-08,Employee Salary - David Brown,-4300.00,Debit,Main Account,pay_011,Payroll,226200.00
+2024-02-09,Marketing Campaign - Google Ads,-3500.00,Debit,Main Account,GA-002,Expense,222700.00
+2024-02-10,Client Payment - BCD Corp,24000.00,Credit,Main Account,INV-011,Revenue,246700.00
+2024-02-11,Office Supplies,-600.00,Debit,Main Account,OD-002,Expense,246100.00
+2024-02-12,Employee Salary - Lisa Chen,-4100.00,Debit,Main Account,pay_012,Payroll,242000.00
+2024-02-13,Cloud Services - AWS,-2800.00,Debit,Main Account,aws_002,Expense,239200.00
+2024-02-14,Client Payment - EFG Ltd,31000.00,Credit,Main Account,INV-012,Revenue,270200.00
+2024-02-15,Travel Expenses - Expedia,-1200.00,Debit,Main Account,EXP-002,Expense,269000.00
+2024-02-16,Employee Salary - Tom Anderson,-4700.00,Debit,Main Account,pay_013,Payroll,264300.00
+2024-02-17,Legal Services,-2500.00,Debit,Main Account,LF-002,Expense,261800.00
+2024-02-18,Client Payment - HIJ Inc,29000.00,Credit,Main Account,INV-013,Revenue,290800.00
+2024-02-19,Insurance Premium,-1200.00,Debit,Main Account,INS-002,Expense,289600.00
+2024-02-20,Employee Salary - Rachel Green,-5100.00,Debit,Main Account,pay_014,Payroll,284500.00
+2024-02-21,Equipment Purchase - Apple Store,-2500.00,Debit,Main Account,AS-002,Expense,282000.00
+2024-02-22,Client Payment - KLM Corp,33000.00,Credit,Main Account,INV-014,Revenue,315000.00
+2024-02-23,Utilities Payment,-450.00,Debit,Main Account,UC-002,Expense,314550.00
+2024-02-24,Employee Salary - James Wilson,-4400.00,Debit,Main Account,pay_015,Payroll,310150.00
+2024-02-25,Advertising Expenses - Facebook,-3000.00,Debit,Main Account,FB-002,Expense,307150.00
+2024-02-26,Client Payment - NOP Ltd,21000.00,Credit,Main Account,INV-015,Revenue,328150.00
+2024-02-27,Maintenance Services,-700.00,Debit,Main Account,MC-002,Expense,327450.00
+2024-02-28,Employee Salary - Maria Garcia,-4150.00,Debit,Main Account,pay_016,Payroll,323300.00
+2024-02-29,Professional Development - Coursera,-2000.00,Debit,Main Account,CR-002,Expense,321300.00
+2024-03-01,Client Payment - QRS Corp,25000.00,Credit,Main Account,INV-016,Revenue,346300.00
+2024-03-02,Employee Salary - Alex Johnson,-4850.00,Debit,Main Account,pay_017,Payroll,341450.00
+2024-03-03,Client Payment - TUV Inc,36000.00,Credit,Main Account,INV-017,Revenue,377450.00
+2024-03-04,Office Rent Payment,-5000.00,Debit,Main Account,LL-003,Expense,372450.00
+2024-03-05,Employee Salary - Sophie Lee,-5300.00,Debit,Main Account,pay_018,Payroll,367150.00
+2024-03-06,Software License - Adobe,-900.00,Debit,Main Account,AD-002,Expense,366250.00
+2024-03-07,Client Payment - WXY Corp,28000.00,Credit,Main Account,INV-018,Revenue,394250.00
+2024-03-08,Internet Bill,-150.00,Debit,Main Account,ISP-003,Expense,394100.00
+2024-03-09,Employee Salary - Chris Martinez,-4350.00,Debit,Main Account,pay_019,Payroll,389750.00
+2024-03-10,Marketing Campaign - Google Ads,-4000.00,Debit,Main Account,GA-003,Expense,385750.00
+2024-03-11,Client Payment - ZAB Ltd,23000.00,Credit,Main Account,INV-019,Revenue,408750.00
+2024-03-12,Office Supplies,-550.00,Debit,Main Account,OD-003,Expense,408200.00
+2024-03-13,Employee Salary - Anna Taylor,-4180.00,Debit,Main Account,pay_020,Payroll,404020.00
+2024-03-14,Cloud Services - AWS,-3000.00,Debit,Main Account,aws_003,Expense,401020.00
+2024-03-15,Client Payment - CDE Corp,34000.00,Credit,Main Account,INV-020,Revenue,435020.00
+2024-03-16,Travel Expenses - Expedia,-1500.00,Debit,Main Account,EXP-003,Expense,433520.00
+2024-03-17,Employee Salary - Ryan Clark,-4900.00,Debit,Main Account,pay_021,Payroll,428620.00
+2024-03-18,Legal Services,-3000.00,Debit,Main Account,LF-003,Expense,425620.00
+2024-03-19,Client Payment - FGH Inc,30000.00,Credit,Main Account,INV-021,Revenue,455620.00
+2024-03-20,Insurance Premium,-1200.00,Debit,Main Account,INS-003,Expense,454420.00
+2024-03-21,Employee Salary - Jessica White,-5400.00,Debit,Main Account,pay_022,Payroll,449020.00
+2024-03-22,Equipment Purchase - Apple Store,-4000.00,Debit,Main Account,AS-003,Expense,445020.00
+2024-03-23,Client Payment - IJK Corp,37000.00,Credit,Main Account,INV-022,Revenue,482020.00
+2024-03-24,Utilities Payment,-500.00,Debit,Main Account,UC-003,Expense,481520.00
+2024-03-25,Employee Salary - Kevin Rodriguez,-4380.00,Debit,Main Account,pay_023,Payroll,477140.00
+2024-03-26,Advertising Expenses - Facebook,-3500.00,Debit,Main Account,FB-003,Expense,473640.00
+2024-03-27,Client Payment - LMN Ltd,22000.00,Credit,Main Account,INV-023,Revenue,495640.00
+2024-03-28,Maintenance Services,-800.00,Debit,Main Account,MC-003,Expense,494840.00
+2024-03-29,Employee Salary - Laura Thompson,-4120.00,Debit,Main Account,pay_024,Payroll,490720.00
+2024-03-30,Professional Development - Coursera,-2500.00,Debit,Main Account,CR-003,Expense,488220.00
+2024-03-31,Client Payment - OPQ Corp,26000.00,Credit,Main Account,INV-024,Revenue,514220.00
+2024-03-31,Employee Salary - Mark Davis,-4950.00,Debit,Main Account,pay_025,Payroll,509270.00
+2024-03-31,Bank Fee,-25.00,Debit,Main Account,BANK-FEE-001,Bank Charges,509245.00 

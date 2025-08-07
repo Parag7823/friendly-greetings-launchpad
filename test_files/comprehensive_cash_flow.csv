@@ -1,0 +1,102 @@
+Date,Description,Amount,Category,Platform,Transaction ID,Currency,Status,Notes
+2024-01-01,Client Payment - ABC Corp,25000,Revenue,Stripe,ch_1234567890abcdef,USD,Completed,Monthly retainer
+2024-01-02,Office Rent Payment,-5000,Expense,Landlord,LL-001,USD,Completed,Office space rent
+2024-01-03,Employee Salary - Abhishek A.,-5000,Expense,Gusto,pay_001,USD,Completed,Regular payroll
+2024-01-04,Software Subscription,-200,Expense,Stripe,ch_0987654321fedcba,USD,Completed,Monthly subscription
+2024-01-05,Client Payment - XYZ Inc,30000,Revenue,Stripe,ch_abcdef1234567890,USD,Completed,Project milestone
+2024-01-06,Internet Bill,-150,Expense,ISP,ISP-001,USD,Completed,Monthly internet
+2024-01-07,Employee Salary - John Smith,-4500,Expense,Gusto,pay_002,USD,Completed,Marketing salary
+2024-01-08,Marketing Campaign,-3000,Expense,Google Ads,GA-001,USD,Completed,Google Ads spend
+2024-01-09,Client Payment - DEF Ltd,18000,Revenue,Stripe,ch_fedcba0987654321,USD,Completed,Consulting fee
+2024-01-10,Office Supplies,-500,Expense,Office Depot,OD-001,USD,Completed,Office supplies
+2024-01-11,Employee Salary - Sarah Johnson,-4200,Expense,Gusto,pay_003,USD,Completed,HR salary
+2024-01-12,Cloud Services,-2500,Expense,AWS,aws_001,USD,Completed,AWS infrastructure
+2024-01-13,Client Payment - GHI Corp,22000,Revenue,Stripe,ch_1234567890abcdef,USD,Completed,Development work
+2024-01-14,Travel Expenses,-800,Expense,Expedia,EXP-001,USD,Completed,Business travel
+2024-01-15,Employee Salary - Mike Wilson,-4800,Expense,Gusto,pay_004,USD,Completed,Sales salary
+2024-01-16,Legal Services,-2000,Expense,Law Firm,LF-001,USD,Completed,Legal consultation
+2024-01-17,Client Payment - JKL Inc,28000,Revenue,Stripe,ch_0987654321fedcba,USD,Completed,Project completion
+2024-01-18,Insurance Premium,-1200,Expense,Insurance Co,INS-001,USD,Completed,Business insurance
+2024-01-19,Employee Salary - Abhishek Arora,-5000,Expense,Gusto,pay_005,USD,Completed,Engineering salary
+2024-01-20,Equipment Purchase,-3000,Expense,Apple Store,AS-001,USD,Completed,MacBook Pro
+2024-01-21,Client Payment - MNO Corp,32000,Revenue,Stripe,ch_abcdef1234567890,USD,Completed,Enterprise project
+2024-01-22,Utilities Payment,-400,Expense,Utility Co,UC-001,USD,Completed,Monthly utilities
+2024-01-23,Employee Salary - John Smith,-4500,Expense,Gusto,pay_006,USD,Completed,February payroll
+2024-01-24,Advertising Expenses,-2500,Expense,Facebook Ads,FB-001,USD,Completed,Facebook campaign
+2024-01-25,Client Payment - PQR Ltd,19000,Revenue,Stripe,ch_fedcba0987654321,USD,Completed,Consulting work
+2024-01-26,Maintenance Services,-600,Expense,Maintenance Co,MC-001,USD,Completed,Office maintenance
+2024-01-27,Employee Salary - Sarah Johnson,-4200,Expense,Gusto,pay_007,USD,Completed,February payroll
+2024-01-28,Professional Development,-1500,Expense,Coursera,CR-001,USD,Completed,Team training
+2024-01-29,Client Payment - STU Corp,26000,Revenue,Stripe,ch_1234567890abcdef,USD,Completed,Development project
+2024-01-30,Employee Salary - Mike Wilson,-4800,Expense,Gusto,pay_008,USD,Completed,February payroll
+2024-01-31,Year-end Bonus - Abhishek A.,-10000,Expense,Gusto,pay_009,USD,Completed,Performance bonus
+2024-02-01,Client Payment - VWX Corp,35000,Revenue,Stripe,ch_0987654321fedcba,USD,Completed,New client
+2024-02-02,Office Rent Payment,-5000,Expense,Landlord,LL-002,USD,Completed,February rent
+2024-02-03,Employee Salary - Emily Davis,-5200,Expense,Gusto,pay_010,USD,Completed,Senior engineer
+2024-02-04,Software License,-800,Expense,Adobe,AD-001,USD,Completed,Creative Cloud
+2024-02-05,Client Payment - YZA Inc,27000,Revenue,Stripe,ch_abcdef1234567890,USD,Completed,Consulting project
+2024-02-06,Internet Bill,-150,Expense,ISP,ISP-002,USD,Completed,February internet
+2024-02-07,Employee Salary - David Brown,-4300,Expense,Gusto,pay_011,USD,Completed,Marketing specialist
+2024-02-08,Marketing Campaign,-3500,Expense,Google Ads,GA-002,USD,Completed,Increased ad spend
+2024-02-09,Client Payment - BCD Corp,24000,Revenue,Stripe,ch_fedcba0987654321,USD,Completed,Development work
+2024-02-10,Office Supplies,-600,Expense,Office Depot,OD-002,USD,Completed,Office supplies
+2024-02-11,Employee Salary - Lisa Chen,-4100,Expense,Gusto,pay_012,USD,Completed,HR assistant
+2024-02-12,Cloud Services,-2800,Expense,AWS,aws_002,USD,Completed,AWS services
+2024-02-13,Client Payment - EFG Ltd,31000,Revenue,Stripe,ch_1234567890abcdef,USD,Completed,Enterprise project
+2024-02-14,Travel Expenses,-1200,Expense,Expedia,EXP-002,USD,Completed,Client meeting
+2024-02-15,Employee Salary - Tom Anderson,-4700,Expense,Gusto,pay_013,USD,Completed,Sales rep
+2024-02-16,Legal Services,-2500,Expense,Law Firm,LF-002,USD,Completed,Contract review
+2024-02-17,Client Payment - HIJ Inc,29000,Revenue,Stripe,ch_0987654321fedcba,USD,Completed,Project milestone
+2024-02-18,Insurance Premium,-1200,Expense,Insurance Co,INS-002,USD,Completed,February premium
+2024-02-19,Employee Salary - Rachel Green,-5100,Expense,Gusto,pay_014,USD,Completed,Frontend developer
+2024-02-20,Equipment Purchase,-2500,Expense,Apple Store,AS-002,USD,Completed,iPad for design
+2024-02-21,Client Payment - KLM Corp,33000,Revenue,Stripe,ch_abcdef1234567890,USD,Completed,Large project
+2024-02-22,Utilities Payment,-450,Expense,Utility Co,UC-002,USD,Completed,February utilities
+2024-02-23,Employee Salary - James Wilson,-4400,Expense,Gusto,pay_015,USD,Completed,Content creator
+2024-02-24,Advertising Expenses,-3000,Expense,Facebook Ads,FB-002,USD,Completed,Facebook campaign
+2024-02-25,Client Payment - NOP Ltd,21000,Revenue,Stripe,ch_fedcba0987654321,USD,Completed,Consulting work
+2024-02-26,Maintenance Services,-700,Expense,Maintenance Co,MC-002,USD,Completed,Equipment maintenance
+2024-02-27,Employee Salary - Maria Garcia,-4150,Expense,Gusto,pay_016,USD,Completed,Recruiter
+2024-02-28,Professional Development,-2000,Expense,Coursera,CR-002,USD,Completed,Advanced training
+2024-02-29,Client Payment - QRS Corp,25000,Revenue,Stripe,ch_1234567890abcdef,USD,Completed,Development project
+2024-03-01,Employee Salary - Alex Johnson,-4850,Expense,Gusto,pay_017,USD,Completed,Sales manager
+2024-03-02,Client Payment - TUV Inc,36000,Revenue,Stripe,ch_0987654321fedcba,USD,Completed,New enterprise client
+2024-03-03,Office Rent Payment,-5000,Expense,Landlord,LL-003,USD,Completed,March rent
+2024-03-04,Employee Salary - Sophie Lee,-5300,Expense,Gusto,pay_018,USD,Completed,Backend developer
+2024-03-05,Software License,-900,Expense,Adobe,AD-002,USD,Completed,Adobe subscription
+2024-03-06,Client Payment - WXY Corp,28000,Revenue,Stripe,ch_abcdef1234567890,USD,Completed,Consulting project
+2024-03-07,Internet Bill,-150,Expense,ISP,ISP-003,USD,Completed,March internet
+2024-03-08,Employee Salary - Chris Martinez,-4350,Expense,Gusto,pay_019,USD,Completed,SEO specialist
+2024-03-09,Marketing Campaign,-4000,Expense,Google Ads,GA-003,USD,Completed,March campaign
+2024-03-10,Client Payment - ZAB Ltd,23000,Revenue,Stripe,ch_fedcba0987654321,USD,Completed,Development work
+2024-03-11,Office Supplies,-550,Expense,Office Depot,OD-003,USD,Completed,Office supplies
+2024-03-12,Employee Salary - Anna Taylor,-4180,Expense,Gusto,pay_020,USD,Completed,Benefits admin
+2024-03-13,Cloud Services,-3000,Expense,AWS,aws_003,USD,Completed,AWS services
+2024-03-14,Client Payment - CDE Corp,34000,Revenue,Stripe,ch_1234567890abcdef,USD,Completed,Enterprise project
+2024-03-15,Travel Expenses,-1500,Expense,Expedia,EXP-003,USD,Completed,Conference travel
+2024-03-16,Employee Salary - Ryan Clark,-4900,Expense,Gusto,pay_021,USD,Completed,Enterprise sales
+2024-03-17,Legal Services,-3000,Expense,Law Firm,LF-003,USD,Completed,Legal services
+2024-03-18,Client Payment - FGH Inc,30000,Revenue,Stripe,ch_0987654321fedcba,USD,Completed,Project completion
+2024-03-19,Insurance Premium,-1200,Expense,Insurance Co,INS-003,USD,Completed,March premium
+2024-03-20,Employee Salary - Jessica White,-5400,Expense,Gusto,pay_022,USD,Completed,DevOps engineer
+2024-03-21,Equipment Purchase,-4000,Expense,Apple Store,AS-003,USD,Completed,Mac Studio
+2024-03-22,Client Payment - IJK Corp,37000,Revenue,Stripe,ch_abcdef1234567890,USD,Completed,Large enterprise project
+2024-03-23,Utilities Payment,-500,Expense,Utility Co,UC-003,USD,Completed,March utilities
+2024-03-24,Employee Salary - Kevin Rodriguez,-4380,Expense,Gusto,pay_023,USD,Completed,Social media
+2024-03-25,Advertising Expenses,-3500,Expense,Facebook Ads,FB-003,USD,Completed,Facebook campaign
+2024-03-26,Client Payment - LMN Ltd,22000,Revenue,Stripe,ch_fedcba0987654321,USD,Completed,Consulting work
+2024-03-27,Maintenance Services,-800,Expense,Maintenance Co,MC-003,USD,Completed,Office maintenance
+2024-03-28,Employee Salary - Laura Thompson,-4120,Expense,Gusto,pay_024,USD,Completed,Payroll specialist
+2024-03-29,Professional Development,-2500,Expense,Coursera,CR-003,USD,Completed,Leadership training
+2024-03-30,Client Payment - OPQ Corp,26000,Revenue,Stripe,ch_1234567890abcdef,USD,Completed,Development project
+2024-03-31,Employee Salary - Mark Davis,-4950,Expense,Gusto,pay_025,USD,Completed,Regional manager
+2024-01-15,Invalid Transaction,,Revenue,Invalid Platform,INV-001,USD,Failed,Missing amount test
+2024-01-16,Test Payment,5000,,Stripe,ch_test123,USD,Completed,Missing category
+2024-01-17,Sample Transaction,3000,Expense,,pay_sample,USD,Completed,Missing platform
+2024-01-18,Demo Payment,2000,Revenue,Stripe,,USD,Completed,Missing transaction ID
+2024-01-19,Example Transaction,4000,Expense,Stripe,ch_example,INR,Completed,Different currency
+2024-01-20,Test Transaction,1000,Revenue,Stripe,ch_test456,EUR,Completed,European currency
+2024-01-21,Sample Payment,6000,Expense,Stripe,pay_sample2,GBP,Completed,British currency
+2024-01-22,Demo Transaction,3500,Revenue,Stripe,ch_demo789,CAD,Completed,Canadian currency
+2024-01-23,Example Payment,4500,Expense,Stripe,pay_example2,AUD,Completed,Australian currency
+2024-01-24,Test Transaction,2800,Revenue,Stripe,ch_test789,JPY,Completed,Japanese currency 
