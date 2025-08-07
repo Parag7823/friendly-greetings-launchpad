@@ -96,9 +96,9 @@
 							]
 						},
 						"url": {
-							"raw": "{{base_url}}/process-excel",
+							"raw": "{{base_url}}/upload-and-process",
 							"host": ["{{base_url}}"],
-							"path": ["process-excel"]
+							"path": ["upload-and-process"]
 						},
 						"description": "Upload company bank statements file"
 					}
@@ -124,9 +124,9 @@
 							]
 						},
 						"url": {
-							"raw": "{{base_url}}/process-excel",
+							"raw": "{{base_url}}/upload-and-process",
 							"host": ["{{base_url}}"],
-							"path": ["process-excel"]
+							"path": ["upload-and-process"]
 						},
 						"description": "Upload company invoices file"
 					}
@@ -152,9 +152,9 @@
 							]
 						},
 						"url": {
-							"raw": "{{base_url}}/process-excel",
+							"raw": "{{base_url}}/upload-and-process",
 							"host": ["{{base_url}}"],
-							"path": ["process-excel"]
+							"path": ["upload-and-process"]
 						},
 						"description": "Upload company expenses file"
 					}
@@ -180,9 +180,9 @@
 							]
 						},
 						"url": {
-							"raw": "{{base_url}}/process-excel",
+							"raw": "{{base_url}}/upload-and-process",
 							"host": ["{{base_url}}"],
-							"path": ["process-excel"]
+							"path": ["upload-and-process"]
 						},
 						"description": "Upload company revenue file"
 					}
@@ -208,9 +208,9 @@
 							]
 						},
 						"url": {
-							"raw": "{{base_url}}/process-excel",
+							"raw": "{{base_url}}/upload-and-process",
 							"host": ["{{base_url}}"],
-							"path": ["process-excel"]
+							"path": ["upload-and-process"]
 						},
 						"description": "Upload company tax records file"
 					}
@@ -236,9 +236,9 @@
 							]
 						},
 						"url": {
-							"raw": "{{base_url}}/process-excel",
+							"raw": "{{base_url}}/upload-and-process",
 							"host": ["{{base_url}}"],
-							"path": ["process-excel"]
+							"path": ["upload-and-process"]
 						},
 						"description": "Upload company accounts receivable file"
 					}
@@ -264,9 +264,9 @@
 							]
 						},
 						"url": {
-							"raw": "{{base_url}}/process-excel",
+							"raw": "{{base_url}}/upload-and-process",
 							"host": ["{{base_url}}"],
-							"path": ["process-excel"]
+							"path": ["upload-and-process"]
 						},
 						"description": "Upload comprehensive payroll data file"
 					}
@@ -292,9 +292,9 @@
 							]
 						},
 						"url": {
-							"raw": "{{base_url}}/process-excel",
+							"raw": "{{base_url}}/upload-and-process",
 							"host": ["{{base_url}}"],
-							"path": ["process-excel"]
+							"path": ["upload-and-process"]
 						},
 						"description": "Upload comprehensive vendor payments file"
 					}
@@ -320,9 +320,9 @@
 							]
 						},
 						"url": {
-							"raw": "{{base_url}}/process-excel",
+							"raw": "{{base_url}}/upload-and-process",
 							"host": ["{{base_url}}"],
-							"path": ["process-excel"]
+							"path": ["upload-and-process"]
 						},
 						"description": "Upload comprehensive cash flow file"
 					}
@@ -348,9 +348,9 @@
 							]
 						},
 						"url": {
-							"raw": "{{base_url}}/process-excel",
+							"raw": "{{base_url}}/upload-and-process",
 							"host": ["{{base_url}}"],
-							"path": ["process-excel"]
+							"path": ["upload-and-process"]
 						},
 						"description": "Upload comprehensive income statement file"
 					}
