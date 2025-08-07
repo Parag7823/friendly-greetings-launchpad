@@ -29,17 +29,20 @@
 	],
 	"item": [
 		{
-			"name": "🔧 SYSTEM CHECKS",
+			"name": "\ud83d\udd27 SYSTEM CHECKS",
 			"item": [
 				{
 					"name": "1. Health Check",
 					"request": {
 						"method": "GET",
-						"header": [],
 						"url": {
 							"raw": "{{base_url}}/health",
-							"host": ["{{base_url}}"],
-							"path": ["health"]
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"health"
+							]
 						},
 						"description": "Test basic API health and connectivity"
 					}
@@ -48,11 +51,14 @@
 					"name": "2. Test Database Connection",
 					"request": {
 						"method": "GET",
-						"header": [],
 						"url": {
 							"raw": "{{base_url}}/test-database",
-							"host": ["{{base_url}}"],
-							"path": ["test-database"]
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"test-database"
+							]
 						},
 						"description": "Test database connectivity and basic operations"
 					}
@@ -61,11 +67,14 @@
 					"name": "3. Test Simple Endpoint",
 					"request": {
 						"method": "GET",
-						"header": [],
 						"url": {
 							"raw": "{{base_url}}/test-simple",
-							"host": ["{{base_url}}"],
-							"path": ["test-simple"]
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"test-simple"
+							]
 						},
 						"description": "Test basic API functionality"
 					}
@@ -73,18 +82,12 @@
 			]
 		},
 		{
-			"name": "📁 FILE UPLOADS (All 10 Files)",
+			"name": "\ud83d\udcc1 FILE UPLOADS (All 10 Files)",
 			"item": [
 				{
 					"name": "1. Upload Bank Statements",
 					"request": {
 						"method": "POST",
-						"header": [
-							{
-								"key": "Content-Type",
-								"value": "multipart/form-data"
-							}
-						],
 						"body": {
 							"mode": "formdata",
 							"formdata": [
@@ -97,8 +100,12 @@
 						},
 						"url": {
 							"raw": "{{base_url}}/upload-and-process",
-							"host": ["{{base_url}}"],
-							"path": ["upload-and-process"]
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"upload-and-process"
+							]
 						},
 						"description": "Upload company bank statements file"
 					}
@@ -107,12 +114,6 @@
 					"name": "2. Upload Invoices",
 					"request": {
 						"method": "POST",
-						"header": [
-							{
-								"key": "Content-Type",
-								"value": "multipart/form-data"
-							}
-						],
 						"body": {
 							"mode": "formdata",
 							"formdata": [
@@ -125,8 +126,12 @@
 						},
 						"url": {
 							"raw": "{{base_url}}/upload-and-process",
-							"host": ["{{base_url}}"],
-							"path": ["upload-and-process"]
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"upload-and-process"
+							]
 						},
 						"description": "Upload company invoices file"
 					}
@@ -135,12 +140,6 @@
 					"name": "3. Upload Expenses",
 					"request": {
 						"method": "POST",
-						"header": [
-							{
-								"key": "Content-Type",
-								"value": "multipart/form-data"
-							}
-						],
 						"body": {
 							"mode": "formdata",
 							"formdata": [
@@ -153,8 +152,12 @@
 						},
 						"url": {
 							"raw": "{{base_url}}/upload-and-process",
-							"host": ["{{base_url}}"],
-							"path": ["upload-and-process"]
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"upload-and-process"
+							]
 						},
 						"description": "Upload company expenses file"
 					}
@@ -163,12 +166,6 @@
 					"name": "4. Upload Revenue",
 					"request": {
 						"method": "POST",
-						"header": [
-							{
-								"key": "Content-Type",
-								"value": "multipart/form-data"
-							}
-						],
 						"body": {
 							"mode": "formdata",
 							"formdata": [
@@ -181,8 +178,12 @@
 						},
 						"url": {
 							"raw": "{{base_url}}/upload-and-process",
-							"host": ["{{base_url}}"],
-							"path": ["upload-and-process"]
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"upload-and-process"
+							]
 						},
 						"description": "Upload company revenue file"
 					}
@@ -191,12 +192,6 @@
 					"name": "5. Upload Tax Records",
 					"request": {
 						"method": "POST",
-						"header": [
-							{
-								"key": "Content-Type",
-								"value": "multipart/form-data"
-							}
-						],
 						"body": {
 							"mode": "formdata",
 							"formdata": [
@@ -209,8 +204,12 @@
 						},
 						"url": {
 							"raw": "{{base_url}}/upload-and-process",
-							"host": ["{{base_url}}"],
-							"path": ["upload-and-process"]
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"upload-and-process"
+							]
 						},
 						"description": "Upload company tax records file"
 					}
@@ -219,12 +218,6 @@
 					"name": "6. Upload Accounts Receivable",
 					"request": {
 						"method": "POST",
-						"header": [
-							{
-								"key": "Content-Type",
-								"value": "multipart/form-data"
-							}
-						],
 						"body": {
 							"mode": "formdata",
 							"formdata": [
@@ -237,8 +230,12 @@
 						},
 						"url": {
 							"raw": "{{base_url}}/upload-and-process",
-							"host": ["{{base_url}}"],
-							"path": ["upload-and-process"]
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"upload-and-process"
+							]
 						},
 						"description": "Upload company accounts receivable file"
 					}
@@ -247,12 +244,6 @@
 					"name": "7. Upload Payroll Data",
 					"request": {
 						"method": "POST",
-						"header": [
-							{
-								"key": "Content-Type",
-								"value": "multipart/form-data"
-							}
-						],
 						"body": {
 							"mode": "formdata",
 							"formdata": [
@@ -265,8 +256,12 @@
 						},
 						"url": {
 							"raw": "{{base_url}}/upload-and-process",
-							"host": ["{{base_url}}"],
-							"path": ["upload-and-process"]
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"upload-and-process"
+							]
 						},
 						"description": "Upload comprehensive payroll data file"
 					}
@@ -275,12 +270,6 @@
 					"name": "8. Upload Vendor Payments",
 					"request": {
 						"method": "POST",
-						"header": [
-							{
-								"key": "Content-Type",
-								"value": "multipart/form-data"
-							}
-						],
 						"body": {
 							"mode": "formdata",
 							"formdata": [
@@ -293,8 +282,12 @@
 						},
 						"url": {
 							"raw": "{{base_url}}/upload-and-process",
-							"host": ["{{base_url}}"],
-							"path": ["upload-and-process"]
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"upload-and-process"
+							]
 						},
 						"description": "Upload comprehensive vendor payments file"
 					}
@@ -303,12 +296,6 @@
 					"name": "9. Upload Cash Flow",
 					"request": {
 						"method": "POST",
-						"header": [
-							{
-								"key": "Content-Type",
-								"value": "multipart/form-data"
-							}
-						],
 						"body": {
 							"mode": "formdata",
 							"formdata": [
@@ -321,8 +308,12 @@
 						},
 						"url": {
 							"raw": "{{base_url}}/upload-and-process",
-							"host": ["{{base_url}}"],
-							"path": ["upload-and-process"]
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"upload-and-process"
+							]
 						},
 						"description": "Upload comprehensive cash flow file"
 					}
@@ -331,12 +322,6 @@
 					"name": "10. Upload Income Statement",
 					"request": {
 						"method": "POST",
-						"header": [
-							{
-								"key": "Content-Type",
-								"value": "multipart/form-data"
-							}
-						],
 						"body": {
 							"mode": "formdata",
 							"formdata": [
@@ -349,8 +334,12 @@
 						},
 						"url": {
 							"raw": "{{base_url}}/upload-and-process",
-							"host": ["{{base_url}}"],
-							"path": ["upload-and-process"]
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"upload-and-process"
+							]
 						},
 						"description": "Upload comprehensive income statement file"
 					}
@@ -358,17 +347,21 @@
 			]
 		},
 		{
-			"name": "📊 DATA ANALYSIS (After Uploads)",
+			"name": "\ud83d\udcca DATA ANALYSIS (After Uploads)",
 			"item": [
 				{
 					"name": "1. Check All Uploaded Data",
 					"request": {
 						"method": "GET",
-						"header": [],
 						"url": {
 							"raw": "{{base_url}}/test-raw-events/{{test_user_id}}",
-							"host": ["{{base_url}}"],
-							"path": ["test-raw-events", "{{test_user_id}}"]
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"test-raw-events",
+								"{{test_user_id}}"
+							]
 						},
 						"description": "Check all uploaded data and processing results"
 					}
@@ -377,11 +370,15 @@
 					"name": "2. Check Entity Resolution Stats",
 					"request": {
 						"method": "GET",
-						"header": [],
 						"url": {
 							"raw": "{{base_url}}/test-entity-stats/{{test_user_id}}",
-							"host": ["{{base_url}}"],
-							"path": ["test-entity-stats", "{{test_user_id}}"]
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"test-entity-stats",
+								"{{test_user_id}}"
+							]
 						},
 						"description": "Check entity resolution statistics"
 					}
@@ -390,11 +387,15 @@
 					"name": "3. Check Raw Events Stats",
 					"request": {
 						"method": "GET",
-						"header": [],
 						"url": {
 							"raw": "{{base_url}}/test-raw-events/{{test_user_id}}",
-							"host": ["{{base_url}}"],
-							"path": ["test-raw-events", "{{test_user_id}}"]
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"test-raw-events",
+								"{{test_user_id}}"
+							]
 						},
 						"description": "Check raw events statistics after processing multiple files"
 					}
@@ -402,17 +403,20 @@
 			]
 		},
 		{
-			"name": "🧠 AI FEATURES TESTING",
+			"name": "\ud83e\udde0 AI FEATURES TESTING",
 			"item": [
 				{
 					"name": "1. Test Platform Detection",
 					"request": {
 						"method": "GET",
-						"header": [],
 						"url": {
 							"raw": "{{base_url}}/test-platform-detection",
-							"host": ["{{base_url}}"],
-							"path": ["test-platform-detection"]
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"test-platform-detection"
+							]
 						},
 						"description": "Test enhanced platform detection with multiple platforms"
 					}
@@ -421,11 +425,14 @@
 					"name": "2. Test AI Row Classification",
 					"request": {
 						"method": "GET",
-						"header": [],
 						"url": {
 							"raw": "{{base_url}}/test-ai-row-classification",
-							"host": ["{{base_url}}"],
-							"path": ["test-ai-row-classification"]
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"test-ai-row-classification"
+							]
 						},
 						"description": "Test AI-powered row classification and entity extraction"
 					}
@@ -434,11 +441,14 @@
 					"name": "3. Test Entity Resolution",
 					"request": {
 						"method": "GET",
-						"header": [],
 						"url": {
 							"raw": "{{base_url}}/test-entity-resolution",
-							"host": ["{{base_url}}"],
-							"path": ["test-entity-resolution"]
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"test-entity-resolution"
+							]
 						},
 						"description": "Test Entity Resolution system with sample data"
 					}
@@ -447,11 +457,15 @@
 					"name": "4. Test Entity Search",
 					"request": {
 						"method": "GET",
-						"header": [],
 						"url": {
 							"raw": "{{base_url}}/test-entity-search/{{test_user_id}}?search_term=Abhishek&entity_type=employee",
-							"host": ["{{base_url}}"],
-							"path": ["test-entity-search", "{{test_user_id}}"],
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"test-entity-search",
+								"{{test_user_id}}"
+							],
 							"query": [
 								{
 									"key": "search_term",
@@ -470,11 +484,15 @@
 					"name": "5. Test Entity Search - Vendors",
 					"request": {
 						"method": "GET",
-						"header": [],
 						"url": {
 							"raw": "{{base_url}}/test-entity-search/{{test_user_id}}?search_term=Razorpay&entity_type=vendor",
-							"host": ["{{base_url}}"],
-							"path": ["test-entity-search", "{{test_user_id}}"],
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"test-entity-search",
+								"{{test_user_id}}"
+							],
 							"query": [
 								{
 									"key": "search_term",
@@ -492,30 +510,38 @@
 			]
 		},
 		{
-			"name": "🔗 RELATIONSHIP DETECTION",
+			"name": "\ud83d\udd17 RELATIONSHIP DETECTION",
 			"item": [
 				{
 					"name": "1. Test Cross-File Relationships",
 					"request": {
 						"method": "GET",
-						"header": [],
 						"url": {
 							"raw": "{{base_url}}/test-cross-file-relationships/{{test_user_id}}",
-							"host": ["{{base_url}}"],
-							"path": ["test-cross-file-relationships", "{{test_user_id}}"]
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"test-cross-file-relationships",
+								"{{test_user_id}}"
+							]
 						},
-						"description": "Test cross-file relationship detection (payroll ↔ payout linking)"
+						"description": "Test cross-file relationship detection (payroll \u2194 payout linking)"
 					}
 				},
 				{
 					"name": "2. Test AI Relationship Detection",
 					"request": {
 						"method": "GET",
-						"header": [],
 						"url": {
 							"raw": "{{base_url}}/test-ai-relationship-detection/{{test_user_id}}",
-							"host": ["{{base_url}}"],
-							"path": ["test-ai-relationship-detection", "{{test_user_id}}"]
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"test-ai-relationship-detection",
+								"{{test_user_id}}"
+							]
 						},
 						"description": "Test comprehensive AI-powered relationship detection for ANY financial data"
 					}
@@ -524,11 +550,15 @@
 					"name": "3. Test Relationship Type Discovery",
 					"request": {
 						"method": "GET",
-						"header": [],
 						"url": {
 							"raw": "{{base_url}}/test-relationship-discovery/{{test_user_id}}",
-							"host": ["{{base_url}}"],
-							"path": ["test-relationship-discovery", "{{test_user_id}}"]
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"test-relationship-discovery",
+								"{{test_user_id}}"
+							]
 						},
 						"description": "Test AI-powered discovery of relationship types in financial data"
 					}
@@ -537,11 +567,15 @@
 					"name": "4. Test AI Relationship Scoring",
 					"request": {
 						"method": "GET",
-						"header": [],
 						"url": {
 							"raw": "{{base_url}}/test-ai-relationship-scoring/{{test_user_id}}",
-							"host": ["{{base_url}}"],
-							"path": ["test-ai-relationship-scoring", "{{test_user_id}}"]
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"test-ai-relationship-scoring",
+								"{{test_user_id}}"
+							]
 						},
 						"description": "Test multi-dimensional relationship scoring with AI-powered analysis"
 					}
@@ -550,11 +584,15 @@
 					"name": "5. Test Relationship Validation",
 					"request": {
 						"method": "GET",
-						"header": [],
 						"url": {
 							"raw": "{{base_url}}/test-relationship-validation/{{test_user_id}}",
-							"host": ["{{base_url}}"],
-							"path": ["test-relationship-validation", "{{test_user_id}}"]
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"test-relationship-validation",
+								"{{test_user_id}}"
+							]
 						},
 						"description": "Test relationship validation and filtering with confidence scoring"
 					}
@@ -563,11 +601,15 @@
 					"name": "6. Test Flexible Relationship Discovery",
 					"request": {
 						"method": "GET",
-						"header": [],
 						"url": {
 							"raw": "{{base_url}}/test-flexible-relationship-discovery/{{test_user_id}}",
-							"host": ["{{base_url}}"],
-							"path": ["test-flexible-relationship-discovery", "{{test_user_id}}"]
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"test-flexible-relationship-discovery",
+								"{{test_user_id}}"
+							]
 						},
 						"description": "Test the flexible relationship discovery engine that can detect ANY type of financial relationship"
 					}
@@ -576,11 +618,15 @@
 					"name": "7. Test Relationship Pattern Learning",
 					"request": {
 						"method": "GET",
-						"header": [],
 						"url": {
 							"raw": "{{base_url}}/test-relationship-pattern-learning/{{test_user_id}}",
-							"host": ["{{base_url}}"],
-							"path": ["test-relationship-pattern-learning", "{{test_user_id}}"]
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"test-relationship-pattern-learning",
+								"{{test_user_id}}"
+							]
 						},
 						"description": "Test relationship pattern learning capabilities and AI-powered pattern extraction"
 					}
@@ -589,11 +635,15 @@
 					"name": "8. Test Cross-Platform Relationship Mapping",
 					"request": {
 						"method": "GET",
-						"header": [],
 						"url": {
 							"raw": "{{base_url}}/test-cross-platform-relationship-mapping/{{test_user_id}}",
-							"host": ["{{base_url}}"],
-							"path": ["test-cross-platform-relationship-mapping", "{{test_user_id}}"]
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"test-cross-platform-relationship-mapping",
+								"{{test_user_id}}"
+							]
 						},
 						"description": "Test cross-platform relationship mapping and platform compatibility assessment"
 					}
@@ -602,11 +652,15 @@
 					"name": "9. Test Relationship Patterns Storage",
 					"request": {
 						"method": "GET",
-						"header": [],
 						"url": {
 							"raw": "{{base_url}}/test-relationship-patterns/{{test_user_id}}",
-							"host": ["{{base_url}}"],
-							"path": ["test-relationship-patterns", "{{test_user_id}}"]
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"test-relationship-patterns",
+								"{{test_user_id}}"
+							]
 						},
 						"description": "Test relationship pattern storage and retrieval from database"
 					}
@@ -614,17 +668,20 @@
 			]
 		},
 		{
-			"name": "💰 DATA ENRICHMENT",
+			"name": "\ud83d\udcb0 DATA ENRICHMENT",
 			"item": [
 				{
 					"name": "1. Test Currency Normalization",
 					"request": {
 						"method": "GET",
-						"header": [],
 						"url": {
 							"raw": "{{base_url}}/test-currency-normalization",
-							"host": ["{{base_url}}"],
-							"path": ["test-currency-normalization"]
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"test-currency-normalization"
+							]
 						},
 						"description": "Test currency normalization with sample data from different platforms"
 					}
@@ -633,11 +690,14 @@
 					"name": "2. Test Vendor Standardization",
 					"request": {
 						"method": "GET",
-						"header": [],
 						"url": {
 							"raw": "{{base_url}}/test-vendor-standardization",
-							"host": ["{{base_url}}"],
-							"path": ["test-vendor-standardization"]
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"test-vendor-standardization"
+							]
 						},
 						"description": "Test vendor name standardization with AI-powered cleaning"
 					}
@@ -646,11 +706,14 @@
 					"name": "3. Test Platform ID Extraction",
 					"request": {
 						"method": "GET",
-						"header": [],
 						"url": {
 							"raw": "{{base_url}}/test-platform-id-extraction",
-							"host": ["{{base_url}}"],
-							"path": ["test-platform-id-extraction"]
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"test-platform-id-extraction"
+							]
 						},
 						"description": "Test platform-specific ID extraction (payment IDs, invoice IDs, etc.)"
 					}
@@ -659,11 +722,14 @@
 					"name": "4. Test Data Enrichment Pipeline",
 					"request": {
 						"method": "GET",
-						"header": [],
 						"url": {
 							"raw": "{{base_url}}/test-data-enrichment",
-							"host": ["{{base_url}}"],
-							"path": ["test-data-enrichment"]
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"test-data-enrichment"
+							]
 						},
 						"description": "Test complete data enrichment pipeline with sample financial data"
 					}
@@ -672,11 +738,15 @@
 					"name": "5. Test Enrichment Statistics",
 					"request": {
 						"method": "GET",
-						"header": [],
 						"url": {
 							"raw": "{{base_url}}/test-enrichment-stats/{{test_user_id}}",
-							"host": ["{{base_url}}"],
-							"path": ["test-enrichment-stats", "{{test_user_id}}"]
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"test-enrichment-stats",
+								"{{test_user_id}}"
+							]
 						},
 						"description": "Test enrichment statistics and metrics for processed data"
 					}
@@ -685,11 +755,15 @@
 					"name": "6. Test Vendor Search",
 					"request": {
 						"method": "GET",
-						"header": [],
 						"url": {
 							"raw": "{{base_url}}/test-vendor-search/{{test_user_id}}?vendor_name=Google",
-							"host": ["{{base_url}}"],
-							"path": ["test-vendor-search", "{{test_user_id}}"],
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"test-vendor-search",
+								"{{test_user_id}}"
+							],
 							"query": [
 								{
 									"key": "vendor_name",
@@ -704,11 +778,15 @@
 					"name": "7. Test Currency Summary",
 					"request": {
 						"method": "GET",
-						"header": [],
 						"url": {
 							"raw": "{{base_url}}/test-currency-summary/{{test_user_id}}",
-							"host": ["{{base_url}}"],
-							"path": ["test-currency-summary", "{{test_user_id}}"]
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"test-currency-summary",
+								"{{test_user_id}}"
+							]
 						},
 						"description": "Test currency conversion summary and exchange rate statistics"
 					}
@@ -716,17 +794,20 @@
 			]
 		},
 		{
-			"name": "🤖 DYNAMIC PLATFORM DETECTION",
+			"name": "\ud83e\udd16 DYNAMIC PLATFORM DETECTION",
 			"item": [
 				{
 					"name": "1. Test Dynamic Platform Detection",
 					"request": {
 						"method": "GET",
-						"header": [],
 						"url": {
 							"raw": "{{base_url}}/test-dynamic-platform-detection",
-							"host": ["{{base_url}}"],
-							"path": ["test-dynamic-platform-detection"]
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"test-dynamic-platform-detection"
+							]
 						},
 						"description": "Test AI-powered dynamic platform detection with sample data"
 					}
@@ -735,11 +816,15 @@
 					"name": "2. Test Platform Learning",
 					"request": {
 						"method": "GET",
-						"header": [],
 						"url": {
 							"raw": "{{base_url}}/test-platform-learning/{{test_user_id}}",
-							"host": ["{{base_url}}"],
-							"path": ["test-platform-learning", "{{test_user_id}}"]
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"test-platform-learning",
+								"{{test_user_id}}"
+							]
 						},
 						"description": "Test AI-powered platform learning from user data"
 					}
@@ -748,11 +833,15 @@
 					"name": "3. Test Platform Discovery",
 					"request": {
 						"method": "GET",
-						"header": [],
 						"url": {
 							"raw": "{{base_url}}/test-platform-discovery/{{test_user_id}}",
-							"host": ["{{base_url}}"],
-							"path": ["test-platform-discovery", "{{test_user_id}}"]
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"test-platform-discovery",
+								"{{test_user_id}}"
+							]
 						},
 						"description": "Test AI-powered discovery of new platforms"
 					}
@@ -761,11 +850,15 @@
 					"name": "4. Test Platform Insights",
 					"request": {
 						"method": "GET",
-						"header": [],
 						"url": {
 							"raw": "{{base_url}}/test-platform-insights/stripe",
-							"host": ["{{base_url}}"],
-							"path": ["test-platform-insights", "stripe"]
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"test-platform-insights",
+								"stripe"
+							]
 						},
 						"description": "Test platform insights and analysis for specific platform"
 					}
@@ -773,17 +866,20 @@
 			]
 		},
 		{
-			"name": "⚡ PERFORMANCE & BATCH PROCESSING",
+			"name": "\u26a1 PERFORMANCE & BATCH PROCESSING",
 			"item": [
 				{
 					"name": "1. Test Batch Processing",
 					"request": {
 						"method": "GET",
-						"header": [],
 						"url": {
 							"raw": "{{base_url}}/test-batch-processing",
-							"host": ["{{base_url}}"],
-							"path": ["test-batch-processing"]
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"test-batch-processing"
+							]
 						},
 						"description": "Test batch processing optimization and AI cost reduction"
 					}
@@ -791,4 +887,4 @@
 			]
 		}
 	]
-} 
+}
