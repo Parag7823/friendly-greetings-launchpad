@@ -1840,6 +1840,7 @@ class RowProcessor:
     def __init__(self, platform_detector: PlatformDetector, ai_classifier):
         self.platform_detector = platform_detector
         self.ai_classifier = ai_classifier
+        self.enrichment_processor = DataEnrichmentProcessor()
     
     async def process_row(self, row: pd.Series, row_index: int, sheet_name: str, 
                    platform_info: Dict, file_context: Dict, column_names: List[str]) -> Dict[str, Any]:
