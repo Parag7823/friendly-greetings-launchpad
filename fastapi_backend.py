@@ -5766,6 +5766,804 @@ async def test_platform_insights(platform: str, user_id: str = None):
             "timestamp": datetime.utcnow().isoformat()
         }
 
+class FlexibleRelationshipEngine:
+    """
+    AI-powered flexible relationship detection engine that can discover ANY type of financial relationship
+    across different platforms and data sources.
+    """
+    
+    def __init__(self, openai_client, supabase_client: Client):
+        self.openai = openai_client
+        self.supabase = supabase_client
+        self.learned_relationship_patterns = {}
+        self.relationship_cache = {}
+        
+    async def discover_all_relationships(self, user_id: str) -> Dict[str, Any]:
+        """Discover ALL possible relationships in user's financial data"""
+        try:
+            # Get all events for the user
+            events = self.supabase.table('raw_events').select('*').eq('user_id', user_id).execute()
+            
+            if not events.data:
+                return {
+                    "message": "No data found for relationship discovery",
+                    "relationships": [],
+                    "patterns_learned": 0
+                }
+            
+            # Step 1: Discover relationship types using AI
+            relationship_types = await self._discover_relationship_types(events.data)
+            
+            # Step 2: Detect relationships by each type
+            all_relationships = []
+            for rel_type in relationship_types:
+                relationships = await self._detect_relationships_by_type(events.data, rel_type)
+                all_relationships.extend(relationships)
+            
+            # Step 3: Learn new relationship patterns
+            await self._learn_relationship_patterns(all_relationships, user_id)
+            
+            # Step 4: Cross-platform relationship mapping
+            cross_platform_relationships = await self._map_cross_platform_relationships(all_relationships)
+            
+            return {
+                "message": "Relationship discovery completed",
+                "total_relationships": len(all_relationships),
+                "relationship_types": relationship_types,
+                "relationships": all_relationships,
+                "cross_platform_relationships": cross_platform_relationships,
+                "patterns_learned": len(self.learned_relationship_patterns)
+            }
+            
+        except Exception as e:
+            logger.error(f"Relationship discovery failed: {e}")
+            return {"message": "Relationship discovery failed", "error": str(e)}
+    
+    async def _discover_relationship_types(self, events: List[Dict]) -> List[str]:
+        """Use AI to discover what types of relationships might exist"""
+        try:
+            # Create context from events
+            event_summary = self._create_relationship_context(events)
+            
+            ai_response = self.openai.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[{
+                    "role": "system",
+                    "content": """You are a financial data analyst specializing in relationship detection. 
+                    Analyze the financial events and identify what types of relationships might exist between them.
+                    Consider relationships like: invoice-to-payment, payroll-to-bank-transfer, expense-to-reimbursement,
+                    subscription-to-billing, refund-to-original-payment, fee-to-transaction, etc.
+                    Return only the relationship types as a JSON array of strings."""
+                }, {
+                    "role": "user",
+                    "content": f"Analyze these financial events and identify relationship types: {event_summary}"
+                }],
+                temperature=0.1
+            )
+            
+            response_text = ai_response.choices[0].message.content
+            return self._parse_relationship_types(response_text)
+            
+        except Exception as e:
+            logger.error(f"AI relationship type discovery failed: {e}")
+            # Fallback to common relationship types
+            return [
+                "invoice_to_payment",
+                "payroll_to_bank_transfer", 
+                "expense_to_reimbursement",
+                "subscription_to_billing",
+                "refund_to_original_payment",
+                "fee_to_transaction",
+                "tax_to_payment",
+                "commission_to_sale"
+            ]
+    
+    async def _detect_relationships_by_type(self, events: List[Dict], relationship_type: str) -> List[Dict]:
+        """Detect relationships of a specific type using AI and pattern matching"""
+        try:
+            # Use AI to detect relationships
+            ai_relationships = await self._ai_detect_relationships(events, relationship_type)
+            
+            # Apply learned patterns
+            pattern_relationships = await self._apply_learned_patterns(events, relationship_type)
+            
+            # Combine and validate
+            all_relationships = ai_relationships + pattern_relationships
+            validated_relationships = await self._validate_relationships(all_relationships)
+            
+            return validated_relationships
+            
+        except Exception as e:
+            logger.error(f"Relationship detection failed for {relationship_type}: {e}")
+            return []
+    
+    async def _ai_detect_relationships(self, events: List[Dict], relationship_type: str) -> List[Dict]:
+        """Use AI to detect relationships of a specific type"""
+        try:
+            context = self._create_comprehensive_context(events, relationship_type)
+            
+            ai_response = self.openai.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[{
+                    "role": "system",
+                    "content": f"""You are a financial data analyst. Analyze the financial events and identify 
+                    {relationship_type} relationships between them. Return the relationships as a JSON array with 
+                    source_event_id, target_event_id, relationship_type, confidence_score, and reasoning."""
+                }, {
+                    "role": "user",
+                    "content": f"Analyze these financial events and identify {relationship_type} relationships: {context}"
+                }],
+                temperature=0.2
+            )
+            
+            response_text = ai_response.choices[0].message.content
+            return self._parse_ai_relationships(response_text, events)
+            
+        except Exception as e:
+            logger.error(f"AI relationship detection failed: {e}")
+            return []
+    
+    async def _apply_learned_patterns(self, events: List[Dict], relationship_type: str) -> List[Dict]:
+        """Apply learned patterns to detect relationships"""
+        patterns = self.learned_relationship_patterns.get(relationship_type, [])
+        relationships = []
+        
+        for pattern in patterns:
+            pattern_relationships = self._apply_single_pattern(events, pattern)
+            relationships.extend(pattern_relationships)
+        
+        return relationships
+    
+    def _apply_single_pattern(self, events: List[Dict], pattern: Dict) -> List[Dict]:
+        """Apply a single learned pattern to detect relationships"""
+        relationships = []
+        
+        # Extract pattern criteria
+        amount_match = pattern.get('amount_match', False)
+        date_window = pattern.get('date_window', 1)  # days
+        entity_match = pattern.get('entity_match', False)
+        id_pattern = pattern.get('id_pattern', None)
+        
+        # Find matching events
+        for i, event1 in enumerate(events):
+            for j, event2 in enumerate(events):
+                if i == j:
+                    continue
+                
+                # Check if events match the pattern
+                if self._events_match_pattern(event1, event2, pattern):
+                    relationship = {
+                        "source_event_id": event1.get('id'),
+                        "target_event_id": event2.get('id'),
+                        "relationship_type": pattern.get('relationship_type'),
+                        "confidence_score": self._calculate_pattern_confidence(event1, event2, pattern),
+                        "detection_method": "learned_pattern",
+                        "pattern_id": pattern.get('id'),
+                        "reasoning": f"Matched learned pattern: {pattern.get('description', '')}"
+                    }
+                    relationships.append(relationship)
+        
+        return relationships
+    
+    def _events_match_pattern(self, event1: Dict, event2: Dict, pattern: Dict) -> bool:
+        """Check if two events match a learned pattern"""
+        # Amount matching
+        if pattern.get('amount_match'):
+            amount1 = self._extract_amount(event1.get('payload', {}))
+            amount2 = self._extract_amount(event2.get('payload', {}))
+            if abs(amount1 - amount2) > 0.01:  # Allow small differences
+                return False
+        
+        # Date matching
+        if pattern.get('date_window'):
+            date1 = self._extract_date(event1.get('payload', {}))
+            date2 = self._extract_date(event2.get('payload', {}))
+            if date1 and date2:
+                date_diff = abs((date1 - date2).days)
+                if date_diff > pattern.get('date_window', 1):
+                    return False
+        
+        # Entity matching
+        if pattern.get('entity_match'):
+            entities1 = self._extract_entities(event1.get('payload', {}))
+            entities2 = self._extract_entities(event2.get('payload', {}))
+            if not self._entities_overlap(entities1, entities2):
+                return False
+        
+        # ID pattern matching
+        if pattern.get('id_pattern'):
+            id1 = self._extract_id(event1.get('payload', {}))
+            id2 = self._extract_id(event2.get('payload', {}))
+            if not self._ids_match_pattern(id1, id2, pattern.get('id_pattern')):
+                return False
+        
+        return True
+    
+    async def _learn_relationship_patterns(self, relationships: List[Dict], user_id: str):
+        """Learn new relationship patterns from detected relationships"""
+        try:
+            # Group relationships by type
+            by_type = {}
+            for rel in relationships:
+                rel_type = rel.get('relationship_type')
+                if rel_type not in by_type:
+                    by_type[rel_type] = []
+                by_type[rel_type].append(rel)
+            
+            # Learn patterns for each relationship type
+            for rel_type, rels in by_type.items():
+                if len(rels) >= 2:  # Need at least 2 relationships to learn a pattern
+                    pattern = await self._extract_relationship_pattern(rels, rel_type)
+                    if pattern:
+                        await self._store_relationship_pattern(pattern, user_id)
+                        self.learned_relationship_patterns[rel_type] = self.learned_relationship_patterns.get(rel_type, []) + [pattern]
+            
+        except Exception as e:
+            logger.error(f"Failed to learn relationship patterns: {e}")
+    
+    async def _extract_relationship_pattern(self, relationships: List[Dict], relationship_type: str) -> Dict:
+        """Extract a pattern from a set of relationships"""
+        try:
+            # Analyze common characteristics
+            amount_matches = []
+            date_windows = []
+            entity_matches = []
+            id_patterns = []
+            
+            for rel in relationships:
+                # Get the actual events
+                source_event = await self._get_event_by_id(rel.get('source_event_id'))
+                target_event = await self._get_event_by_id(rel.get('target_event_id'))
+                
+                if source_event and target_event:
+                    # Amount analysis
+                    amount1 = self._extract_amount(source_event.get('payload', {}))
+                    amount2 = self._extract_amount(target_event.get('payload', {}))
+                    if abs(amount1 - amount2) < 0.01:
+                        amount_matches.append(True)
+                    
+                    # Date analysis
+                    date1 = self._extract_date(source_event.get('payload', {}))
+                    date2 = self._extract_date(target_event.get('payload', {}))
+                    if date1 and date2:
+                        date_diff = abs((date1 - date2).days)
+                        date_windows.append(date_diff)
+                    
+                    # Entity analysis
+                    entities1 = self._extract_entities(source_event.get('payload', {}))
+                    entities2 = self._extract_entities(target_event.get('payload', {}))
+                    if self._entities_overlap(entities1, entities2):
+                        entity_matches.append(True)
+                    
+                    # ID pattern analysis
+                    id1 = self._extract_id(source_event.get('payload', {}))
+                    id2 = self._extract_id(target_event.get('payload', {}))
+                    if id1 and id2:
+                        pattern = self._extract_id_pattern(id1, id2)
+                        if pattern:
+                            id_patterns.append(pattern)
+            
+            # Create pattern based on common characteristics
+            pattern = {
+                "relationship_type": relationship_type,
+                "amount_match": len(amount_matches) / len(relationships) > 0.7,
+                "date_window": max(date_windows) if date_windows else 1,
+                "entity_match": len(entity_matches) / len(relationships) > 0.5,
+                "id_pattern": max(set(id_patterns), key=id_patterns.count) if id_patterns else None,
+                "confidence_threshold": 0.7,
+                "description": f"Learned pattern for {relationship_type} relationships"
+            }
+            
+            return pattern
+            
+        except Exception as e:
+            logger.error(f"Failed to extract relationship pattern: {e}")
+            return None
+    
+    async def _map_cross_platform_relationships(self, relationships: List[Dict]) -> List[Dict]:
+        """Map relationships across different platforms"""
+        try:
+            cross_platform = []
+            
+            for rel in relationships:
+                source_event = await self._get_event_by_id(rel.get('source_event_id'))
+                target_event = await self._get_event_by_id(rel.get('target_event_id'))
+                
+                if source_event and target_event:
+                    source_platform = source_event.get('source_platform')
+                    target_platform = target_event.get('source_platform')
+                    
+                    if source_platform != target_platform:
+                        cross_platform_rel = {
+                            **rel,
+                            "cross_platform": True,
+                            "source_platform": source_platform,
+                            "target_platform": target_platform,
+                            "platform_compatibility": self._assess_platform_compatibility(source_platform, target_platform)
+                        }
+                        cross_platform.append(cross_platform_rel)
+            
+            return cross_platform
+            
+        except Exception as e:
+            logger.error(f"Cross-platform mapping failed: {e}")
+            return []
+    
+    def _assess_platform_compatibility(self, platform1: str, platform2: str) -> str:
+        """Assess compatibility between two platforms"""
+        # Known platform pairs
+        compatible_pairs = [
+            ('stripe', 'quickbooks'),
+            ('razorpay', 'quickbooks'),
+            ('paypal', 'quickbooks'),
+            ('stripe', 'xero'),
+            ('razorpay', 'xero')
+        ]
+        
+        pair = tuple(sorted([platform1, platform2]))
+        if pair in compatible_pairs:
+            return "high"
+        elif platform1 == platform2:
+            return "same_platform"
+        else:
+            return "low"
+    
+    async def _get_event_by_id(self, event_id: str) -> Dict:
+        """Get event by ID from cache or database"""
+        if event_id in self.relationship_cache:
+            return self.relationship_cache[event_id]
+        
+        try:
+            result = self.supabase.table('raw_events').select('*').eq('id', event_id).execute()
+            if result.data:
+                event = result.data[0]
+                self.relationship_cache[event_id] = event
+                return event
+        except Exception as e:
+            logger.error(f"Failed to get event {event_id}: {e}")
+        
+        return None
+    
+    async def _store_relationship_pattern(self, pattern: Dict, user_id: str):
+        """Store learned relationship pattern in database"""
+        try:
+            pattern_data = {
+                "user_id": user_id,
+                "relationship_type": pattern.get('relationship_type'),
+                "pattern_data": pattern,
+                "created_at": datetime.utcnow().isoformat()
+            }
+            
+            self.supabase.table('relationship_patterns').insert(pattern_data).execute()
+            
+        except Exception as e:
+            logger.error(f"Failed to store relationship pattern: {e}")
+    
+    def _create_relationship_context(self, events: List[Dict]) -> str:
+        """Create context for relationship discovery"""
+        context_parts = []
+        
+        # Group by platform
+        platform_groups = {}
+        for event in events:
+            platform = event.get('source_platform', 'unknown')
+            if platform not in platform_groups:
+                platform_groups[platform] = []
+            platform_groups[platform].append(event)
+        
+        for platform, platform_events in platform_groups.items():
+            context_parts.append(f"\nPlatform: {platform}")
+            context_parts.append(f"Event count: {len(platform_events)}")
+            
+            # Sample events
+            for event in platform_events[:3]:
+                payload = event.get('payload', {})
+                context_parts.append(f"- {event.get('kind')}: {payload.get('description', '')} (Amount: {payload.get('amount', 'N/A')})")
+        
+        return '\n'.join(context_parts)
+    
+    def _create_comprehensive_context(self, events: List[Dict], relationship_type: str) -> str:
+        """Create comprehensive context for relationship detection"""
+        context_parts = [f"Looking for {relationship_type} relationships:"]
+        
+        for event in events[:10]:  # Limit to first 10 events
+            payload = event.get('payload', {})
+            context_parts.append(f"Event {event.get('id')}: {event.get('kind')} - {payload.get('description', '')} - Amount: {payload.get('amount', 'N/A')} - Date: {payload.get('date', 'N/A')}")
+        
+        return '\n'.join(context_parts)
+    
+    def _parse_relationship_types(self, response_text: str) -> List[str]:
+        """Parse relationship types from AI response"""
+        try:
+            # Try to extract JSON array
+            if '[' in response_text and ']' in response_text:
+                start = response_text.find('[')
+                end = response_text.rfind(']') + 1
+                json_str = response_text[start:end]
+                return json.loads(json_str)
+        except:
+            pass
+        
+        # Fallback parsing
+        types = []
+        response_lower = response_text.lower()
+        
+        # Common relationship types
+        common_types = [
+            'invoice_to_payment', 'payroll_to_bank_transfer', 'expense_to_reimbursement',
+            'subscription_to_billing', 'refund_to_original_payment', 'fee_to_transaction',
+            'tax_to_payment', 'commission_to_sale'
+        ]
+        
+        for rel_type in common_types:
+            if rel_type.replace('_', ' ') in response_lower:
+                types.append(rel_type)
+        
+        return types if types else ['invoice_to_payment', 'payroll_to_bank_transfer']
+    
+    def _parse_ai_relationships(self, response_text: str, events: List[Dict]) -> List[Dict]:
+        """Parse AI-detected relationships from response"""
+        try:
+            # Try to extract JSON array
+            if '[' in response_text and ']' in response_text:
+                start = response_text.find('[')
+                end = response_text.rfind(']') + 1
+                json_str = response_text[start:end]
+                relationships = json.loads(json_str)
+                
+                # Validate and enhance relationships
+                validated = []
+                for rel in relationships:
+                    if self._validate_relationship_structure(rel, events):
+                        rel['detection_method'] = 'ai_analysis'
+                        validated.append(rel)
+                
+                return validated
+        except:
+            pass
+        
+        return []
+    
+    def _validate_relationship_structure(self, rel: Dict, events: List[Dict]) -> bool:
+        """Validate relationship structure"""
+        required_fields = ['source_event_id', 'target_event_id', 'relationship_type']
+        return all(field in rel for field in required_fields)
+    
+    async def _validate_relationships(self, relationships: List[Dict]) -> List[Dict]:
+        """Validate and filter relationships"""
+        validated = []
+        
+        for rel in relationships:
+            # Check if events exist
+            source_exists = await self._event_exists(rel.get('source_event_id'))
+            target_exists = await self._event_exists(rel.get('target_event_id'))
+            
+            if source_exists and target_exists:
+                # Add confidence if missing
+                if 'confidence_score' not in rel:
+                    rel['confidence_score'] = 0.7
+                
+                # Add detection method if missing
+                if 'detection_method' not in rel:
+                    rel['detection_method'] = 'pattern_matching'
+                
+                validated.append(rel)
+        
+        return validated
+    
+    async def _event_exists(self, event_id: str) -> bool:
+        """Check if event exists in database"""
+        try:
+            result = self.supabase.table('raw_events').select('id').eq('id', event_id).execute()
+            return len(result.data) > 0
+        except:
+            return False
+    
+    def _extract_amount(self, payload: Dict) -> float:
+        """Extract amount from payload"""
+        amount = payload.get('amount')
+        if isinstance(amount, (int, float)):
+            return float(amount)
+        return 0.0
+    
+    def _extract_date(self, payload: Dict) -> Optional[datetime]:
+        """Extract date from payload"""
+        date_str = payload.get('date') or payload.get('created_at') or payload.get('created')
+        if date_str:
+            try:
+                return datetime.fromisoformat(date_str.replace('Z', '+00:00'))
+            except:
+                pass
+        return None
+    
+    def _extract_entities(self, payload: Dict) -> List[str]:
+        """Extract entities from payload"""
+        entities = []
+        
+        # Extract from description
+        description = payload.get('description', '')
+        if description:
+            entities.extend(description.split())
+        
+        # Extract from vendor
+        vendor = payload.get('vendor_standard') or payload.get('vendor_raw')
+        if vendor:
+            entities.append(vendor)
+        
+        return list(set(entities))
+    
+    def _extract_id(self, payload: Dict) -> str:
+        """Extract ID from payload"""
+        return (payload.get('transaction_id') or 
+                payload.get('charge_id') or 
+                payload.get('payment_id') or 
+                payload.get('invoice_id') or 
+                '')
+    
+    def _entities_overlap(self, entities1: List[str], entities2: List[str]) -> bool:
+        """Check if two entity lists overlap"""
+        if not entities1 or not entities2:
+            return False
+        
+        set1 = set(entity.lower() for entity in entities1)
+        set2 = set(entity.lower() for entity in entities2)
+        
+        return len(set1.intersection(set2)) > 0
+    
+    def _ids_match_pattern(self, id1: str, id2: str, pattern: str) -> bool:
+        """Check if IDs match a pattern"""
+        if not id1 or not id2 or not pattern:
+            return False
+        
+        # Simple pattern matching
+        if pattern == 'same_prefix':
+            return id1.split('_')[0] == id2.split('_')[0]
+        elif pattern == 'same_suffix':
+            return id1.split('_')[-1] == id2.split('_')[-1]
+        
+        return False
+    
+    def _extract_id_pattern(self, id1: str, id2: str) -> str:
+        """Extract pattern between two IDs"""
+        if not id1 or not id2:
+            return None
+        
+        if id1.split('_')[0] == id2.split('_')[0]:
+            return 'same_prefix'
+        elif id1.split('_')[-1] == id2.split('_')[-1]:
+            return 'same_suffix'
+        
+        return None
+    
+    def _calculate_pattern_confidence(self, event1: Dict, event2: Dict, pattern: Dict) -> float:
+        """Calculate confidence score for pattern-based relationship"""
+        confidence = 0.5  # Base confidence
+        
+        # Amount match bonus
+        if pattern.get('amount_match'):
+            amount1 = self._extract_amount(event1.get('payload', {}))
+            amount2 = self._extract_amount(event2.get('payload', {}))
+            if abs(amount1 - amount2) < 0.01:
+                confidence += 0.3
+        
+        # Date match bonus
+        if pattern.get('date_window'):
+            date1 = self._extract_date(event1.get('payload', {}))
+            date2 = self._extract_date(event2.get('payload', {}))
+            if date1 and date2:
+                date_diff = abs((date1 - date2).days)
+                if date_diff <= pattern.get('date_window', 1):
+                    confidence += 0.2
+        
+        # Entity match bonus
+        if pattern.get('entity_match'):
+            entities1 = self._extract_entities(event1.get('payload', {}))
+            entities2 = self._extract_entities(event2.get('payload', {}))
+            if self._entities_overlap(entities1, entities2):
+                confidence += 0.2
+        
+        return min(confidence, 1.0)
+
+@app.get("/test-flexible-relationship-discovery/{user_id}")
+async def test_flexible_relationship_discovery(user_id: str):
+    """Test the flexible relationship discovery engine"""
+    try:
+        # Initialize OpenAI and Supabase clients
+        openai_client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
+        supabase_url = os.getenv('SUPABASE_URL')
+        supabase_key = os.getenv('SUPABASE_KEY')
+        
+        if not supabase_url or not supabase_key:
+            return {
+                "message": "Supabase credentials not configured",
+                "timestamp": datetime.utcnow().isoformat()
+            }
+        
+        supabase = create_client(supabase_url, supabase_key)
+        
+        # Initialize Flexible Relationship Engine
+        relationship_engine = FlexibleRelationshipEngine(openai_client, supabase)
+        
+        # Discover all relationships
+        result = await relationship_engine.discover_all_relationships(user_id)
+        
+        return {
+            "message": "Flexible Relationship Discovery Test Completed",
+            "result": ensure_json_serializable(result),
+            "timestamp": datetime.utcnow().isoformat()
+        }
+        
+    except Exception as e:
+        return {
+            "message": "Flexible Relationship Discovery Test Failed",
+            "error": str(e),
+            "timestamp": datetime.utcnow().isoformat()
+        }
+
+@app.get("/test-relationship-pattern-learning/{user_id}")
+async def test_relationship_pattern_learning(user_id: str):
+    """Test relationship pattern learning capabilities"""
+    try:
+        # Initialize OpenAI and Supabase clients
+        openai_client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
+        supabase_url = os.getenv('SUPABASE_URL')
+        supabase_key = os.getenv('SUPABASE_KEY')
+        
+        if not supabase_url or not supabase_key:
+            return {
+                "message": "Supabase credentials not configured",
+                "timestamp": datetime.utcnow().isoformat()
+            }
+        
+        supabase = create_client(supabase_url, supabase_key)
+        
+        # Initialize Flexible Relationship Engine
+        relationship_engine = FlexibleRelationshipEngine(openai_client, supabase)
+        
+        # Get all events for the user
+        events = supabase.table('raw_events').select('*').eq('user_id', user_id).execute()
+        
+        if not events.data:
+            return {
+                "message": "No data found for pattern learning",
+                "timestamp": datetime.utcnow().isoformat()
+            }
+        
+        # Discover relationship types
+        relationship_types = await relationship_engine._discover_relationship_types(events.data)
+        
+        # Learn patterns for each type
+        learned_patterns = {}
+        for rel_type in relationship_types[:3]:  # Test with first 3 types
+            relationships = await relationship_engine._detect_relationships_by_type(events.data, rel_type)
+            if relationships:
+                await relationship_engine._learn_relationship_patterns(relationships, user_id)
+                learned_patterns[rel_type] = len(relationships)
+        
+        return {
+            "message": "Relationship Pattern Learning Test Completed",
+            "relationship_types_discovered": relationship_types,
+            "learned_patterns": learned_patterns,
+            "total_patterns_learned": len(relationship_engine.learned_relationship_patterns),
+            "timestamp": datetime.utcnow().isoformat()
+        }
+        
+    except Exception as e:
+        return {
+            "message": "Relationship Pattern Learning Test Failed",
+            "error": str(e),
+            "timestamp": datetime.utcnow().isoformat()
+        }
+
+@app.get("/test-cross-platform-relationship-mapping/{user_id}")
+async def test_cross_platform_relationship_mapping(user_id: str):
+    """Test cross-platform relationship mapping"""
+    try:
+        # Initialize OpenAI and Supabase clients
+        openai_client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
+        supabase_url = os.getenv('SUPABASE_URL')
+        supabase_key = os.getenv('SUPABASE_KEY')
+        
+        if not supabase_url or not supabase_key:
+            return {
+                "message": "Supabase credentials not configured",
+                "timestamp": datetime.utcnow().isoformat()
+            }
+        
+        supabase = create_client(supabase_url, supabase_key)
+        
+        # Initialize Flexible Relationship Engine
+        relationship_engine = FlexibleRelationshipEngine(openai_client, supabase)
+        
+        # Get all events for the user
+        events = supabase.table('raw_events').select('*').eq('user_id', user_id).execute()
+        
+        if not events.data:
+            return {
+                "message": "No data found for cross-platform mapping",
+                "timestamp": datetime.utcnow().isoformat()
+            }
+        
+        # Create sample relationships for testing
+        sample_relationships = []
+        platforms = list(set(event.get('source_platform', 'unknown') for event in events.data))
+        
+        # Create cross-platform relationships
+        for i, platform1 in enumerate(platforms):
+            for platform2 in platforms[i+1:]:
+                # Find events from different platforms
+                platform1_events = [e for e in events.data if e.get('source_platform') == platform1]
+                platform2_events = [e for e in events.data if e.get('source_platform') == platform2]
+                
+                if platform1_events and platform2_events:
+                    sample_relationships.append({
+                        "source_event_id": platform1_events[0].get('id'),
+                        "target_event_id": platform2_events[0].get('id'),
+                        "relationship_type": "cross_platform_transfer",
+                        "confidence_score": 0.8,
+                        "detection_method": "manual_test"
+                    })
+        
+        # Map cross-platform relationships
+        cross_platform_relationships = await relationship_engine._map_cross_platform_relationships(sample_relationships)
+        
+        return {
+            "message": "Cross-Platform Relationship Mapping Test Completed",
+            "total_relationships": len(sample_relationships),
+            "cross_platform_relationships": ensure_json_serializable(cross_platform_relationships),
+            "platforms_analyzed": platforms,
+            "timestamp": datetime.utcnow().isoformat()
+        }
+        
+    except Exception as e:
+        return {
+            "message": "Cross-Platform Relationship Mapping Test Failed",
+            "error": str(e),
+            "timestamp": datetime.utcnow().isoformat()
+        }
+
+@app.get("/test-relationship-patterns/{user_id}")
+async def test_relationship_patterns(user_id: str):
+    """Test relationship pattern storage and retrieval"""
+    try:
+        # Initialize Supabase client
+        supabase_url = os.getenv('SUPABASE_URL')
+        supabase_key = os.getenv('SUPABASE_KEY')
+        
+        if not supabase_url or not supabase_key:
+            return {
+                "message": "Supabase credentials not configured",
+                "timestamp": datetime.utcnow().isoformat()
+            }
+        
+        supabase = create_client(supabase_url, supabase_key)
+        
+        # Get stored relationship patterns
+        patterns = supabase.table('relationship_patterns').select('*').eq('user_id', user_id).execute()
+        
+        # Analyze patterns
+        pattern_analysis = {}
+        for pattern in patterns.data:
+            rel_type = pattern.get('relationship_type')
+            if rel_type not in pattern_analysis:
+                pattern_analysis[rel_type] = 0
+            pattern_analysis[rel_type] += 1
+        
+        return {
+            "message": "Relationship Patterns Test Completed",
+            "total_patterns": len(patterns.data),
+            "patterns_by_type": pattern_analysis,
+            "stored_patterns": ensure_json_serializable(patterns.data),
+            "timestamp": datetime.utcnow().isoformat()
+        }
+        
+    except Exception as e:
+        return {
+            "message": "Relationship Patterns Test Failed",
+            "error": str(e),
+            "timestamp": datetime.utcnow().isoformat()
+        }
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", 8000)))

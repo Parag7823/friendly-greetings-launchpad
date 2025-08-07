@@ -552,6 +552,58 @@
         },
         "description": "Test platform insights and analysis for specific platform"
       }
+    },
+    {
+      "name": "35. Test Flexible Relationship Discovery",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/test-flexible-relationship-discovery/{{test_user_id}}",
+          "host": ["{{base_url}}"],
+          "path": ["test-flexible-relationship-discovery", "{{test_user_id}}"]
+        },
+        "description": "Test the flexible relationship discovery engine that can detect ANY type of financial relationship"
+      }
+    },
+    {
+      "name": "36. Test Relationship Pattern Learning",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/test-relationship-pattern-learning/{{test_user_id}}",
+          "host": ["{{base_url}}"],
+          "path": ["test-relationship-pattern-learning", "{{test_user_id}}"]
+        },
+        "description": "Test relationship pattern learning capabilities and AI-powered pattern extraction"
+      }
+    },
+    {
+      "name": "37. Test Cross-Platform Relationship Mapping",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/test-cross-platform-relationship-mapping/{{test_user_id}}",
+          "host": ["{{base_url}}"],
+          "path": ["test-cross-platform-relationship-mapping", "{{test_user_id}}"]
+        },
+        "description": "Test cross-platform relationship mapping and platform compatibility assessment"
+      }
+    },
+    {
+      "name": "38. Test Relationship Patterns Storage",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/test-relationship-patterns/{{test_user_id}}",
+          "host": ["{{base_url}}"],
+          "path": ["test-relationship-patterns", "{{test_user_id}}"]
+        },
+        "description": "Test relationship pattern storage and retrieval from database"
+      }
     }
   ]
 } 
