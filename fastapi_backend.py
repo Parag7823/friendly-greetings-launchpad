@@ -2540,7 +2540,8 @@ async def upload_and_process(
     try:
         # Generate job_id if not provided
         if not job_id:
-            job_id = f"test-job-{int(time.time())}"
+            import uuid
+            job_id = str(uuid.uuid4())
         
         # Read file content
         file_content = await file.read()
