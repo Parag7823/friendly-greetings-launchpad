@@ -371,6 +371,26 @@ class PlatformIDExtractor:
                 'invoice_id': r'INV-[0-9]{4}-[0-9]{6}',
                 'contact_id': r'[a-zA-Z0-9]{8}-[a-zA-Z0-9]{4}-[a-zA-Z0-9]{4}',
                 'bank_transaction_id': r'BT-[0-9]{8}'
+            },
+            'bank_statement': {
+                'invoice_id': r'INV-[0-9]{3}',
+                'payroll_id': r'pay_[0-9]{3}',
+                'stripe_id': r'ch_[a-zA-Z0-9]{16}',
+                'aws_id': r'aws_[0-9]{3}',
+                'google_ads_id': r'GA-[0-9]{3}',
+                'facebook_id': r'FB-[0-9]{3}',
+                'adobe_id': r'AD-[0-9]{3}',
+                'coursera_id': r'CR-[0-9]{3}',
+                'expedia_id': r'EXP-[0-9]{3}',
+                'legal_id': r'LF-[0-9]{3}',
+                'insurance_id': r'INS-[0-9]{3}',
+                'apple_store_id': r'AS-[0-9]{3}',
+                'utilities_id': r'UC-[0-9]{3}',
+                'maintenance_id': r'MC-[0-9]{3}',
+                'office_supplies_id': r'OD-[0-9]{3}',
+                'internet_id': r'ISP-[0-9]{3}',
+                'lease_id': r'LL-[0-9]{3}',
+                'bank_fee_id': r'BANK-FEE-[0-9]{3}'
             }
         }
     
@@ -574,6 +594,30 @@ class DataEnrichmentProcessor:
             if any(vendor_word in col.lower() for vendor_word in ['vendor', 'payee', 'recipient', 'company']):
                 if col in row_data:
                     return str(row_data[col])
+        
+        # Extract vendor from description (for bank statements)
+        description = row_data.get('description', '') or row_data.get('Description', '')
+        if description:
+            # Common patterns in bank statement descriptions
+            vendor_patterns = [
+                r'^([^-]+?)\s*[-–]\s*',  # "Vendor - Description"
+                r'^([^-]+?)\s*Payment\s*[-–]\s*',  # "Vendor Payment - Description"
+                r'^([^-]+?)\s*Services?\s*[-–]\s*',  # "Vendor Services - Description"
+                r'^([^-]+?)\s*Purchase\s*[-–]\s*',  # "Vendor Purchase - Description"
+                r'^([^-]+?)\s*Campaign\s*[-–]\s*',  # "Vendor Campaign - Description"
+                r'^([^-]+?)\s*Expenses?\s*[-–]\s*',  # "Vendor Expenses - Description"
+                r'^([^-]+?)\s*Bill\s*[-–]\s*',  # "Vendor Bill - Description"
+                r'^([^-]+?)\s*Premium\s*[-–]\s*',  # "Vendor Premium - Description"
+                r'^([^-]+?)\s*License\s*[-–]\s*',  # "Vendor License - Description"
+                r'^([^-]+?)\s*Development\s*[-–]\s*',  # "Vendor Development - Description"
+            ]
+            
+            for pattern in vendor_patterns:
+                match = re.search(pattern, description, re.IGNORECASE)
+                if match:
+                    vendor = match.group(1).strip()
+                    if vendor and len(vendor) > 2:  # Avoid very short matches
+                        return vendor
         
         return ""
     
