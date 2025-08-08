@@ -431,7 +431,7 @@ class DataEnrichmentProcessor:
         self.platform_id_extractor = PlatformIDExtractor()
     
     async def enrich_row_data(self, row_data: Dict, platform_info: Dict, column_names: List[str], 
-                            ai_classification: Dict, file_context: Dict) -> Dict[str, Any]:
+                            ai_classification: Dict, file_context: Dict, fast_mode: bool = False) -> Dict[str, Any]:
         """Enrich row data with currency, vendor, and platform information"""
         try:
             # Extract basic information
@@ -439,29 +439,46 @@ class DataEnrichmentProcessor:
             description = self._extract_description(row_data)
             platform = platform_info.get('platform', 'unknown')
             date = self._extract_date(row_data)
-            
-            # 1. Currency normalization
-            currency_info = await self.currency_normalizer.normalize_currency(
-                amount=amount,
-                currency=None,  # Will be detected
-                description=description,
-                platform=platform,
-                date=date
-            )
-            
-            # 2. Vendor standardization
             vendor_name = self._extract_vendor_name(row_data, column_names)
-            vendor_info = await self.vendor_standardizer.standardize_vendor(
-                vendor_name=vendor_name,
-                platform=platform
-            )
             
-            # 3. Platform ID extraction
-            platform_ids = self.platform_id_extractor.extract_platform_ids(
-                row_data=row_data,
-                platform=platform,
-                column_names=column_names
-            )
+            # Fast mode: Skip expensive operations
+            if fast_mode:
+                currency_info = {
+                    'currency': 'USD',
+                    'amount_original': amount,
+                    'amount_usd': amount,
+                    'exchange_rate': 1.0,
+                    'exchange_date': None
+                }
+                vendor_info = {
+                    'vendor_raw': vendor_name,
+                    'vendor_standard': vendor_name,
+                    'confidence': 1.0,
+                    'cleaning_method': 'fast_mode'
+                }
+                platform_ids = {'extracted_ids': {}}
+            else:
+                # 1. Currency normalization
+                currency_info = await self.currency_normalizer.normalize_currency(
+                    amount=amount,
+                    currency=None,  # Will be detected
+                    description=description,
+                    platform=platform,
+                    date=date
+                )
+                
+                # 2. Vendor standardization
+                vendor_info = await self.vendor_standardizer.standardize_vendor(
+                    vendor_name=vendor_name,
+                    platform=platform
+                )
+                
+                # 3. Platform ID extraction
+                platform_ids = self.platform_id_extractor.extract_platform_ids(
+                    row_data=row_data,
+                    platform=platform,
+                    column_names=column_names
+                )
             
             # 4. Create enhanced payload
             enriched_payload = {
@@ -1843,11 +1860,13 @@ class RowProcessor:
         self.enrichment_processor = DataEnrichmentProcessor(openai_client)
     
     async def process_row(self, row: pd.Series, row_index: int, sheet_name: str, 
-                   platform_info: Dict, file_context: Dict, column_names: List[str]) -> Dict[str, Any]:
+                   platform_info: Dict, file_context: Dict, column_names: List[str], 
+                   ai_classification: Dict = None) -> Dict[str, Any]:
         """Process a single row and create an event with AI-powered classification and enrichment"""
         
-        # AI-powered row classification
-        ai_classification = await self.ai_classifier.classify_row_with_ai(row, platform_info, column_names, file_context)
+        # Use provided AI classification or generate new one
+        if ai_classification is None:
+            ai_classification = await self.ai_classifier.classify_row_with_ai(row, platform_info, column_names, file_context)
         
         # Convert row to JSON-serializable format
         row_data = self._convert_row_to_json_serializable(row)
@@ -2160,6 +2179,10 @@ class ExcelProcessor:
             'job_id': job_id
         }
         
+        # Performance optimization: Pre-calculate common values
+        platform_name = platform_info.get('platform', 'unknown')
+        platform_confidence = platform_info.get('confidence', 0.0)
+        
         # Process each sheet with batch optimization
         for sheet_name, df in sheets.items():
             if df.empty:
@@ -2169,7 +2192,7 @@ class ExcelProcessor:
             rows = list(df.iterrows())
             
             # Process rows in batches for efficiency
-            batch_size = 20  # Process 20 rows at once
+            batch_size = 50  # Process 50 rows at once for better performance
             total_batches = (len(rows) + batch_size - 1) // batch_size
             
             for batch_idx in range(0, len(rows), batch_size):
@@ -2180,7 +2203,7 @@ class ExcelProcessor:
                     row_data = [row[1] for row in batch_rows]  # row[1] is the Series
                     row_indices = [row[0] for row in batch_rows]  # row[0] is the index
                     
-                    # Process batch with AI classification
+                    # Process batch with AI classification (single API call for multiple rows)
                     batch_classifications = await self.batch_classifier.classify_rows_batch(
                         row_data, platform_info, column_names
                     )
@@ -2188,15 +2211,13 @@ class ExcelProcessor:
                     # Store each row from the batch
                     for i, (row_index, row) in enumerate(batch_rows):
                         try:
-                            # Create event for this row
-                            event = await self.row_processor.process_row(
-                                row, row_index, sheet_name, platform_info, file_context, column_names
-                            )
+                            # Use batch classification result directly
+                            ai_classification = batch_classifications[i] if i < len(batch_classifications) else {}
                             
-                            # Use batch classification result
-                            if i < len(batch_classifications):
-                                ai_classification = batch_classifications[i]
-                                event['classification_metadata'].update(ai_classification)
+                            # Create event for this row with pre-classified data
+                            event = await self.row_processor.process_row(
+                                row, row_index, sheet_name, platform_info, file_context, column_names, ai_classification
+                            )
                             
                             # Store event in raw_events table with enrichment fields
                             enriched_payload = event['payload']  # This is now the enriched payload
