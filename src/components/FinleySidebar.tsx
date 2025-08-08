@@ -1,8 +1,17 @@
-import { useState } from 'react';
-import { FileSpreadsheet, ChevronDown, ChevronRight, Settings } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { FileSpreadsheet, Settings } from 'lucide-react';
+import { NavLink } from 'react-router-dom';
 import { EnhancedExcelUpload } from './EnhancedExcelUpload';
 export const FinleySidebar = () => {
   const [isIntegrationsOpen, setIsIntegrationsOpen] = useState(false);
+
+  // Open Excel upload flow on demand
+  useEffect(() => {
+    const handler = () => setIsIntegrationsOpen(true);
+    window.addEventListener('open-excel-upload', handler);
+    return () => window.removeEventListener('open-excel-upload', handler);
+  }, []);
+
   return <div className="finley-sidebar flex flex-col h-full p-6 overflow-y-auto">
       {/* Header */}
       <div className="mb-8">
@@ -17,14 +26,16 @@ export const FinleySidebar = () => {
       {/* Integrations Section */}
       <div className="flex-1">
         <div className="space-y-2">
-          {/* Collapsible Integrations Menu */}
-          <button onClick={() => setIsIntegrationsOpen(!isIntegrationsOpen)} className="w-full flex items-center justify-between p-3 text-left hover:bg-muted/50 rounded-lg transition-colors">
+          {/* Integrations menu navigates to dedicated page */}
+          <NavLink
+            to="/integrations"
+            className={({ isActive }) => `w-full flex items-center justify-between p-3 rounded-lg transition-colors ${isActive ? 'bg-muted/50' : 'hover:bg-muted/50'}`}
+          >
             <div className="flex items-center gap-2">
               <Settings className="w-5 h-5 text-muted-foreground" />
               <span className="font-medium text-foreground">Integrations</span>
             </div>
-            {isIntegrationsOpen ? <ChevronDown className="w-4 h-4 text-muted-foreground" /> : <ChevronRight className="w-4 h-4 text-muted-foreground" />}
-          </button>
+          </NavLink>
           
           {/* Excel Integration - Only show when open */}
           {isIntegrationsOpen && <div className="">
