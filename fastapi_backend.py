@@ -4676,7 +4676,7 @@ async def test_vendor_search(user_id: str, vendor_name: str = "Google"):
     try:
         # Initialize Supabase client
         supabase_url = os.getenv('SUPABASE_URL')
-        supabase_key = os.getenv('SUPABASE_KEY')
+        supabase_key = os.getenv('SUPABASE_SERVICE_KEY')
         
         if not supabase_url or not supabase_key:
             return {
@@ -4722,7 +4722,7 @@ async def test_currency_summary(user_id: str):
     try:
         # Initialize Supabase client
         supabase_url = os.getenv('SUPABASE_URL')
-        supabase_key = os.getenv('SUPABASE_KEY')
+        supabase_key = os.getenv('SUPABASE_SERVICE_KEY')
         
         if not supabase_url or not supabase_key:
             return {
