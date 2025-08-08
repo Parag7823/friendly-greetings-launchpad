@@ -557,20 +557,32 @@ class DataEnrichmentProcessor:
             }
     
     def _extract_amount(self, row_data: Dict) -> float:
-        """Extract amount from row data"""
+        """Extract amount from row data (case-insensitive key search and string parsing)."""
         try:
-            # Look for amount fields
-            amount_fields = ['amount', 'total', 'value', 'sum', 'payment_amount', 'price']
-            for field in amount_fields:
-                if field in row_data:
-                    value = row_data[field]
+            amount_fields = {'amount', 'total', 'value', 'sum', 'payment_amount', 'price'}
+            # Direct, case-insensitive lookup
+            for key, value in row_data.items():
+                if str(key).lower() in amount_fields:
                     if isinstance(value, (int, float)):
                         return float(value)
-                    elif isinstance(value, str):
-                        # Remove currency symbols and convert
+                    if isinstance(value, str):
                         cleaned = re.sub(r'[^\d.-]', '', value)
-                        return float(cleaned) if cleaned else 0.0
-        except:
+                        if cleaned not in (None, ''):
+                            try:
+                                return float(cleaned)
+                            except:
+                                pass
+            # Fallback: scan strings for currency-amount patterns
+            for value in row_data.values():
+                if isinstance(value, str):
+                    m = re.search(r'([-+]?[0-9]{1,3}(?:,[0-9]{3})*(?:\.[0-9]+)?|[-+]?[0-9]+\.[0-9]+)', value)
+                    if m:
+                        cleaned = m.group(1).replace(',', '')
+                        try:
+                            return float(cleaned)
+                        except:
+                            continue
+        except Exception:
             pass
         return 0.0
     
@@ -2374,6 +2386,10 @@ class ExcelProcessor:
                             except Exception as entity_err:
                                 logger.error(f"Entity resolution failed for row {row_index}: {entity_err}")
                             
+                            # Ensure classification_metadata reflects final entities
+                            if 'entities' not in event['classification_metadata'] or not event['classification_metadata']['entities']:
+                                event['classification_metadata']['entities'] = event['payload'].get('entities', {})
+
                             # Store event in raw_events table with enrichment fields
                             enriched_payload = event['payload']  # This is now the enriched payload
                             event_result = supabase.table('raw_events').insert({
@@ -2394,7 +2410,7 @@ class ExcelProcessor:
                                 'status': event['status'],
                                 'confidence_score': event['confidence_score'],
                                 'classification_metadata': event['classification_metadata'],
-                                'entities': event['classification_metadata'].get('entities', {}),
+                                'entities': event['classification_metadata'].get('entities', {}) or enriched_payload.get('entities', {}),
                                 'relationships': event['classification_metadata'].get('relationships', {}),
                                 # Enrichment fields
                                 'amount_original': enriched_payload.get('amount_original'),
