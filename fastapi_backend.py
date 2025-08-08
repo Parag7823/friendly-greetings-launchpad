@@ -2146,10 +2146,11 @@ class ExcelProcessor:
             job_result = supabase.table('ingestion_jobs').insert({
                 'id': job_id,
                 'user_id': user_id,
-                'file_id': file_id,
-                'status': 'processing',
-                'created_at': datetime.utcnow().isoformat(),
-                'updated_at': datetime.utcnow().isoformat()
+                'record_id': file_id,
+                'job_type': 'classification',
+                'status': 'running',
+                'progress': 0,
+                'started_at': datetime.utcnow().isoformat()
             }).execute()
 
             if not job_result.data:
@@ -2159,9 +2160,10 @@ class ExcelProcessor:
             # If job already exists, update it
             logger.info(f"Job {job_id} already exists, updating...")
             update_result = supabase.table('ingestion_jobs').update({
-                'file_id': file_id,
-                'status': 'processing',
-                'updated_at': datetime.utcnow().isoformat()
+                'record_id': file_id,
+                'status': 'running',
+                'progress': 0,
+                'started_at': datetime.utcnow().isoformat()
             }).eq('id', job_id).execute()
 
             if not update_result.data:
