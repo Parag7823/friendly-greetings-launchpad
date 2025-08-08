@@ -1928,6 +1928,20 @@ class RowProcessor:
         # Update file context with row index
         file_context['row_index'] = row_index
         
+        # Ensure entities exist by inferring from columns/description to feed downstream resolution and storage
+        inferred_entities = self._extract_entities_from_columns(row_data, column_names)
+        if ai_classification is None:
+            ai_classification = {}
+        if not ai_classification.get('entities'):
+            ai_classification['entities'] = inferred_entities
+        else:
+            for key in ['employees', 'vendors', 'customers', 'projects']:
+                existing = ai_classification['entities'].get(key, []) or []
+                inferred = inferred_entities.get(key, []) or []
+                merged = list(dict.fromkeys([*existing, *inferred]))
+                if merged:
+                    ai_classification['entities'][key] = merged
+
         # Data enrichment - create enhanced payload
         enriched_payload = await self.enrichment_processor.enrich_row_data(
             row_data=row_data,
@@ -2004,6 +2018,57 @@ class RowProcessor:
             return obj
         else:
             return str(obj)
+
+    def _extract_entities_from_columns(self, row_data: Dict[str, Any], column_names: List[str]) -> Dict[str, List[str]]:
+        entities: Dict[str, List[str]] = {
+            'employees': [],
+            'vendors': [],
+            'customers': [],
+            'projects': []
+        }
+
+        # Column-based extraction
+        joined_cols = ' '.join([str(c).lower() for c in column_names])
+        for key, value in row_data.items():
+            key_l = str(key).lower()
+            val = str(value).strip()
+            if not val:
+                continue
+            if ('client' in key_l) or ('customer' in key_l):
+                entities['customers'].append(val)
+            if ('vendor' in key_l) or ('supplier' in key_l):
+                entities['vendors'].append(val)
+            if ('employee' in key_l) or ('name' in key_l and 'employee' in joined_cols):
+                entities['employees'].append(val)
+            if 'project' in key_l:
+                entities['projects'].append(val)
+
+        # Description-based extraction
+        desc = str(row_data.get('Description') or row_data.get('description') or '')
+        if desc:
+            m_client = re.search(r'Client Payment\s*[-–]\s*([^,]+)', desc, re.IGNORECASE)
+            if m_client:
+                name = m_client.group(1).strip()
+                if name:
+                    entities['customers'].append(name)
+
+            m_emp = re.search(r'Employee Salary\s*[-–]\s*([^,]+)', desc, re.IGNORECASE)
+            if m_emp:
+                name = m_emp.group(1).strip()
+                if name:
+                    entities['employees'].append(name)
+
+            m_vendor = re.search(r'^([^\-–]+?)\s*[-–]\s*', desc)
+            if m_vendor:
+                cand = m_vendor.group(1).strip()
+                if cand and len(cand) > 2 and not cand.lower().startswith(('client payment', 'employee salary')):
+                    entities['vendors'].append(cand)
+
+        for k in entities:
+            if entities[k]:
+                entities[k] = list(dict.fromkeys(entities[k]))
+
+        return entities
     
 
 
