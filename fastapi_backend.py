@@ -2140,9 +2140,9 @@ class ExcelProcessor:
         else:
             raise HTTPException(status_code=500, detail="Failed to create raw record")
         
-        # Step 4: Create or update ingestion_jobs entry
+        # Step 4: Create ingestion_jobs entry FIRST
         try:
-            # Try to create the job entry if it doesn't exist
+            # Create the job entry - this must exist before processing rows
             job_result = supabase.table('ingestion_jobs').insert({
                 'id': job_id,
                 'user_id': user_id,
@@ -2151,15 +2151,23 @@ class ExcelProcessor:
                 'created_at': datetime.utcnow().isoformat(),
                 'updated_at': datetime.utcnow().isoformat()
             }).execute()
+
+            if not job_result.data:
+                raise HTTPException(status_code=500, detail="Failed to create ingestion job")
+
         except Exception as e:
             # If job already exists, update it
             logger.info(f"Job {job_id} already exists, updating...")
-            supabase.table('ingestion_jobs').update({
+            update_result = supabase.table('ingestion_jobs').update({
                 'file_id': file_id,
                 'status': 'processing',
                 'updated_at': datetime.utcnow().isoformat()
             }).eq('id', job_id).execute()
-        
+
+            if not update_result.data:
+                raise HTTPException(status_code=500, detail="Failed to update ingestion job")
+
+        # Now we can safely process rows since the job exists
         # Step 5: Process each sheet with optimized batch processing
         await manager.send_update(job_id, {
             "step": "streaming",
