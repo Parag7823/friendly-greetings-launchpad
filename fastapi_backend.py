@@ -3254,12 +3254,21 @@ class EntityResolver:
         
         resolution_results = []
         
+        # Map plural keys from AI/classification to singular types expected by SQL
+        type_map = {
+            'employees': 'employee',
+            'vendors': 'vendor',
+            'customers': 'customer',
+            'projects': 'project'
+        }
+
         for entity_type, entity_list in entities.items():
+            normalized_type = type_map.get(entity_type, entity_type)
             for entity_name in entity_list:
                 if entity_name and entity_name.strip():
                     resolution = await self.resolve_entity(
                         entity_name.strip(),
-                        entity_type,
+                        normalized_type,
                         platform,
                         user_id,
                         row_data,
