@@ -27,7 +27,7 @@ export const FinleySidebar = () => {
           </button>
           
           {/* Excel Integration - Only show when open */}
-          {isIntegrationsOpen && <div className="ml-4 pl-4 border-l border-border">
+          {isIntegrationsOpen && <div className="">
               <div className="finley-card p-4 hover-lift hover-glow">
                 <div className="flex items-center gap-3 mb-3">
                   <div className="w-8 h-8 bg-green-600 rounded-lg flex items-center justify-center">

@@ -15,7 +15,7 @@ export const ChatInterface = () => {
   return (
     <div className="finley-chat flex flex-col h-full">
       {/* Chat Messages Area */}
-      <div className="flex-1 flex items-center justify-center p-8">
+      <div className="flex-1 grid place-items-center p-8">
         <div className="text-center">
           <h1 className="text-3xl font-bold text-foreground tracking-tight">
             Finance Meet Intelligence

@@ -217,10 +217,10 @@ export const EnhancedExcelUpload = () => {
 
       {/* File Upload Zone */}
       <Card>
-        <CardContent className="p-6">
+        <CardContent className="p-6 flex justify-center">
           <input type="file" id="excel-upload" accept=".xlsx,.xls,.csv" multiple onChange={handleFileSelect} className="hidden" />
           
-          <div className="upload-zone cursor-pointer border-2 border-dashed border-finley-accent/30 hover:border-finley-accent/50 rounded-lg p-8 transition-colors" onDrop={handleDrop} onDragOver={handleDragOver} onClick={() => document.getElementById('excel-upload')?.click()}>
+          <div className="cursor-pointer w-full mx-auto border border-border rounded-md p-8 transition-colors" onDrop={handleDrop} onDragOver={handleDragOver} onClick={() => document.getElementById('excel-upload')?.click()}>
             <div className="text-center">
               <div className="mb-4">
                 <Upload className="w-8 h-8 text-finley-accent mx-auto mb-2" />
@@ -245,14 +245,15 @@ export const EnhancedExcelUpload = () => {
           <CardContent className="space-y-4">
             {uploadState.files.map((fileState, index) => <div key={index} className="space-y-3 p-4 bg-muted/30 rounded-lg">
                 <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
+                <div className="flex items-center gap-3 min-w-0 flex-1">
                     {getStatusIcon(fileState.status)}
-                    <div>
-                      <div className="font-medium text-sm">{fileState.file.name}</div>
+                    <div className="min-w-0">
+                      <div className="font-medium text-sm truncate">{fileState.file.name}</div>
                       <div className="text-xs text-muted-foreground">
                         {Math.round(fileState.file.size / 1024 / 1024 * 100) / 100} MB
                       </div>
                     </div>
+
                   </div>
                   <div className="text-right">
                     <div className="text-sm font-medium">{fileState.progress}%</div>
