@@ -2282,6 +2282,32 @@ class ExcelProcessor:
                             event = await self.row_processor.process_row(
                                 row, row_index, sheet_name, platform_info, file_context, column_names, ai_classification
                             )
+
+                            # Entity resolution (batch mode previously skipped). Resolve if entities present
+                            try:
+                                ai_entities = ai_classification.get('entities', {}) if isinstance(ai_classification, dict) else {}
+                                if ai_entities:
+                                    # Convert row to simple dict for identifier extraction
+                                    row_data_dict = {}
+                                    for col, val in row.items():
+                                        if pd.notna(val):
+                                            row_data_dict[str(col)] = str(val)
+
+                                    resolution_result = await self.entity_resolver.resolve_entities_batch(
+                                        ai_entities,
+                                        platform_info.get('platform', 'unknown'),
+                                        user_id,
+                                        row_data_dict,
+                                        column_names,
+                                        filename,
+                                        f"row-{row_index}"
+                                    )
+
+                                    # Inject resolved entities into event metadata
+                                    if resolution_result and 'resolved_entities' in resolution_result:
+                                        event['classification_metadata']['entities'] = resolution_result['resolved_entities']
+                            except Exception as entity_err:
+                                logger.error(f"Entity resolution failed for row {row_index}: {entity_err}")
                             
                             # Store event in raw_events table with enrichment fields
                             enriched_payload = event['payload']  # This is now the enriched payload
@@ -2548,7 +2574,8 @@ async def test_raw_events(user_id: str):
     try:
         # Initialize Supabase client (you'll need to provide credentials)
         supabase_url = os.environ.get("SUPABASE_URL")
-        supabase_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
+        # Use SERVICE_KEY consistently
+        supabase_key = os.environ.get("SUPABASE_SERVICE_KEY")
         
         # Clean the JWT token (remove newlines and whitespace)
         if supabase_key:
