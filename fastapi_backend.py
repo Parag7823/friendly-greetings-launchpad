@@ -673,7 +673,7 @@ class DocumentAnalyzer:
             Based on the column names and data, classify this document and return ONLY a valid JSON object with this structure:
             
             {{
-                "document_type": "income_statement|balance_sheet|cash_flow|payroll_data|expense_data|revenue_data|general_ledger|budget|unknown",
+                "document_type": "income_statement|balance_sheet|cash_flow|payroll_data|expense_data|revenue_data|general_ledger|bank_statement|budget|unknown",
                 "source_platform": "gusto|quickbooks|xero|razorpay|freshbooks|unknown",
                 "confidence": 0.95,
                 "key_columns": ["col1", "col2"],
@@ -782,6 +782,9 @@ class DocumentAnalyzer:
             doc_type = "payroll_data"
         elif any(word in ' '.join(column_names).lower() for word in ['asset', 'liability', 'equity']):
             doc_type = "balance_sheet"
+        elif any(word in ' '.join(column_names).lower() for word in ['balance', 'debit', 'credit']) and \
+             any(word in ' '.join(column_names).lower() for word in ['date', 'description', 'amount']):
+            doc_type = "bank_statement"
         
         # Enhanced platform detection using column patterns
         platform = "unknown"
@@ -1152,6 +1155,13 @@ class PlatformDetector:
                 'data_patterns': ['account_number', 'journal_entry', 'period', 'sage_specific'],
                 'confidence_threshold': 0.7,
                 'description': 'Business management software'
+            },
+            'bank_statement': {
+                'keywords': ['bank', 'statement', 'account', 'transaction', 'balance'],
+                'columns': ['date', 'description', 'amount', 'balance', 'type', 'reference'],
+                'data_patterns': ['debit', 'credit', 'opening_balance', 'closing_balance', 'bank_fee'],
+                'confidence_threshold': 0.8,
+                'description': 'Bank account statement'
             },
             'netsuite': {
                 'keywords': ['netsuite', 'erp', 'enterprise', 'suite'],
