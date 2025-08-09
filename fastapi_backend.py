@@ -737,6 +737,77 @@ class DocumentAnalyzer:
                 missing_mask = series.isna() | blank_mask
                 missing_counts[col] = int(missing_mask.sum())
         return missing_counts
+    
+    def _compute_data_quality_metrics(self, df: pd.DataFrame) -> Dict[str, Any]:
+        """Compute comprehensive data quality metrics"""
+        quality_metrics = {
+            'total_rows': len(df),
+            'total_columns': len(df.columns),
+            'missing_data_percentage': 0.0,
+            'duplicate_rows': 0,
+            'data_types': {},
+            'column_completeness': {},
+            'anomalies': []
+        }
+        
+        # Calculate missing data percentage
+        total_cells = len(df) * len(df.columns)
+        missing_cells = df.isnull().sum().sum()
+        quality_metrics['missing_data_percentage'] = (missing_cells / total_cells) * 100 if total_cells > 0 else 0
+        
+        # Count duplicate rows
+        quality_metrics['duplicate_rows'] = len(df[df.duplicated()])
+        
+        # Analyze data types
+        for col in df.columns:
+            quality_metrics['data_types'][col] = str(df[col].dtype)
+            
+            # Column completeness
+            non_null_count = df[col].notna().sum()
+            quality_metrics['column_completeness'][col] = {
+                'non_null_count': int(non_null_count),
+                'null_count': int(len(df) - non_null_count),
+                'completeness_percentage': (non_null_count / len(df)) * 100 if len(df) > 0 else 0
+            }
+        
+        # Detect anomalies
+        anomalies = []
+        
+        # Check for extreme values in numeric columns
+        numeric_cols = df.select_dtypes(include=[np.number]).columns
+        for col in numeric_cols:
+            if len(df[col].dropna()) > 0:
+                q1 = df[col].quantile(0.25)
+                q3 = df[col].quantile(0.75)
+                iqr = q3 - q1
+                lower_bound = q1 - 1.5 * iqr
+                upper_bound = q3 + 1.5 * iqr
+                
+                outliers = df[(df[col] < lower_bound) | (df[col] > upper_bound)]
+                if len(outliers) > 0:
+                    anomalies.append({
+                        'type': 'outlier',
+                        'column': col,
+                        'count': len(outliers),
+                        'percentage': (len(outliers) / len(df)) * 100
+                    })
+        
+        # Check for inconsistent date formats
+        date_cols = [col for col in df.columns if any(word in col.lower() for word in ['date', 'time'])]
+        for col in date_cols:
+            try:
+                pd.to_datetime(df[col], errors='raise')
+            except:
+                anomalies.append({
+                    'type': 'invalid_date_format',
+                    'column': col,
+                    'count': len(df[df[col].notna()]),
+                    'percentage': (len(df[df[col].notna()]) / len(df)) * 100
+                })
+        
+        quality_metrics['anomalies'] = anomalies
+        
+        return quality_metrics
 
     def _build_required_columns_by_type(self, doc_type: str) -> list:
         mapping = {
@@ -1512,6 +1583,70 @@ class PlatformDetector:
             return f"No clear indicators for {platform}"
         
         return f"{platform} detected: {'; '.join(reasoning_parts)}"
+    
+    def _detect_platform_data_values(self, df: pd.DataFrame, platform: str) -> List[str]:
+        """Detect platform-specific data values in the dataset"""
+        data_values = []
+        
+        # Sample data for analysis
+        sample_data = df.head(10).astype(str).values.flatten()
+        sample_text = ' '.join(sample_data).lower()
+        
+        if platform == 'quickbooks':
+            # QB-specific data patterns
+            qb_patterns = ['qb_', 'quickbooks_', 'class:', 'customer:', 'vendor:']
+            for pattern in qb_patterns:
+                if pattern in sample_text:
+                    data_values.append(f"qb_data: {pattern}")
+        
+        elif platform == 'xero':
+            # Xero-specific data patterns
+            xero_patterns = ['xero_', 'contact:', 'tracking:', 'reference:']
+            for pattern in xero_patterns:
+                if pattern in sample_text:
+                    data_values.append(f"xero_data: {pattern}")
+        
+        elif platform == 'stripe':
+            # Stripe-specific data patterns
+            stripe_patterns = ['ch_', 'pi_', 'tr_', 'fee_', 'charge_']
+            for pattern in stripe_patterns:
+                if pattern in sample_text:
+                    data_values.append(f"stripe_data: {pattern}")
+        
+        elif platform == 'gusto':
+            # Gusto-specific data patterns
+            gusto_patterns = ['pay_', 'emp_', 'gross_', 'net_', 'deduction_']
+            for pattern in gusto_patterns:
+                if pattern in sample_text:
+                    data_values.append(f"gusto_data: {pattern}")
+        
+        return data_values
+    
+    def _detect_platform_date_formats(self, df: pd.DataFrame, platform: str) -> int:
+        """Detect platform-specific date formats"""
+        date_format_matches = 0
+        
+        # Get date columns
+        date_columns = [col for col in df.columns if any(word in col.lower() for word in ['date', 'time', 'created', 'updated'])]
+        
+        if not date_columns:
+            return 0
+        
+        # Sample date values
+        for col in date_columns[:3]:  # Check first 3 date columns
+            sample_dates = df[col].dropna().head(5).astype(str)
+            
+            for date_str in sample_dates:
+                if platform == 'quickbooks' and ('/' in date_str or '-' in date_str):
+                    date_format_matches += 1
+                elif platform == 'xero' and ('T' in date_str or 'Z' in date_str):
+                    date_format_matches += 1
+                elif platform == 'stripe' and ('T' in date_str and 'Z' in date_str):
+                    date_format_matches += 1
+                elif platform == 'gusto' and ('-' in date_str and len(date_str.split('-')) == 3):
+                    date_format_matches += 1
+        
+        return min(date_format_matches, 3)  # Cap at 3 matches
     
     def get_platform_info(self, platform: str) -> Dict[str, Any]:
         """Get detailed information about a platform"""
@@ -3314,51 +3449,51 @@ class EntityResolver:
         identifiers = self.extract_strong_identifiers(row_data, column_names)
         
         try:
-            # Call database function to find or create entity
-            result = self.supabase.rpc('find_or_create_entity', {
-                'p_user_id': user_id,
-                'p_entity_name': entity_name,
-                'p_entity_type': entity_type,
-                'p_platform': platform,
-                'p_email': identifiers.get('email'),
-                'p_bank_account': identifiers.get('bank_account'),
-                'p_phone': identifiers.get('phone'),
-                'p_tax_id': identifiers.get('tax_id'),
-                'p_source_file': source_file
+            # CRITICAL FIX: Add name similarity check before calling database function
+            # This prevents over-merging of entities with same email/bank but different names
+            
+            # First, try to find existing entities with similar identifiers
+            existing_entities = await self._find_similar_entities(
+                entity_name, entity_type, user_id, identifiers
+            )
+            
+            # If we found similar entities, check if we should merge or create new
+            if existing_entities:
+                best_match = await self._find_best_entity_match(
+                    entity_name, entity_type, existing_entities, identifiers
+                )
+                
+                if best_match and best_match['should_merge']:
+                    # Use existing entity
+                    entity_id = best_match['entity_id']
+                else:
+                    # Create new entity - names are too different
+                    entity_id = await self._create_new_entity(
+                        entity_name, entity_type, platform, user_id, identifiers, source_file
+                    )
+            else:
+                # No similar entities found, create new
+                entity_id = await self._create_new_entity(
+                    entity_name, entity_type, platform, user_id, identifiers, source_file
+                )
+            
+            # Get entity details for response
+            entity_details = self.supabase.rpc('get_entity_details', {
+                'user_uuid': user_id,
+                'entity_id': entity_id
             }).execute()
             
-            if result.data:
-                entity_id = result.data
-                
-                # Get entity details for response
-                entity_details = self.supabase.rpc('get_entity_details', {
-                    'user_uuid': user_id,
-                    'entity_id': entity_id
-                }).execute()
-                
-                return {
-                    'entity_id': entity_id,
-                    'resolved_name': entity_name,
-                    'entity_type': entity_type,
-                    'platform': platform,
-                    'identifiers': identifiers,
-                    'source_file': source_file,
-                    'row_id': row_id,
-                    'resolution_success': True,
-                    'entity_details': entity_details.data[0] if entity_details.data else None
-                }
-            else:
-                return {
-                    'entity_id': None,
-                    'resolved_name': entity_name,
-                    'entity_type': entity_type,
-                    'platform': platform,
-                    'identifiers': identifiers,
-                    'source_file': source_file,
-                    'row_id': row_id,
-                    'resolution_success': False,
-                    'error': 'Database function returned no entity ID'
-                }
+            return {
+                'entity_id': entity_id,
+                'resolved_name': entity_name,
+                'entity_type': entity_type,
+                'platform': platform,
+                'identifiers': identifiers,
+                'source_file': source_file,
+                'row_id': row_id,
+                'resolution_success': True,
+                'entity_details': entity_details.data[0] if entity_details.data else None
+            }
                 
         except Exception as e:
             return {
@@ -3372,6 +3507,106 @@ class EntityResolver:
                 'resolution_success': False,
                 'error': str(e)
             }
+    
+    async def _find_similar_entities(self, entity_name: str, entity_type: str, 
+                                   user_id: str, identifiers: Dict[str, str]) -> List[Dict]:
+        """Find existing entities that might match based on identifiers"""
+        similar_entities = []
+        
+        try:
+            # Query for entities with matching identifiers
+            query = self.supabase.table('normalized_entities').select('*').eq('user_id', user_id).eq('entity_type', entity_type)
+            
+            # Add identifier filters
+            if identifiers.get('email'):
+                query = query.eq('email', identifiers['email'])
+            elif identifiers.get('bank_account'):
+                query = query.eq('bank_account', identifiers['bank_account'])
+            elif identifiers.get('phone'):
+                query = query.eq('phone', identifiers['phone'])
+            elif identifiers.get('tax_id'):
+                query = query.eq('tax_id', identifiers['tax_id'])
+            else:
+                # No strong identifiers, return empty
+                return []
+            
+            result = query.execute()
+            
+            if result.data:
+                for entity in result.data:
+                    similar_entities.append({
+                        'id': entity['id'],
+                        'canonical_name': entity['canonical_name'],
+                        'aliases': entity['aliases'],
+                        'email': entity['email'],
+                        'bank_account': entity['bank_account'],
+                        'phone': entity['phone'],
+                        'tax_id': entity['tax_id']
+                    })
+            
+            return similar_entities
+            
+        except Exception as e:
+            logger.error(f"Error finding similar entities: {e}")
+            return []
+    
+    async def _find_best_entity_match(self, entity_name: str, entity_type: str, 
+                                    existing_entities: List[Dict], identifiers: Dict[str, str]) -> Dict:
+        """Find the best matching entity or determine if we should create a new one"""
+        
+        best_match = None
+        highest_similarity = 0.0
+        
+        for entity in existing_entities:
+            # Calculate name similarity
+            name_similarity = self.calculate_name_similarity(entity_name, entity['canonical_name'])
+            
+            # Check alias similarity
+            alias_similarity = 0.0
+            if entity['aliases']:
+                for alias in entity['aliases']:
+                    alias_sim = self.calculate_name_similarity(entity_name, alias)
+                    alias_similarity = max(alias_similarity, alias_sim)
+            
+            # Use the higher of canonical name or alias similarity
+            similarity = max(name_similarity, alias_similarity)
+            
+            if similarity > highest_similarity:
+                highest_similarity = similarity
+                best_match = {
+                    'entity_id': entity['id'],
+                    'similarity': similarity,
+                    'should_merge': similarity >= 0.8  # CRITICAL: Only merge if very similar names
+                }
+        
+        return best_match
+    
+    async def _create_new_entity(self, entity_name: str, entity_type: str, platform: str,
+                               user_id: str, identifiers: Dict[str, str], source_file: str) -> str:
+        """Create a new entity in the database"""
+        
+        try:
+            # Call database function to create new entity
+            result = self.supabase.rpc('find_or_create_entity', {
+                'p_user_id': user_id,
+                'p_entity_name': entity_name,
+                'p_entity_type': entity_type,
+                'p_platform': platform,
+                'p_email': identifiers.get('email'),
+                'p_bank_account': identifiers.get('bank_account'),
+                'p_phone': identifiers.get('phone'),
+                'p_tax_id': identifiers.get('tax_id'),
+                'p_source_file': source_file
+            }).execute()
+            
+            if result.data:
+                return result.data
+            else:
+                raise Exception("Database function returned no entity ID")
+                
+        except Exception as e:
+            logger.error(f"Error creating new entity: {e}")
+            raise e
     
     async def resolve_entities_batch(self, entities: Dict[str, List[str]], platform: str, 
                                    user_id: str, row_data: Dict, column_names: List[str],
