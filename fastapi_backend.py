@@ -731,9 +731,11 @@ class DocumentAnalyzer:
         missing_counts: Dict[str, int] = {}
         for col in columns:
             if col in df.columns:
-                col_series = df[col]
-                # Treat empty strings and NaN as missing
-                missing_counts[col] = int(col_series.isna().sum() + (col_series.astype(str).str.strip() == '').sum() - (col_series.isna().sum()))
+                series = df[col]
+                # Treat NaN or blank strings as missing
+                blank_mask = series.astype(str).str.strip() == ''
+                missing_mask = series.isna() | blank_mask
+                missing_counts[col] = int(missing_mask.sum())
         return missing_counts
 
     def _build_required_columns_by_type(self, doc_type: str) -> list:
