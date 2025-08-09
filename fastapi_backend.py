@@ -3443,57 +3443,57 @@ class EntityResolver:
     async def resolve_entity(self, entity_name: str, entity_type: str, platform: str, 
                            user_id: str, row_data: Dict, column_names: List[str], 
                            source_file: str, row_id: str) -> Dict[str, Any]:
-        """Resolve entity using database functions and return resolution details"""
+        """Resolve entity using database functions with improved over-merging prevention"""
         
         # Extract strong identifiers
         identifiers = self.extract_strong_identifiers(row_data, column_names)
         
         try:
-            # CRITICAL FIX: Add name similarity check before calling database function
-            # This prevents over-merging of entities with same email/bank but different names
-            
-            # First, try to find existing entities with similar identifiers
-            existing_entities = await self._find_similar_entities(
-                entity_name, entity_type, user_id, identifiers
-            )
-            
-            # If we found similar entities, check if we should merge or create new
-            if existing_entities:
-                best_match = await self._find_best_entity_match(
-                    entity_name, entity_type, existing_entities, identifiers
-                )
-                
-                if best_match and best_match['should_merge']:
-                    # Use existing entity
-                    entity_id = best_match['entity_id']
-                else:
-                    # Create new entity - names are too different
-                    entity_id = await self._create_new_entity(
-                        entity_name, entity_type, platform, user_id, identifiers, source_file
-                    )
-            else:
-                # No similar entities found, create new
-                entity_id = await self._create_new_entity(
-                    entity_name, entity_type, platform, user_id, identifiers, source_file
-                )
-            
-            # Get entity details for response
-            entity_details = self.supabase.rpc('get_entity_details', {
-                'user_uuid': user_id,
-                'entity_id': entity_id
+            # Call the improved database function that now includes name similarity checks
+            result = self.supabase.rpc('find_or_create_entity', {
+                'p_user_id': user_id,
+                'p_entity_name': entity_name,
+                'p_entity_type': entity_type,
+                'p_platform': platform,
+                'p_email': identifiers.get('email'),
+                'p_bank_account': identifiers.get('bank_account'),
+                'p_phone': identifiers.get('phone'),
+                'p_tax_id': identifiers.get('tax_id'),
+                'p_source_file': source_file
             }).execute()
             
-            return {
-                'entity_id': entity_id,
-                'resolved_name': entity_name,
-                'entity_type': entity_type,
-                'platform': platform,
-                'identifiers': identifiers,
-                'source_file': source_file,
-                'row_id': row_id,
-                'resolution_success': True,
-                'entity_details': entity_details.data[0] if entity_details.data else None
-            }
+            if result.data:
+                entity_id = result.data
+                
+                # Get entity details for response
+                entity_details = self.supabase.rpc('get_entity_details', {
+                    'user_uuid': user_id,
+                    'entity_id': entity_id
+                }).execute()
+                
+                return {
+                    'entity_id': entity_id,
+                    'resolved_name': entity_name,
+                    'entity_type': entity_type,
+                    'platform': platform,
+                    'identifiers': identifiers,
+                    'source_file': source_file,
+                    'row_id': row_id,
+                    'resolution_success': True,
+                    'entity_details': entity_details.data[0] if entity_details.data else None
+                }
+            else:
+                return {
+                    'entity_id': None,
+                    'resolved_name': entity_name,
+                    'entity_type': entity_type,
+                    'platform': platform,
+                    'identifiers': identifiers,
+                    'source_file': source_file,
+                    'row_id': row_id,
+                    'resolution_success': False,
+                    'error': 'Database function returned no entity ID'
+                }
                 
         except Exception as e:
             return {
@@ -3508,105 +3508,7 @@ class EntityResolver:
                 'error': str(e)
             }
     
-    async def _find_similar_entities(self, entity_name: str, entity_type: str, 
-                                   user_id: str, identifiers: Dict[str, str]) -> List[Dict]:
-        """Find existing entities that might match based on identifiers"""
-        similar_entities = []
-        
-        try:
-            # Query for entities with matching identifiers
-            query = self.supabase.table('normalized_entities').select('*').eq('user_id', user_id).eq('entity_type', entity_type)
-            
-            # Add identifier filters
-            if identifiers.get('email'):
-                query = query.eq('email', identifiers['email'])
-            elif identifiers.get('bank_account'):
-                query = query.eq('bank_account', identifiers['bank_account'])
-            elif identifiers.get('phone'):
-                query = query.eq('phone', identifiers['phone'])
-            elif identifiers.get('tax_id'):
-                query = query.eq('tax_id', identifiers['tax_id'])
-            else:
-                # No strong identifiers, return empty
-                return []
-            
-            result = query.execute()
-            
-            if result.data:
-                for entity in result.data:
-                    similar_entities.append({
-                        'id': entity['id'],
-                        'canonical_name': entity['canonical_name'],
-                        'aliases': entity['aliases'],
-                        'email': entity['email'],
-                        'bank_account': entity['bank_account'],
-                        'phone': entity['phone'],
-                        'tax_id': entity['tax_id']
-                    })
-            
-            return similar_entities
-            
-        except Exception as e:
-            logger.error(f"Error finding similar entities: {e}")
-            return []
-    
-    async def _find_best_entity_match(self, entity_name: str, entity_type: str, 
-                                    existing_entities: List[Dict], identifiers: Dict[str, str]) -> Dict:
-        """Find the best matching entity or determine if we should create a new one"""
-        
-        best_match = None
-        highest_similarity = 0.0
-        
-        for entity in existing_entities:
-            # Calculate name similarity
-            name_similarity = self.calculate_name_similarity(entity_name, entity['canonical_name'])
-            
-            # Check alias similarity
-            alias_similarity = 0.0
-            if entity['aliases']:
-                for alias in entity['aliases']:
-                    alias_sim = self.calculate_name_similarity(entity_name, alias)
-                    alias_similarity = max(alias_similarity, alias_sim)
-            
-            # Use the higher of canonical name or alias similarity
-            similarity = max(name_similarity, alias_similarity)
-            
-            if similarity > highest_similarity:
-                highest_similarity = similarity
-                best_match = {
-                    'entity_id': entity['id'],
-                    'similarity': similarity,
-                    'should_merge': similarity >= 0.8  # CRITICAL: Only merge if very similar names
-                }
-        
-        return best_match
-    
-    async def _create_new_entity(self, entity_name: str, entity_type: str, platform: str,
-                               user_id: str, identifiers: Dict[str, str], source_file: str) -> str:
-        """Create a new entity in the database"""
-        
-        try:
-            # Call database function to create new entity
-            result = self.supabase.rpc('find_or_create_entity', {
-                'p_user_id': user_id,
-                'p_entity_name': entity_name,
-                'p_entity_type': entity_type,
-                'p_platform': platform,
-                'p_email': identifiers.get('email'),
-                'p_bank_account': identifiers.get('bank_account'),
-                'p_phone': identifiers.get('phone'),
-                'p_tax_id': identifiers.get('tax_id'),
-                'p_source_file': source_file
-            }).execute()
-            
-            if result.data:
-                return result.data
-            else:
-                raise Exception("Database function returned no entity ID")
-                
-        except Exception as e:
-            logger.error(f"Error creating new entity: {e}")
-            raise e
+
     
     async def resolve_entities_batch(self, entities: Dict[str, List[str]], platform: str, 
                                    user_id: str, row_data: Dict, column_names: List[str],
