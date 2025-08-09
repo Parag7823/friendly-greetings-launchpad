@@ -707,6 +707,85 @@ class DocumentAnalyzer:
     def __init__(self, openai_client):
         self.openai = openai_client
     
+    # ---------- Universal helpers for quality and platform analysis ----------
+    def _get_date_columns(self, df: pd.DataFrame) -> list:
+        column_names = list(df.columns)
+        return [col for col in column_names if any(word in col.lower() for word in ['date', 'time', 'period', 'month', 'year'])]
+
+    def _safe_parse_dates(self, series: pd.Series) -> pd.Series:
+        try:
+            return pd.to_datetime(series, errors='coerce', utc=False)
+        except Exception:
+            # If parsing fails entirely, return all NaT
+            return pd.to_datetime(pd.Series([None] * len(series)))
+
+    def _compute_platform_distribution(self, df: pd.DataFrame) -> Dict[str, int]:
+        if 'Platform' in df.columns:
+            platform_series = df['Platform'].astype(str).str.strip()
+            platform_series = platform_series[platform_series != '']
+            counts = platform_series.value_counts(dropna=True)
+            return {str(k): int(v) for k, v in counts.items()}
+        return {}
+
+    def _compute_missing_counts(self, df: pd.DataFrame, columns: list) -> Dict[str, int]:
+        missing_counts: Dict[str, int] = {}
+        for col in columns:
+            if col in df.columns:
+                col_series = df[col]
+                # Treat empty strings and NaN as missing
+                missing_counts[col] = int(col_series.isna().sum() + (col_series.astype(str).str.strip() == '').sum() - (col_series.isna().sum()))
+        return missing_counts
+
+    def _build_required_columns_by_type(self, doc_type: str) -> list:
+        mapping = {
+            'bank_statement': ['Date', 'Description', 'Amount', 'Balance'],
+            'expense_data': ['Vendor Name', 'Amount', 'Payment Date'],
+            'revenue_data': ['Client Name', 'Amount', 'Issue Date'],
+            'payroll_data': ['Employee Name', 'Salary', 'Payment Date'],
+        }
+        return mapping.get(doc_type, [])
+
+    def _analyze_general_quality(self, df: pd.DataFrame, doc_type: str) -> Dict[str, Any]:
+        data_quality: Dict[str, Any] = {
+            'missing_field_counts': {},
+            'invalid_dates': {},
+            'zero_amount_rows': 0,
+        }
+
+        # Required fields
+        required_cols = self._build_required_columns_by_type(doc_type)
+        if required_cols:
+            data_quality['missing_field_counts'] = self._compute_missing_counts(df, required_cols)
+
+        # Date anomalies
+        for date_col in self._get_date_columns(df):
+            if date_col in df.columns:
+                raw_series = df[date_col].astype(str)
+                parsed = self._safe_parse_dates(raw_series)
+                # invalid if original non-empty and parsed is NaT
+                non_empty = raw_series.str.strip() != ''
+                invalid_count = int(((parsed.isna()) & non_empty).sum())
+                if invalid_count > 0:
+                    data_quality['invalid_dates'][date_col] = invalid_count
+
+        # Zero amount checks
+        if 'Amount' in df.columns:
+            try:
+                numeric_amount = pd.to_numeric(df['Amount'], errors='coerce').fillna(0)
+                data_quality['zero_amount_rows'] = int((numeric_amount == 0).sum())
+            except Exception:
+                data_quality['zero_amount_rows'] = 0
+
+        # Payroll-specific zero salary
+        if doc_type == 'payroll_data' and 'Salary' in df.columns:
+            try:
+                numeric_salary = pd.to_numeric(df['Salary'], errors='coerce').fillna(0)
+                data_quality['zero_salary_rows'] = int((numeric_salary == 0).sum())
+            except Exception:
+                data_quality['zero_salary_rows'] = 0
+
+        return data_quality
+
     async def detect_document_type(self, df: pd.DataFrame, filename: str) -> Dict[str, Any]:
         """Enhanced document type detection using AI analysis"""
         try:
@@ -925,6 +1004,28 @@ class DocumentAnalyzer:
                     "count": int(df[col].count())
                 }
             
+            # Universal platform distribution and low-confidence handling
+            platform_distribution = self._compute_platform_distribution(df)
+            if platform_distribution:
+                insights["platform_distribution"] = platform_distribution
+                insights["detected_platforms"] = list(platform_distribution.keys())
+                # If more than one platform present, treat as mixed and low confidence
+                if len(platform_distribution.keys()) > 1:
+                    insights["source_platform"] = "mixed"
+                    insights["low_confidence"] = True
+            # Low confidence flag from AI doc analysis
+            if insights.get("confidence", 1.0) < 0.7:
+                insights["low_confidence"] = True
+
+            # Data quality and anomalies
+            doc_type = insights.get("document_type", "unknown")
+            insights["data_quality"] = self._analyze_general_quality(df, doc_type)
+
+            # Optional currency breakdown if present
+            if 'Currency' in df.columns:
+                cur_counts = df['Currency'].astype(str).str.strip().value_counts(dropna=True)
+                insights['currency_breakdown'] = {str(k): int(v) for k, v in cur_counts.items()}
+
             # Enhanced analysis based on document type
             doc_type = doc_analysis.get("document_type", "unknown")
             if doc_type == "income_statement":
@@ -940,11 +1041,40 @@ class DocumentAnalyzer:
                     "equity_analysis": self._analyze_equity(df)
                 }
             elif doc_type == "payroll_data":
+                payroll_summary = self._analyze_payroll_data(df)
+                employee_analysis = self._analyze_employee_data(df)
+                tax_analysis = self._analyze_tax_data(df)
+                # Add unique employee metrics and month distribution
+                if 'Employee ID' in df.columns:
+                    unique_employees = int(df['Employee ID'].astype(str).nunique())
+                elif 'Employee Name' in df.columns:
+                    unique_employees = int(df['Employee Name'].astype(str).nunique())
+                else:
+                    unique_employees = None
+
+                date_cols = self._get_date_columns(df)
+                month_distribution = {}
+                if date_cols:
+                    dt = self._safe_parse_dates(df[date_cols[0]].astype(str))
+                    month_distribution = dt.dt.to_period('M').value_counts().sort_index()
+                    month_distribution = {str(k): int(v) for k, v in month_distribution.items()}
+
                 insights["enhanced_analysis"] = {
-                    "payroll_summary": self._analyze_payroll_data(df),
-                    "employee_analysis": self._analyze_employee_data(df),
-                    "tax_analysis": self._analyze_tax_data(df)
+                    "payroll_summary": payroll_summary,
+                    "employee_analysis": employee_analysis,
+                    "tax_analysis": tax_analysis,
+                    "unique_employee_count": unique_employees,
+                    "month_distribution": month_distribution
                 }
+            elif doc_type == "expense_data":
+                # Per-vendor totals for vendor payments
+                if 'Vendor Name' in df.columns and 'Amount' in df.columns:
+                    try:
+                        amounts = pd.to_numeric(df['Amount'], errors='coerce')
+                        per_vendor = amounts.groupby(df['Vendor Name']).sum().sort_values(ascending=False).head(20)
+                        insights.setdefault('enhanced_analysis', {})['per_vendor_totals'] = {str(k): float(v) for k, v in per_vendor.items()}
+                    except Exception:
+                        pass
             
             return insights
             
