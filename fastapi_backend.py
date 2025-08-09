@@ -1042,6 +1042,24 @@ class DocumentAnalyzer:
                     "liability_analysis": self._analyze_liabilities(df),
                     "equity_analysis": self._analyze_equity(df)
                 }
+            elif doc_type == "cash_flow":
+                insights["enhanced_analysis"] = {
+                    "cash_flow_analysis": self._analyze_cash_flow_data(df),
+                    "transaction_analysis": self._analyze_transaction_patterns(df),
+                    "cash_flow_metrics": self._calculate_cash_flow_metrics(df)
+                }
+            elif doc_type == "bank_statement":
+                insights["enhanced_analysis"] = {
+                    "bank_activity_analysis": self._analyze_bank_activity(df),
+                    "balance_trends": self._analyze_balance_trends(df),
+                    "transaction_categorization": self._categorize_bank_transactions(df)
+                }
+            elif doc_type == "tax_records":
+                insights["enhanced_analysis"] = {
+                    "tax_analysis": self._analyze_tax_records(df),
+                    "tax_liability_summary": self._calculate_tax_liabilities(df),
+                    "filing_status_analysis": self._analyze_filing_status(df)
+                }
             elif doc_type == "payroll_data":
                 payroll_summary = self._analyze_payroll_data(df)
                 employee_analysis = self._analyze_employee_data(df)
@@ -1077,6 +1095,16 @@ class DocumentAnalyzer:
                         insights.setdefault('enhanced_analysis', {})['per_vendor_totals'] = {str(k): float(v) for k, v in per_vendor.items()}
                     except Exception:
                         pass
+                
+                # Add expense categorization
+                insights.setdefault('enhanced_analysis', {})['expense_categorization'] = self._categorize_expenses(df)
+            else:
+                # Universal analysis for any document type
+                insights["enhanced_analysis"] = {
+                    "general_analysis": self._analyze_general_document(df),
+                    "data_quality_insights": self._get_data_quality_insights(df),
+                    "trend_analysis": self._analyze_trends(df)
+                }
             
             return insights
             
