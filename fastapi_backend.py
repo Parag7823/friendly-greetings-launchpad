@@ -4226,6 +4226,98 @@ class AIRelationshipDetector:
         
         return relationships
     
+    async def _discover_relationship_types(self, events: List[Dict]) -> List[str]:
+        """Discover relationship types from events using AI"""
+        try:
+            # Create context for AI analysis
+            event_summary = self._create_event_summary(events)
+            
+            prompt = f"""
+            Analyze the following financial events and identify possible relationship types between them.
+            
+            Events Summary:
+            {event_summary}
+            
+            Identify relationship types that could exist between these events. Consider:
+            1. Invoice to payment relationships
+            2. Fee to transaction relationships  
+            3. Refund to original transaction relationships
+            4. Payroll to payout relationships
+            5. Revenue to expense relationships
+            6. Any other logical financial relationships
+            
+            Return only the relationship type names, one per line, without explanations.
+            """
+            
+            response = await self.openai.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=200,
+                temperature=0.1
+            )
+            
+            response_text = response.choices[0].message.content.strip()
+            relationship_types = self._parse_relationship_types(response_text)
+            
+            # Add default types if AI doesn't find any
+            if not relationship_types:
+                relationship_types = ["invoice_to_payment", "fee_to_transaction", "refund_to_original", "payroll_to_payout"]
+            
+            return relationship_types[:10]  # Limit to 10 types
+            
+        except Exception as e:
+            logger.error(f"AI relationship type discovery failed: {e}")
+            # Return default relationship types
+            return ["invoice_to_payment", "fee_to_transaction", "refund_to_original", "payroll_to_payout"]
+    
+    def _create_event_summary(self, events: List[Dict]) -> str:
+        """Create a summary of events for AI analysis"""
+        if not events:
+            return "No events found"
+        
+        # Group events by platform and type
+        platform_counts = {}
+        type_counts = {}
+        
+        for event in events:
+            platform = event.get('source_platform', 'unknown')
+            platform_counts[platform] = platform_counts.get(platform, 0) + 1
+            
+            payload = event.get('payload', {})
+            text = str(payload).lower()
+            
+            if any(word in text for word in ['invoice', 'bill']):
+                type_counts['invoice'] = type_counts.get('invoice', 0) + 1
+            elif any(word in text for word in ['payment', 'charge']):
+                type_counts['payment'] = type_counts.get('payment', 0) + 1
+            elif any(word in text for word in ['payroll', 'salary']):
+                type_counts['payroll'] = type_counts.get('payroll', 0) + 1
+            elif any(word in text for word in ['refund', 'return']):
+                type_counts['refund'] = type_counts.get('refund', 0) + 1
+            else:
+                type_counts['other'] = type_counts.get('other', 0) + 1
+        
+        summary = f"Total events: {len(events)}\n"
+        summary += f"Platforms: {', '.join([f'{k}({v})' for k, v in platform_counts.items()])}\n"
+        summary += f"Event types: {', '.join([f'{k}({v})' for k, v in type_counts.items()])}"
+        
+        return summary
+    
+    def _parse_relationship_types(self, response_text: str) -> List[str]:
+        """Parse relationship types from AI response"""
+        lines = response_text.strip().split('\n')
+        types = []
+        
+        for line in lines:
+            line = line.strip()
+            if line and not line.startswith('#') and not line.startswith('-'):
+                # Clean up the line
+                clean_type = line.lower().replace(' ', '_').replace('-', '_')
+                if clean_type:
+                    types.append(clean_type)
+        
+        return types
+    
     def _get_relationship_groups(self, relationship_type: str, event_groups: Dict[str, List[Dict]]) -> Tuple[List[Dict], List[Dict]]:
         """Get relevant event groups for a relationship type"""
         group_mapping = {
@@ -4743,32 +4835,40 @@ class AIRelationshipDetector:
     def _check_id_pattern_match(self, id1: str, id2: str, relationship_type: str) -> bool:
         """Check if IDs match a pattern for the relationship type"""
         import re
-        # Define patterns for different relationship types
-        patterns = {
-            'invoice_to_payment': [
-                (r'inv_(\w+)', r'pay_\1'),  # invoice_id to payment_id
-                (r'in_(\w+)', r'pi_\1'),    # invoice_id to payment_intent
-            ],
-            'fee_to_transaction': [
-                (r'fee_(\w+)', r'ch_\1'),   # fee_id to charge_id
-                (r'fee_(\w+)', r'txn_\1'),  # fee_id to transaction_id
-            ],
-            'refund_to_original': [
-                (r're_(\w+)', r'ch_\1'),    # refund_id to charge_id
-                (r'rfnd_(\w+)', r'pay_\1'), # refund_id to payment_id
-            ]
-        }
-        
-        pattern_list = patterns.get(relationship_type, [])
-        
-        for pattern1, pattern2 in pattern_list:
-            match1 = re.match(pattern1, id1)
-            match2 = re.match(pattern2, id2)
+        try:
+            # Define patterns for different relationship types
+            patterns = {
+                'invoice_to_payment': [
+                    (r'inv_(\w+)', r'pay_\1'),  # invoice_id to payment_id
+                    (r'in_(\w+)', r'pi_\1'),    # invoice_id to payment_intent
+                ],
+                'fee_to_transaction': [
+                    (r'fee_(\w+)', r'ch_\1'),   # fee_id to charge_id
+                    (r'fee_(\w+)', r'txn_\1'),  # fee_id to transaction_id
+                ],
+                'refund_to_original': [
+                    (r're_(\w+)', r'ch_\1'),    # refund_id to charge_id
+                    (r'rfnd_(\w+)', r'pay_\1'), # refund_id to payment_id
+                ]
+            }
             
-            if match1 and match2 and match1.group(1) == match2.group(1):
-                return True
-        
-        return False
+            pattern_list = patterns.get(relationship_type, [])
+            
+            for pattern1, pattern2 in pattern_list:
+                try:
+                    match1 = re.match(pattern1, id1)
+                    match2 = re.match(pattern2, id2)
+                    
+                    if match1 and match2 and match1.group(1) == match2.group(1):
+                        return True
+                except (re.error, IndexError):
+                    # Skip invalid patterns
+                    continue
+            
+            return False
+        except Exception as e:
+            logger.error(f"Error in ID pattern matching: {e}")
+            return False
     
     def _get_context_boost(self, context1: str, context2: str, relationship_type: str) -> float:
         """Get context boost for expected relationship patterns"""
@@ -6075,11 +6175,8 @@ async def test_ai_relationship_detection(user_id: str):
         
         supabase = create_client(supabase_url, supabase_key)
         
-        # Import and use the optimized relationship detector
-        from optimized_relationship_detector import OptimizedAIRelationshipDetector
-        
-        # Initialize OPTIMIZED AI Relationship Detector
-        ai_detector = OptimizedAIRelationshipDetector(openai_client, supabase)
+        # Use the existing AIRelationshipDetector class
+        ai_detector = AIRelationshipDetector(openai_client, supabase)
         
         # Detect relationships with optimized processing
         result = await ai_detector.detect_all_relationships(user_id)
@@ -6831,7 +6928,8 @@ class FlexibleRelationshipEngine:
                 "created_at": datetime.utcnow().isoformat()
             }
             
-            self.supabase.table('relationship_patterns').insert(pattern_data).execute()
+            # Use upsert to handle duplicate key constraints
+            self.supabase.table('relationship_patterns').upsert(pattern_data).execute()
             
         except Exception as e:
             logger.error(f"Failed to store relationship pattern: {e}")
