@@ -4592,96 +4592,89 @@ class AIRelationshipDetector:
             return []
     
     async def _calculate_comprehensive_score(self, source: Dict, target: Dict, relationship_type: str) -> float:
-        """Calculate comprehensive relationship score using multiple dimensions"""
-        score = 0.0
-        
-        # Amount matching (30% weight)
+        """UNIVERSAL: Calculate comprehensive relationship score - More lenient for real-world data"""
+        # Calculate individual scores
         amount_score = self._calculate_amount_score(source, target, relationship_type)
-        score += amount_score * 0.3
-        
-        # Date matching (20% weight)
         date_score = self._calculate_date_score(source, target, relationship_type)
-        score += date_score * 0.2
-        
-        # Entity matching (20% weight)
         entity_score = self._calculate_entity_score(source, target, relationship_type)
-        score += entity_score * 0.2
-        
-        # ID matching (15% weight)
         id_score = self._calculate_id_score(source, target, relationship_type)
-        score += id_score * 0.15
-        
-        # Context matching (15% weight)
         context_score = self._calculate_context_score(source, target, relationship_type)
-        score += context_score * 0.15
         
-        return min(score, 1.0)
+        # UNIVERSAL: More balanced weighting for real-world data
+        comprehensive_score = (
+            amount_score * 0.35 + 
+            date_score * 0.25 + 
+            entity_score * 0.20 + 
+            id_score * 0.10 + 
+            context_score * 0.10
+        )
+        
+        # Boost score for any meaningful matches
+        if amount_score > 0.3 or date_score > 0.3 or entity_score > 0.3:
+            comprehensive_score = min(1.0, comprehensive_score + 0.1)
+        
+        return comprehensive_score
     
     def _calculate_amount_score(self, source: Dict, target: Dict, relationship_type: str) -> float:
-        """Calculate amount matching score with intelligent tolerance"""
+        """UNIVERSAL: Calculate amount matching score - More lenient for real-world data"""
         source_amount = self._extract_amount(source.get('payload', {}))
         target_amount = self._extract_amount(target.get('payload', {}))
         
-        if source_amount == 0 or target_amount == 0:
-            return 0.0
+        if source_amount == 0 and target_amount == 0:
+            return 0.5  # Both zero - neutral score
+        elif source_amount == 0 or target_amount == 0:
+            return 0.3  # One zero - low but not zero score
         
-        # Different tolerance based on relationship type
-        tolerance_map = {
-            'invoice_to_payment': 0.001,  # Exact match
-            'fee_to_transaction': 0.01,   # 1% tolerance
-            'refund_to_original': 0.001,  # Exact match
-            'payroll_to_payout': 0.05,    # 5% tolerance
-            'tax_to_income': 0.02,        # 2% tolerance
-            'expense_to_reimbursement': 0.001,  # Exact match
-            'subscription_to_payment': 0.001,   # Exact match
-            'loan_to_payment': 0.01,      # 1% tolerance
-            'investment_to_return': 0.1,  # 10% tolerance
-        }
+        # Calculate percentage difference
+        diff = abs(source_amount - target_amount)
+        max_amount = max(abs(source_amount), abs(target_amount))
+        percentage_diff = diff / max_amount if max_amount > 0 else 1.0
         
-        tolerance = tolerance_map.get(relationship_type, 0.01)
-        amount_diff = abs(source_amount - target_amount)
-        
-        if amount_diff <= tolerance:
+        # UNIVERSAL SCORING - More lenient for real-world data
+        if percentage_diff <= 0.01:  # 1% or less
             return 1.0
-        elif amount_diff <= source_amount * tolerance:
+        elif percentage_diff <= 0.05:  # 5% or less
+            return 0.9
+        elif percentage_diff <= 0.10:  # 10% or less
             return 0.8
-        elif amount_diff <= source_amount * tolerance * 2:
-            return 0.6
+        elif percentage_diff <= 0.20:  # 20% or less
+            return 0.7
+        elif percentage_diff <= 0.50:  # 50% or less
+            return 0.5
+        elif percentage_diff <= 1.0:  # 100% or less
+            return 0.3
         else:
-            return 0.0
+            return 0.1  # Very different amounts
     
     def _calculate_date_score(self, source: Dict, target: Dict, relationship_type: str) -> float:
-        """Calculate date matching score with configurable windows"""
+        """UNIVERSAL: Calculate date matching score - More flexible for real-world data"""
         source_date = self._extract_date(source.get('payload', {}))
         target_date = self._extract_date(target.get('payload', {}))
         
         if not source_date or not target_date:
-            return 0.0
+            return 0.2  # Missing dates - give some score instead of zero
         
-        # Different date windows based on relationship type
-        window_map = {
-            'invoice_to_payment': 7,      # 7 days
-            'fee_to_transaction': 1,      # Same day
-            'refund_to_original': 30,     # 30 days
-            'payroll_to_payout': 3,       # 3 days
-            'tax_to_income': 90,          # 90 days
-            'expense_to_reimbursement': 30,  # 30 days
-            'subscription_to_payment': 7,     # 7 days
-            'loan_to_payment': 1,         # Same day
-            'investment_to_return': 365,  # 1 year
-        }
-        
-        window_days = window_map.get(relationship_type, 7)
+        # Use flexible day difference scoring
         date_diff = abs((source_date - target_date).days)
         
         if date_diff == 0:
             return 1.0
-        elif date_diff <= window_days:
+        elif date_diff <= 1:
+            return 0.95
+        elif date_diff <= 3:
+            return 0.9
+        elif date_diff <= 7:
             return 0.8
-        elif date_diff <= window_days * 2:
+        elif date_diff <= 14:
+            return 0.7
+        elif date_diff <= 30:
             return 0.6
+        elif date_diff <= 60:
+            return 0.4
+        elif date_diff <= 90:
+            return 0.3
         else:
-            return 0.0
+            return 0.1  # Very different dates but not zero
     
     def _calculate_entity_score(self, source: Dict, target: Dict, relationship_type: str) -> float:
         """Calculate entity matching score with fuzzy logic"""
