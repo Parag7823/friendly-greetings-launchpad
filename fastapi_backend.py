@@ -3801,7 +3801,7 @@ async def test_cross_file_relationships(user_id: str):
     """Test cross-file relationship detection using EnhancedRelationshipDetector"""
     try:
         # Initialize OpenAI client
-        openai_client = AsyncOpenAI(api_key=os.getenv('OPENAI_API_KEY'))
+        openai_client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
         
         # Initialize Supabase client
         supabase_url = os.getenv('SUPABASE_URL')
@@ -7678,7 +7678,7 @@ async def test_cross_file_relationships(user_id: str):
     """Test cross-file relationship detection using EnhancedRelationshipDetector"""
     try:
         # Initialize OpenAI client
-        openai_client = AsyncOpenAI(api_key=os.getenv('OPENAI_API_KEY'))
+        openai_client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
         
         # Initialize Supabase client
         supabase_url = os.getenv('SUPABASE_URL')
@@ -11825,7 +11825,7 @@ async def test_enhanced_relationship_detection(user_id: str):
     """Test the enhanced relationship detection system"""
     try:
         # Initialize OpenAI client
-        openai_client = AsyncOpenAI(api_key=os.getenv('OPENAI_API_KEY'))
+        openai_client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
         
         # Initialize Supabase client
         supabase_url = os.getenv('SUPABASE_URL')
