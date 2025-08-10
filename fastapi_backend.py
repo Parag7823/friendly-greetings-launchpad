@@ -3892,12 +3892,12 @@ class CrossFileRelationshipDetector:
                 payload = event.get('payload', {})
                 platform = event.get('source_platform', 'unknown')
                 
-                # Identify payroll events
-                if platform in ['gusto', 'quickbooks'] and self._is_payroll_event(payload):
+                # Identify payroll events - UNIVERSAL DETECTION
+                if self._is_payroll_event(payload):
                     payroll_events.append(event)
                 
-                # Identify payout events  
-                if platform in ['razorpay', 'stripe'] and self._is_payout_event(payload):
+                # Identify payout events - UNIVERSAL DETECTION  
+                if self._is_payout_event(payload):
                     payout_events.append(event)
             
             # Find relationships
