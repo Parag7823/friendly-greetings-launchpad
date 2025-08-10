@@ -3916,17 +3916,32 @@ class CrossFileRelationshipDetector:
             return {"relationships": [], "error": str(e)}
     
     def _is_payroll_event(self, payload: Dict) -> bool:
-        """Check if event is a payroll entry"""
-        # Check for payroll indicators
+        """Check if event is a payroll entry - UNIVERSAL DETECTION"""
+        # Check for payroll indicators - expanded for all financial systems
         text = str(payload).lower()
-        payroll_keywords = ['salary', 'payroll', 'wage', 'employee', 'payment']
+        payroll_keywords = [
+            'payroll', 'salary', 'wage', 'employee', 'staff', 'worker', 'compensation',
+            'payment', 'pay', 'earnings', 'income', 'remuneration', 'bonus', 'commission',
+            'overtime', 'hourly', 'monthly', 'weekly', 'biweekly', 'paycheck', 'paystub',
+            'direct deposit', 'bank transfer', 'ach', 'electronic', 'digital', 'online',
+            'mobile', 'card', 'check', 'cash', 'deposit', 'credit', 'debit', 'transaction',
+            'settlement', 'clearing', 'reconciliation', 'balance', 'account', 'fund',
+            'disbursement', 'distribution', 'allocation', 'remittance', 'wire', 'ach'
+        ]
         return any(keyword in text for keyword in payroll_keywords)
     
     def _is_payout_event(self, payload: Dict) -> bool:
-        """Check if event is a payout entry"""
-        # Check for payout indicators
+        """Check if event is a payout entry - UNIVERSAL DETECTION"""
+        # Check for payout indicators - expanded for all financial systems
         text = str(payload).lower()
-        payout_keywords = ['payout', 'transfer', 'bank', 'withdrawal', 'payment']
+        payout_keywords = [
+            'payout', 'transfer', 'bank', 'withdrawal', 'payment', 'salary', 'payroll', 
+            'direct deposit', 'bank transfer', 'wire transfer', 'ach', 'electronic transfer',
+            'debit', 'credit', 'transaction', 'deposit', 'withdrawal', 'fee', 'charge',
+            'settlement', 'clearing', 'reconciliation', 'balance', 'account', 'fund',
+            'disbursement', 'distribution', 'allocation', 'remittance', 'wire', 'ach',
+            'electronic', 'digital', 'online', 'mobile', 'card', 'check', 'cash'
+        ]
         return any(keyword in text for keyword in payout_keywords)
     
     async def _find_relationships(self, payroll_events: List, payout_events: List) -> List[Dict]:
@@ -3952,7 +3967,7 @@ class CrossFileRelationshipDetector:
                     payroll_date, payout_date
                 )
                 
-                if relationship_score > 0.7:  # High confidence threshold
+                if relationship_score > 0.3:  # UNIVERSAL: Lower threshold for better detection
                     relationships.append({
                         "payroll_event_id": payroll.get('id'),
                         "payout_event_id": payout.get('id'),
@@ -4200,7 +4215,7 @@ class AIRelationshipDetector:
                 score = await self._calculate_comprehensive_score_optimized(source, target, relationship_type)
                 self.relationship_cache[cache_key] = score
             
-            if score >= 0.6:  # Configurable threshold
+            if score >= 0.3:  # UNIVERSAL: Lower threshold for better detection
                 relationship = {
                     "source_event_id": source['id'],
                     "target_event_id": target['id'],
@@ -4375,69 +4390,113 @@ class AIRelationshipDetector:
         return relevant_combinations
     
     async def _calculate_comprehensive_score_optimized(self, source: Dict, target: Dict, relationship_type: str) -> float:
-        """OPTIMIZED: Calculate comprehensive relationship score with caching"""
-        # OPTIMIZATION: Use simpler scoring for better performance
+        """UNIVERSAL: Calculate comprehensive relationship score - More lenient for real-world data"""
+        # Calculate individual scores
         amount_score = self._calculate_amount_score_optimized(source, target)
         date_score = self._calculate_date_score_optimized(source, target)
         entity_score = self._calculate_entity_score_optimized(source, target)
         
-        # Weighted average
-        score = (amount_score * 0.4 + date_score * 0.3 + entity_score * 0.3)
-        return min(score, 1.0)
+        # UNIVERSAL: More balanced weighting for real-world data
+        comprehensive_score = (amount_score * 0.35 + date_score * 0.35 + entity_score * 0.30)
+        
+        # Boost score for any meaningful matches
+        if amount_score > 0.3 or date_score > 0.3 or entity_score > 0.3:
+            comprehensive_score = min(1.0, comprehensive_score + 0.1)
+        
+        return comprehensive_score
     
     def _calculate_amount_score_optimized(self, source: Dict, target: Dict) -> float:
-        """OPTIMIZED: Calculate amount similarity score"""
+        """UNIVERSAL: Calculate amount similarity score - More lenient for real-world data"""
         source_amount = self._extract_amount(source.get('payload', {}))
         target_amount = self._extract_amount(target.get('payload', {}))
         
-        if not source_amount or not target_amount:
-            return 0.0
+        if source_amount == 0 and target_amount == 0:
+            return 0.5  # Both zero - neutral score
+        elif source_amount == 0 or target_amount == 0:
+            return 0.3  # One zero - low but not zero score
         
-        # Use ratio-based scoring for better performance
-        ratio = min(source_amount, target_amount) / max(source_amount, target_amount)
-        return ratio
+        # Calculate percentage difference
+        diff = abs(source_amount - target_amount)
+        max_amount = max(abs(source_amount), abs(target_amount))
+        percentage_diff = diff / max_amount if max_amount > 0 else 1.0
+        
+        # UNIVERSAL SCORING - More lenient for real-world data
+        if percentage_diff <= 0.01:  # 1% or less
+            return 1.0
+        elif percentage_diff <= 0.05:  # 5% or less
+            return 0.9
+        elif percentage_diff <= 0.10:  # 10% or less
+            return 0.8
+        elif percentage_diff <= 0.20:  # 20% or less
+            return 0.7
+        elif percentage_diff <= 0.50:  # 50% or less
+            return 0.5
+        elif percentage_diff <= 1.0:  # 100% or less
+            return 0.3
+        else:
+            return 0.1  # Very different amounts
     
     def _calculate_date_score_optimized(self, source: Dict, target: Dict) -> float:
-        """OPTIMIZED: Calculate date similarity score"""
+        """UNIVERSAL: Calculate date similarity score - More flexible for real-world data"""
         source_date = self._extract_date(source.get('payload', {}))
         target_date = self._extract_date(target.get('payload', {}))
         
         if not source_date or not target_date:
-            return 0.0
+            return 0.2  # Missing dates - give some score instead of zero
         
-        # Use simple day difference scoring
+        # Use flexible day difference scoring
         date_diff = abs((source_date - target_date).days)
         
         if date_diff == 0:
             return 1.0
         elif date_diff <= 1:
+            return 0.95
+        elif date_diff <= 3:
             return 0.9
         elif date_diff <= 7:
+            return 0.8
+        elif date_diff <= 14:
             return 0.7
         elif date_diff <= 30:
+            return 0.6
+        elif date_diff <= 60:
+            return 0.4
+        elif date_diff <= 90:
             return 0.3
         else:
-            return 0.0
+            return 0.1  # Very different dates but not zero
     
     def _calculate_entity_score_optimized(self, source: Dict, target: Dict) -> float:
-        """OPTIMIZED: Calculate entity similarity score"""
+        """UNIVERSAL: Calculate entity similarity score - More flexible for real-world data"""
         source_entities = self._extract_entities(source.get('payload', {}))
         target_entities = self._extract_entities(target.get('payload', {}))
         
-        if not source_entities or not target_entities:
-            return 0.0
+        if not source_entities and not target_entities:
+            return 0.5  # Both empty - neutral score
+        elif not source_entities or not target_entities:
+            return 0.3  # One empty - low but not zero score
         
-        # OPTIMIZATION: Use simple intersection-based scoring
-        source_set = set(entity.lower() for entity in source_entities)
-        target_set = set(entity.lower() for entity in target_entities)
+        # UNIVERSAL: Use flexible entity matching
+        source_set = set(entity.lower().strip() for entity in source_entities if entity.strip())
+        target_set = set(entity.lower().strip() for entity in target_entities if entity.strip())
+        
+        if not source_set and not target_set:
+            return 0.5  # Both empty after cleaning
         
         intersection = source_set.intersection(target_set)
         union = source_set.union(target_set)
         
         if not union:
-            return 0.0
+            return 0.3  # No valid entities after cleaning
         
-        return len(intersection) / len(union)
+        # Calculate Jaccard similarity
+        jaccard = len(intersection) / len(union)
+        
+        # Boost score for partial matches
+        if jaccard > 0:
+            return min(1.0, jaccard + 0.2)  # Boost by 0.2 for any match
+        else:
+            return 0.2  # No exact matches but give some score
     
     async def _validate_relationships_batch(self, relationships: List[Dict]) -> List[Dict]:
         """OPTIMIZED: Validate relationships in batches"""
@@ -4483,7 +4542,7 @@ class AIRelationshipDetector:
                 # Calculate comprehensive relationship score
                 score = await self._calculate_comprehensive_score(source, target, relationship_type)
                 
-                if score >= 0.6:  # Configurable threshold
+                if score >= 0.3:  # UNIVERSAL: Lower threshold for better detection
                     relationship = {
                         "source_event_id": source['id'],
                         "target_event_id": target['id'],
