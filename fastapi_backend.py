@@ -704,6 +704,1423 @@ class ProcessRequest(BaseModel):
     user_id: str
 
 class DocumentAnalyzer:
+    def __init__(self, openai_client):
+        self.openai_client = openai_client
+
+import os
+import io
+import logging
+import hashlib
+from datetime import datetime, timedelta
+from typing import Dict, Any, List, Optional, Tuple
+import pandas as pd
+import numpy as np
+from fastapi import FastAPI, HTTPException, BackgroundTasks, WebSocket, WebSocketDisconnect, UploadFile, Form, File
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+from supabase import create_client, Client
+import openai
+import magic
+import filetype
+from openai import OpenAI
+import time
+import json
+import re
+import asyncio
+from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor
+from difflib import SequenceMatcher
+import aiohttp
+import requests
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Initialize FastAPI app
+app = FastAPI(title="Finley AI Backend", version="1.0.0")
+
+# Add CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Initialize OpenAI client
+openai = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+
+class CurrencyNormalizer:
+    """Handles currency detection, conversion, and normalization"""
+    
+    def __init__(self):
+        self.exchange_api_base = "https://api.exchangerate-api.com/v4/latest/"
+        self.rates_cache = {}
+        self.cache_duration = timedelta(hours=24)
+    
+    async def detect_currency(self, amount: str, description: str, platform: str) -> str:
+        """Detect currency from amount, description, and platform context"""
+        try:
+            # Remove currency symbols and clean amount
+            cleaned_amount = re.sub(r'[^\d.-]', '', str(amount))
+            
+            # Platform-specific currency detection
+            platform_currencies = {
+                'razorpay': 'INR',
+                'stripe': 'USD',
+                'paypal': 'USD',
+                'gusto': 'USD',
+                'quickbooks': 'USD',
+                'xero': 'USD'
+            }
+            
+            # Check for currency symbols in description
+            currency_symbols = {
+                '$': 'USD',
+                '₹': 'INR',
+                '€': 'EUR',
+                '£': 'GBP',
+                '¥': 'JPY'
+            }
+            
+            for symbol, currency in currency_symbols.items():
+                if symbol in str(description):
+                    return currency
+            
+            # Check for currency codes in description
+            currency_codes = ['USD', 'INR', 'EUR', 'GBP', 'JPY', 'CAD', 'AUD']
+            for code in currency_codes:
+                if code.lower() in str(description).lower():
+                    return code
+            
+            # Platform-based default
+            if platform in platform_currencies:
+                return platform_currencies[platform]
+            
+            # Default to USD
+            return 'USD'
+            
+        except Exception as e:
+            logger.error(f"Currency detection failed: {e}")
+            return 'USD'
+    
+    async def get_exchange_rate(self, from_currency: str, to_currency: str = 'USD', date: str = None) -> float:
+        """Get exchange rate for currency conversion"""
+        try:
+            # Use current date if not provided
+            if not date:
+                date = datetime.now().strftime('%Y-%m-%d')
+            
+            # Check cache first
+            cache_key = f"{from_currency}_{to_currency}_{date}"
+            if cache_key in self.rates_cache:
+                cached_rate, cached_time = self.rates_cache[cache_key]
+                if datetime.now() - cached_time < self.cache_duration:
+                    return cached_rate
+            
+            # Fetch from API
+            if from_currency == to_currency:
+                rate = 1.0
+            else:
+                url = f"{self.exchange_api_base}{from_currency}"
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(url) as response:
+                        if response.status == 200:
+                            data = await response.json()
+                            rate = data['rates'].get(to_currency, 1.0)
+                        else:
+                            # Fallback to hardcoded rates for common currencies
+                            fallback_rates = {
+                                'INR': 0.012,
+                                'EUR': 1.08,
+                                'GBP': 1.26,
+                                'JPY': 0.0067,
+                                'CAD': 0.74,
+                                'AUD': 0.66
+                            }
+                            rate = fallback_rates.get(from_currency, 1.0)
+            
+            # Cache the rate
+            self.rates_cache[cache_key] = (rate, datetime.now())
+            return rate
+            
+        except Exception as e:
+            logger.error(f"Exchange rate fetch failed: {e}")
+            # Return fallback rate
+            fallback_rates = {
+                'INR': 0.012,
+                'EUR': 1.08,
+                'GBP': 1.26,
+                'JPY': 0.0067,
+                'CAD': 0.74,
+                'AUD': 0.66
+            }
+            return fallback_rates.get(from_currency, 1.0)
+    
+    async def normalize_currency(self, amount: float, currency: str, description: str, platform: str, date: str = None) -> Dict[str, Any]:
+        """Normalize currency and convert to USD"""
+        try:
+            # Detect currency if not provided
+            if not currency:
+                currency = await self.detect_currency(amount, description, platform)
+            
+            # Get exchange rate
+            exchange_rate = await self.get_exchange_rate(currency, 'USD', date)
+            
+            # Convert to USD
+            amount_usd = amount * exchange_rate
+            
+            return {
+                "amount_original": amount,
+                "amount_usd": round(amount_usd, 2),
+                "currency": currency,
+                "exchange_rate": round(exchange_rate, 6),
+                "exchange_date": date or datetime.now().strftime('%Y-%m-%d')
+            }
+            
+        except Exception as e:
+            logger.error(f"Currency normalization failed: {e}")
+            return {
+                "amount_original": amount,
+                "amount_usd": amount,
+                "currency": currency or 'USD',
+                "exchange_rate": 1.0,
+                "exchange_date": date or datetime.now().strftime('%Y-%m-%d')
+            }
+
+class VendorStandardizer:
+    """Handles vendor name standardization and cleaning"""
+    
+    def __init__(self, openai_client):
+        self.openai = openai_client
+        self.vendor_cache = {}
+        self.common_suffixes = [
+            ' inc', ' corp', ' llc', ' ltd', ' co', ' company', ' pvt', ' private',
+            ' limited', ' corporation', ' incorporated', ' enterprises', ' solutions',
+            ' services', ' systems', ' technologies', ' tech', ' group', ' holdings'
+        ]
+    
+    async def standardize_vendor(self, vendor_name: str, platform: str = None) -> Dict[str, Any]:
+        """Standardize vendor name using AI and rule-based cleaning"""
+        try:
+            if not vendor_name or vendor_name.strip() == '':
+                return {
+                    "vendor_raw": vendor_name,
+                    "vendor_standard": "",
+                    "confidence": 0.0,
+                    "cleaning_method": "empty"
+                }
+            
+            # Check cache first
+            cache_key = f"{vendor_name}_{platform}"
+            if cache_key in self.vendor_cache:
+                return self.vendor_cache[cache_key]
+            
+            # Rule-based cleaning first
+            cleaned_name = self._rule_based_cleaning(vendor_name)
+            
+            # If rule-based cleaning is sufficient, use it
+            if cleaned_name != vendor_name:
+                result = {
+                    "vendor_raw": vendor_name,
+                    "vendor_standard": cleaned_name,
+                    "confidence": 0.8,
+                    "cleaning_method": "rule_based"
+                }
+                self.vendor_cache[cache_key] = result
+                return result
+            
+            # Use AI for complex cases
+            ai_result = await self._ai_standardization(vendor_name, platform)
+            self.vendor_cache[cache_key] = ai_result
+            return ai_result
+            
+        except Exception as e:
+            logger.error(f"Vendor standardization failed: {e}")
+            return {
+                "vendor_raw": vendor_name,
+                "vendor_standard": vendor_name,
+                "confidence": 0.5,
+                "cleaning_method": "fallback"
+            }
+    
+    def _rule_based_cleaning(self, vendor_name: str) -> str:
+        """Rule-based vendor name cleaning"""
+        try:
+            # Convert to lowercase and clean
+            cleaned = vendor_name.lower().strip()
+            
+            # Remove common suffixes
+            for suffix in self.common_suffixes:
+                if cleaned.endswith(suffix):
+                    cleaned = cleaned[:-len(suffix)]
+            
+            # Remove extra whitespace
+            cleaned = ' '.join(cleaned.split())
+            
+            # Capitalize properly
+            cleaned = cleaned.title()
+            
+            # Handle common abbreviations
+            abbreviations = {
+                'Ggl': 'Google',
+                'Msoft': 'Microsoft',
+                'Msft': 'Microsoft',
+                'Amzn': 'Amazon',
+                'Aapl': 'Apple',
+                'Nflx': 'Netflix',
+                'Tsla': 'Tesla'
+            }
+            
+            if cleaned in abbreviations:
+                cleaned = abbreviations[cleaned]
+            
+            return cleaned
+            
+        except Exception as e:
+            logger.error(f"Rule-based cleaning failed: {e}")
+            return vendor_name
+    
+    async def _ai_standardization(self, vendor_name: str, platform: str = None) -> Dict[str, Any]:
+        """AI-powered vendor name standardization"""
+        try:
+            prompt = f"""
+            Standardize this vendor name to a clean, canonical form.
+            
+            VENDOR NAME: {vendor_name}
+            PLATFORM: {platform or 'unknown'}
+            
+            Rules:
+            1. Remove legal suffixes (Inc, Corp, LLC, Ltd, etc.)
+            2. Standardize common company names
+            3. Handle abbreviations and variations
+            4. Return a clean, professional name
+            
+            Examples:
+            - "Google LLC" → "Google"
+            - "Microsoft Corporation" → "Microsoft"
+            - "AMAZON.COM INC" → "Amazon"
+            - "Apple Inc." → "Apple"
+            - "Netflix, Inc." → "Netflix"
+            
+            Return ONLY a valid JSON object:
+            {{
+                "standard_name": "cleaned_vendor_name",
+                "confidence": 0.95,
+                "reasoning": "brief_explanation"
+            }}
+            """
+            
+            response = self.openai.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.1,
+                max_tokens=200
+            )
+            
+            result = response.choices[0].message.content.strip()
+            
+            # Clean and parse JSON
+            cleaned_result = result.strip()
+            if cleaned_result.startswith('```json'):
+                cleaned_result = cleaned_result[7:]
+            if cleaned_result.endswith('```'):
+                cleaned_result = cleaned_result[:-3]
+            
+            parsed = json.loads(cleaned_result)
+            
+            return {
+                "vendor_raw": vendor_name,
+                "vendor_standard": parsed.get('standard_name', vendor_name),
+                "confidence": parsed.get('confidence', 0.7),
+                "cleaning_method": "ai_powered",
+                "reasoning": parsed.get('reasoning', 'AI standardization')
+            }
+            
+        except Exception as e:
+            logger.error(f"AI vendor standardization failed: {e}")
+            return {
+                "vendor_raw": vendor_name,
+                "vendor_standard": vendor_name,
+                "confidence": 0.5,
+                "cleaning_method": "ai_fallback"
+            }
+
+class PlatformIDExtractor:
+    """Extracts platform-specific IDs and metadata"""
+    
+    def __init__(self):
+        self.platform_patterns = {
+            'razorpay': {
+                'payment_id': r'pay_[a-zA-Z0-9]{14}',
+                'order_id': r'order_[a-zA-Z0-9]{14}',
+                'refund_id': r'rfnd_[a-zA-Z0-9]{14}',
+                'settlement_id': r'setl_[a-zA-Z0-9]{14}'
+            },
+            'stripe': {
+                'charge_id': r'ch_[a-zA-Z0-9]{24}',
+                'payment_intent': r'pi_[a-zA-Z0-9]{24}',
+                'customer_id': r'cus_[a-zA-Z0-9]{14}',
+                'invoice_id': r'in_[a-zA-Z0-9]{24}'
+            },
+            'gusto': {
+                'employee_id': r'emp_[a-zA-Z0-9]{8}',
+                'payroll_id': r'pay_[a-zA-Z0-9]{12}',
+                'timesheet_id': r'ts_[a-zA-Z0-9]{10}'
+            },
+            'quickbooks': {
+                'transaction_id': r'txn_[a-zA-Z0-9]{12}',
+                'invoice_id': r'inv_[a-zA-Z0-9]{10}',
+                'vendor_id': r'ven_[a-zA-Z0-9]{8}',
+                'customer_id': r'cust_[a-zA-Z0-9]{8}'
+            },
+            'xero': {
+                'invoice_id': r'INV-[0-9]{4}-[0-9]{6}',
+                'contact_id': r'[a-zA-Z0-9]{8}-[a-zA-Z0-9]{4}-[a-zA-Z0-9]{4}',
+                'bank_transaction_id': r'BT-[0-9]{8}'
+            },
+            'bank_statement': {
+                'invoice_id': r'INV-[0-9]{3}',
+                'payroll_id': r'pay_[0-9]{3}',
+                'stripe_id': r'ch_[a-zA-Z0-9]{16}',
+                'aws_id': r'aws_[0-9]{3}',
+                'google_ads_id': r'GA-[0-9]{3}',
+                'facebook_id': r'FB-[0-9]{3}',
+                'adobe_id': r'AD-[0-9]{3}',
+                'coursera_id': r'CR-[0-9]{3}',
+                'expedia_id': r'EXP-[0-9]{3}',
+                'legal_id': r'LF-[0-9]{3}',
+                'insurance_id': r'INS-[0-9]{3}',
+                'apple_store_id': r'AS-[0-9]{3}',
+                'utilities_id': r'UC-[0-9]{3}',
+                'maintenance_id': r'MC-[0-9]{3}',
+                'office_supplies_id': r'OD-[0-9]{3}',
+                'internet_id': r'ISP-[0-9]{3}',
+                'lease_id': r'LL-[0-9]{3}',
+                'bank_fee_id': r'BANK-FEE-[0-9]{3}'
+            }
+        }
+    
+    def extract_platform_ids(self, row_data: Dict, platform: str, column_names: List[str]) -> Dict[str, Any]:
+        """Extract platform-specific IDs from row data"""
+        try:
+            extracted_ids = {}
+            platform_lower = platform.lower()
+            
+            # Get patterns for this platform
+            patterns = self.platform_patterns.get(platform_lower, {})
+            
+            # Search in all text fields
+            all_text = ' '.join(str(val) for val in row_data.values() if val)
+            
+            for id_type, pattern in patterns.items():
+                matches = re.findall(pattern, all_text, re.IGNORECASE)
+                if matches:
+                    extracted_ids[id_type] = matches[0]  # Take first match
+            
+            # Also check column names for ID patterns
+            for col_name in column_names:
+                col_lower = col_name.lower()
+                if any(id_type in col_lower for id_type in ['id', 'reference', 'number']):
+                    col_value = row_data.get(col_name)
+                    if col_value:
+                        # Check if this column value matches any pattern
+                        for id_type, pattern in patterns.items():
+                            if re.match(pattern, str(col_value), re.IGNORECASE):
+                                extracted_ids[id_type] = str(col_value)
+                                break
+            
+            # Generate a unique platform ID if none found
+            if not extracted_ids:
+                extracted_ids['platform_generated_id'] = f"{platform_lower}_{hash(str(row_data)) % 10000:04d}"
+            
+            return {
+                "platform": platform,
+                "extracted_ids": extracted_ids,
+                "total_ids_found": len(extracted_ids)
+            }
+            
+        except Exception as e:
+            logger.error(f"Platform ID extraction failed: {e}")
+            return {
+                "platform": platform,
+                "extracted_ids": {},
+                "total_ids_found": 0,
+                "error": str(e)
+            }
+
+class DataEnrichmentProcessor:
+    """Orchestrates all data enrichment processes"""
+    
+    def __init__(self, openai_client):
+        self.currency_normalizer = CurrencyNormalizer()
+        self.vendor_standardizer = VendorStandardizer(openai_client)
+        self.platform_id_extractor = PlatformIDExtractor()
+    
+    async def enrich_row_data(self, row_data: Dict, platform_info: Dict, column_names: List[str], 
+                            ai_classification: Dict, file_context: Dict, fast_mode: bool = False) -> Dict[str, Any]:
+        """Enrich row data with currency, vendor, and platform information"""
+        try:
+            # Extract basic information
+            amount = self._extract_amount(row_data)
+            description = self._extract_description(row_data)
+            platform = platform_info.get('platform', 'unknown')
+            date = self._extract_date(row_data)
+            vendor_name = self._extract_vendor_name(row_data, column_names)
+            
+            # Fast mode: Skip expensive operations
+            if fast_mode:
+                currency_info = {
+                    'currency': 'USD',
+                    'amount_original': amount,
+                    'amount_usd': amount,
+                    'exchange_rate': 1.0,
+                    'exchange_date': None
+                }
+                vendor_info = {
+                    'vendor_raw': vendor_name,
+                    'vendor_standard': vendor_name,
+                    'confidence': 1.0,
+                    'cleaning_method': 'fast_mode'
+                }
+                platform_ids = {'extracted_ids': {}}
+            else:
+                # 1. Currency normalization
+                currency_info = await self.currency_normalizer.normalize_currency(
+                    amount=amount,
+                    currency=None,  # Will be detected
+                    description=description,
+                    platform=platform,
+                    date=date
+                )
+                
+                # 2. Vendor standardization
+                vendor_info = await self.vendor_standardizer.standardize_vendor(
+                    vendor_name=vendor_name,
+                    platform=platform
+                )
+                
+                # 3. Platform ID extraction
+                platform_ids = self.platform_id_extractor.extract_platform_ids(
+                    row_data=row_data,
+                    platform=platform,
+                    column_names=column_names
+                )
+            
+            # 4. Create enhanced payload
+            enriched_payload = {
+                # Basic classification
+                "kind": ai_classification.get('row_type', 'transaction'),
+                "category": ai_classification.get('category', 'other'),
+                "subcategory": ai_classification.get('subcategory', 'general'),
+                
+                # Currency information
+                "currency": currency_info.get('currency', 'USD'),
+                "amount_original": currency_info.get('amount_original', amount),
+                "amount_usd": currency_info.get('amount_usd', amount),
+                "exchange_rate": currency_info.get('exchange_rate', 1.0),
+                "exchange_date": currency_info.get('exchange_date'),
+                
+                # Vendor information
+                "vendor_raw": vendor_info.get('vendor_raw', vendor_name),
+                "vendor_standard": vendor_info.get('vendor_standard', vendor_name),
+                "vendor_confidence": vendor_info.get('confidence', 0.0),
+                "vendor_cleaning_method": vendor_info.get('cleaning_method', 'none'),
+                
+                # Platform information
+                "platform": platform,
+                "platform_confidence": platform_info.get('confidence', 0.0),
+                "platform_ids": platform_ids.get('extracted_ids', {}),
+                
+                # Enhanced metadata
+                "standard_description": self._clean_description(description),
+                "ingested_on": datetime.utcnow().isoformat(),
+                "file_source": file_context.get('filename', 'unknown'),
+                "row_index": file_context.get('row_index', 0),
+                
+                # AI classification metadata
+                "ai_confidence": ai_classification.get('confidence', 0.0),
+                "ai_reasoning": ai_classification.get('reasoning', ''),
+                "entities": ai_classification.get('entities', {}),
+                "relationships": ai_classification.get('relationships', {})
+            }
+            
+            return enriched_payload
+            
+        except Exception as e:
+            logger.error(f"Data enrichment failed: {e}")
+            # Return basic payload if enrichment fails
+            return {
+                "kind": ai_classification.get('row_type', 'transaction'),
+                "category": ai_classification.get('category', 'other'),
+                "amount_original": self._extract_amount(row_data),
+                "amount_usd": self._extract_amount(row_data),
+                "currency": "USD",
+                "vendor_raw": self._extract_vendor_name(row_data, column_names),
+                "vendor_standard": self._extract_vendor_name(row_data, column_names),
+                "platform": platform_info.get('platform', 'unknown'),
+                "ingested_on": datetime.utcnow().isoformat(),
+                "enrichment_error": str(e)
+            }
+    
+    def _extract_amount(self, row_data: Dict) -> float:
+        """Extract amount from row data (case-insensitive key search and string parsing)."""
+        try:
+            amount_fields = {'amount', 'total', 'value', 'sum', 'payment_amount', 'price'}
+            # Direct, case-insensitive lookup
+            for key, value in row_data.items():
+                if str(key).lower() in amount_fields:
+                    if isinstance(value, (int, float)):
+                        return float(value)
+                    if isinstance(value, str):
+                        cleaned = re.sub(r'[^\d.-]', '', value)
+                        if cleaned not in (None, ''):
+                            try:
+                                return float(cleaned)
+                            except:
+                                pass
+            # Fallback: scan strings for currency-amount patterns
+            for value in row_data.values():
+                if isinstance(value, str):
+                    m = re.search(r'([-+]?[0-9]{1,3}(?:,[0-9]{3})*(?:\.[0-9]+)?|[-+]?[0-9]+\.[0-9]+)', value)
+                    if m:
+                        cleaned = m.group(1).replace(',', '')
+                        try:
+                            return float(cleaned)
+                        except:
+                            continue
+        except Exception:
+            pass
+        return 0.0
+    
+    def _extract_description(self, row_data: Dict) -> str:
+        """Extract description from row data"""
+        desc_fields = ['description', 'memo', 'notes', 'details', 'comment']
+        for field in desc_fields:
+            if field in row_data:
+                return str(row_data[field])
+        return ""
+    
+    def _extract_vendor_name(self, row_data: Dict, column_names: List[str]) -> str:
+        """Extract vendor name from row data"""
+        vendor_fields = ['vendor', 'vendor_name', 'payee', 'recipient', 'company', 'merchant']
+        for field in vendor_fields:
+            if field in row_data:
+                return str(row_data[field])
+        
+        # Check column names for vendor patterns
+        for col in column_names:
+            if any(vendor_word in col.lower() for vendor_word in ['vendor', 'payee', 'recipient', 'company']):
+                if col in row_data:
+                    return str(row_data[col])
+        
+        # Extract vendor from description (for bank statements)
+        description = row_data.get('description', '') or row_data.get('Description', '')
+        if description:
+            # Common patterns in bank statement descriptions
+            vendor_patterns = [
+                r'^([^-]+?)\s*[-–]\s*',  # "Vendor - Description"
+                r'^([^-]+?)\s*Payment\s*[-–]\s*',  # "Vendor Payment - Description"
+                r'^([^-]+?)\s*Services?\s*[-–]\s*',  # "Vendor Services - Description"
+                r'^([^-]+?)\s*Purchase\s*[-–]\s*',  # "Vendor Purchase - Description"
+                r'^([^-]+?)\s*Campaign\s*[-–]\s*',  # "Vendor Campaign - Description"
+                r'^([^-]+?)\s*Expenses?\s*[-–]\s*',  # "Vendor Expenses - Description"
+                r'^([^-]+?)\s*Bill\s*[-–]\s*',  # "Vendor Bill - Description"
+                r'^([^-]+?)\s*Premium\s*[-–]\s*',  # "Vendor Premium - Description"
+                r'^([^-]+?)\s*License\s*[-–]\s*',  # "Vendor License - Description"
+                r'^([^-]+?)\s*Development\s*[-–]\s*',  # "Vendor Development - Description"
+            ]
+            
+            for pattern in vendor_patterns:
+                match = re.search(pattern, description, re.IGNORECASE)
+                if match:
+                    vendor = match.group(1).strip()
+                    if vendor and len(vendor) > 2:  # Avoid very short matches
+                        return vendor
+        
+        return ""
+    
+    def _extract_date(self, row_data: Dict) -> str:
+        """Extract date from row data"""
+        date_fields = ['date', 'payment_date', 'transaction_date', 'created_at', 'timestamp']
+        for field in date_fields:
+            if field in row_data:
+                date_val = row_data[field]
+                if isinstance(date_val, str):
+                    return date_val
+                elif isinstance(date_val, datetime):
+                    return date_val.strftime('%Y-%m-%d')
+        return datetime.now().strftime('%Y-%m-%d')
+    
+    def _clean_description(self, description: str) -> str:
+        """Clean and standardize description"""
+        try:
+            if not description:
+                return ""
+            
+            # Remove extra whitespace
+            cleaned = ' '.join(description.split())
+            
+            # Remove common prefixes
+            prefixes_to_remove = ['Payment for ', 'Transaction for ', 'Invoice for ']
+            for prefix in prefixes_to_remove:
+                if cleaned.startswith(prefix):
+                    cleaned = cleaned[len(prefix):]
+            
+            # Capitalize first letter
+            if cleaned:
+                cleaned = cleaned[0].upper() + cleaned[1:]
+            
+            return cleaned
+            
+        except Exception as e:
+            logger.error(f"Description cleaning failed: {e}")
+            return description
+
+# WebSocket connection manager
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections: Dict[str, List[WebSocket]] = {}
+
+    async def connect(self, websocket: WebSocket, job_id: str):
+        await websocket.accept()
+        if job_id not in self.active_connections:
+            self.active_connections[job_id] = []
+        self.active_connections[job_id].append(websocket)
+
+    def disconnect(self, job_id: str):
+        if job_id in self.active_connections:
+            self.active_connections[job_id] = []
+
+    async def send_update(self, job_id: str, message: dict):
+        if job_id in self.active_connections:
+            for connection in self.active_connections[job_id]:
+                try:
+                    await connection.send_json(message)
+                except:
+                    pass
+
+manager = ConnectionManager()
+
+class ProcessRequest(BaseModel):
+    job_id: str
+    storage_path: str
+    file_name: str
+    supabase_url: str
+    supabase_key: str
+    user_id: str
+
+import os
+import io
+import logging
+import hashlib
+from datetime import datetime, timedelta
+from typing import Dict, Any, List, Optional, Tuple
+import pandas as pd
+import numpy as np
+from fastapi import FastAPI, HTTPException, BackgroundTasks, WebSocket, WebSocketDisconnect, UploadFile, Form, File
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+from supabase import create_client, Client
+import openai
+import magic
+import filetype
+from openai import OpenAI
+import time
+import json
+import re
+import asyncio
+from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor
+from difflib import SequenceMatcher
+import aiohttp
+import requests
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Initialize FastAPI app
+app = FastAPI(title="Finley AI Backend", version="1.0.0")
+
+# Add CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Initialize OpenAI client
+openai = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+
+class CurrencyNormalizer:
+    """Handles currency detection, conversion, and normalization"""
+    
+    def __init__(self):
+        self.exchange_api_base = "https://api.exchangerate-api.com/v4/latest/"
+        self.rates_cache = {}
+        self.cache_duration = timedelta(hours=24)
+    
+    async def detect_currency(self, amount: str, description: str, platform: str) -> str:
+        """Detect currency from amount, description, and platform context"""
+        try:
+            # Remove currency symbols and clean amount
+            cleaned_amount = re.sub(r'[^\d.-]', '', str(amount))
+            
+            # Platform-specific currency detection
+            platform_currencies = {
+                'razorpay': 'INR',
+                'stripe': 'USD',
+                'paypal': 'USD',
+                'gusto': 'USD',
+                'quickbooks': 'USD',
+                'xero': 'USD'
+            }
+            
+            # Check for currency symbols in description
+            currency_symbols = {
+                '$': 'USD',
+                '₹': 'INR',
+                '€': 'EUR',
+                '£': 'GBP',
+                '¥': 'JPY'
+            }
+            
+            for symbol, currency in currency_symbols.items():
+                if symbol in str(description):
+                    return currency
+            
+            # Check for currency codes in description
+            currency_codes = ['USD', 'INR', 'EUR', 'GBP', 'JPY', 'CAD', 'AUD']
+            for code in currency_codes:
+                if code.lower() in str(description).lower():
+                    return code
+            
+            # Platform-based default
+            if platform in platform_currencies:
+                return platform_currencies[platform]
+            
+            # Default to USD
+            return 'USD'
+            
+        except Exception as e:
+            logger.error(f"Currency detection failed: {e}")
+            return 'USD'
+    
+    async def get_exchange_rate(self, from_currency: str, to_currency: str = 'USD', date: str = None) -> float:
+        """Get exchange rate for currency conversion"""
+        try:
+            # Use current date if not provided
+            if not date:
+                date = datetime.now().strftime('%Y-%m-%d')
+            
+            # Check cache first
+            cache_key = f"{from_currency}_{to_currency}_{date}"
+            if cache_key in self.rates_cache:
+                cached_rate, cached_time = self.rates_cache[cache_key]
+                if datetime.now() - cached_time < self.cache_duration:
+                    return cached_rate
+            
+            # Fetch from API
+            if from_currency == to_currency:
+                rate = 1.0
+            else:
+                url = f"{self.exchange_api_base}{from_currency}"
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(url) as response:
+                        if response.status == 200:
+                            data = await response.json()
+                            rate = data['rates'].get(to_currency, 1.0)
+                        else:
+                            # Fallback to hardcoded rates for common currencies
+                            fallback_rates = {
+                                'INR': 0.012,
+                                'EUR': 1.08,
+                                'GBP': 1.26,
+                                'JPY': 0.0067,
+                                'CAD': 0.74,
+                                'AUD': 0.66
+                            }
+                            rate = fallback_rates.get(from_currency, 1.0)
+            
+            # Cache the rate
+            self.rates_cache[cache_key] = (rate, datetime.now())
+            return rate
+            
+        except Exception as e:
+            logger.error(f"Exchange rate fetch failed: {e}")
+            # Return fallback rate
+            fallback_rates = {
+                'INR': 0.012,
+                'EUR': 1.08,
+                'GBP': 1.26,
+                'JPY': 0.0067,
+                'CAD': 0.74,
+                'AUD': 0.66
+            }
+            return fallback_rates.get(from_currency, 1.0)
+    
+    async def normalize_currency(self, amount: float, currency: str, description: str, platform: str, date: str = None) -> Dict[str, Any]:
+        """Normalize currency and convert to USD"""
+        try:
+            # Detect currency if not provided
+            if not currency:
+                currency = await self.detect_currency(amount, description, platform)
+            
+            # Get exchange rate
+            exchange_rate = await self.get_exchange_rate(currency, 'USD', date)
+            
+            # Convert to USD
+            amount_usd = amount * exchange_rate
+            
+            return {
+                "amount_original": amount,
+                "amount_usd": round(amount_usd, 2),
+                "currency": currency,
+                "exchange_rate": round(exchange_rate, 6),
+                "exchange_date": date or datetime.now().strftime('%Y-%m-%d')
+            }
+            
+        except Exception as e:
+            logger.error(f"Currency normalization failed: {e}")
+            return {
+                "amount_original": amount,
+                "amount_usd": amount,
+                "currency": currency or 'USD',
+                "exchange_rate": 1.0,
+                "exchange_date": date or datetime.now().strftime('%Y-%m-%d')
+            }
+
+class VendorStandardizer:
+    """Handles vendor name standardization and cleaning"""
+    
+    def __init__(self, openai_client):
+        self.openai = openai_client
+        self.vendor_cache = {}
+        self.common_suffixes = [
+            ' inc', ' corp', ' llc', ' ltd', ' co', ' company', ' pvt', ' private',
+            ' limited', ' corporation', ' incorporated', ' enterprises', ' solutions',
+            ' services', ' systems', ' technologies', ' tech', ' group', ' holdings'
+        ]
+    
+    async def standardize_vendor(self, vendor_name: str, platform: str = None) -> Dict[str, Any]:
+        """Standardize vendor name using AI and rule-based cleaning"""
+        try:
+            if not vendor_name or vendor_name.strip() == '':
+                return {
+                    "vendor_raw": vendor_name,
+                    "vendor_standard": "",
+                    "confidence": 0.0,
+                    "cleaning_method": "empty"
+                }
+            
+            # Check cache first
+            cache_key = f"{vendor_name}_{platform}"
+            if cache_key in self.vendor_cache:
+                return self.vendor_cache[cache_key]
+            
+            # Rule-based cleaning first
+            cleaned_name = self._rule_based_cleaning(vendor_name)
+            
+            # If rule-based cleaning is sufficient, use it
+            if cleaned_name != vendor_name:
+                result = {
+                    "vendor_raw": vendor_name,
+                    "vendor_standard": cleaned_name,
+                    "confidence": 0.8,
+                    "cleaning_method": "rule_based"
+                }
+                self.vendor_cache[cache_key] = result
+                return result
+            
+            # Use AI for complex cases
+            ai_result = await self._ai_standardization(vendor_name, platform)
+            self.vendor_cache[cache_key] = ai_result
+            return ai_result
+            
+        except Exception as e:
+            logger.error(f"Vendor standardization failed: {e}")
+            return {
+                "vendor_raw": vendor_name,
+                "vendor_standard": vendor_name,
+                "confidence": 0.5,
+                "cleaning_method": "fallback"
+            }
+    
+    def _rule_based_cleaning(self, vendor_name: str) -> str:
+        """Rule-based vendor name cleaning"""
+        try:
+            # Convert to lowercase and clean
+            cleaned = vendor_name.lower().strip()
+            
+            # Remove common suffixes
+            for suffix in self.common_suffixes:
+                if cleaned.endswith(suffix):
+                    cleaned = cleaned[:-len(suffix)]
+            
+            # Remove extra whitespace
+            cleaned = ' '.join(cleaned.split())
+            
+            # Capitalize properly
+            cleaned = cleaned.title()
+            
+            # Handle common abbreviations
+            abbreviations = {
+                'Ggl': 'Google',
+                'Msoft': 'Microsoft',
+                'Msft': 'Microsoft',
+                'Amzn': 'Amazon',
+                'Aapl': 'Apple',
+                'Nflx': 'Netflix',
+                'Tsla': 'Tesla'
+            }
+            
+            if cleaned in abbreviations:
+                cleaned = abbreviations[cleaned]
+            
+            return cleaned
+            
+        except Exception as e:
+            logger.error(f"Rule-based cleaning failed: {e}")
+            return vendor_name
+    
+    async def _ai_standardization(self, vendor_name: str, platform: str = None) -> Dict[str, Any]:
+        """AI-powered vendor name standardization"""
+        try:
+            prompt = f"""
+            Standardize this vendor name to a clean, canonical form.
+            
+            VENDOR NAME: {vendor_name}
+            PLATFORM: {platform or 'unknown'}
+            
+            Rules:
+            1. Remove legal suffixes (Inc, Corp, LLC, Ltd, etc.)
+            2. Standardize common company names
+            3. Handle abbreviations and variations
+            4. Return a clean, professional name
+            
+            Examples:
+            - "Google LLC" → "Google"
+            - "Microsoft Corporation" → "Microsoft"
+            - "AMAZON.COM INC" → "Amazon"
+            - "Apple Inc." → "Apple"
+            - "Netflix, Inc." → "Netflix"
+            
+            Return ONLY a valid JSON object:
+            {{
+                "standard_name": "cleaned_vendor_name",
+                "confidence": 0.95,
+                "reasoning": "brief_explanation"
+            }}
+            """
+            
+            response = self.openai.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.1,
+                max_tokens=200
+            )
+            
+            result = response.choices[0].message.content.strip()
+            
+            # Clean and parse JSON
+            cleaned_result = result.strip()
+            if cleaned_result.startswith('```json'):
+                cleaned_result = cleaned_result[7:]
+            if cleaned_result.endswith('```'):
+                cleaned_result = cleaned_result[:-3]
+            
+            parsed = json.loads(cleaned_result)
+            
+            return {
+                "vendor_raw": vendor_name,
+                "vendor_standard": parsed.get('standard_name', vendor_name),
+                "confidence": parsed.get('confidence', 0.7),
+                "cleaning_method": "ai_powered",
+                "reasoning": parsed.get('reasoning', 'AI standardization')
+            }
+            
+        except Exception as e:
+            logger.error(f"AI vendor standardization failed: {e}")
+            return {
+                "vendor_raw": vendor_name,
+                "vendor_standard": vendor_name,
+                "confidence": 0.5,
+                "cleaning_method": "ai_fallback"
+            }
+
+class PlatformIDExtractor:
+    """Extracts platform-specific IDs and metadata"""
+    
+    def __init__(self):
+        self.platform_patterns = {
+            'razorpay': {
+                'payment_id': r'pay_[a-zA-Z0-9]{14}',
+                'order_id': r'order_[a-zA-Z0-9]{14}',
+                'refund_id': r'rfnd_[a-zA-Z0-9]{14}',
+                'settlement_id': r'setl_[a-zA-Z0-9]{14}'
+            },
+            'stripe': {
+                'charge_id': r'ch_[a-zA-Z0-9]{24}',
+                'payment_intent': r'pi_[a-zA-Z0-9]{24}',
+                'customer_id': r'cus_[a-zA-Z0-9]{14}',
+                'invoice_id': r'in_[a-zA-Z0-9]{24}'
+            },
+            'gusto': {
+                'employee_id': r'emp_[a-zA-Z0-9]{8}',
+                'payroll_id': r'pay_[a-zA-Z0-9]{12}',
+                'timesheet_id': r'ts_[a-zA-Z0-9]{10}'
+            },
+            'quickbooks': {
+                'transaction_id': r'txn_[a-zA-Z0-9]{12}',
+                'invoice_id': r'inv_[a-zA-Z0-9]{10}',
+                'vendor_id': r'ven_[a-zA-Z0-9]{8}',
+                'customer_id': r'cust_[a-zA-Z0-9]{8}'
+            },
+            'xero': {
+                'invoice_id': r'INV-[0-9]{4}-[0-9]{6}',
+                'contact_id': r'[a-zA-Z0-9]{8}-[a-zA-Z0-9]{4}-[a-zA-Z0-9]{4}',
+                'bank_transaction_id': r'BT-[0-9]{8}'
+            },
+            'bank_statement': {
+                'invoice_id': r'INV-[0-9]{3}',
+                'payroll_id': r'pay_[0-9]{3}',
+                'stripe_id': r'ch_[a-zA-Z0-9]{16}',
+                'aws_id': r'aws_[0-9]{3}',
+                'google_ads_id': r'GA-[0-9]{3}',
+                'facebook_id': r'FB-[0-9]{3}',
+                'adobe_id': r'AD-[0-9]{3}',
+                'coursera_id': r'CR-[0-9]{3}',
+                'expedia_id': r'EXP-[0-9]{3}',
+                'legal_id': r'LF-[0-9]{3}',
+                'insurance_id': r'INS-[0-9]{3}',
+                'apple_store_id': r'AS-[0-9]{3}',
+                'utilities_id': r'UC-[0-9]{3}',
+                'maintenance_id': r'MC-[0-9]{3}',
+                'office_supplies_id': r'OD-[0-9]{3}',
+                'internet_id': r'ISP-[0-9]{3}',
+                'lease_id': r'LL-[0-9]{3}',
+                'bank_fee_id': r'BANK-FEE-[0-9]{3}'
+            }
+        }
+    
+    def extract_platform_ids(self, row_data: Dict, platform: str, column_names: List[str]) -> Dict[str, Any]:
+        """Extract platform-specific IDs from row data"""
+        try:
+            extracted_ids = {}
+            platform_lower = platform.lower()
+            
+            # Get patterns for this platform
+            patterns = self.platform_patterns.get(platform_lower, {})
+            
+            # Search in all text fields
+            all_text = ' '.join(str(val) for val in row_data.values() if val)
+            
+            for id_type, pattern in patterns.items():
+                matches = re.findall(pattern, all_text, re.IGNORECASE)
+                if matches:
+                    extracted_ids[id_type] = matches[0]  # Take first match
+            
+            # Also check column names for ID patterns
+            for col_name in column_names:
+                col_lower = col_name.lower()
+                if any(id_type in col_lower for id_type in ['id', 'reference', 'number']):
+                    col_value = row_data.get(col_name)
+                    if col_value:
+                        # Check if this column value matches any pattern
+                        for id_type, pattern in patterns.items():
+                            if re.match(pattern, str(col_value), re.IGNORECASE):
+                                extracted_ids[id_type] = str(col_value)
+                                break
+            
+            # Generate a unique platform ID if none found
+            if not extracted_ids:
+                extracted_ids['platform_generated_id'] = f"{platform_lower}_{hash(str(row_data)) % 10000:04d}"
+            
+            return {
+                "platform": platform,
+                "extracted_ids": extracted_ids,
+                "total_ids_found": len(extracted_ids)
+            }
+            
+        except Exception as e:
+            logger.error(f"Platform ID extraction failed: {e}")
+            return {
+                "platform": platform,
+                "extracted_ids": {},
+                "total_ids_found": 0,
+                "error": str(e)
+            }
+
+class DataEnrichmentProcessor:
+    """Orchestrates all data enrichment processes"""
+    
+    def __init__(self, openai_client):
+        self.currency_normalizer = CurrencyNormalizer()
+        self.vendor_standardizer = VendorStandardizer(openai_client)
+        self.platform_id_extractor = PlatformIDExtractor()
+    
+    async def enrich_row_data(self, row_data: Dict, platform_info: Dict, column_names: List[str], 
+                            ai_classification: Dict, file_context: Dict, fast_mode: bool = False) -> Dict[str, Any]:
+        """Enrich row data with currency, vendor, and platform information"""
+        try:
+            # Extract basic information
+            amount = self._extract_amount(row_data)
+            description = self._extract_description(row_data)
+            platform = platform_info.get('platform', 'unknown')
+            date = self._extract_date(row_data)
+            vendor_name = self._extract_vendor_name(row_data, column_names)
+            
+            # Fast mode: Skip expensive operations
+            if fast_mode:
+                currency_info = {
+                    'currency': 'USD',
+                    'amount_original': amount,
+                    'amount_usd': amount,
+                    'exchange_rate': 1.0,
+                    'exchange_date': None
+                }
+                vendor_info = {
+                    'vendor_raw': vendor_name,
+                    'vendor_standard': vendor_name,
+                    'confidence': 1.0,
+                    'cleaning_method': 'fast_mode'
+                }
+                platform_ids = {'extracted_ids': {}}
+            else:
+                # 1. Currency normalization
+                currency_info = await self.currency_normalizer.normalize_currency(
+                    amount=amount,
+                    currency=None,  # Will be detected
+                    description=description,
+                    platform=platform,
+                    date=date
+                )
+                
+                # 2. Vendor standardization
+                vendor_info = await self.vendor_standardizer.standardize_vendor(
+                    vendor_name=vendor_name,
+                    platform=platform
+                )
+                
+                # 3. Platform ID extraction
+                platform_ids = self.platform_id_extractor.extract_platform_ids(
+                    row_data=row_data,
+                    platform=platform,
+                    column_names=column_names
+                )
+            
+            # 4. Create enhanced payload
+            enriched_payload = {
+                # Basic classification
+                "kind": ai_classification.get('row_type', 'transaction'),
+                "category": ai_classification.get('category', 'other'),
+                "subcategory": ai_classification.get('subcategory', 'general'),
+                
+                # Currency information
+                "currency": currency_info.get('currency', 'USD'),
+                "amount_original": currency_info.get('amount_original', amount),
+                "amount_usd": currency_info.get('amount_usd', amount),
+                "exchange_rate": currency_info.get('exchange_rate', 1.0),
+                "exchange_date": currency_info.get('exchange_date'),
+                
+                # Vendor information
+                "vendor_raw": vendor_info.get('vendor_raw', vendor_name),
+                "vendor_standard": vendor_info.get('vendor_standard', vendor_name),
+                "vendor_confidence": vendor_info.get('confidence', 0.0),
+                "vendor_cleaning_method": vendor_info.get('cleaning_method', 'none'),
+                
+                # Platform information
+                "platform": platform,
+                "platform_confidence": platform_info.get('confidence', 0.0),
+                "platform_ids": platform_ids.get('extracted_ids', {}),
+                
+                # Enhanced metadata
+                "standard_description": self._clean_description(description),
+                "ingested_on": datetime.utcnow().isoformat(),
+                "file_source": file_context.get('filename', 'unknown'),
+                "row_index": file_context.get('row_index', 0),
+                
+                # AI classification metadata
+                "ai_confidence": ai_classification.get('confidence', 0.0),
+                "ai_reasoning": ai_classification.get('reasoning', ''),
+                "entities": ai_classification.get('entities', {}),
+                "relationships": ai_classification.get('relationships', {})
+            }
+            
+            return enriched_payload
+            
+        except Exception as e:
+            logger.error(f"Data enrichment failed: {e}")
+            # Return basic payload if enrichment fails
+            return {
+                "kind": ai_classification.get('row_type', 'transaction'),
+                "category": ai_classification.get('category', 'other'),
+                "amount_original": self._extract_amount(row_data),
+                "amount_usd": self._extract_amount(row_data),
+                "currency": "USD",
+                "vendor_raw": self._extract_vendor_name(row_data, column_names),
+                "vendor_standard": self._extract_vendor_name(row_data, column_names),
+                "platform": platform_info.get('platform', 'unknown'),
+                "ingested_on": datetime.utcnow().isoformat(),
+                "enrichment_error": str(e)
+            }
+    
+    def _extract_amount(self, row_data: Dict) -> float:
+        """Extract amount from row data (case-insensitive key search and string parsing)."""
+        try:
+            amount_fields = {'amount', 'total', 'value', 'sum', 'payment_amount', 'price'}
+            # Direct, case-insensitive lookup
+            for key, value in row_data.items():
+                if str(key).lower() in amount_fields:
+                    if isinstance(value, (int, float)):
+                        return float(value)
+                    if isinstance(value, str):
+                        cleaned = re.sub(r'[^\d.-]', '', value)
+                        if cleaned not in (None, ''):
+                            try:
+                                return float(cleaned)
+                            except:
+                                pass
+            # Fallback: scan strings for currency-amount patterns
+            for value in row_data.values():
+                if isinstance(value, str):
+                    m = re.search(r'([-+]?[0-9]{1,3}(?:,[0-9]{3})*(?:\.[0-9]+)?|[-+]?[0-9]+\.[0-9]+)', value)
+                    if m:
+                        cleaned = m.group(1).replace(',', '')
+                        try:
+                            return float(cleaned)
+                        except:
+                            continue
+        except Exception:
+            pass
+        return 0.0
+    
+    def _extract_description(self, row_data: Dict) -> str:
+        """Extract description from row data"""
+        desc_fields = ['description', 'memo', 'notes', 'details', 'comment']
+        for field in desc_fields:
+            if field in row_data:
+                return str(row_data[field])
+        return ""
+    
+    def _extract_vendor_name(self, row_data: Dict, column_names: List[str]) -> str:
+        """Extract vendor name from row data"""
+        vendor_fields = ['vendor', 'vendor_name', 'payee', 'recipient', 'company', 'merchant']
+        for field in vendor_fields:
+            if field in row_data:
+                return str(row_data[field])
+        
+        # Check column names for vendor patterns
+        for col in column_names:
+            if any(vendor_word in col.lower() for vendor_word in ['vendor', 'payee', 'recipient', 'company']):
+                if col in row_data:
+                    return str(row_data[col])
+        
+        # Extract vendor from description (for bank statements)
+        description = row_data.get('description', '') or row_data.get('Description', '')
+        if description:
+            # Common patterns in bank statement descriptions
+            vendor_patterns = [
+                r'^([^-]+?)\s*[-–]\s*',  # "Vendor - Description"
+                r'^([^-]+?)\s*Payment\s*[-–]\s*',  # "Vendor Payment - Description"
+                r'^([^-]+?)\s*Services?\s*[-–]\s*',  # "Vendor Services - Description"
+                r'^([^-]+?)\s*Purchase\s*[-–]\s*',  # "Vendor Purchase - Description"
+                r'^([^-]+?)\s*Campaign\s*[-–]\s*',  # "Vendor Campaign - Description"
+                r'^([^-]+?)\s*Expenses?\s*[-–]\s*',  # "Vendor Expenses - Description"
+                r'^([^-]+?)\s*Bill\s*[-–]\s*',  # "Vendor Bill - Description"
+                r'^([^-]+?)\s*Premium\s*[-–]\s*',  # "Vendor Premium - Description"
+                r'^([^-]+?)\s*License\s*[-–]\s*',  # "Vendor License - Description"
+                r'^([^-]+?)\s*Development\s*[-–]\s*',  # "Vendor Development - Description"
+            ]
+            
+            for pattern in vendor_patterns:
+                match = re.search(pattern, description, re.IGNORECASE)
+                if match:
+                    vendor = match.group(1).strip()
+                    if vendor and len(vendor) > 2:  # Avoid very short matches
+                        return vendor
+        
+        return ""
+    
+    def _extract_date(self, row_data: Dict) -> str:
+        """Extract date from row data"""
+        date_fields = ['date', 'payment_date', 'transaction_date', 'created_at', 'timestamp']
+        for field in date_fields:
+            if field in row_data:
+                date_val = row_data[field]
+                if isinstance(date_val, str):
+                    return date_val
+                elif isinstance(date_val, datetime):
+                    return date_val.strftime('%Y-%m-%d')
+        return datetime.now().strftime('%Y-%m-%d')
+    
+    def _clean_description(self, description: str) -> str:
+        """Clean and standardize description"""
+        try:
+            if not description:
+                return ""
+            
+            # Remove extra whitespace
+            cleaned = ' '.join(description.split())
+            
+            # Remove common prefixes
+            prefixes_to_remove = ['Payment for ', 'Transaction for ', 'Invoice for ']
+            for prefix in prefixes_to_remove:
+                if cleaned.startswith(prefix):
+                    cleaned = cleaned[len(prefix):]
+            
+            # Capitalize first letter
+            if cleaned:
+                cleaned = cleaned[0].upper() + cleaned[1:]
+            
+            return cleaned
+            
+        except Exception as e:
+            logger.error(f"Description cleaning failed: {e}")
+            return description
+
+# WebSocket connection manager
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections: Dict[str, List[WebSocket]] = {}
+
+    async def connect(self, websocket: WebSocket, job_id: str):
+        await websocket.accept()
+        if job_id not in self.active_connections:
+            self.active_connections[job_id] = []
+        self.active_connections[job_id].append(websocket)
+
+    def disconnect(self, job_id: str):
+        if job_id in self.active_connections:
+            self.active_connections[job_id] = []
+
+    async def send_update(self, job_id: str, message: dict):
+        if job_id in self.active_connections:
+            for connection in self.active_connections[job_id]:
+                try:
+                    await connection.send_json(message)
+                except:
+                    pass
+
+manager = ConnectionManager()
+
+class ProcessRequest(BaseModel):
+    job_id: str
+    storage_path: str
+    file_name: str
+    supabase_url: str
+    supabase_key: str
+    user_id: str
+
+class DocumentAnalyzer:
+    def __init__(self, openai_client):
+        self.openai_client = openai_client
+
 import os
 import io
 import logging
