@@ -7673,49 +7673,6 @@ async def test_entity_stats(user_id: str):
             "success": False
         }
 
-@app.get("/test-cross-file-relationships/{user_id}")
-async def test_cross_file_relationships(user_id: str):
-    """Test cross-file relationship detection using EnhancedRelationshipDetector"""
-    try:
-        # Initialize OpenAI client
-        openai_client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
-        
-        # Initialize Supabase client
-        supabase_url = os.getenv('SUPABASE_URL')
-        supabase_key = os.getenv('SUPABASE_KEY')
-        
-        if not supabase_url or not supabase_key:
-            return {
-                "message": "Supabase credentials not configured",
-                "user_id": user_id,
-                "success": False
-            }
-        
-        supabase = create_client(supabase_url, supabase_key)
-        
-        # Initialize Enhanced Relationship Detector
-        enhanced_detector = EnhancedRelationshipDetector(openai_client, supabase)
-        
-        # Detect relationships
-        results = await enhanced_detector.detect_all_relationships(user_id)
-        
-        return {
-            "message": "Enhanced Cross-File Relationship Analysis Completed",
-            "user_id": user_id,
-            "success": True,
-            **results
-        }
-        
-    except Exception as e:
-        logger.error(f"Enhanced cross-file relationship test failed: {e}")
-        return {
-            "message": "Enhanced Cross-File Relationship Test Failed",
-            "error": str(e),
-            "user_id": user_id,
-            "relationships": [],
-            "success": False
-        }
-
 @app.get("/test-websocket/{job_id}")
 async def test_websocket(job_id: str):
     """Test WebSocket functionality by sending messages to a specific job"""

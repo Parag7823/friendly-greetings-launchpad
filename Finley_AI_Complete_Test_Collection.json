@@ -547,6 +547,23 @@
 					}
 				},
 				{
+					"name": "2.5. Test Enhanced Relationship Detection",
+					"request": {
+						"method": "GET",
+						"url": {
+							"raw": "{{base_url}}/test-enhanced-relationship-detection/{{test_user_id}}",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"test-enhanced-relationship-detection",
+								"{{test_user_id}}"
+							]
+						},
+						"description": "Test enhanced relationship detection with comprehensive 5-factor scoring and cross-file analysis"
+					}
+				},
+				{
 					"name": "3. Test Relationship Type Discovery",
 					"request": {
 						"method": "GET",
