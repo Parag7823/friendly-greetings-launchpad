@@ -10071,11 +10071,11 @@ async def test_ai_relationship_detection(user_id: str):
         
         supabase = create_client(supabase_url, supabase_key)
         
-        # Use the existing AIRelationshipDetector class
-        ai_detector = AIRelationshipDetector(openai_client, supabase)
+        # Use the EnhancedRelationshipDetector class for better results
+        enhanced_detector = EnhancedRelationshipDetector(openai_client, supabase)
         
-        # Detect relationships with optimized processing
-        result = await ai_detector.detect_all_relationships(user_id)
+        # Detect relationships with enhanced processing
+        result = await enhanced_detector.detect_all_relationships(user_id)
         
         return {
             "message": "AI Relationship Detection Test Completed",
