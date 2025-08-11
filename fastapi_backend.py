@@ -3875,51 +3875,6 @@ async def test_websocket(job_id: str):
             "success": False
         }
 
-import os
-import io
-import logging
-import hashlib
-from datetime import datetime, timedelta
-from typing import Dict, Any, List, Optional, Tuple
-import pandas as pd
-import numpy as np
-from fastapi import FastAPI, HTTPException, BackgroundTasks, WebSocket, WebSocketDisconnect, UploadFile, Form, File
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-from supabase import create_client, Client
-import openai
-import magic
-import filetype
-from openai import OpenAI
-import time
-import json
-import re
-import asyncio
-from collections import defaultdict
-from concurrent.futures import ThreadPoolExecutor
-from difflib import SequenceMatcher
-import aiohttp
-import requests
-
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
-# Initialize FastAPI app
-app = FastAPI(title="Finley AI Backend", version="1.0.0")
-
-# Add CORS middleware
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# Initialize OpenAI client
-openai = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
-
 class CurrencyNormalizer:
     """Handles currency detection, conversion, and normalization"""
     
