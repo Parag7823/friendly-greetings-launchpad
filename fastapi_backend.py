@@ -11752,7 +11752,7 @@ class EnhancedRelationshipDetector:
             return None
     
     def _extract_entities(self, payload: Dict) -> List[str]:
-        """Extract entities from payload"""
+        """Extract entities from payload - Enhanced for real-world data"""
         entities = []
         try:
             # Extract from entities field
@@ -11763,31 +11763,72 @@ class EnhancedRelationshipDetector:
                         if isinstance(entity_list, list):
                             entities.extend(entity_list)
             
-            # Extract from text
-            text = str(payload)
-            import re
-            # Simple entity extraction
-            words = text.split()
-            for word in words:
-                if len(word) > 3 and word[0].isupper():
-                    entities.append(word)
+            # Direct field extraction
+            name_fields = ['employee_name', 'name', 'recipient', 'payee', 'description', 'vendor_name', 'vendor', 'company', 'business', 'client', 'customer']
+            for field in name_fields:
+                if field in payload:
+                    value = payload[field]
+                    if isinstance(value, str) and value.strip():
+                        entities.append(value.strip())
             
-            return list(set(entities))
-        except:
+            # Extract from description field if it contains entity-like information
+            if 'description' in payload:
+                desc = payload['description']
+                if isinstance(desc, str):
+                    # Look for patterns like "Payment to [Company]" or "Invoice from [Vendor]"
+                    import re
+                    patterns = [
+                        r'to\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)',  # "to Company Name"
+                        r'from\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)',  # "from Vendor Name"
+                        r'for\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)',  # "for Client Name"
+                    ]
+                    for pattern in patterns:
+                        matches = re.findall(pattern, desc)
+                        entities.extend(matches)
+            
+            # Extract from any field that might contain entity information
+            for key, value in payload.items():
+                if isinstance(value, str) and len(value) > 3 and len(value) < 100:
+                    # Check if it looks like a company/vendor name
+                    if any(word in key.lower() for word in ['name', 'vendor', 'company', 'business', 'client', 'customer']):
+                        if value.strip() and not value.isdigit():
+                            entities.append(value.strip())
+            
+            return list(set(entities))  # Remove duplicates
+        except Exception as e:
+            logger.error(f"Error extracting entities: {e}")
             return []
     
     def _extract_ids(self, payload: Dict) -> List[str]:
-        """Extract IDs from payload"""
+        """Extract IDs from payload - Enhanced for real-world data"""
         ids = []
         try:
             # Try different ID fields
-            id_fields = ['id', 'transaction_id', 'payment_id', 'invoice_id', 'reference']
+            id_fields = ['id', 'transaction_id', 'payment_id', 'invoice_id', 'reference', 'reference_id', 'order_id', 'receipt_id', 'check_number', 'confirmation_number']
             for field in id_fields:
                 if field in payload and payload[field]:
-                    ids.append(str(payload[field]))
+                    value = payload[field]
+                    if isinstance(value, (str, int, float)):
+                        ids.append(str(value).strip())
             
-            return ids
-        except:
+            # Extract IDs from text using regex
+            text = str(payload)
+            import re
+            # Look for common ID patterns
+            id_patterns = [
+                r'ID[:\s]*([A-Z0-9\-_]+)',  # "ID: ABC123"
+                r'Ref[:\s]*([A-Z0-9\-_]+)',  # "Ref: XYZ789"
+                r'Order[:\s]*([A-Z0-9\-_]+)',  # "Order: ORD456"
+                r'Invoice[:\s]*([A-Z0-9\-_]+)',  # "Invoice: INV789"
+                r'Payment[:\s]*([A-Z0-9\-_]+)',  # "Payment: PAY123"
+            ]
+            for pattern in id_patterns:
+                matches = re.findall(pattern, text, re.IGNORECASE)
+                ids.extend(matches)
+            
+            return list(set(ids))  # Remove duplicates
+        except Exception as e:
+            logger.error(f"Error extracting IDs: {e}")
             return []
     
     def _remove_duplicate_relationships(self, relationships: List[Dict]) -> List[Dict]:
@@ -11898,30 +11939,77 @@ class EnhancedRelationshipDetector:
             return f"{relationship_type} relationship (error generating details: {str(e)})"
     
     def _validate_business_logic(self, source_event: Dict, target_event: Dict, relationship_type: str) -> bool:
-        """Validate business logic of relationship"""
+        """Validate business logic of relationship - Enhanced for accuracy"""
         try:
             source_payload = source_event.get('payload', {})
             target_payload = target_event.get('payload', {})
             
-            # Check for logical inconsistencies
-            if relationship_type == 'invoice_to_payment':
-                # Invoice should have positive amount, payment should have negative
-                source_amount = self._extract_amount(source_payload)
-                target_amount = self._extract_amount(target_payload)
-                if source_amount > 0 and target_amount > 0:
-                    return False  # Both positive amounts don't make sense for invoice-payment
-            
-            # Check date logic
+            # Extract key data
+            source_amount = self._extract_amount(source_payload)
+            target_amount = self._extract_amount(target_payload)
             source_date = self._extract_date(source_event)
             target_date = self._extract_date(target_event)
+            source_entities = self._extract_entities(source_payload)
+            target_entities = self._extract_entities(target_payload)
+            
+            # Amount validation
+            if relationship_type in ['invoice_to_payment', 'payment_to_invoice']:
+                # For invoice-payment relationships, amounts should be related
+                if source_amount > 0 and target_amount > 0:
+                    # Check if amounts are similar (within 10% or exact match)
+                    if abs(source_amount - target_amount) / max(source_amount, target_amount) > 0.1:
+                        return False
+                elif source_amount < 0 and target_amount < 0:
+                    # Both negative amounts might indicate bank transactions
+                    pass
+                else:
+                    # One positive, one negative is expected for invoice-payment
+                    pass
+            
+            # Date validation - more sophisticated
             if source_date and target_date:
-                # For most relationships, source should be before or same as target
-                if (source_date - target_date).days > 30:
-                    return False  # Source too far in the future
+                date_diff = abs((source_date - target_date).days)
+                
+                # Different relationship types have different date tolerance
+                if relationship_type in ['invoice_to_payment', 'payment_to_invoice']:
+                    # Invoice and payment should be within 30 days
+                    if date_diff > 30:
+                        return False
+                elif relationship_type in ['revenue_to_cashflow', 'expense_to_bank']:
+                    # Revenue and cash flow should be within 7 days
+                    if date_diff > 7:
+                        return False
+                elif relationship_type in ['payroll_to_bank']:
+                    # Payroll and bank transactions should be within 3 days
+                    if date_diff > 3:
+                        return False
+                else:
+                    # General relationships should be within 14 days
+                    if date_diff > 14:
+                        return False
+            
+            # Entity validation
+            if source_entities and target_entities:
+                common_entities = set(source_entities) & set(target_entities)
+                # For certain relationship types, we expect some entity overlap
+                if relationship_type in ['invoice_to_payment', 'payment_to_invoice']:
+                    if not common_entities and len(source_entities) > 0 and len(target_entities) > 0:
+                        # No common entities might indicate unrelated transactions
+                        return False
+            
+            # Amount range validation
+            if source_amount != 0 and target_amount != 0:
+                # Check for reasonable amount relationships
+                if relationship_type in ['invoice_to_payment', 'payment_to_invoice']:
+                    # Amounts should be similar
+                    amount_ratio = min(abs(source_amount), abs(target_amount)) / max(abs(source_amount), abs(target_amount))
+                    if amount_ratio < 0.8:  # Less than 80% match
+                        return False
             
             return True
             
-        except:
+        except Exception as e:
+            logger.error(f"Business logic validation error: {e}")
             return True  # Default to valid if validation fails
 
 # Add new test endpoint for enhanced relationship detection
