@@ -10096,7 +10096,7 @@ async def test_ai_relationship_detection(user_id: str):
 
 @app.get("/test-relationship-discovery/{user_id}")
 async def test_relationship_discovery(user_id: str):
-    """Test AI-powered relationship type discovery"""
+    """Test AI-powered relationship type discovery - Updated to use Enhanced Detector"""
     try:
         # Initialize OpenAI and Supabase clients
         openai_client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
@@ -10121,16 +10121,20 @@ async def test_relationship_discovery(user_id: str):
                 "timestamp": datetime.utcnow().isoformat()
             }
         
-        # Initialize AI Relationship Detector
-        ai_detector = AIRelationshipDetector(openai_client, supabase)
+        # Initialize Enhanced Relationship Detector for better discovery
+        enhanced_detector = EnhancedRelationshipDetector(openai_client, supabase)
         
-        # Discover relationship types
-        relationship_types = await ai_detector._discover_relationship_types(events.data)
+        # Detect relationships to discover types
+        result = await enhanced_detector.detect_all_relationships(user_id)
+        
+        # Extract unique relationship types from results
+        relationship_types = list(set([r.get('relationship_type', 'unknown') for r in result.get('relationships', [])]))
         
         return {
-            "message": "Relationship Type Discovery Test Completed",
+            "message": "Relationship Type Discovery Test Completed (Enhanced)",
             "discovered_types": relationship_types,
             "total_events": len(events.data),
+            "total_relationships": len(result.get('relationships', [])),
             "timestamp": datetime.utcnow().isoformat()
         }
         
