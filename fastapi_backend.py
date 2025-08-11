@@ -11393,18 +11393,20 @@ class EnhancedRelationshipDetector:
             for target_event in target_events[:10]:  # Limit for performance
                 score = await self._calculate_relationship_score(source_event, target_event, relationship_type)
                 
-                if score > 0.6:  # Only include high-confidence relationships
-                    relationship = {
-                        'source_event_id': source_event.get('id'),
-                        'target_event_id': target_event.get('id'),
-                        'relationship_type': relationship_type,
-                        'confidence_score': score,
-                        'source_file': source_event.get('source_filename'),
-                        'target_file': target_event.get('source_filename'),
-                        'detection_method': 'cross_file_analysis',
-                        'reasoning': f"Cross-file relationship between {source_event.get('source_filename')} and {target_event.get('source_filename')}"
-                    }
-                    relationships.append(relationship)
+                if score > 0.8:  # Only include high-confidence relationships (increased threshold)
+                    # Validate business logic
+                    if self._validate_business_logic(source_event, target_event, relationship_type):
+                        relationship = {
+                            'source_event_id': source_event.get('id'),
+                            'target_event_id': target_event.get('id'),
+                            'relationship_type': relationship_type,
+                            'confidence_score': score,
+                            'source_file': source_event.get('source_filename'),
+                            'target_file': target_event.get('source_filename'),
+                            'detection_method': 'cross_file_analysis',
+                            'reasoning': await self._generate_detailed_reasoning(source_event, target_event, relationship_type, score)
+                        }
+                        relationships.append(relationship)
         
         return relationships
     
@@ -11420,18 +11422,20 @@ class EnhancedRelationshipDetector:
                 relationship_type = self._determine_relationship_type(event1, event2)
                 score = await self._calculate_relationship_score(event1, event2, relationship_type)
                 
-                if score > 0.5:  # Lower threshold for within-file relationships
-                    relationship = {
-                        'source_event_id': event1.get('id'),
-                        'target_event_id': event2.get('id'),
-                        'relationship_type': relationship_type,
-                        'confidence_score': score,
-                        'source_file': filename,
-                        'target_file': filename,
-                        'detection_method': 'within_file_analysis',
-                        'reasoning': f"Sequential relationship within {filename}"
-                    }
-                    relationships.append(relationship)
+                if score > 0.7:  # Higher threshold for within-file relationships (increased from 0.5)
+                    # Validate business logic
+                    if self._validate_business_logic(event1, event2, relationship_type):
+                        relationship = {
+                            'source_event_id': event1.get('id'),
+                            'target_event_id': event2.get('id'),
+                            'relationship_type': relationship_type,
+                            'confidence_score': score,
+                            'source_file': filename,
+                            'target_file': filename,
+                            'detection_method': 'within_file_analysis',
+                            'reasoning': await self._generate_detailed_reasoning(event1, event2, relationship_type, score)
+                        }
+                        relationships.append(relationship)
         
         return relationships
     
@@ -11775,6 +11779,101 @@ class EnhancedRelationshipDetector:
             return False
         
         return True
+    
+    async def _generate_detailed_reasoning(self, source_event: Dict, target_event: Dict, relationship_type: str, score: float) -> str:
+        """Generate detailed reasoning for relationship"""
+        try:
+            source_payload = source_event.get('payload', {})
+            target_payload = target_event.get('payload', {})
+            
+            # Extract key information
+            source_amount = self._extract_amount(source_payload)
+            target_amount = self._extract_amount(target_payload)
+            source_date = self._extract_date(source_event)
+            target_date = self._extract_date(target_event)
+            source_entities = self._extract_entities(source_payload)
+            target_entities = self._extract_entities(target_payload)
+            
+            # Build detailed reasoning
+            reasoning_parts = []
+            
+            # Amount correlation
+            if source_amount > 0 and target_amount > 0:
+                amount_ratio = min(source_amount, target_amount) / max(source_amount, target_amount)
+                if amount_ratio > 0.95:
+                    reasoning_parts.append(f"Exact amount match: ${source_amount:,.2f}")
+                elif amount_ratio > 0.8:
+                    reasoning_parts.append(f"High amount correlation: ${source_amount:,.2f} vs ${target_amount:,.2f}")
+                elif amount_ratio > 0.6:
+                    reasoning_parts.append(f"Moderate amount correlation: ${source_amount:,.2f} vs ${target_amount:,.2f}")
+            
+            # Date proximity
+            if source_date and target_date:
+                date_diff = abs((source_date - target_date).days)
+                if date_diff == 0:
+                    reasoning_parts.append("Same date")
+                elif date_diff <= 1:
+                    reasoning_parts.append(f"Dates within 1 day ({date_diff} days apart)")
+                elif date_diff <= 7:
+                    reasoning_parts.append(f"Dates within 1 week ({date_diff} days apart)")
+                elif date_diff <= 30:
+                    reasoning_parts.append(f"Dates within 1 month ({date_diff} days apart)")
+            
+            # Entity matching
+            if source_entities and target_entities:
+                common_entities = set(source_entities) & set(target_entities)
+                if common_entities:
+                    reasoning_parts.append(f"Common entities: {', '.join(list(common_entities)[:3])}")
+            
+            # Relationship type context
+            if relationship_type == 'invoice_to_payment':
+                reasoning_parts.append("Invoice payment relationship")
+            elif relationship_type == 'revenue_to_cashflow':
+                reasoning_parts.append("Revenue to cash flow relationship")
+            elif relationship_type == 'expense_to_bank':
+                reasoning_parts.append("Expense to bank transaction relationship")
+            elif relationship_type == 'payroll_to_bank':
+                reasoning_parts.append("Payroll to bank transaction relationship")
+            
+            # Confidence level
+            if score >= 0.9:
+                reasoning_parts.append("Very high confidence")
+            elif score >= 0.8:
+                reasoning_parts.append("High confidence")
+            elif score >= 0.7:
+                reasoning_parts.append("Moderate confidence")
+            
+            return "; ".join(reasoning_parts) if reasoning_parts else f"{relationship_type} relationship detected"
+            
+        except Exception as e:
+            return f"{relationship_type} relationship (error generating details: {str(e)})"
+    
+    def _validate_business_logic(self, source_event: Dict, target_event: Dict, relationship_type: str) -> bool:
+        """Validate business logic of relationship"""
+        try:
+            source_payload = source_event.get('payload', {})
+            target_payload = target_event.get('payload', {})
+            
+            # Check for logical inconsistencies
+            if relationship_type == 'invoice_to_payment':
+                # Invoice should have positive amount, payment should have negative
+                source_amount = self._extract_amount(source_payload)
+                target_amount = self._extract_amount(target_payload)
+                if source_amount > 0 and target_amount > 0:
+                    return False  # Both positive amounts don't make sense for invoice-payment
+            
+            # Check date logic
+            source_date = self._extract_date(source_event)
+            target_date = self._extract_date(target_event)
+            if source_date and target_date:
+                # For most relationships, source should be before or same as target
+                if (source_date - target_date).days > 30:
+                    return False  # Source too far in the future
+            
+            return True
+            
+        except:
+            return True  # Default to valid if validation fails
 
 # Add new test endpoint for enhanced relationship detection
 @app.get("/test-enhanced-relationship-detection/{user_id}")
