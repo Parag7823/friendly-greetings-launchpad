@@ -9291,6 +9291,9 @@ async def test_vendor_search(user_id: str, vendor_name: str = "Google"):
                 "timestamp": datetime.utcnow().isoformat()
             }
         
+        # Clean the JWT token (remove newlines and whitespace)
+        supabase_key = supabase_key.strip().replace('\n', '').replace('\r', '').replace('\\n', '')
+        
         supabase = create_client(supabase_url, supabase_key)
         
         # Call the database function
@@ -9336,6 +9339,9 @@ async def test_currency_summary(user_id: str):
                 "message": "Supabase credentials not configured",
                 "timestamp": datetime.utcnow().isoformat()
             }
+        
+        # Clean the JWT token (remove newlines and whitespace)
+        supabase_key = supabase_key.strip().replace('\n', '').replace('\r', '').replace('\\n', '')
         
         supabase = create_client(supabase_url, supabase_key)
         
