@@ -8107,7 +8107,7 @@ class AIRelationshipDetector:
             Return only the relationship type names, one per line, without explanations.
             """
             
-            response = await self.openai.chat.completions.create(
+            response = self.openai.chat.completions.create(
                 model="gpt-4o-mini",
                 messages=[{"role": "user", "content": prompt}],
                 max_tokens=200,
@@ -8538,9 +8538,16 @@ class AIRelationshipDetector:
         return max_similarity
     
     def _calculate_id_score(self, source: Dict, target: Dict, relationship_type: str) -> float:
-        """Calculate ID matching score with pattern recognition"""
+        """Calculate ID matching score with pattern recognition - Enhanced for real-world data"""
+        # Try platform_ids first
         source_ids = source.get('platform_ids', {})
         target_ids = target.get('platform_ids', {})
+        
+        # If no platform_ids, try to extract IDs from payload
+        if not source_ids:
+            source_ids = self._extract_ids_from_payload(source.get('payload', {}))
+        if not target_ids:
+            target_ids = self._extract_ids_from_payload(target.get('payload', {}))
         
         if not source_ids or not target_ids:
             return 0.0
@@ -8674,18 +8681,44 @@ class AIRelationshipDetector:
         return 0.0
     
     def _extract_entities(self, payload: Dict) -> List[str]:
-        """Extract entity names from payload"""
+        """Extract entity names from payload - Enhanced for real-world data"""
         entities = []
         try:
-            name_fields = ['employee_name', 'name', 'recipient', 'payee', 'description', 'vendor_name']
+            # Direct field extraction
+            name_fields = ['employee_name', 'name', 'recipient', 'payee', 'description', 'vendor_name', 'vendor', 'company', 'business']
             for field in name_fields:
                 if field in payload:
                     value = payload[field]
                     if isinstance(value, str) and value.strip():
                         entities.append(value.strip())
-        except:
-            pass
-        return entities
+            
+            # Extract from description field if it contains entity-like information
+            if 'description' in payload:
+                desc = payload['description']
+                if isinstance(desc, str):
+                    # Look for patterns like "Payment to [Company]" or "Invoice from [Vendor]"
+                    import re
+                    patterns = [
+                        r'to\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)',  # "to Company Name"
+                        r'from\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)',  # "from Vendor Name"
+                        r'for\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)',  # "for Client Name"
+                    ]
+                    for pattern in patterns:
+                        matches = re.findall(pattern, desc)
+                        entities.extend(matches)
+            
+            # Extract from any field that might contain entity information
+            for key, value in payload.items():
+                if isinstance(value, str) and len(value) > 3 and len(value) < 100:
+                    # Check if it looks like a company/vendor name
+                    if any(word in key.lower() for word in ['name', 'vendor', 'company', 'business', 'client', 'customer']):
+                        if value.strip() and not value.isdigit():
+                            entities.append(value.strip())
+            
+        except Exception as e:
+            logger.error(f"Error extracting entities: {e}")
+        
+        return list(set(entities))  # Remove duplicates
     
     def _extract_date(self, payload: Dict) -> Optional[datetime]:
         """Extract date from payload"""
@@ -8701,6 +8734,22 @@ class AIRelationshipDetector:
         except:
             pass
         return None
+    
+    def _extract_ids_from_payload(self, payload: Dict) -> Dict[str, str]:
+        """Extract IDs from payload fields"""
+        ids = {}
+        try:
+            id_fields = ['id', 'transaction_id', 'invoice_id', 'payment_id', 'reference', 'reference_id', 'order_id', 'receipt_id']
+            for field in id_fields:
+                if field in payload:
+                    value = payload[field]
+                    if isinstance(value, str) and value.strip():
+                        ids[field] = value.strip()
+                    elif isinstance(value, (int, float)):
+                        ids[field] = str(value)
+        except Exception as e:
+            logger.error(f"Error extracting IDs: {e}")
+        return ids
     
     def _extract_context(self, event: Dict) -> str:
         """Extract context from event"""
