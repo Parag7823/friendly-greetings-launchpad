@@ -11,6 +11,7 @@ import { Badge } from './ui/badge';
 import { Progress } from './ui/progress';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
 interface FileUploadState {
+  id: string;
   file: File;
   status: 'processing' | 'success' | 'error';
   progress: number;
@@ -79,86 +80,93 @@ export const EnhancedExcelUpload = () => {
       isValid: true
     };
   };
-  const processFileEnhanced = async (file: File, fileIndex: number, customPrompt?: string) => {
-    try {
-      const result = await processWithFastAPI(file, customPrompt, progress => {
-        setUploadState(prev => ({
-          ...prev,
-          files: prev.files.map((f, i) => i === fileIndex ? {
-            ...f,
-            currentStep: progress.message,
-            progress: progress.progress,
-            sheetProgress: progress.sheetProgress
-          } : f)
-        }));
-      });
-
-      // Move file to uploaded files list and remove from processing
+const processFileEnhanced = async (file: File, fileId: string, customPrompt?: string) => {
+  try {
+    const result = await processWithFastAPI(file, customPrompt, progress => {
       setUploadState(prev => ({
         ...prev,
-        files: prev.files.filter((_, i) => i !== fileIndex),
-        uploadedFiles: [...prev.uploadedFiles, {
-          id: `${file.name}-${Date.now()}`,
-          name: file.name,
-          uploadedAt: new Date(),
-          analysisResults: result,
-          sheets: result.sheets || []
-        }]
-      }));
-      return result;
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'FastAPI processing failed';
-      setUploadState(prev => ({
-        ...prev,
-        files: prev.files.map((f, i) => i === fileIndex ? {
+        files: prev.files.map(f => f.id === fileId ? {
           ...f,
-          status: 'error' as const,
-          error: errorMessage
+          currentStep: progress.message,
+          progress: progress.progress,
+          sheetProgress: progress.sheetProgress
         } : f)
       }));
-      throw error;
-    }
-  };
-  const handleMultipleFileUpload = useCallback(async (files: FileList, customPrompt?: string) => {
-    const fileArray = Array.from(files).slice(0, 5); // Limit to 5 files for FastAPI
+    });
 
-    // Validate all files first
-    const validations = fileArray.map(file => ({
-      file,
-      validation: validateFile(file)
-    }));
-    const invalidFiles = validations.filter(v => !v.validation.isValid);
-    if (invalidFiles.length > 0) {
-      toast({
-        variant: "destructive",
-        title: "Upload Failed",
-        description: `Invalid files: ${invalidFiles.map(f => f.file.name).join(', ')}`
-      });
-      return;
-    }
-
-    // Initialize file states
-    const baseIndex = uploadState.files.length;
-    const initialFileStates: FileUploadState[] = fileArray.map(file => ({
-      file,
-      status: 'processing' as const,
-      progress: 0,
-      currentStep: 'Preparing for advanced analysis...'
-    }));
+    // Move file to uploaded files list and remove from processing
     setUploadState(prev => ({
       ...prev,
-      files: [...prev.files, ...initialFileStates]
+      files: prev.files.filter(f => f.id !== fileId),
+      uploadedFiles: [...prev.uploadedFiles, {
+        id: `${file.name}-${Date.now()}`,
+        name: file.name,
+        uploadedAt: new Date(),
+        analysisResults: result,
+        sheets: result.sheets || []
+      }]
     }));
+    return result;
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'FastAPI processing failed';
+    setUploadState(prev => ({
+      ...prev,
+      files: prev.files.map(f => f.id === fileId ? {
+        ...f,
+        status: 'error' as const,
+        error: errorMessage
+      } : f)
+    }));
+    throw error;
+  }
+};
+const handleMultipleFileUpload = useCallback(async (files: FileList, customPrompt?: string) => {
+  const fileArray = Array.from(files).slice(0, 15); // Limit to 15 files max
 
-    // Process files one by one for better progress tracking
-    for (let i = 0; i < fileArray.length; i++) {
-      try {
-        await processFileEnhanced(fileArray[i], baseIndex + i, customPrompt);
-      } catch (error) {
-        console.error(`Error processing file ${fileArray[i].name}:`, error);
-      }
+  // Validate all files first
+  const validations = fileArray.map(file => ({
+    file,
+    validation: validateFile(file)
+  }));
+  const invalidFiles = validations.filter(v => !v.validation.isValid);
+  if (invalidFiles.length > 0) {
+    toast({
+      variant: "destructive",
+      title: "Upload Failed",
+      description: `Invalid files: ${invalidFiles.map(f => f.file.name).join(', ')}`
+    });
+    return;
+  }
+
+  // Prepare file entries with stable IDs
+  const now = Date.now();
+  const fileEntries = fileArray.map((file, i) => ({
+    id: `${now}-${i}-${file.name}`,
+    file
+  }));
+
+  // Initialize file states
+  const initialFileStates: FileUploadState[] = fileEntries.map(({ id, file }) => ({
+    id,
+    file,
+    status: 'processing' as const,
+    progress: 0,
+    currentStep: 'Preparing for advanced analysis...'
+  }));
+  setUploadState(prev => ({
+    ...prev,
+    files: [...prev.files, ...initialFileStates]
+  }));
+
+  // Process files one by one for better progress tracking
+  for (let i = 0; i < fileEntries.length; i++) {
+    try {
+      await processFileEnhanced(fileEntries[i].file, fileEntries[i].id, customPrompt);
+    } catch (error) {
+      console.error(`Error processing file ${fileEntries[i].file.name}:`, error);
     }
-  }, [uploadState.files.length, toast]);
+  }
+}, [toast]);
   const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = event.target.files;
     if (files && files.length > 0) {
@@ -228,7 +236,7 @@ export const EnhancedExcelUpload = () => {
               </div>
               <p className="text-lg font-medium text-foreground mb-2">Upload Financial Documents</p>
               <p className="text-sm text-muted-foreground mb-2">
-                Drag & drop or click to browse (up to 5 files)
+                Drag & drop or click to browse (up to 15 files)
               </p>
               <p className="text-xs text-muted-foreground">.xlsx, .xls, .csv • Max 50MB per file </p>
             </div>

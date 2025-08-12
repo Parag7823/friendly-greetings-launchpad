@@ -642,9 +642,7 @@ export class FastAPIProcessor {
             category: this.getCategoryFromHeader(col.header),
             subcategory: col.header,
             amount: value,
-            date_recorded: new Date().toISOString().split('T')[0],
-            columnSource: col.header,
-            rowIndex: rowIndex + 1
+            date_recorded: new Date().toISOString().split('T')[0]
           });
         }
       });
