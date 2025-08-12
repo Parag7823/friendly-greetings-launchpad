@@ -37,7 +37,7 @@ def upload_file(filename):
     try:
         with open(file_path, 'rb') as f:
             files = {'file': (filename, f, 'text/csv')}
-            response = requests.post(f"{BASE_URL}/process_excel", files=files)
+            response = requests.post(f"{BASE_URL}/process-excel", files=files)
             
         if response.status_code == 200:
             result = response.json()
