@@ -181,8 +181,6 @@ export class FastAPIProcessor {
         job_id: jobData.id,
         storage_path: fileName,
         file_name: file.name,
-        supabase_url: "https://gnrbafqifucxlaihtyuv.supabase.co",
-        supabase_key: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImducmJhZnFpZnVjeGxhaWh0eXV2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTMxMTM5OTksImV4cCI6MjA2ODY4OTk5OX0.Lb5Fuu1ktYuPKBgx0Oxla9SXot-TWI-bPhsML9EkRwE",
         user_id: user.id
       };
 
