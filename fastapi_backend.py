@@ -11410,17 +11410,17 @@ class EnhancedRelationshipDetector:
                 if score > 0.8:  # Only include high-confidence relationships (increased threshold)
                     # Validate business logic
                     if self._validate_business_logic(source_event, target_event, relationship_type):
-                    relationship = {
-                        'source_event_id': source_event.get('id'),
-                        'target_event_id': target_event.get('id'),
-                        'relationship_type': relationship_type,
-                        'confidence_score': score,
-                        'source_file': source_event.get('source_filename'),
-                        'target_file': target_event.get('source_filename'),
-                        'detection_method': 'cross_file_analysis',
+                        relationship = {
+                            'source_event_id': source_event.get('id'),
+                            'target_event_id': target_event.get('id'),
+                            'relationship_type': relationship_type,
+                            'confidence_score': score,
+                            'source_file': source_event.get('source_filename'),
+                            'target_file': target_event.get('source_filename'),
+                            'detection_method': 'cross_file_analysis',
                             'reasoning': await self._generate_detailed_reasoning(source_event, target_event, relationship_type, score)
-                    }
-                    relationships.append(relationship)
+                        }
+                        relationships.append(relationship)
         
         return relationships
     
@@ -11439,17 +11439,17 @@ class EnhancedRelationshipDetector:
                 if score > 0.7:  # Higher threshold for within-file relationships (increased from 0.5)
                     # Validate business logic
                     if self._validate_business_logic(event1, event2, relationship_type):
-                    relationship = {
-                        'source_event_id': event1.get('id'),
-                        'target_event_id': event2.get('id'),
-                        'relationship_type': relationship_type,
-                        'confidence_score': score,
-                        'source_file': filename,
-                        'target_file': filename,
-                        'detection_method': 'within_file_analysis',
+                        relationship = {
+                            'source_event_id': event1.get('id'),
+                            'target_event_id': event2.get('id'),
+                            'relationship_type': relationship_type,
+                            'confidence_score': score,
+                            'source_file': filename,
+                            'target_file': filename,
+                            'detection_method': 'within_file_analysis',
                             'reasoning': await self._generate_detailed_reasoning(event1, event2, relationship_type, score)
-                    }
-                    relationships.append(relationship)
+                        }
+                        relationships.append(relationship)
         
         return relationships
     
@@ -11741,7 +11741,6 @@ class EnhancedRelationshipDetector:
                 desc = payload['description']
                 if isinstance(desc, str):
                     # Look for patterns like "Payment to [Company]" or "Invoice from [Vendor]"
-            import re
                     patterns = [
                         r'to\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)',  # "to Company Name"
                         r'from\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)',  # "from Vendor Name"
