@@ -13,7 +13,7 @@ from supabase import create_client, Client
 import openai
 import magic
 import filetype
-from openai import OpenAI, AsyncOpenAI
+from openai import OpenAI
 import time
 import json
 import re
@@ -699,6 +699,8 @@ class ProcessRequest(BaseModel):
     job_id: str
     storage_path: str
     file_name: str
+    supabase_url: str
+    supabase_key: str
     user_id: str
 
 class DocumentAnalyzer:
@@ -2816,14 +2818,8 @@ async def process_excel(request: ProcessRequest, background_tasks: BackgroundTas
     """Process uploaded Excel file with row-by-row streaming"""
     
     try:
-        # Initialize Supabase client from environment (never accept client-sent credentials)
-        supabase_url = os.environ.get("SUPABASE_URL")
-        supabase_key = os.environ.get("SUPABASE_SERVICE_KEY") or os.environ.get("SUPABASE_SERVICE_ROLE_KEY") or os.environ.get("SUPABASE_KEY")
-        if supabase_key:
-            supabase_key = supabase_key.strip().replace('\n', '').replace('\r', '')
-        if not supabase_url or not supabase_key:
-            raise HTTPException(status_code=500, detail="Supabase credentials not configured on server")
-        supabase: Client = create_client(supabase_url, supabase_key)
+        # Initialize Supabase client
+        supabase: Client = create_client(request.supabase_url, request.supabase_key)
         
         # Send initial update
         await manager.send_update(request.job_id, {
@@ -2844,63 +2840,6 @@ async def process_excel(request: ProcessRequest, background_tasks: BackgroundTas
                 "progress": 0
             })
             raise HTTPException(status_code=400, detail=f"File download failed: {str(e)}")
-        
-        # Server-side validation
-        max_size = 50 * 1024 * 1024  # 50MB
-        allowed_exts = ('.csv', '.xlsx', '.xls')
-        if not request.file_name.lower().endswith(allowed_exts):
-            await manager.send_update(request.job_id, {
-                "step": "error",
-                "message": "Unsupported file type. Please upload a CSV or Excel file.",
-                "progress": 0
-            })
-            raise HTTPException(status_code=400, detail="Unsupported file type. Allowed: CSV, XLSX, XLS")
-        
-        if isinstance(file_content, bytes):
-            file_size = len(file_content)
-        else:
-            file_content = bytes(file_content)
-            file_size = len(file_content)
-        
-        if file_size > max_size:
-            await manager.send_update(request.job_id, {
-                "step": "error",
-                "message": "File too large. Max size is 50MB.",
-                "progress": 0
-            })
-            raise HTTPException(status_code=400, detail="File too large. Max size is 50MB.")
-        
-        # Duplicate detection via file hash
-        file_sha256 = hashlib.sha256(file_content).hexdigest()
-        is_duplicate = False
-        try:
-            existing = supabase.table('raw_records')\
-                .select('id, file_name, metadata')\
-                .eq('user_id', request.user_id)\
-                .eq('file_name', request.file_name)\
-                .order('created_at', desc=True)\
-                .limit(1)\
-                .execute()
-            if existing.data:
-                meta = existing.data[0].get('metadata') or {}
-                if isinstance(meta, dict) and meta.get('file_sha256') == file_sha256:
-                    is_duplicate = True
-        except Exception as dup_e:
-            logger.warning(f"Duplicate check error: {dup_e}")
-        
-        if is_duplicate:
-            supabase.table('ingestion_jobs').update({
-                'status': 'completed',
-                'completed_at': datetime.utcnow().isoformat(),
-                'progress': 100,
-                'result': {'duplicate': True, 'message': 'Duplicate file skipped', 'file_sha256': file_sha256}
-            }).eq('id', request.job_id).execute()
-            await manager.send_update(request.job_id, {
-                "step": "completed",
-                "message": "✅ Duplicate detected. Skipping processing.",
-                "progress": 100
-            })
-            return {"status": "success", "job_id": request.job_id, "results": {"duplicate": True, "file_sha256": file_sha256}}
         
         # Create or update job status to processing
         try:
@@ -2950,22 +2889,9 @@ async def process_excel(request: ProcessRequest, background_tasks: BackgroundTas
             'result': results
         }).eq('id', request.job_id).execute()
         
-        # Kick off relationship detection in background (best-effort)
-        async def run_relationship_detection(uid: str):
-            try:
-                openai_key = os.environ.get("OPENAI_API_KEY")
-                if not openai_key:
-                    logger.warning("OPENAI_API_KEY not set; skipping relationship detection")
-                    return
-                openai_client = AsyncOpenAI(api_key=openai_key)
-                detector = EnhancedRelationshipDetector(openai_client, supabase)
-                await detector.detect_all_relationships(uid)
-            except Exception as re:
-                logger.error(f"Background relationship detection failed: {re}")
-        
-        asyncio.create_task(run_relationship_detection(request.user_id))
-        
         return {"status": "success", "job_id": request.job_id, "results": results}
+        
+    except Exception as e:
         logger.error(f"Processing error for job {request.job_id}: {e}")
         
         # Update job with error
@@ -3068,7 +2994,7 @@ async def health_check():
 @app.post("/upload-and-process")
 async def upload_and_process(
     file: UploadFile = Form(...),
-    user_id: str = Form(...),  # User ID must be provided by caller
+    user_id: str = Form("550e8400-e29b-41d4-a716-446655440000"),  # Default test user ID
     job_id: str = Form(None)  # Optional, will generate if not provided
 ):
     """Direct file upload and processing endpoint for testing"""
@@ -4605,6 +4531,8 @@ class ProcessRequest(BaseModel):
     job_id: str
     storage_path: str
     file_name: str
+    supabase_url: str
+    supabase_key: str
     user_id: str
 
 class DocumentAnalyzer:
@@ -6722,14 +6650,8 @@ async def process_excel(request: ProcessRequest, background_tasks: BackgroundTas
     """Process uploaded Excel file with row-by-row streaming"""
     
     try:
-        # Initialize Supabase client from environment (never accept client-sent credentials)
-        supabase_url = os.environ.get("SUPABASE_URL")
-        supabase_key = os.environ.get("SUPABASE_SERVICE_KEY") or os.environ.get("SUPABASE_SERVICE_ROLE_KEY") or os.environ.get("SUPABASE_KEY")
-        if supabase_key:
-            supabase_key = supabase_key.strip().replace('\n', '').replace('\r', '')
-        if not supabase_url or not supabase_key:
-            raise HTTPException(status_code=500, detail="Supabase credentials not configured on server")
-        supabase: Client = create_client(supabase_url, supabase_key)
+        # Initialize Supabase client
+        supabase: Client = create_client(request.supabase_url, request.supabase_key)
         
         # Send initial update
         await manager.send_update(request.job_id, {
@@ -6750,63 +6672,6 @@ async def process_excel(request: ProcessRequest, background_tasks: BackgroundTas
                 "progress": 0
             })
             raise HTTPException(status_code=400, detail=f"File download failed: {str(e)}")
-        
-        # Server-side validation
-        max_size = 50 * 1024 * 1024  # 50MB
-        allowed_exts = ('.csv', '.xlsx', '.xls')
-        if not request.file_name.lower().endswith(allowed_exts):
-            await manager.send_update(request.job_id, {
-                "step": "error",
-                "message": "Unsupported file type. Please upload a CSV or Excel file.",
-                "progress": 0
-            })
-            raise HTTPException(status_code=400, detail="Unsupported file type. Allowed: CSV, XLSX, XLS")
-        
-        if isinstance(file_content, bytes):
-            file_size = len(file_content)
-        else:
-            file_content = bytes(file_content)
-            file_size = len(file_content)
-        
-        if file_size > max_size:
-            await manager.send_update(request.job_id, {
-                "step": "error",
-                "message": "File too large. Max size is 50MB.",
-                "progress": 0
-            })
-            raise HTTPException(status_code=400, detail="File too large. Max size is 50MB.")
-        
-        # Duplicate detection via file hash
-        file_sha256 = hashlib.sha256(file_content).hexdigest()
-        is_duplicate = False
-        try:
-            existing = supabase.table('raw_records')\
-                .select('id, file_name, metadata')\
-                .eq('user_id', request.user_id)\
-                .eq('file_name', request.file_name)\
-                .order('created_at', desc=True)\
-                .limit(1)\
-                .execute()
-            if existing.data:
-                meta = existing.data[0].get('metadata') or {}
-                if isinstance(meta, dict) and meta.get('file_sha256') == file_sha256:
-                    is_duplicate = True
-        except Exception as dup_e:
-            logger.warning(f"Duplicate check error: {dup_e}")
-        
-        if is_duplicate:
-            supabase.table('ingestion_jobs').update({
-                'status': 'completed',
-                'completed_at': datetime.utcnow().isoformat(),
-                'progress': 100,
-                'result': {'duplicate': True, 'message': 'Duplicate file skipped', 'file_sha256': file_sha256}
-            }).eq('id', request.job_id).execute()
-            await manager.send_update(request.job_id, {
-                "step": "completed",
-                "message": "✅ Duplicate detected. Skipping processing.",
-                "progress": 100
-            })
-            return {"status": "success", "job_id": request.job_id, "results": {"duplicate": True, "file_sha256": file_sha256}}
         
         # Create or update job status to processing
         try:
@@ -6855,21 +6720,6 @@ async def process_excel(request: ProcessRequest, background_tasks: BackgroundTas
             'progress': 100,
             'result': results
         }).eq('id', request.job_id).execute()
-        
-        # Kick off relationship detection in background (best-effort)
-        async def run_relationship_detection(uid: str):
-            try:
-                openai_key = os.environ.get("OPENAI_API_KEY")
-                if not openai_key:
-                    logger.warning("OPENAI_API_KEY not set; skipping relationship detection")
-                    return
-                openai_client = AsyncOpenAI(api_key=openai_key)
-                detector = EnhancedRelationshipDetector(openai_client, supabase)
-                await detector.detect_all_relationships(uid)
-            except Exception as re:
-                logger.error(f"Background relationship detection failed: {re}")
-        
-        asyncio.create_task(run_relationship_detection(request.user_id))
         
         return {"status": "success", "job_id": request.job_id, "results": results}
         
@@ -6976,7 +6826,7 @@ async def health_check():
 @app.post("/upload-and-process")
 async def upload_and_process(
     file: UploadFile = Form(...),
-    user_id: str = Form(...),  # User ID must be provided by caller
+    user_id: str = Form("550e8400-e29b-41d4-a716-446655440000"),  # Default test user ID
     job_id: str = Form(None)  # Optional, will generate if not provided
 ):
     """Direct file upload and processing endpoint for testing"""
@@ -11560,17 +11410,17 @@ class EnhancedRelationshipDetector:
                 if score > 0.8:  # Only include high-confidence relationships (increased threshold)
                     # Validate business logic
                     if self._validate_business_logic(source_event, target_event, relationship_type):
-                        relationship = {
-                            'source_event_id': source_event.get('id'),
-                            'target_event_id': target_event.get('id'),
-                            'relationship_type': relationship_type,
-                            'confidence_score': score,
-                            'source_file': source_event.get('source_filename'),
-                            'target_file': target_event.get('source_filename'),
-                            'detection_method': 'cross_file_analysis',
+                    relationship = {
+                        'source_event_id': source_event.get('id'),
+                        'target_event_id': target_event.get('id'),
+                        'relationship_type': relationship_type,
+                        'confidence_score': score,
+                        'source_file': source_event.get('source_filename'),
+                        'target_file': target_event.get('source_filename'),
+                        'detection_method': 'cross_file_analysis',
                             'reasoning': await self._generate_detailed_reasoning(source_event, target_event, relationship_type, score)
-                        }
-                        relationships.append(relationship)
+                    }
+                    relationships.append(relationship)
         
         return relationships
     
@@ -11589,17 +11439,17 @@ class EnhancedRelationshipDetector:
                 if score > 0.7:  # Higher threshold for within-file relationships (increased from 0.5)
                     # Validate business logic
                     if self._validate_business_logic(event1, event2, relationship_type):
-                        relationship = {
-                            'source_event_id': event1.get('id'),
-                            'target_event_id': event2.get('id'),
-                            'relationship_type': relationship_type,
-                            'confidence_score': score,
-                            'source_file': filename,
-                            'target_file': filename,
-                            'detection_method': 'within_file_analysis',
+                    relationship = {
+                        'source_event_id': event1.get('id'),
+                        'target_event_id': event2.get('id'),
+                        'relationship_type': relationship_type,
+                        'confidence_score': score,
+                        'source_file': filename,
+                        'target_file': filename,
+                        'detection_method': 'within_file_analysis',
                             'reasoning': await self._generate_detailed_reasoning(event1, event2, relationship_type, score)
-                        }
-                        relationships.append(relationship)
+                    }
+                    relationships.append(relationship)
         
         return relationships
     
@@ -11891,7 +11741,7 @@ class EnhancedRelationshipDetector:
                 desc = payload['description']
                 if isinstance(desc, str):
                     # Look for patterns like "Payment to [Company]" or "Invoice from [Vendor]"
-                    import re
+            import re
                     patterns = [
                         r'to\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)',  # "to Company Name"
                         r'from\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)',  # "from Vendor Name"
