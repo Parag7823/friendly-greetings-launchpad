@@ -43,6 +43,19 @@ app.add_middleware(
 # Initialize OpenAI client
 openai = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 
+# Helper: fetch Supabase credentials consistently across endpoints
+def _get_supabase_credentials() -> Tuple[Optional[str], Optional[str]]:
+    """Return (url, key) using any of the common env var names, cleaned."""
+    supabase_url = os.getenv("SUPABASE_URL")
+    supabase_key = (
+        os.getenv("SUPABASE_SERVICE_KEY")
+        or os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+        or os.getenv("SUPABASE_KEY")
+    )
+    if supabase_key:
+        supabase_key = supabase_key.strip().replace('\n', '').replace('\r', '')
+    return supabase_url, supabase_key
+
 class CurrencyNormalizer:
     """Handles currency detection, conversion, and normalization"""
     
@@ -3804,8 +3817,7 @@ async def test_cross_file_relationships(user_id: str):
         openai_client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
         
         # Initialize Supabase client
-        supabase_url = os.getenv('SUPABASE_URL')
-        supabase_key = os.getenv('SUPABASE_KEY')
+        supabase_url, supabase_key = _get_supabase_credentials()
         
         if not supabase_url or not supabase_key:
             return {
@@ -10070,8 +10082,7 @@ async def test_ai_relationship_detection(user_id: str):
     try:
         # Initialize OpenAI and Supabase clients
         openai_client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
-        supabase_url = os.getenv('SUPABASE_URL')
-        supabase_key = os.getenv('SUPABASE_KEY')
+        supabase_url, supabase_key = _get_supabase_credentials()
         
         if not supabase_url or not supabase_key:
             return {
