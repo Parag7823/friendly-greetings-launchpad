@@ -3563,26 +3563,26 @@ async def test_cross_file_relationships(user_id: str):
         # Create test Supabase client
         supabase_url = os.getenv('SUPABASE_URL')
         supabase_key = os.getenv('SUPABASE_SERVICE_KEY')
-        
+
         # Clean the JWT token (remove newlines and whitespace)
         if supabase_key:
             supabase_key = supabase_key.strip().replace('\n', '').replace('\r', '')
-        
+
         supabase = create_client(supabase_url, supabase_key)
-        
+
         # Initialize relationship detector
         relationship_detector = CrossFileRelationshipDetector(supabase)
-        
+
         # Detect relationships
         results = await relationship_detector.detect_cross_file_relationships(user_id)
-        
+
         return {
             "message": "Cross-File Relationship Analysis",
             "user_id": user_id,
             "success": True,
             **results
         }
-        
+
     except Exception as e:
         logger.error(f"Cross-file relationship test failed: {e}")
         return {
@@ -3591,6 +3591,140 @@ async def test_cross_file_relationships(user_id: str):
             "user_id": user_id,
             "relationships": [],
             "success": False
+        }
+
+@app.get("/test-enhanced-relationship-detection/{user_id}")
+async def test_enhanced_relationship_detection(user_id: str):
+    """Test ENHANCED relationship detection with cross-file capabilities"""
+    try:
+        # Import the enhanced detector
+        from enhanced_relationship_detector import EnhancedRelationshipDetector
+
+        # Create test Supabase client
+        supabase_url = os.getenv('SUPABASE_URL')
+        supabase_key = os.getenv('SUPABASE_SERVICE_KEY')
+
+        # Clean the JWT token (remove newlines and whitespace)
+        if supabase_key:
+            supabase_key = supabase_key.strip().replace('\n', '').replace('\r', '')
+
+        supabase = create_client(supabase_url, supabase_key)
+
+        # Initialize enhanced relationship detector
+        enhanced_detector = EnhancedRelationshipDetector(supabase)
+
+        # Detect ALL relationships (cross-file + within-file)
+        results = await enhanced_detector.detect_all_relationships(user_id)
+
+        return {
+            "message": "Enhanced Relationship Detection Test Completed",
+            "user_id": user_id,
+            "success": True,
+            "result": results,
+            "timestamp": datetime.utcnow().isoformat()
+        }
+
+    except Exception as e:
+        logger.error(f"Enhanced relationship detection test failed: {e}")
+        return {
+            "message": "Enhanced Relationship Detection Test Failed",
+            "error": str(e),
+            "user_id": user_id,
+            "success": False,
+            "timestamp": datetime.utcnow().isoformat()
+        }
+
+@app.get("/debug-cross-file-data/{user_id}")
+async def debug_cross_file_data(user_id: str):
+    """Debug endpoint to check what files and data exist for cross-file analysis"""
+    try:
+        # Create test Supabase client
+        supabase_url = os.getenv('SUPABASE_URL')
+        supabase_key = os.getenv('SUPABASE_SERVICE_KEY')
+
+        # Clean the JWT token (remove newlines and whitespace)
+        if supabase_key:
+            supabase_key = supabase_key.strip().replace('\n', '').replace('\r', '')
+
+        supabase = create_client(supabase_url, supabase_key)
+
+        # Get all events for the user
+        events = supabase.table('raw_events').select('*').eq('user_id', user_id).execute()
+
+        if not events.data:
+            return {
+                "message": "No data found for user",
+                "user_id": user_id,
+                "total_events": 0,
+                "files": [],
+                "timestamp": datetime.utcnow().isoformat()
+            }
+
+        # Group events by file
+        events_by_file = {}
+        for event in events.data:
+            filename = event.get('source_filename', 'unknown')
+            if filename not in events_by_file:
+                events_by_file[filename] = []
+            events_by_file[filename].append(event)
+
+        # Create file summary
+        file_summary = []
+        for filename, file_events in events_by_file.items():
+            file_summary.append({
+                "filename": filename,
+                "event_count": len(file_events),
+                "sample_event_ids": [e.get('id') for e in file_events[:3]],
+                "sample_amounts": [e.get('amount') for e in file_events[:3] if e.get('amount')],
+                "date_range": {
+                    "earliest": min([e.get('event_date') for e in file_events if e.get('event_date')], default=None),
+                    "latest": max([e.get('event_date') for e in file_events if e.get('event_date')], default=None)
+                }
+            })
+
+        # Check for potential cross-file relationships
+        potential_relationships = []
+        cross_file_patterns = [
+            ['company_invoices.csv', 'comprehensive_vendor_payments.csv'],
+            ['company_revenue.csv', 'comprehensive_cash_flow.csv'],
+            ['company_expenses.csv', 'company_bank_statements.csv'],
+            ['comprehensive_payroll_data.csv', 'company_bank_statements.csv'],
+            ['company_invoices.csv', 'company_accounts_receivable.csv']
+        ]
+
+        for pattern in cross_file_patterns:
+            source_file, target_file = pattern
+            source_exists = source_file in events_by_file
+            target_exists = target_file in events_by_file
+
+            potential_relationships.append({
+                "source_file": source_file,
+                "target_file": target_file,
+                "source_exists": source_exists,
+                "target_exists": target_exists,
+                "source_events": len(events_by_file.get(source_file, [])),
+                "target_events": len(events_by_file.get(target_file, [])),
+                "can_analyze": source_exists and target_exists
+            })
+
+        return {
+            "message": "Cross-file data analysis completed",
+            "user_id": user_id,
+            "total_events": len(events.data),
+            "total_files": len(events_by_file),
+            "files": file_summary,
+            "potential_cross_file_relationships": potential_relationships,
+            "analysis_ready": sum(1 for p in potential_relationships if p["can_analyze"]),
+            "timestamp": datetime.utcnow().isoformat()
+        }
+
+    except Exception as e:
+        logger.error(f"Cross-file data debug failed: {e}")
+        return {
+            "message": "Cross-file data debug failed",
+            "error": str(e),
+            "user_id": user_id,
+            "timestamp": datetime.utcnow().isoformat()
         }
 
 @app.get("/test-websocket/{job_id}")
