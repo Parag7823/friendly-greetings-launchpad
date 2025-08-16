@@ -10,6 +10,7 @@ import { Button } from './ui/button';
 import { Badge } from './ui/badge';
 import { Progress } from './ui/progress';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
+import { DuplicateDetectionModal } from './DuplicateDetectionModal';
 interface FileUploadState {
   id: string;
   file: File;
@@ -44,6 +45,18 @@ export const EnhancedExcelUpload = () => {
   const [apiKey, setApiKey] = useState<string>('');
   const [processingMode, setProcessingMode] = useState<'basic' | 'fastapi'>('fastapi');
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
+
+  // Duplicate detection state
+  const [duplicateModal, setDuplicateModal] = useState({
+    isOpen: false,
+    phase: 'basic_duplicate' as 'basic_duplicate' | 'versions_detected' | 'similar_files',
+    duplicateInfo: null as any,
+    versionCandidates: null as any,
+    recommendation: null as any,
+    currentJobId: null as string | null,
+    currentFileHash: null as string | null
+  });
+
   const {
     toast
   } = useToast();
@@ -58,6 +71,97 @@ export const EnhancedExcelUpload = () => {
       setApiKey(storedKey);
     }
   }, []);
+
+  // Duplicate detection handlers
+  const handleDuplicateDecision = async (decision: 'replace' | 'keep_both' | 'skip') => {
+    if (!duplicateModal.currentJobId || !duplicateModal.currentFileHash) {
+      toast({
+        title: "Error",
+        description: "Missing job information for duplicate decision",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    try {
+      const response = await fetch('/api/handle-duplicate-decision', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          job_id: duplicateModal.currentJobId,
+          user_id: 'current-user-id', // Replace with actual user ID
+          decision: decision,
+          file_hash: duplicateModal.currentFileHash
+        })
+      });
+
+      if (response.ok) {
+        setDuplicateModal(prev => ({ ...prev, isOpen: false }));
+
+        if (decision === 'skip') {
+          toast({
+            title: "Upload Cancelled",
+            description: "File upload was cancelled as requested",
+          });
+        } else {
+          toast({
+            title: "Decision Processed",
+            description: `File will be processed with decision: ${decision}`,
+          });
+        }
+      } else {
+        throw new Error('Failed to process duplicate decision');
+      }
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to process duplicate decision",
+        variant: "destructive"
+      });
+    }
+  };
+
+  const handleVersionRecommendationFeedback = async (accepted: boolean, feedback?: string) => {
+    if (!duplicateModal.recommendation) {
+      return;
+    }
+
+    try {
+      const response = await fetch('/api/version-recommendation-feedback', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          recommendation_id: duplicateModal.recommendation.id,
+          user_id: 'current-user-id', // Replace with actual user ID
+          accepted: accepted,
+          feedback: feedback
+        })
+      });
+
+      if (response.ok) {
+        setDuplicateModal(prev => ({ ...prev, isOpen: false }));
+
+        toast({
+          title: accepted ? "Recommendation Accepted" : "Feedback Submitted",
+          description: accepted
+            ? "Processing will continue with the recommended version"
+            : "Thank you for your feedback. It will help improve our recommendations.",
+        });
+      } else {
+        throw new Error('Failed to submit feedback');
+      }
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to submit feedback",
+        variant: "destructive"
+      });
+    }
+  };
   const validateFile = (file: File): {
     isValid: boolean;
     error?: string;
@@ -350,7 +454,19 @@ const handleMultipleFileUpload = useCallback(async (files: FileList, customPromp
 
       {/* Empty State */}
       {uploadState.files.length === 0 && uploadState.uploadedFiles.length === 0 && <Card>
-          
+
         </Card>}
+
+      {/* Duplicate Detection Modal */}
+      <DuplicateDetectionModal
+        isOpen={duplicateModal.isOpen}
+        onClose={() => setDuplicateModal(prev => ({ ...prev, isOpen: false }))}
+        duplicateInfo={duplicateModal.duplicateInfo}
+        versionCandidates={duplicateModal.versionCandidates}
+        recommendation={duplicateModal.recommendation}
+        onDecision={handleDuplicateDecision}
+        onVersionAccept={handleVersionRecommendationFeedback}
+        phase={duplicateModal.phase}
+      />
     </div>;
 };

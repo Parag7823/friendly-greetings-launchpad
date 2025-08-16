@@ -22,6 +22,7 @@ from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from difflib import SequenceMatcher
 import aiohttp
+from duplicate_detection_service import DuplicateDetectionService
 import requests
 
 # Configure logging
@@ -2049,17 +2050,20 @@ class ExcelProcessor:
             logger.error(f"Error reading file {filename}: {e}")
             raise HTTPException(status_code=400, detail=f"Error reading file {filename}: {str(e)}")
     
-    async def process_file(self, job_id: str, file_content: bytes, filename: str, 
+    async def process_file(self, job_id: str, file_content: bytes, filename: str,
                           user_id: str, supabase: Client) -> Dict[str, Any]:
-        """Optimized processing pipeline with batch AI classification for large files"""
-        
+        """Optimized processing pipeline with duplicate detection and batch AI classification"""
+
+        # Initialize duplicate detection service
+        duplicate_service = DuplicateDetectionService(supabase)
+
         # Step 1: Read the file
         await manager.send_update(job_id, {
             "step": "reading",
             "message": f"📖 Reading and parsing your {filename}...",
-            "progress": 10
+            "progress": 5
         })
-        
+
         try:
             sheets = await self.read_file(file_content, filename)
         except Exception as e:
@@ -2069,6 +2073,95 @@ class ExcelProcessor:
                 "progress": 0
             })
             raise HTTPException(status_code=400, detail=f"Failed to read file: {str(e)}")
+
+        # Step 2: Comprehensive Duplicate Detection
+        await manager.send_update(job_id, {
+            "step": "duplicate_check",
+            "message": "🔍 Checking for duplicates and similar files...",
+            "progress": 15
+        })
+
+        try:
+            duplicate_analysis = await duplicate_service.process_file_upload(
+                user_id, file_content, filename, sheets
+            )
+
+            # Handle different duplicate detection phases
+            if duplicate_analysis['phase'] == 'basic_duplicate_detected':
+                await manager.send_update(job_id, {
+                    "step": "duplicate_found",
+                    "message": "⚠️ Identical file detected! User decision required.",
+                    "progress": 20,
+                    "duplicate_info": duplicate_analysis['duplicate_info'],
+                    "requires_user_decision": True
+                })
+
+                # Return early - wait for user decision
+                return {
+                    "status": "duplicate_detected",
+                    "duplicate_analysis": duplicate_analysis,
+                    "job_id": job_id,
+                    "requires_user_decision": True
+                }
+
+            elif duplicate_analysis['phase'] == 'versions_detected':
+                await manager.send_update(job_id, {
+                    "step": "versions_found",
+                    "message": f"📋 Found {len(duplicate_analysis['similar_files'])} similar files - analyzing versions...",
+                    "progress": 25,
+                    "version_info": {
+                        "similar_files": duplicate_analysis['similar_files'],
+                        "version_candidates": duplicate_analysis['version_candidates']
+                    }
+                })
+
+                # Generate intelligent recommendations
+                if len(duplicate_analysis['version_candidates']) > 1:
+                    # Create temporary version group for analysis
+                    version_group_id = str(uuid.uuid4())
+
+                    # Generate version recommendation
+                    recommendation = await duplicate_service.generate_version_recommendation(version_group_id)
+
+                    await manager.send_update(job_id, {
+                        "step": "version_analysis",
+                        "message": "🧠 Generated intelligent version recommendation",
+                        "progress": 30,
+                        "recommendation": recommendation
+                    })
+
+                    return {
+                        "status": "versions_detected",
+                        "duplicate_analysis": duplicate_analysis,
+                        "recommendation": recommendation,
+                        "job_id": job_id,
+                        "requires_user_decision": True
+                    }
+
+            elif duplicate_analysis['phase'] == 'similar_files_found':
+                await manager.send_update(job_id, {
+                    "step": "similar_files",
+                    "message": f"📄 Found {len(duplicate_analysis['similar_files'])} similar files",
+                    "progress": 20,
+                    "similar_files": duplicate_analysis['similar_files']
+                })
+
+            # Continue with normal processing if no blocking duplicates
+            await manager.send_update(job_id, {
+                "step": "processing",
+                "message": "✅ No blocking duplicates found - proceeding with processing",
+                "progress": 25
+            })
+
+        except Exception as e:
+            logger.warning(f"Duplicate detection failed: {e} - proceeding with normal processing")
+            duplicate_analysis = {'phase': 'error', 'error': str(e)}
+
+            await manager.send_update(job_id, {
+                "step": "duplicate_check_failed",
+                "message": "⚠️ Duplicate check failed - proceeding with upload",
+                "progress": 20
+            })
         
         # Step 2: Detect platform and document type
         await manager.send_update(job_id, {
@@ -2091,25 +2184,27 @@ class ExcelProcessor:
         await manager.send_update(job_id, {
             "step": "storing",
             "message": "💾 Storing file metadata...",
-            "progress": 30
+            "progress": 35
         })
-        
+
         # Calculate file hash for duplicate detection
         file_hash = hashlib.sha256(file_content).hexdigest()
-        
-        # Store in raw_records
+
+        # Store in raw_records with dedicated file_hash column
         raw_record_result = supabase.table('raw_records').insert({
             'user_id': user_id,
             'file_name': filename,
             'file_size': len(file_content),
+            'file_hash': file_hash,  # Dedicated column for fast duplicate detection
             'source': 'file_upload',
             'content': {
                 'sheets': list(sheets.keys()),
                 'platform_detection': platform_info,
                 'document_analysis': doc_analysis,
-                'file_hash': file_hash,
+                'file_hash': file_hash,  # Also keep in content for backward compatibility
                 'total_rows': sum(len(sheet) for sheet in sheets.values()),
-                'processed_at': datetime.utcnow().isoformat()
+                'processed_at': datetime.utcnow().isoformat(),
+                'duplicate_analysis': duplicate_analysis  # Store duplicate analysis results
             },
             'status': 'processing',
             'classification_status': 'processing'
@@ -2536,49 +2631,187 @@ async def upload_and_process(
     user_id: str = Form("550e8400-e29b-41d4-a716-446655440000"),  # Default test user ID
     job_id: str = Form(None)  # Optional, will generate if not provided
 ):
-    """Direct file upload and processing endpoint for testing"""
+    """Direct file upload and processing endpoint with duplicate detection"""
     try:
         # Generate job_id if not provided
         if not job_id:
             job_id = f"test-job-{int(time.time())}"
-        
+
         # Read file content
         file_content = await file.read()
-        
+
         # Initialize Supabase client
         supabase_url = os.environ.get("SUPABASE_URL")
         supabase_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
-        
+
         # Clean the JWT token (remove newlines and whitespace)
         if supabase_key:
             supabase_key = supabase_key.strip().replace('\n', '').replace('\r', '')
-        
+
         if not supabase_url or not supabase_key:
             raise HTTPException(status_code=500, detail="Supabase credentials not configured")
-        
+
         supabase: Client = create_client(supabase_url, supabase_key)
-        
+
         # Create ExcelProcessor instance
         excel_processor = ExcelProcessor()
-        
-        # Process the file directly
+
+        # Process the file with duplicate detection
         results = await excel_processor.process_file(
-            job_id, 
-            file_content, 
+            job_id,
+            file_content,
             file.filename,
             user_id,
             supabase
         )
-        
+
         return {
-            "status": "success", 
-            "job_id": job_id, 
+            "status": "success",
+            "job_id": job_id,
             "results": results,
             "message": "File processed successfully"
         }
-        
+
     except Exception as e:
         logger.error(f"Upload and process error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# ============================================================================
+# DUPLICATE HANDLING ENDPOINTS
+# ============================================================================
+
+class DuplicateDecisionRequest(BaseModel):
+    job_id: str
+    user_id: str
+    decision: str  # 'replace', 'keep_both', 'skip'
+    file_hash: str
+
+@app.post("/handle-duplicate-decision")
+async def handle_duplicate_decision(request: DuplicateDecisionRequest):
+    """Handle user's decision about duplicate files"""
+    try:
+        # Initialize Supabase client
+        supabase_url = os.environ.get("SUPABASE_URL")
+        supabase_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
+
+        if supabase_key:
+            supabase_key = supabase_key.strip().replace('\n', '').replace('\r', '')
+
+        if not supabase_url or not supabase_key:
+            raise HTTPException(status_code=500, detail="Supabase credentials not configured")
+
+        supabase: Client = create_client(supabase_url, supabase_key)
+        duplicate_service = DuplicateDetectionService(supabase)
+
+        # Handle the duplicate decision
+        result = await duplicate_service.handle_duplicate_decision(
+            request.user_id,
+            request.file_hash,
+            request.decision
+        )
+
+        # Send update to WebSocket
+        await manager.send_update(request.job_id, {
+            "step": "duplicate_decision_processed",
+            "message": f"✅ Duplicate decision processed: {request.decision}",
+            "progress": 30,
+            "decision_result": result
+        })
+
+        # If decision is to proceed, continue with processing
+        if result['action'] == 'proceed_with_new':
+            await manager.send_update(request.job_id, {
+                "step": "continuing_processing",
+                "message": "🔄 Continuing with file processing...",
+                "progress": 35
+            })
+
+        return {
+            "status": "success",
+            "decision_result": result,
+            "message": f"Duplicate decision '{request.decision}' processed successfully"
+        }
+
+    except Exception as e:
+        logger.error(f"Error handling duplicate decision: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+class VersionRecommendationFeedback(BaseModel):
+    recommendation_id: str
+    user_id: str
+    accepted: bool
+    feedback: Optional[str] = None
+
+@app.post("/version-recommendation-feedback")
+async def submit_version_recommendation_feedback(request: VersionRecommendationFeedback):
+    """Submit user feedback on version recommendations"""
+    try:
+        # Initialize Supabase client
+        supabase_url = os.environ.get("SUPABASE_URL")
+        supabase_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
+
+        if supabase_key:
+            supabase_key = supabase_key.strip().replace('\n', '').replace('\r', '')
+
+        if not supabase_url or not supabase_key:
+            raise HTTPException(status_code=500, detail="Supabase credentials not configured")
+
+        supabase: Client = create_client(supabase_url, supabase_key)
+        duplicate_service = DuplicateDetectionService(supabase)
+
+        # Update recommendation with feedback
+        success = await duplicate_service.update_recommendation_feedback(
+            request.recommendation_id,
+            request.accepted,
+            request.feedback
+        )
+
+        if success:
+            return {
+                "status": "success",
+                "message": "Feedback submitted successfully"
+            }
+        else:
+            raise HTTPException(status_code=500, detail="Failed to submit feedback")
+
+    except Exception as e:
+        logger.error(f"Error submitting version feedback: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/duplicate-analysis/{user_id}")
+async def get_duplicate_analysis(user_id: str):
+    """Get duplicate analysis and recommendations for a user"""
+    try:
+        # Initialize Supabase client
+        supabase_url = os.environ.get("SUPABASE_URL")
+        supabase_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
+
+        if supabase_key:
+            supabase_key = supabase_key.strip().replace('\n', '').replace('\r', '')
+
+        if not supabase_url or not supabase_key:
+            raise HTTPException(status_code=500, detail="Supabase credentials not configured")
+
+        supabase: Client = create_client(supabase_url, supabase_key)
+
+        # Get file versions for user
+        versions_result = supabase.table('file_versions').select(
+            '*'
+        ).eq('user_id', user_id).execute()
+
+        # Get pending recommendations
+        recommendations_result = supabase.table('version_recommendations').select(
+            '*'
+        ).eq('user_id', user_id).is_('user_accepted', 'null').execute()
+
+        return {
+            "status": "success",
+            "file_versions": versions_result.data,
+            "pending_recommendations": recommendations_result.data
+        }
+
+    except Exception as e:
+        logger.error(f"Error getting duplicate analysis: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/test-simple")
