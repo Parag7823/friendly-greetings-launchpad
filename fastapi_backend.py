@@ -2569,6 +2569,7 @@ class ExcelProcessor:
         
         if duplicate_check.data:
             duplicate_file = duplicate_check.data[0]
+            raise HTTPException(
                 status_code=400, 
                 detail=f"Duplicate file detected. File '{duplicate_file['file_name']}' was already uploaded on {duplicate_file['created_at'][:10]}"
             )
@@ -2627,16 +2628,19 @@ class ExcelProcessor:
 
         # Now we can safely process rows since the job exists
         # Step 5: Process each sheet with memory-optimized chunked processing
+        await manager.send_update(job_id, {
             "step": "streaming",
             "message": f"🔄 Processing rows in memory-optimized chunks (chunk size: {chunk_size})...",
             "progress": 40
-        
+        })
         # Memory monitoring during processing
         memory_check_interval = max(1, total_rows // 20)  # Check memory every 5% of rows
+        await manager.send_update(job_id, {
             "step": "streaming",
+        await manager.send_update(job_id, {
             "message": "🔄 Processing rows in optimized batches...",
             "progress": 40
-        
+        })
         total_rows = sum(len(sheet) for sheet in sheets.values())
         processed_rows = 0
         events_created = 0
@@ -2780,6 +2784,7 @@ class ExcelProcessor:
                             "message": f"🔄 Memory check: {current_memory:.1f}% usage, processed {processed_rows}/{total_rows} rows",
                     
                     # Update progress every batch
+        await manager.send_update(job_id, {
                         "step": "streaming",
                         "message": f"🔄 Processed {processed_rows}/{total_rows} rows ({events_created} events created)...",
                         "progress": int(progress)
@@ -6617,16 +6622,19 @@ class ExcelProcessor:
 
         # Now we can safely process rows since the job exists
         # Step 5: Process each sheet with memory-optimized chunked processing
+        await manager.send_update(job_id, {
             "step": "streaming",
             "message": f"🔄 Processing rows in memory-optimized chunks (chunk size: {chunk_size})...",
             "progress": 40
-        
+        })
         # Memory monitoring during processing
         memory_check_interval = max(1, total_rows // 20)  # Check memory every 5% of rows
+        await manager.send_update(job_id, {
             "step": "streaming",
+        await manager.send_update(job_id, {
             "message": "🔄 Processing rows in optimized batches...",
             "progress": 40
-        
+        })
         total_rows = sum(len(sheet) for sheet in sheets.values())
         processed_rows = 0
         events_created = 0
@@ -6770,6 +6778,7 @@ class ExcelProcessor:
                             "message": f"🔄 Memory check: {current_memory:.1f}% usage, processed {processed_rows}/{total_rows} rows",
                     
                     # Update progress every batch
+        await manager.send_update(job_id, {
                         "step": "streaming",
                         "message": f"🔄 Processed {processed_rows}/{total_rows} rows ({events_created} events created)...",
                         "progress": int(progress)
