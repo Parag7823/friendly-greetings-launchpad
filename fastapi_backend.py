@@ -20,9 +20,6 @@ import re
 import asyncio
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
-import gc
-import psutil
-import os
 from difflib import SequenceMatcher
 import aiohttp
 import requests
@@ -30,38 +27,6 @@ import requests
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
-# Memory monitoring utilities
-class MemoryMonitor:
-    """Monitor and manage memory usage for large file processing"""
-    
-    def __init__(self):
-        self.process = psutil.Process(os.getpid())
-        self.memory_threshold = 0.8  # 80% memory usage threshold
-    
-    def get_memory_usage(self):
-        """Get current memory usage percentage"""
-        return self.process.memory_percent()
-    
-    def check_memory_limit(self):
-        """Check if memory usage is within limits"""
-        return self.get_memory_usage() < self.memory_threshold
-    
-    def force_garbage_collection(self):
-        """Force garbage collection to free memory"""
-        gc.collect()
-    
-    def get_memory_info(self):
-        """Get detailed memory information"""
-        memory_info = self.process.memory_info()
-        return {
-            'rss': memory_info.rss / 1024 / 1024,  # MB
-            'vms': memory_info.vms / 1024 / 1024,  # MB
-            'percent': self.get_memory_usage()
-        }
-
-# Initialize memory monitor
-memory_monitor = MemoryMonitor()
 
 # Initialize FastAPI app
 app = FastAPI(title="Finley AI Backend", version="1.0.0")
@@ -77,19 +42,6 @@ app.add_middleware(
 
 # Initialize OpenAI client
 openai = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
-
-# Helper: fetch Supabase credentials consistently across endpoints
-def _get_supabase_credentials() -> Tuple[Optional[str], Optional[str]]:
-    """Return (url, key) using any of the common env var names, cleaned."""
-    supabase_url = os.getenv("SUPABASE_URL")
-    supabase_key = (
-        os.getenv("SUPABASE_SERVICE_KEY")
-        or os.getenv("SUPABASE_SERVICE_ROLE_KEY")
-        or os.getenv("SUPABASE_KEY")
-    )
-    if supabase_key:
-        supabase_key = supabase_key.strip().replace('\n', '').replace('\r', '')
-    return supabase_url, supabase_key
 
 class CurrencyNormalizer:
     """Handles currency detection, conversion, and normalization"""
@@ -113,7 +65,7 @@ class CurrencyNormalizer:
                 'gusto': 'USD',
                 'quickbooks': 'USD',
                 'xero': 'USD'
-        }
+            }
             
             # Check for currency symbols in description
             currency_symbols = {
@@ -122,7 +74,7 @@ class CurrencyNormalizer:
                 '€': 'EUR',
                 '£': 'GBP',
                 '¥': 'JPY'
-        }
+            }
             
             for symbol, currency in currency_symbols.items():
                 if symbol in str(description):
@@ -178,7 +130,7 @@ class CurrencyNormalizer:
                                 'JPY': 0.0067,
                                 'CAD': 0.74,
                                 'AUD': 0.66
-        }
+                            }
                             rate = fallback_rates.get(from_currency, 1.0)
             
             # Cache the rate
@@ -195,7 +147,7 @@ class CurrencyNormalizer:
                 'JPY': 0.0067,
                 'CAD': 0.74,
                 'AUD': 0.66
-        }
+            }
             return fallback_rates.get(from_currency, 1.0)
     
     async def normalize_currency(self, amount: float, currency: str, description: str, platform: str, date: str = None) -> Dict[str, Any]:
@@ -217,7 +169,7 @@ class CurrencyNormalizer:
                 "currency": currency,
                 "exchange_rate": round(exchange_rate, 6),
                 "exchange_date": date or datetime.now().strftime('%Y-%m-%d')
-        }
+            }
             
         except Exception as e:
             logger.error(f"Currency normalization failed: {e}")
@@ -227,7 +179,7 @@ class CurrencyNormalizer:
                 "currency": currency or 'USD',
                 "exchange_rate": 1.0,
                 "exchange_date": date or datetime.now().strftime('%Y-%m-%d')
-        }
+            }
 
 class VendorStandardizer:
     """Handles vendor name standardization and cleaning"""
@@ -250,7 +202,7 @@ class VendorStandardizer:
                     "vendor_standard": "",
                     "confidence": 0.0,
                     "cleaning_method": "empty"
-        }
+                }
             
             # Check cache first
             cache_key = f"{vendor_name}_{platform}"
@@ -267,7 +219,7 @@ class VendorStandardizer:
                     "vendor_standard": cleaned_name,
                     "confidence": 0.8,
                     "cleaning_method": "rule_based"
-        }
+                }
                 self.vendor_cache[cache_key] = result
                 return result
             
@@ -283,7 +235,7 @@ class VendorStandardizer:
                 "vendor_standard": vendor_name,
                 "confidence": 0.5,
                 "cleaning_method": "fallback"
-        }
+            }
     
     def _rule_based_cleaning(self, vendor_name: str) -> str:
         """Rule-based vendor name cleaning"""
@@ -311,7 +263,7 @@ class VendorStandardizer:
                 'Aapl': 'Apple',
                 'Nflx': 'Netflix',
                 'Tsla': 'Tesla'
-        }
+            }
             
             if cleaned in abbreviations:
                 cleaned = abbreviations[cleaned]
@@ -348,8 +300,8 @@ class VendorStandardizer:
             {{
                 "standard_name": "cleaned_vendor_name",
                 "confidence": 0.95,
-        "reasoning": "brief_explanation"
-        }}
+                "reasoning": "brief_explanation"
+            }}
             """
             
             response = self.openai.chat.completions.create(
@@ -375,8 +327,8 @@ class VendorStandardizer:
                 "vendor_standard": parsed.get('standard_name', vendor_name),
                 "confidence": parsed.get('confidence', 0.7),
                 "cleaning_method": "ai_powered",
-        "reasoning": parsed.get('reasoning', 'AI standardization')
-        }
+                "reasoning": parsed.get('reasoning', 'AI standardization')
+            }
             
         except Exception as e:
             logger.error(f"AI vendor standardization failed: {e}")
@@ -385,7 +337,7 @@ class VendorStandardizer:
                 "vendor_standard": vendor_name,
                 "confidence": 0.5,
                 "cleaning_method": "ai_fallback"
-        }
+            }
 
 class PlatformIDExtractor:
     """Extracts platform-specific IDs and metadata"""
@@ -397,29 +349,29 @@ class PlatformIDExtractor:
                 'order_id': r'order_[a-zA-Z0-9]{14}',
                 'refund_id': r'rfnd_[a-zA-Z0-9]{14}',
                 'settlement_id': r'setl_[a-zA-Z0-9]{14}'
-        },
+            },
             'stripe': {
                 'charge_id': r'ch_[a-zA-Z0-9]{24}',
                 'payment_intent': r'pi_[a-zA-Z0-9]{24}',
                 'customer_id': r'cus_[a-zA-Z0-9]{14}',
                 'invoice_id': r'in_[a-zA-Z0-9]{24}'
-        },
+            },
             'gusto': {
                 'employee_id': r'emp_[a-zA-Z0-9]{8}',
                 'payroll_id': r'pay_[a-zA-Z0-9]{12}',
                 'timesheet_id': r'ts_[a-zA-Z0-9]{10}'
-        },
+            },
             'quickbooks': {
                 'transaction_id': r'txn_[a-zA-Z0-9]{12}',
                 'invoice_id': r'inv_[a-zA-Z0-9]{10}',
                 'vendor_id': r'ven_[a-zA-Z0-9]{8}',
                 'customer_id': r'cust_[a-zA-Z0-9]{8}'
-        },
+            },
             'xero': {
                 'invoice_id': r'INV-[0-9]{4}-[0-9]{6}',
                 'contact_id': r'[a-zA-Z0-9]{8}-[a-zA-Z0-9]{4}-[a-zA-Z0-9]{4}',
                 'bank_transaction_id': r'BT-[0-9]{8}'
-        },
+            },
             'bank_statement': {
                 'invoice_id': r'INV-[0-9]{3}',
                 'payroll_id': r'pay_[0-9]{3}',
@@ -439,7 +391,7 @@ class PlatformIDExtractor:
                 'internet_id': r'ISP-[0-9]{3}',
                 'lease_id': r'LL-[0-9]{3}',
                 'bank_fee_id': r'BANK-FEE-[0-9]{3}'
-        }
+            }
         }
     
     def extract_platform_ids(self, row_data: Dict, platform: str, column_names: List[str]) -> Dict[str, Any]:
@@ -479,7 +431,7 @@ class PlatformIDExtractor:
                 "platform": platform,
                 "extracted_ids": extracted_ids,
                 "total_ids_found": len(extracted_ids)
-        }
+            }
             
         except Exception as e:
             logger.error(f"Platform ID extraction failed: {e}")
@@ -488,7 +440,7 @@ class PlatformIDExtractor:
                 "extracted_ids": {},
                 "total_ids_found": 0,
                 "error": str(e)
-        }
+            }
 
 class DataEnrichmentProcessor:
     """Orchestrates all data enrichment processes"""
@@ -517,13 +469,13 @@ class DataEnrichmentProcessor:
                     'amount_usd': amount,
                     'exchange_rate': 1.0,
                     'exchange_date': None
-        }
+                }
                 vendor_info = {
                     'vendor_raw': vendor_name,
                     'vendor_standard': vendor_name,
                     'confidence': 1.0,
                     'cleaning_method': 'fast_mode'
-        }
+                }
                 platform_ids = {'extracted_ids': {}}
             else:
                 # 1. Currency normalization
@@ -551,9 +503,9 @@ class DataEnrichmentProcessor:
             # 4. Create enhanced payload
             enriched_payload = {
                 # Basic classification
-        "kind": ai_classification.get('row_type', 'transaction'),
-        "category": ai_classification.get('category', 'other'),
-        "subcategory": ai_classification.get('subcategory', 'general'),
+                "kind": ai_classification.get('row_type', 'transaction'),
+                "category": ai_classification.get('category', 'other'),
+                "subcategory": ai_classification.get('subcategory', 'general'),
                 
                 # Currency information
                 "currency": currency_info.get('currency', 'USD'),
@@ -577,14 +529,14 @@ class DataEnrichmentProcessor:
                 "standard_description": self._clean_description(description),
                 "ingested_on": datetime.utcnow().isoformat(),
                 "file_source": file_context.get('filename', 'unknown'),
-        "row_index": file_context.get('row_index', 0),
+                "row_index": file_context.get('row_index', 0),
                 
                 # AI classification metadata
                 "ai_confidence": ai_classification.get('confidence', 0.0),
                 "ai_reasoning": ai_classification.get('reasoning', ''),
-        "entities": ai_classification.get('entities', {}),
-        "relationships": ai_classification.get('relationships', {})
-        }
+                "entities": ai_classification.get('entities', {}),
+                "relationships": ai_classification.get('relationships', {})
+            }
             
             return enriched_payload
             
@@ -592,8 +544,8 @@ class DataEnrichmentProcessor:
             logger.error(f"Data enrichment failed: {e}")
             # Return basic payload if enrichment fails
             return {
-        "kind": ai_classification.get('row_type', 'transaction'),
-        "category": ai_classification.get('category', 'other'),
+                "kind": ai_classification.get('row_type', 'transaction'),
+                "category": ai_classification.get('category', 'other'),
                 "amount_original": self._extract_amount(row_data),
                 "amount_usd": self._extract_amount(row_data),
                 "currency": "USD",
@@ -602,7 +554,7 @@ class DataEnrichmentProcessor:
                 "platform": platform_info.get('platform', 'unknown'),
                 "ingested_on": datetime.utcnow().isoformat(),
                 "enrichment_error": str(e)
-        }
+            }
     
     def _extract_amount(self, row_data: Dict) -> float:
         """Extract amount from row data (case-insensitive key search and string parsing)."""
@@ -816,7 +768,7 @@ class DocumentAnalyzer:
                 'non_null_count': int(non_null_count),
                 'null_count': int(len(df) - non_null_count),
                 'completeness_percentage': (non_null_count / len(df)) * 100 if len(df) > 0 else 0
-        }
+            }
         
         # Detect anomalies
         anomalies = []
@@ -838,6 +790,7 @@ class DocumentAnalyzer:
                         'column': col,
                         'count': len(outliers),
                         'percentage': (len(outliers) / len(df)) * 100
+                    })
         
         # Check for inconsistent date formats
         date_cols = [col for col in df.columns if any(word in col.lower() for word in ['date', 'time'])]
@@ -850,6 +803,7 @@ class DocumentAnalyzer:
                     'column': col,
                     'count': len(df[df[col].notna()]),
                     'percentage': (len(df[df[col].notna()]) / len(df)) * 100
+                })
         
         quality_metrics['anomalies'] = anomalies
         
@@ -928,7 +882,7 @@ class DocumentAnalyzer:
             
             {{
                 "document_type": "income_statement|balance_sheet|cash_flow|payroll_data|expense_data|revenue_data|general_ledger|bank_statement|budget|unknown",
-        "source_platform": "gusto|quickbooks|xero|razorpay|freshbooks|unknown",
+                "source_platform": "gusto|quickbooks|xero|razorpay|freshbooks|unknown",
                 "confidence": 0.95,
                 "key_columns": ["col1", "col2"],
                 "analysis": "Brief explanation",
@@ -939,11 +893,11 @@ class DocumentAnalyzer:
                     "has_account_data": false,
                     "has_transaction_data": false,
                     "time_period": "monthly"
-        }},
+                }},
                 "classification_reasoning": "Step-by-step explanation",
                 "platform_indicators": ["indicator1"],
                 "document_indicators": ["indicator1"]
-        }}
+            }}
             
             IMPORTANT: Return ONLY the JSON object, no additional text or explanations.
             """
@@ -979,7 +933,7 @@ class DocumentAnalyzer:
                         "has_account_data": False,
                         "has_transaction_data": False,
                         "time_period": "unknown"
-        }
+                    }
                 
                 if 'classification_reasoning' not in parsed_result:
                     parsed_result['classification_reasoning'] = "Analysis completed but reasoning not provided"
@@ -1004,7 +958,7 @@ class DocumentAnalyzer:
             logger.error(f"Error in document type detection: {e}")
             return {
                 "document_type": "unknown",
-        "source_platform": "unknown",
+                "source_platform": "unknown",
                 "confidence": 0.3,
                 "key_columns": list(df.columns),
                 "analysis": f"Error in analysis: {str(e)}",
@@ -1015,11 +969,11 @@ class DocumentAnalyzer:
                     "has_account_data": False,
                     "has_transaction_data": False,
                     "time_period": "unknown"
-        },
+                },
                 "classification_reasoning": f"Error occurred during analysis: {str(e)}",
                 "platform_indicators": [],
                 "document_indicators": []
-        }
+            }
     
     def _extract_fallback_info(self, response: str, column_names: list) -> Dict[str, Any]:
         """Extract basic information from AI response when JSON parsing fails"""
@@ -1074,7 +1028,7 @@ class DocumentAnalyzer:
         
         return {
             "document_type": doc_type,
-        "source_platform": platform,
+            "source_platform": platform,
             "confidence": 0.6,
             "key_columns": column_names,
             "analysis": "Fallback analysis due to JSON parsing failure",
@@ -1085,7 +1039,7 @@ class DocumentAnalyzer:
                 "has_account_data": any(word in ' '.join(column_names).lower() for word in ['account', 'ledger']),
                 "has_transaction_data": any(word in ' '.join(column_names).lower() for word in ['transaction', 'payment']),
                 "time_period": "unknown"
-        },
+            },
             "classification_reasoning": f"Fallback classification based on column names: {column_names}",
             "platform_indicators": platform_indicators,
             "document_indicators": column_names
@@ -1101,7 +1055,7 @@ class DocumentAnalyzer:
                 "total_columns": len(df.columns),
                 "numeric_columns": len(numeric_columns),
                 "document_type": doc_analysis.get("document_type", "unknown"),
-        "source_platform": doc_analysis.get("source_platform", "unknown"),
+                "source_platform": doc_analysis.get("source_platform", "unknown"),
                 "confidence": doc_analysis.get("confidence", 0.5),
                 "key_columns": doc_analysis.get("key_columns", []),
                 "analysis": doc_analysis.get("analysis", ""),
@@ -1111,7 +1065,7 @@ class DocumentAnalyzer:
                 "document_indicators": doc_analysis.get("document_indicators", []),
                 "summary_stats": {},
                 "enhanced_analysis": {}
-        }
+            }
             
             # Calculate summary statistics for numeric columns
             for col in numeric_columns:
@@ -1121,7 +1075,7 @@ class DocumentAnalyzer:
                     "min": float(df[col].min()) if not df[col].empty else 0,
                     "max": float(df[col].max()) if not df[col].empty else 0,
                     "count": int(df[col].count())
-        }
+                }
             
             # Universal platform distribution and low-confidence handling
             platform_distribution = self._compute_platform_distribution(df)
@@ -1152,13 +1106,13 @@ class DocumentAnalyzer:
                     "revenue_analysis": self._analyze_revenue_data(df),
                     "expense_analysis": self._analyze_expense_data(df),
                     "profitability_metrics": self._calculate_profitability_metrics(df)
-        }
+                }
             elif doc_type == "balance_sheet":
                 insights["enhanced_analysis"] = {
                     "asset_analysis": self._analyze_assets(df),
                     "liability_analysis": self._analyze_liabilities(df),
                     "equity_analysis": self._analyze_equity(df)
-        }
+                }
             elif doc_type == "payroll_data":
                 payroll_summary = self._analyze_payroll_data(df)
                 employee_analysis = self._analyze_employee_data(df)
@@ -1184,7 +1138,7 @@ class DocumentAnalyzer:
                     "tax_analysis": tax_analysis,
                     "unique_employee_count": unique_employees,
                     "month_distribution": month_distribution
-        }
+                }
             elif doc_type == "expense_data":
                 # Per-vendor totals for vendor payments
                 if 'Vendor Name' in df.columns and 'Amount' in df.columns:
@@ -1207,7 +1161,7 @@ class DocumentAnalyzer:
                 "classification_reasoning": f"Error generating insights: {str(e)}",
                 "platform_indicators": [],
                 "document_indicators": []
-        }
+            }
     
     def _analyze_revenue_data(self, df: pd.DataFrame) -> Dict[str, Any]:
         """Analyze revenue-related data"""
@@ -1225,14 +1179,14 @@ class DocumentAnalyzer:
                         "total": float(numeric_data.sum()) if not numeric_data.empty else 0,
                         "average": float(numeric_data.mean()) if not numeric_data.empty else 0,
                         "growth_rate": self._calculate_growth_rate(numeric_data) if len(numeric_data) > 1 else None
-        }
+                    }
                 except Exception as e:
                     logger.warning(f"Could not analyze revenue column {col}: {e}")
                     analysis[col] = {
                         "total": 0,
                         "average": 0,
                         "growth_rate": None
-        }
+                    }
         return analysis
     
     def _analyze_expense_data(self, df: pd.DataFrame) -> Dict[str, Any]:
@@ -1251,14 +1205,14 @@ class DocumentAnalyzer:
                         "total": float(numeric_data.sum()) if not numeric_data.empty else 0,
                         "average": float(numeric_data.mean()) if not numeric_data.empty else 0,
                         "percentage_of_revenue": self._calculate_expense_ratio(df, col)
-        }
+                    }
                 except Exception as e:
                     logger.warning(f"Could not analyze expense column {col}: {e}")
                     analysis[col] = {
                         "total": 0,
                         "average": 0,
                         "percentage_of_revenue": 0
-        }
+                    }
         return analysis
     
     def _calculate_profitability_metrics(self, df: pd.DataFrame) -> Dict[str, Any]:
@@ -1418,98 +1372,98 @@ class PlatformDetector:
                 'data_patterns': ['employee_ssn', 'pay_rate', 'hours_worked', 'overtime', 'federal_tax', 'state_tax'],
                 'confidence_threshold': 0.7,
                 'description': 'Payroll and HR platform'
-        },
+            },
             'quickbooks': {
                 'keywords': ['quickbooks', 'qb', 'accounting', 'invoice', 'bill', 'qbo'],
                 'columns': ['account', 'memo', 'amount', 'date', 'type', 'ref_number', 'split'],
                 'data_patterns': ['account_number', 'class', 'customer', 'vendor', 'journal_entry'],
                 'confidence_threshold': 0.7,
                 'description': 'Accounting software'
-        },
+            },
             'xero': {
                 'keywords': ['xero', 'invoice', 'contact', 'account', 'xero'],
                 'columns': ['contact_name', 'invoice_number', 'amount', 'date', 'reference', 'tracking'],
                 'data_patterns': ['contact_id', 'invoice_id', 'tax_amount', 'line_amount', 'tracking_category'],
                 'confidence_threshold': 0.7,
                 'description': 'Cloud accounting platform'
-        },
+            },
             'razorpay': {
                 'keywords': ['razorpay', 'payment', 'transaction', 'merchant', 'settlement'],
                 'columns': ['transaction_id', 'merchant_id', 'amount', 'status', 'created_at', 'payment_id'],
                 'data_patterns': ['order_id', 'currency', 'method', 'description', 'fee_amount'],
                 'confidence_threshold': 0.7,
                 'description': 'Payment gateway'
-        },
+            },
             'freshbooks': {
                 'keywords': ['freshbooks', 'invoice', 'time_tracking', 'client', 'project'],
                 'columns': ['client_name', 'invoice_number', 'amount', 'date', 'project', 'time_logged'],
                 'data_patterns': ['client_id', 'project_id', 'rate', 'hours', 'service_type'],
                 'confidence_threshold': 0.7,
                 'description': 'Invoicing and time tracking'
-        },
+            },
             'wave': {
                 'keywords': ['wave', 'accounting', 'invoice', 'business'],
                 'columns': ['account_name', 'description', 'amount', 'date', 'category'],
                 'data_patterns': ['account_id', 'transaction_id', 'balance', 'wave_specific'],
                 'confidence_threshold': 0.7,
                 'description': 'Free accounting software'
-        },
+            },
             'sage': {
                 'keywords': ['sage', 'accounting', 'business', 'sage50', 'sage100'],
                 'columns': ['account', 'description', 'amount', 'date', 'reference'],
                 'data_patterns': ['account_number', 'journal_entry', 'period', 'sage_specific'],
                 'confidence_threshold': 0.7,
                 'description': 'Business management software'
-        },
+            },
             'bank_statement': {
                 'keywords': ['bank', 'statement', 'account', 'transaction', 'balance'],
                 'columns': ['date', 'description', 'amount', 'balance', 'type', 'reference'],
                 'data_patterns': ['debit', 'credit', 'opening_balance', 'closing_balance', 'bank_fee'],
                 'confidence_threshold': 0.8,
                 'description': 'Bank account statement'
-        },
+            },
             'netsuite': {
                 'keywords': ['netsuite', 'erp', 'enterprise', 'suite'],
                 'columns': ['account', 'memo', 'amount', 'date', 'entity', 'subsidiary'],
                 'data_patterns': ['internal_id', 'tran_id', 'line_id', 'netsuite_specific'],
                 'confidence_threshold': 0.7,
                 'description': 'Enterprise resource planning'
-        },
+            },
             'stripe': {
                 'keywords': ['stripe', 'payment', 'charge', 'customer', 'subscription'],
                 'columns': ['charge_id', 'customer_id', 'amount', 'status', 'created', 'currency'],
                 'data_patterns': ['payment_intent', 'transfer_id', 'fee_amount', 'payment_method'],
                 'confidence_threshold': 0.7,
                 'description': 'Payment processing platform'
-        },
+            },
             'square': {
                 'keywords': ['square', 'payment', 'transaction', 'merchant'],
                 'columns': ['transaction_id', 'merchant_id', 'amount', 'status', 'created_at'],
                 'data_patterns': ['location_id', 'device_id', 'tender_type', 'square_specific'],
                 'confidence_threshold': 0.7,
                 'description': 'Point of sale and payments'
-        },
+            },
             'paypal': {
                 'keywords': ['paypal', 'payment', 'transaction', 'merchant'],
                 'columns': ['transaction_id', 'merchant_id', 'amount', 'status', 'created_at'],
                 'data_patterns': ['paypal_id', 'fee_amount', 'currency', 'payment_type'],
                 'confidence_threshold': 0.7,
                 'description': 'Online payment system'
-        },
+            },
             'shopify': {
                 'keywords': ['shopify', 'order', 'product', 'sales', 'ecommerce'],
                 'columns': ['order_id', 'product_name', 'amount', 'date', 'customer'],
                 'data_patterns': ['shopify_id', 'product_id', 'variant_id', 'fulfillment_status'],
                 'confidence_threshold': 0.7,
                 'description': 'E-commerce platform'
-        },
+            },
             'zoho': {
                 'keywords': ['zoho', 'books', 'invoice', 'accounting'],
                 'columns': ['contact_name', 'invoice_number', 'amount', 'date', 'reference'],
                 'data_patterns': ['zoho_id', 'organization_id', 'zoho_specific'],
                 'confidence_threshold': 0.7,
                 'description': 'Business software suite'
-        }
+            }
         }
     
     def detect_platform(self, df: pd.DataFrame, filename: str) -> Dict[str, Any]:
@@ -1574,7 +1528,7 @@ class PlatformDetector:
                     'matched_patterns': matched_patterns,
                     'reasoning': self._generate_reasoning(platform, filename_matches, column_matches, len(matched_patterns)),
                     'description': patterns['description']
-        }
+                }
         
         return best_match
     
@@ -1703,7 +1657,7 @@ class PlatformDetector:
                 'typical_columns': self.platform_patterns[platform]['columns'],
                 'keywords': self.platform_patterns[platform]['keywords'],
                 'confidence_threshold': self.platform_patterns[platform]['confidence_threshold']
-        }
+            }
         return {
             'name': platform,
             'description': 'Unknown platform',
@@ -1732,7 +1686,7 @@ class AIRowClassifier:
                 'column_names': column_names,
                 'row_data': row_data,
                 'row_index': row.name if hasattr(row, 'name') else 'unknown'
-        }
+            }
             
             # AI prompt for semantic classification
             prompt = f"""
@@ -1745,28 +1699,28 @@ class AIRowClassifier:
             Classify this row and return ONLY a valid JSON object with this structure:
             
             {{
-        "row_type": "payroll_expense|salary_expense|revenue_income|operating_expense|capital_expense|invoice|bill|transaction|investment|tax|other",
-        "category": "payroll|revenue|expense|investment|tax|other",
-        "subcategory": "employee_salary|office_rent|client_payment|software_subscription|etc",
-        "entities": {{
+                "row_type": "payroll_expense|salary_expense|revenue_income|operating_expense|capital_expense|invoice|bill|transaction|investment|tax|other",
+                "category": "payroll|revenue|expense|investment|tax|other",
+                "subcategory": "employee_salary|office_rent|client_payment|software_subscription|etc",
+                "entities": {{
                     "employees": ["employee_name1", "employee_name2"],
                     "vendors": ["vendor_name1", "vendor_name2"],
                     "customers": ["customer_name1", "customer_name2"],
                     "projects": ["project_name1", "project_name2"]
-        }},
+                }},
                 "amount": "positive_number_or_null",
                 "currency": "USD|EUR|INR|etc",
                 "date": "YYYY-MM-DD_or_null",
-        "description": "human_readable_description",
+                "description": "human_readable_description",
                 "confidence": 0.95,
-        "reasoning": "explanation_of_classification",
-        "relationships": {{
+                "reasoning": "explanation_of_classification",
+                "relationships": {{
                     "employee_id": "extracted_or_null",
                     "vendor_id": "extracted_or_null",
                     "customer_id": "extracted_or_null",
                     "project_id": "extracted_or_null"
-        }}
-        }}
+                }}
+            }}
             
             IMPORTANT RULES:
             1. If you see salary/wage/payroll terms, classify as payroll_expense
@@ -1825,7 +1779,7 @@ class AIRowClassifier:
                                 'resolution_results': [],
                                 'total_resolved': 0,
                                 'total_attempted': 0
-        }
+                            }
                         
                         # Update classification with resolved entities
                         classification['resolved_entities'] = resolution_result['resolved_entities']
@@ -1833,7 +1787,7 @@ class AIRowClassifier:
                         classification['entity_resolution_stats'] = {
                             'total_resolved': resolution_result['total_resolved'],
                             'total_attempted': resolution_result['total_attempted']
-        }
+                        }
                         
                     except Exception as e:
                         logger.error(f"Entity resolution failed: {e}")
@@ -1982,6 +1936,7 @@ class BatchAIRowClassifier:
                     'index': i,
                     'row_data': row_data,
                     'row_index': row.name if hasattr(row, 'name') else f'row_{i}'
+                })
             
             # Create batch prompt
             prompt = f"""
@@ -1993,22 +1948,22 @@ class BatchAIRowClassifier:
             
             For each row, provide classification in this format:
             {{
-        "row_type": "payroll_expense|salary_expense|revenue_income|operating_expense|capital_expense|invoice|bill|transaction|investment|tax|other",
-        "category": "payroll|revenue|expense|investment|tax|other",
-        "subcategory": "employee_salary|office_rent|client_payment|software_subscription|etc",
-        "entities": {{
+                "row_type": "payroll_expense|salary_expense|revenue_income|operating_expense|capital_expense|invoice|bill|transaction|investment|tax|other",
+                "category": "payroll|revenue|expense|investment|tax|other",
+                "subcategory": "employee_salary|office_rent|client_payment|software_subscription|etc",
+                "entities": {{
                     "employees": ["name1", "name2"],
                     "vendors": ["vendor1", "vendor2"],
                     "customers": ["customer1", "customer2"],
                     "projects": ["project1", "project2"]
-        }},
+                }},
                 "amount": "number_or_null",
                 "currency": "USD|EUR|INR|etc",
                 "date": "YYYY-MM-DD_or_null",
-        "description": "human_readable_description",
+                "description": "human_readable_description",
                 "confidence": 0.95,
-        "reasoning": "brief_explanation"
-        }}
+                "reasoning": "brief_explanation"
+            }}
             
             ROW DATA:
             """
@@ -2275,39 +2230,33 @@ class RowProcessor:
             file_context=file_context
         )
         
-        # Validate required fields before creating event
-        if not enriched_payload.get('kind'):
-            enriched_payload['kind'] = 'transaction'
-        if not enriched_payload.get('category'):
-            enriched_payload['category'] = 'other'
-        
         # Create the event payload with enhanced metadata
         event = {
-        "provider": "excel-upload",
-        "kind": enriched_payload.get('kind', 'transaction'),
-        "source_platform": platform_info.get('platform', 'unknown'),
-        "payload": enriched_payload,  # Use enriched payload instead of raw
-        "row_index": row_index,
-        "sheet_name": sheet_name,
-        "source_filename": file_context['filename'],
-        "uploader": file_context['user_id'],
-        "ingest_ts": datetime.utcnow().isoformat(),
-        "status": "pending",
-        "confidence_score": enriched_payload.get('ai_confidence', 0.5),
-        "classification_metadata": {
-        "platform_detection": platform_info,
-        "ai_classification": ai_classification,
-        "enrichment_data": enriched_payload,
-        "row_type": enriched_payload.get('kind', 'transaction'),
-        "category": enriched_payload.get('category', 'other'),
-        "subcategory": enriched_payload.get('subcategory', 'general'),
-        "entities": enriched_payload.get('entities', {}),
-        "relationships": enriched_payload.get('relationships', {}),
-        "description": enriched_payload.get('standard_description', ''),
-        "reasoning": enriched_payload.get('ai_reasoning', ''),
-        "sheet_name": sheet_name,
-        "file_context": file_context
-        }
+            "provider": "excel-upload",
+            "kind": enriched_payload.get('kind', 'transaction'),
+            "source_platform": platform_info.get('platform', 'unknown'),
+            "payload": enriched_payload,  # Use enriched payload instead of raw
+            "row_index": row_index,
+            "sheet_name": sheet_name,
+            "source_filename": file_context['filename'],
+            "uploader": file_context['user_id'],
+            "ingest_ts": datetime.utcnow().isoformat(),
+            "status": "pending",
+            "confidence_score": enriched_payload.get('ai_confidence', 0.5),
+            "classification_metadata": {
+                "platform_detection": platform_info,
+                "ai_classification": ai_classification,
+                "enrichment_data": enriched_payload,
+                "row_type": enriched_payload.get('kind', 'transaction'),
+                "category": enriched_payload.get('category', 'other'),
+                "subcategory": enriched_payload.get('subcategory', 'general'),
+                "entities": enriched_payload.get('entities', {}),
+                "relationships": enriched_payload.get('relationships', {}),
+                "description": enriched_payload.get('standard_description', ''),
+                "reasoning": enriched_payload.get('ai_reasoning', ''),
+                "sheet_name": sheet_name,
+                "file_context": file_context
+            }
         }
         
         return event
@@ -2520,36 +2469,32 @@ class ExcelProcessor:
     
     async def process_file(self, job_id: str, file_content: bytes, filename: str, 
                           user_id: str, supabase: Client) -> Dict[str, Any]:
-        """Optimized processing pipeline with memory management and chunked processing for large files"""
-        
-        # Check memory before starting
-        if not memory_monitor.check_memory_limit():
-            memory_monitor.force_garbage_collection()
-            logger.warning(f"High memory usage detected: {memory_monitor.get_memory_usage():.1f}%")
-        
-        # Determine chunk size based on file size
-        file_size_mb = len(file_content) / 1024 / 1024
-        if file_size_mb > 100:  # Large file
-            chunk_size = 1000  # Process 1000 rows at a time
-            logger.info(f"Large file detected ({file_size_mb:.1f}MB), using chunked processing")
-        elif file_size_mb > 50:  # Medium file
-            chunk_size = 2000  # Process 2000 rows at a time
-            logger.info(f"Medium file detected ({file_size_mb:.1f}MB), using optimized processing")
-        else:  # Small file
-            chunk_size = 5000  # Process 5000 rows at a time
-            logger.info(f"Small file detected ({file_size_mb:.1f}MB), using standard processing")
         """Optimized processing pipeline with batch AI classification for large files"""
         
         # Step 1: Read the file
+        await manager.send_update(job_id, {
+            "step": "reading",
+            "message": f"📖 Reading and parsing your {filename}...",
+            "progress": 10
+        })
+        
         try:
             sheets = await self.read_file(file_content, filename)
         except Exception as e:
+            await manager.send_update(job_id, {
                 "step": "error",
                 "message": f"❌ Error reading file: {str(e)}",
                 "progress": 0
+            })
             raise HTTPException(status_code=400, detail=f"Failed to read file: {str(e)}")
         
         # Step 2: Detect platform and document type
+        await manager.send_update(job_id, {
+            "step": "analyzing",
+            "message": "🧠 Analyzing document structure and detecting platform...",
+            "progress": 20
+        })
+        
         # Use first sheet for platform detection
         first_sheet = list(sheets.values())[0]
         platform_info = self.platform_detector.detect_platform(first_sheet, filename)
@@ -2561,18 +2506,14 @@ class ExcelProcessor:
         self.row_processor = RowProcessor(self.platform_detector, self.ai_classifier, self.openai)
         
         # Step 3: Create raw_records entry
+        await manager.send_update(job_id, {
+            "step": "storing",
+            "message": "💾 Storing file metadata...",
+            "progress": 30
+        })
+        
         # Calculate file hash for duplicate detection
         file_hash = hashlib.sha256(file_content).hexdigest()
-        
-        # Check for duplicate files
-        duplicate_check = supabase.table('raw_records').select('id, file_name, created_at').eq('user_id', user_id).eq('content->file_hash', file_hash).execute()
-        
-        if duplicate_check.data:
-            duplicate_file = duplicate_check.data[0]
-            raise HTTPException(
-                status_code=400, 
-                detail=f"Duplicate file detected. File '{duplicate_file['file_name']}' was already uploaded on {duplicate_file['created_at'][:10]}"
-            )
         
         # Store in raw_records
         raw_record_result = supabase.table('raw_records').insert({
@@ -2587,7 +2528,7 @@ class ExcelProcessor:
                 'file_hash': file_hash,
                 'total_rows': sum(len(sheet) for sheet in sheets.values()),
                 'processed_at': datetime.utcnow().isoformat()
-        },
+            },
             'status': 'processing',
             'classification_status': 'processing'
         }).execute()
@@ -2608,7 +2549,7 @@ class ExcelProcessor:
                 'status': 'running',
                 'progress': 0,
                 'started_at': datetime.utcnow().isoformat()
-        }).execute()
+            }).execute()
 
             if not job_result.data:
                 raise HTTPException(status_code=500, detail="Failed to create ingestion job")
@@ -2621,26 +2562,19 @@ class ExcelProcessor:
                 'status': 'running',
                 'progress': 0,
                 'started_at': datetime.utcnow().isoformat()
-        }).eq('id', job_id).execute()
+            }).eq('id', job_id).execute()
 
             if not update_result.data:
                 raise HTTPException(status_code=500, detail="Failed to update ingestion job")
 
         # Now we can safely process rows since the job exists
-        # Step 5: Process each sheet with memory-optimized chunked processing
+        # Step 5: Process each sheet with optimized batch processing
         await manager.send_update(job_id, {
             "step": "streaming",
-            "message": f"🔄 Processing rows in memory-optimized chunks (chunk size: {chunk_size})...",
-            "progress": 40
-        })
-        # Memory monitoring during processing
-        memory_check_interval = max(1, total_rows // 20)  # Check memory every 5% of rows
-        await manager.send_update(job_id, {
-            "step": "streaming",
-        await manager.send_update(job_id, {
             "message": "🔄 Processing rows in optimized batches...",
             "progress": 40
         })
+        
         total_rows = sum(len(sheet) for sheet in sheets.values())
         processed_rows = 0
         events_created = 0
@@ -2758,7 +2692,7 @@ class ExcelProcessor:
                                 'platform_ids': enriched_payload.get('platform_ids', {}),
                                 'standard_description': enriched_payload.get('standard_description'),
                                 'ingested_on': enriched_payload.get('ingested_on')
-        }).execute()
+                            }).execute()
                             
                             if event_result.data:
                                 events_created += 1
@@ -2772,42 +2706,25 @@ class ExcelProcessor:
                         
                         processed_rows += 1
                     
-                    # Memory management: Check and clean memory periodically
-                    if processed_rows % memory_check_interval == 0:
-                        current_memory = memory_monitor.get_memory_usage()
-                        if current_memory > 75:  # 75% threshold
-                            memory_monitor.force_garbage_collection()
-                            logger.info(f"Memory cleaned at row {processed_rows}, usage: {current_memory:.1f}%")
-                        
-                        # Send memory status update
-                            "step": "memory_check",
-                            "message": f"🔄 Memory check: {current_memory:.1f}% usage, processed {processed_rows}/{total_rows} rows",
-                    
                     # Update progress every batch
-        await manager.send_update(job_id, {
+                    progress = 40 + (processed_rows / total_rows) * 40
+                    await manager.send_update(job_id, {
                         "step": "streaming",
                         "message": f"🔄 Processed {processed_rows}/{total_rows} rows ({events_created} events created)...",
                         "progress": int(progress)
+                    })
                 
                 except Exception as e:
                     error_msg = f"Error processing batch {batch_idx//batch_size + 1} in sheet {sheet_name}: {str(e)}"
                     errors.append(error_msg)
                     logger.error(error_msg)
         
-        # Step 6: Final memory cleanup and status update
-        # Force final garbage collection
-        memory_monitor.force_garbage_collection()
-        final_memory = memory_monitor.get_memory_info()
-        logger.info(f"Processing completed. Final memory usage: {final_memory['rss']:.1f}MB RSS, {final_memory['percent']:.1f}%")
-        
-            "step": "finalizing",
-            "message": f"✅ Finalizing processing... (Memory: {final_memory['percent']:.1f}%)",
-            "progress": 90
-        
-        # Step 7: Update raw_records with completion status
+        # Step 6: Update raw_records with completion status
+        await manager.send_update(job_id, {
             "step": "finalizing",
             "message": "✅ Finalizing processing...",
             "progress": 90
+        })
         
         supabase.table('raw_records').update({
             'status': 'completed',
@@ -2821,13 +2738,15 @@ class ExcelProcessor:
                 'events_created': events_created,
                 'errors': errors,
                 'processed_at': datetime.utcnow().isoformat()
-        }
+            }
         }).eq('id', file_id).execute()
         
         # Step 7: Generate insights
+        await manager.send_update(job_id, {
             "step": "insights",
             "message": "💡 Generating intelligent financial insights...",
             "progress": 95
+        })
         
         insights = await self.analyzer.generate_insights(first_sheet, doc_analysis)
         
@@ -2848,8 +2767,9 @@ class ExcelProcessor:
                 'batch_size': 20,
                 'ai_calls_reduced': f"{(total_rows - (total_rows // 20)) / total_rows * 100:.1f}%",
                 'file_type': filename.split('.')[-1].lower() if '.' in filename else 'unknown'
-        },
+            },
             'errors': errors
+        })
         
         # Add enhanced platform information if detected
         if platform_info.get('platform') != 'unknown':
@@ -2864,170 +2784,20 @@ class ExcelProcessor:
                 'matched_indicators': {
                     'columns': platform_info.get('matched_columns', []),
                     'patterns': platform_info.get('matched_patterns', [])
-        }
-        }
+                }
+            }
         
-        # Step 8: Automatic Relationship Detection
-            "step": "relationships",
-            "message": "🔗 Detecting financial relationships automatically...",
-            "progress": 98
-        
-        try:
-            # Initialize Enhanced Relationship Detector
-            enhanced_detector = EnhancedRelationshipDetector(openai, supabase)
-            
-            # Detect relationships automatically
-            relationship_results = await enhanced_detector.detect_all_relationships(user_id)
-            
-            # Store relationship results in insights
-            insights['automatic_relationships'] = {
-                'total_relationships': relationship_results.get('total_relationships', 0),
-                'relationship_types': relationship_results.get('relationship_types', []),
-                'detection_method': 'automatic_upload_processing',
-                'detected_at': datetime.utcnow().isoformat()
-        }
-            
-            logger.info(f"Automatic relationship detection completed: {relationship_results.get('total_relationships', 0)} relationships found")
-            
-        except Exception as e:
-            logger.error(f"Automatic relationship detection failed: {e}")
-            insights['automatic_relationships'] = {
-                'error': str(e),
-                'detection_method': 'automatic_upload_processing_failed',
-                'detected_at': datetime.utcnow().isoformat()
-        }
-        
-        # Step 9: Complete Database Population
-            "step": "database_population",
-            "message": "💾 Populating all database tables with processed data...",
-            "progress": 99
-        
-        try:
-            # Store normalized entities
-            if insights.get('automatic_relationships', {}).get('total_relationships', 0) > 0:
-                # Extract entities from relationships
-                entities_to_store = []
-                for rel in insights.get('automatic_relationships', {}).get('relationships', []):
-                    if rel.get('source_entity'):
-                        entities_to_store.append({
-                            'user_id': user_id,
-                            'entity_name': rel['source_entity'],
-                            'entity_type': 'vendor',
-                            'normalized_name': rel['source_entity'],
-                            'confidence_score': rel.get('confidence_score', 0.8),
-                            'source_file': filename,
-                            'detected_at': datetime.utcnow().isoformat()
-                    if rel.get('target_entity'):
-                        entities_to_store.append({
-                            'user_id': user_id,
-                            'entity_name': rel['target_entity'],
-                            'entity_type': 'vendor',
-                            'normalized_name': rel['target_entity'],
-                            'confidence_score': rel.get('confidence_score', 0.8),
-                            'source_file': filename,
-                            'detected_at': datetime.utcnow().isoformat()
-                
-                if entities_to_store:
-                    # Store normalized entities
-                    supabase.table('normalized_entities').insert(entities_to_store).execute()
-                    logger.info(f"Stored {len(entities_to_store)} normalized entities")
-                
-                # Store entity matches
-                entity_matches = []
-                for i, entity1 in enumerate(entities_to_store):
-                    for j, entity2 in enumerate(entities_to_store[i+1:], i+1):
-                        if entity1['normalized_name'] == entity2['normalized_name']:
-                            entity_matches.append({
-                                'user_id': user_id,
-                                'entity1_id': entity1.get('id'),
-                                'entity2_id': entity2.get('id'),
-                                'match_confidence': 0.9,
-                                'match_type': 'exact_name',
-                                'matched_at': datetime.utcnow().isoformat()
-                
-                if entity_matches:
-                    supabase.table('entity_matches').insert(entity_matches).execute()
-                    logger.info(f"Stored {len(entity_matches)} entity matches")
-            
-            # Store relationship patterns
-            relationship_types = insights.get('automatic_relationships', {}).get('relationship_types', [])
-            for rel_type in relationship_types:
-                pattern_data = {
-                    'id_pattern': None,
-                    'date_window': 1,
-                    'description': f"Auto-detected pattern for {rel_type}",
-                    'amount_match': True,
-                    'entity_match': False,
-                    'relationship_type': rel_type,
-                    'confidence_threshold': 0.7
-        }
-                
-                supabase.table('relationship_patterns').upsert({
-                    'user_id': user_id,
-                    'relationship_type': rel_type,
-                    'pattern_data': pattern_data,
-                    'created_at': datetime.utcnow().isoformat(),
-                    'updated_at': datetime.utcnow().isoformat()
-        }).execute()
-            
-            # Store platform patterns
-            platform_info = insights.get('processing_stats', {}).get('platform_detected', 'unknown')
-            if platform_info != 'unknown':
-                platform_pattern = {
-                    'user_id': user_id,
-                    'platform_name': platform_info,
-                    'pattern_data': {
-                        'columns': insights.get('processing_stats', {}).get('matched_columns', []),
-                        'patterns': insights.get('processing_stats', {}).get('matched_patterns', []),
-                        'confidence': insights.get('processing_stats', {}).get('platform_confidence', 0.0)
-        },
-                    'detected_at': datetime.utcnow().isoformat()
-        }
-                
-                supabase.table('platform_patterns').upsert(platform_pattern).execute()
-                
-                # Store discovered platform
-                supabase.table('discovered_platforms').upsert({
-                    'user_id': user_id,
-                    'platform_name': platform_info,
-                    'detection_count': 1,
-                    'first_detected': datetime.utcnow().isoformat(),
-                    'last_detected': datetime.utcnow().isoformat()
-        }).execute()
-            
-            # Store metrics
-            metrics_data = {
-                'user_id': user_id,
-                'metric_type': 'file_processing',
-                'metric_value': events_created,
-                'metric_details': {
-                    'file_name': filename,
-                    'total_rows': total_rows,
-                    'events_created': events_created,
-                    'relationships_detected': insights.get('automatic_relationships', {}).get('total_relationships', 0),
-                    'platform_detected': platform_info,
-                    'processing_time': datetime.utcnow().isoformat()
-        },
-                'recorded_at': datetime.utcnow().isoformat()
-        }
-            
-            supabase.table('metrics').insert(metrics_data).execute()
-            
-            logger.info("Database population completed successfully")
-            
-        except Exception as e:
-            logger.error(f"Database population failed: {e}")
-            # Continue processing even if database population fails
-        
-        # Step 10: Update ingestion_jobs with completion
+        # Step 8: Update ingestion_jobs with completion
         supabase.table('ingestion_jobs').update({
             'status': 'completed',
             'updated_at': datetime.utcnow().isoformat()
         }).eq('id', job_id).execute()
         
+        await manager.send_update(job_id, {
             "step": "completed",
-            "message": f"✅ Processing completed! {events_created} events created, {insights.get('automatic_relationships', {}).get('total_relationships', 0)} relationships detected. Data enrichment: {sum(1 for e in insights.get('processing_stats', {}).get('enrichment_stats', {}).values() if e > 0)} fields enriched.",
+            "message": f"✅ Processing completed! {events_created} events created from {processed_rows} rows.",
             "progress": 100
+        })
         
         return insights
 
@@ -3056,6 +2826,7 @@ async def process_excel(request: ProcessRequest, background_tasks: BackgroundTas
             "step": "starting",
             "message": "🚀 Starting intelligent analysis with row-by-row processing...",
             "progress": 5
+        })
         
         # Download file from Supabase storage
         try:
@@ -3067,6 +2838,7 @@ async def process_excel(request: ProcessRequest, background_tasks: BackgroundTas
                 "step": "error",
                 "message": f"Failed to download file: {str(e)}",
                 "progress": 0
+            })
             raise HTTPException(status_code=400, detail=f"File download failed: {str(e)}")
         
         # Create or update job status to processing
@@ -3087,7 +2859,7 @@ async def process_excel(request: ProcessRequest, background_tasks: BackgroundTas
                     'status': 'processing',
                     'started_at': datetime.utcnow().isoformat(),
                     'progress': 10
-        }).execute()
+                }).execute()
         except Exception as e:
             logger.warning(f"Could not update job {request.job_id}, creating new one: {e}")
             # Create the job if update fails
@@ -3098,7 +2870,7 @@ async def process_excel(request: ProcessRequest, background_tasks: BackgroundTas
                 'status': 'processing',
                 'started_at': datetime.utcnow().isoformat(),
                 'progress': 10
-        }).execute()
+            }).execute()
         
         # Process the file with row-by-row streaming
         results = await processor.process_file(
@@ -3128,7 +2900,7 @@ async def process_excel(request: ProcessRequest, background_tasks: BackgroundTas
                 'status': 'failed',
                 'error_message': str(e),
                 'progress': 0
-        }).eq('id', request.job_id).execute()
+            }).eq('id', request.job_id).execute()
         except:
             pass
         
@@ -3136,6 +2908,7 @@ async def process_excel(request: ProcessRequest, background_tasks: BackgroundTas
             "step": "error",
             "message": f"Analysis failed: {str(e)}",
             "progress": 0
+        })
         
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -3168,7 +2941,7 @@ async def test_raw_events(user_id: str):
         recent_events = supabase.table('raw_events').select('*').eq('user_id', user_id).order('created_at', desc=True).limit(10).execute()
         
         return {
-        "status": "success",
+            "status": "success",
             "user_id": user_id,
             "statistics": result.data[0] if result.data else {},
             "recent_events": recent_events.data if recent_events.data else [],
@@ -3204,7 +2977,7 @@ async def health_check():
             status = "degraded"
         
         return {
-        "status": status,
+            "status": status,
             "service": "Finley AI Backend",
             "timestamp": datetime.utcnow().isoformat(),
             "issues": issues,
@@ -3212,7 +2985,7 @@ async def health_check():
         }
     except Exception as e:
         return {
-        "status": "unhealthy",
+            "status": "unhealthy",
             "service": "Finley AI Backend",
             "error": str(e),
             "timestamp": datetime.utcnow().isoformat()
@@ -3221,7 +2994,7 @@ async def health_check():
 @app.post("/upload-and-process")
 async def upload_and_process(
     file: UploadFile = Form(...),
-    user_id: str = Form(...),  # Required user ID - no default
+    user_id: str = Form("550e8400-e29b-41d4-a716-446655440000"),  # Default test user ID
     job_id: str = Form(None)  # Optional, will generate if not provided
 ):
     """Direct file upload and processing endpoint for testing"""
@@ -3260,7 +3033,7 @@ async def upload_and_process(
         )
         
         return {
-        "status": "success", 
+            "status": "success", 
             "job_id": job_id, 
             "results": results,
             "message": "File processed successfully"
@@ -3282,7 +3055,7 @@ async def test_simple():
         import filetype
         
         return {
-        "status": "success",
+            "status": "success",
             "message": "Backend is working! All dependencies loaded successfully.",
             "timestamp": datetime.utcnow().isoformat(),
             "dependencies": {
@@ -3291,17 +3064,17 @@ async def test_simple():
                 "openai": "loaded",
                 "magic": "loaded",
                 "filetype": "loaded"
-        },
+            },
             "endpoints": {
                 "health": "/health",
                 "upload_and_process": "/upload-and-process",
                 "test_raw_events": "/test-raw-events/{user_id}",
                 "process_excel": "/process-excel"
-        }
+            }
         }
     except Exception as e:
         return {
-        "status": "error",
+            "status": "error",
             "message": f"Backend has issues: {str(e)}",
             "timestamp": datetime.utcnow().isoformat(),
             "error": str(e)
@@ -3332,13 +3105,13 @@ async def test_database():
         records_count = supabase.table('raw_records').select('id', count='exact').eq('user_id', test_user_id).execute()
         
         return {
-        "status": "success",
+            "status": "success",
             "database_connection": "working",
             "tables": {
                 "raw_events": events_count.count if hasattr(events_count, 'count') else 0,
                 "ingestion_jobs": jobs_count.count if hasattr(jobs_count, 'count') else 0,
                 "raw_records": records_count.count if hasattr(records_count, 'count') else 0
-        },
+            },
             "message": "Database connection and queries working"
         }
         
@@ -3360,7 +3133,7 @@ async def test_platform_detection():
                 'Amount': [1000, 500],
                 'Date': ['2024-01-01', '2024-01-02'],
                 'Ref Number': ['REF001', 'REF002']
-        }),
+            }),
             'gusto': pd.DataFrame({
                 'Employee Name': ['John Doe', 'Jane Smith'],
                 'Employee ID': ['EMP001', 'EMP002'],
@@ -3368,7 +3141,7 @@ async def test_platform_detection():
                 'Gross Pay': [5000, 6000],
                 'Net Pay': [3500, 4200],
                 'Tax Deductions': [1500, 1800]
-        }),
+            }),
             'stripe': pd.DataFrame({
                 'Charge ID': ['ch_001', 'ch_002'],
                 'Customer ID': ['cus_001', 'cus_002'],
@@ -3376,7 +3149,7 @@ async def test_platform_detection():
                 'Status': ['succeeded', 'succeeded'],
                 'Created': ['2024-01-01', '2024-01-02'],
                 'Currency': ['usd', 'usd']
-        }),
+            }),
             'xero': pd.DataFrame({
                 'Contact Name': ['Client A', 'Client B'],
                 'Invoice Number': ['INV001', 'INV002'],
@@ -3384,6 +3157,7 @@ async def test_platform_detection():
                 'Date': ['2024-01-01', '2024-01-02'],
                 'Reference': ['REF001', 'REF002'],
                 'Tracking': ['Project A', 'Project B']
+            })
         }
         
         results = {}
@@ -3399,17 +3173,17 @@ async def test_platform_detection():
                 'platform_info': platform_info,
                 'sample_columns': list(df.columns),
                 'sample_data_shape': df.shape
-        }
+            }
         
         return {
-        "status": "success",
+            "status": "success",
             "message": "Enhanced platform detection test completed",
             "test_cases": results,
             "summary": {
                 "total_platforms_tested": len(test_cases),
                 "detection_accuracy": sum(1 for r in results.values() 
                                         if r['detection_result']['platform'] != 'unknown') / len(results)
-        }
+            }
         }
         
     except Exception as e:
@@ -3424,27 +3198,27 @@ async def test_ai_row_classification():
     test_cases = [
         {
             "test_case": "Payroll Transaction",
-        "description": "Employee salary payment",
+            "description": "Employee salary payment",
             "row_data": {"Description": "Salary payment to John Smith", "Amount": 5000, "Date": "2024-01-15"}
         },
         {
             "test_case": "Revenue Transaction", 
-        "description": "Client payment received",
+            "description": "Client payment received",
             "row_data": {"Description": "Payment from ABC Corp", "Amount": 15000, "Date": "2024-01-20"}
         },
         {
             "test_case": "Expense Transaction",
-        "description": "Office rent payment",
+            "description": "Office rent payment",
             "row_data": {"Description": "Office rent to Building LLC", "Amount": -3000, "Date": "2024-01-10"}
         },
         {
             "test_case": "Investment Transaction",
-        "description": "Stock purchase",
+            "description": "Stock purchase",
             "row_data": {"Description": "Stock purchase - AAPL", "Amount": -5000, "Date": "2024-01-25"}
         },
         {
             "test_case": "Tax Transaction",
-        "description": "Tax payment",
+            "description": "Tax payment",
             "row_data": {"Description": "Income tax payment", "Amount": -2000, "Date": "2024-01-30"}
         }
     ]
@@ -3470,9 +3244,10 @@ async def test_ai_row_classification():
         
         test_results.append({
             "test_case": test_case["test_case"],
-        "description": test_case["description"],
+            "description": test_case["description"],
             "row_data": test_case["row_data"],
-        "ai_classification": ai_classification
+            "ai_classification": ai_classification
+        })
     
     return {
         "message": "AI Row Classification Test Results",
@@ -3685,7 +3460,7 @@ class EntityResolver:
                 'p_phone': identifiers.get('phone'),
                 'p_tax_id': identifiers.get('tax_id'),
                 'p_source_file': source_file
-        }).execute()
+            }).execute()
             
             if result.data:
                 entity_id = result.data
@@ -3694,7 +3469,7 @@ class EntityResolver:
                 entity_details = self.supabase.rpc('get_entity_details', {
                     'user_uuid': user_id,
                     'entity_id': entity_id
-        }).execute()
+                }).execute()
                 
                 return {
                     'entity_id': entity_id,
@@ -3706,7 +3481,7 @@ class EntityResolver:
                     'row_id': row_id,
                     'resolution_success': True,
                     'entity_details': entity_details.data[0] if entity_details.data else None
-        }
+                }
             else:
                 return {
                     'entity_id': None,
@@ -3718,7 +3493,7 @@ class EntityResolver:
                     'row_id': row_id,
                     'resolution_success': False,
                     'error': 'Database function returned no entity ID'
-        }
+                }
                 
         except Exception as e:
             return {
@@ -3731,7 +3506,7 @@ class EntityResolver:
                 'row_id': row_id,
                 'resolution_success': False,
                 'error': str(e)
-        }
+            }
     
 
     
@@ -3778,6 +3553,7 @@ class EntityResolver:
                             'name': entity_name,
                             'entity_id': resolution['entity_id'],
                             'resolved_name': resolution['resolved_name']
+                        })
         
         return {
             'resolved_entities': resolved_entities,
@@ -3809,44 +3585,44 @@ async def test_entity_resolution():
         test_cases = [
             {
                 "test_case": "Employee Name Resolution",
-        "description": "Test resolving employee names across platforms",
-        "entities": {
+                "description": "Test resolving employee names across platforms",
+                "entities": {
                     "employees": ["Abhishek A.", "Abhishek Arora", "John Smith"],
                     "vendors": ["Razorpay Payout", "Razorpay Payments Pvt. Ltd."],
                     "customers": ["Client ABC", "ABC Corp"],
                     "projects": ["Project Alpha", "Alpha Initiative"]
-        },
+                },
                 "platform": "gusto",
                 "user_id": "550e8400-e29b-41d4-a716-446655440000",
                 "row_data": {
                     "employee_name": "Abhishek A.",
                     "email": "abhishek@company.com",
                     "amount": "5000"
-        },
+                },
                 "column_names": ["employee_name", "email", "amount"],
                 "source_file": "test-payroll.xlsx",
                 "row_id": "row-1"
-        },
+            },
             {
                 "test_case": "Vendor Name Resolution",
-        "description": "Test resolving vendor names with different formats",
-        "entities": {
+                "description": "Test resolving vendor names with different formats",
+                "entities": {
                     "employees": [],
                     "vendors": ["Razorpay Payout", "Razorpay Payments Pvt. Ltd.", "Stripe Inc"],
                     "customers": [],
                     "projects": []
-        },
+                },
                 "platform": "razorpay",
                 "user_id": "550e8400-e29b-41d4-a716-446655440000",
                 "row_data": {
                     "vendor_name": "Razorpay Payout",
                     "bank_account": "1234567890",
                     "amount": "10000"
-        },
+                },
                 "column_names": ["vendor_name", "bank_account", "amount"],
                 "source_file": "test-payments.xlsx",
                 "row_id": "row-2"
-        }
+            }
         ]
         
         results = []
@@ -3866,20 +3642,22 @@ async def test_entity_resolution():
                 
                 results.append({
                     "test_case": test_case["test_case"],
-        "description": test_case["description"],
-        "entities": test_case["entities"],
+                    "description": test_case["description"],
+                    "entities": test_case["entities"],
                     "platform": test_case["platform"],
                     "resolution_result": resolution_result,
                     "success": True
+                })
                 
             except Exception as e:
                 results.append({
                     "test_case": test_case["test_case"],
-        "description": test_case["description"],
-        "entities": test_case["entities"],
+                    "description": test_case["description"],
+                    "entities": test_case["entities"],
                     "platform": test_case["platform"],
                     "error": str(e),
                     "success": False
+                })
         
         return {
             "message": "Entity Resolution Test Results",
@@ -3918,7 +3696,7 @@ async def test_entity_search(user_id: str, search_term: str = "Abhishek", entity
                 "user_id": user_id,
                 "results": [],
                 "total_results": 0
-        }
+            }
         
         if not supabase_key:
             return {
@@ -3929,7 +3707,7 @@ async def test_entity_search(user_id: str, search_term: str = "Abhishek", entity
                 "user_id": user_id,
                 "results": [],
                 "total_results": 0
-        }
+            }
         
         # Clean the JWT token (remove newlines and whitespace)
         supabase_key = supabase_key.strip().replace('\n', '').replace('\r', '')
@@ -3980,7 +3758,7 @@ async def test_entity_stats(user_id: str):
                 "user_id": user_id,
                 "stats": {},
                 "success": False
-        }
+            }
         
         if not supabase_key:
             return {
@@ -3989,7 +3767,7 @@ async def test_entity_stats(user_id: str):
                 "user_id": user_id,
                 "stats": {},
                 "success": False
-        }
+            }
         
         # Clean the JWT token (remove newlines and whitespace)
         supabase_key = supabase_key.strip().replace('\n', '').replace('\r', '')
@@ -4026,14 +3804,15 @@ async def test_cross_file_relationships(user_id: str):
         openai_client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
         
         # Initialize Supabase client
-        supabase_url, supabase_key = _get_supabase_credentials()
+        supabase_url = os.getenv('SUPABASE_URL')
+        supabase_key = os.getenv('SUPABASE_KEY')
         
         if not supabase_url or not supabase_key:
             return {
                 "message": "Supabase credentials not configured",
                 "user_id": user_id,
                 "success": False
-        }
+            }
         
         supabase = create_client(supabase_url, supabase_key)
         
@@ -4056,7 +3835,7 @@ async def test_cross_file_relationships(user_id: str):
             "message": "Enhanced Cross-File Relationship Test Failed",
             "error": str(e),
             "user_id": user_id,
-        "relationships": [],
+            "relationships": [],
             "success": False
         }
 
@@ -4118,7 +3897,7 @@ class CurrencyNormalizer:
                 'gusto': 'USD',
                 'quickbooks': 'USD',
                 'xero': 'USD'
-        }
+            }
             
             # Check for currency symbols in description
             currency_symbols = {
@@ -4127,7 +3906,7 @@ class CurrencyNormalizer:
                 '€': 'EUR',
                 '£': 'GBP',
                 '¥': 'JPY'
-        }
+            }
             
             for symbol, currency in currency_symbols.items():
                 if symbol in str(description):
@@ -4183,7 +3962,7 @@ class CurrencyNormalizer:
                                 'JPY': 0.0067,
                                 'CAD': 0.74,
                                 'AUD': 0.66
-        }
+                            }
                             rate = fallback_rates.get(from_currency, 1.0)
             
             # Cache the rate
@@ -4200,7 +3979,7 @@ class CurrencyNormalizer:
                 'JPY': 0.0067,
                 'CAD': 0.74,
                 'AUD': 0.66
-        }
+            }
             return fallback_rates.get(from_currency, 1.0)
     
     async def normalize_currency(self, amount: float, currency: str, description: str, platform: str, date: str = None) -> Dict[str, Any]:
@@ -4222,7 +4001,7 @@ class CurrencyNormalizer:
                 "currency": currency,
                 "exchange_rate": round(exchange_rate, 6),
                 "exchange_date": date or datetime.now().strftime('%Y-%m-%d')
-        }
+            }
             
         except Exception as e:
             logger.error(f"Currency normalization failed: {e}")
@@ -4232,7 +4011,7 @@ class CurrencyNormalizer:
                 "currency": currency or 'USD',
                 "exchange_rate": 1.0,
                 "exchange_date": date or datetime.now().strftime('%Y-%m-%d')
-        }
+            }
 
 class VendorStandardizer:
     """Handles vendor name standardization and cleaning"""
@@ -4255,7 +4034,7 @@ class VendorStandardizer:
                     "vendor_standard": "",
                     "confidence": 0.0,
                     "cleaning_method": "empty"
-        }
+                }
             
             # Check cache first
             cache_key = f"{vendor_name}_{platform}"
@@ -4272,7 +4051,7 @@ class VendorStandardizer:
                     "vendor_standard": cleaned_name,
                     "confidence": 0.8,
                     "cleaning_method": "rule_based"
-        }
+                }
                 self.vendor_cache[cache_key] = result
                 return result
             
@@ -4288,7 +4067,7 @@ class VendorStandardizer:
                 "vendor_standard": vendor_name,
                 "confidence": 0.5,
                 "cleaning_method": "fallback"
-        }
+            }
     
     def _rule_based_cleaning(self, vendor_name: str) -> str:
         """Rule-based vendor name cleaning"""
@@ -4316,7 +4095,7 @@ class VendorStandardizer:
                 'Aapl': 'Apple',
                 'Nflx': 'Netflix',
                 'Tsla': 'Tesla'
-        }
+            }
             
             if cleaned in abbreviations:
                 cleaned = abbreviations[cleaned]
@@ -4353,8 +4132,8 @@ class VendorStandardizer:
             {{
                 "standard_name": "cleaned_vendor_name",
                 "confidence": 0.95,
-        "reasoning": "brief_explanation"
-        }}
+                "reasoning": "brief_explanation"
+            }}
             """
             
             response = self.openai.chat.completions.create(
@@ -4380,8 +4159,8 @@ class VendorStandardizer:
                 "vendor_standard": parsed.get('standard_name', vendor_name),
                 "confidence": parsed.get('confidence', 0.7),
                 "cleaning_method": "ai_powered",
-        "reasoning": parsed.get('reasoning', 'AI standardization')
-        }
+                "reasoning": parsed.get('reasoning', 'AI standardization')
+            }
             
         except Exception as e:
             logger.error(f"AI vendor standardization failed: {e}")
@@ -4390,7 +4169,7 @@ class VendorStandardizer:
                 "vendor_standard": vendor_name,
                 "confidence": 0.5,
                 "cleaning_method": "ai_fallback"
-        }
+            }
 
 class PlatformIDExtractor:
     """Extracts platform-specific IDs and metadata"""
@@ -4402,29 +4181,29 @@ class PlatformIDExtractor:
                 'order_id': r'order_[a-zA-Z0-9]{14}',
                 'refund_id': r'rfnd_[a-zA-Z0-9]{14}',
                 'settlement_id': r'setl_[a-zA-Z0-9]{14}'
-        },
+            },
             'stripe': {
                 'charge_id': r'ch_[a-zA-Z0-9]{24}',
                 'payment_intent': r'pi_[a-zA-Z0-9]{24}',
                 'customer_id': r'cus_[a-zA-Z0-9]{14}',
                 'invoice_id': r'in_[a-zA-Z0-9]{24}'
-        },
+            },
             'gusto': {
                 'employee_id': r'emp_[a-zA-Z0-9]{8}',
                 'payroll_id': r'pay_[a-zA-Z0-9]{12}',
                 'timesheet_id': r'ts_[a-zA-Z0-9]{10}'
-        },
+            },
             'quickbooks': {
                 'transaction_id': r'txn_[a-zA-Z0-9]{12}',
                 'invoice_id': r'inv_[a-zA-Z0-9]{10}',
                 'vendor_id': r'ven_[a-zA-Z0-9]{8}',
                 'customer_id': r'cust_[a-zA-Z0-9]{8}'
-        },
+            },
             'xero': {
                 'invoice_id': r'INV-[0-9]{4}-[0-9]{6}',
                 'contact_id': r'[a-zA-Z0-9]{8}-[a-zA-Z0-9]{4}-[a-zA-Z0-9]{4}',
                 'bank_transaction_id': r'BT-[0-9]{8}'
-        },
+            },
             'bank_statement': {
                 'invoice_id': r'INV-[0-9]{3}',
                 'payroll_id': r'pay_[0-9]{3}',
@@ -4444,7 +4223,7 @@ class PlatformIDExtractor:
                 'internet_id': r'ISP-[0-9]{3}',
                 'lease_id': r'LL-[0-9]{3}',
                 'bank_fee_id': r'BANK-FEE-[0-9]{3}'
-        }
+            }
         }
     
     def extract_platform_ids(self, row_data: Dict, platform: str, column_names: List[str]) -> Dict[str, Any]:
@@ -4484,7 +4263,7 @@ class PlatformIDExtractor:
                 "platform": platform,
                 "extracted_ids": extracted_ids,
                 "total_ids_found": len(extracted_ids)
-        }
+            }
             
         except Exception as e:
             logger.error(f"Platform ID extraction failed: {e}")
@@ -4493,7 +4272,7 @@ class PlatformIDExtractor:
                 "extracted_ids": {},
                 "total_ids_found": 0,
                 "error": str(e)
-        }
+            }
 
 class DataEnrichmentProcessor:
     """Orchestrates all data enrichment processes"""
@@ -4522,13 +4301,13 @@ class DataEnrichmentProcessor:
                     'amount_usd': amount,
                     'exchange_rate': 1.0,
                     'exchange_date': None
-        }
+                }
                 vendor_info = {
                     'vendor_raw': vendor_name,
                     'vendor_standard': vendor_name,
                     'confidence': 1.0,
                     'cleaning_method': 'fast_mode'
-        }
+                }
                 platform_ids = {'extracted_ids': {}}
             else:
                 # 1. Currency normalization
@@ -4556,9 +4335,9 @@ class DataEnrichmentProcessor:
             # 4. Create enhanced payload
             enriched_payload = {
                 # Basic classification
-        "kind": ai_classification.get('row_type', 'transaction'),
-        "category": ai_classification.get('category', 'other'),
-        "subcategory": ai_classification.get('subcategory', 'general'),
+                "kind": ai_classification.get('row_type', 'transaction'),
+                "category": ai_classification.get('category', 'other'),
+                "subcategory": ai_classification.get('subcategory', 'general'),
                 
                 # Currency information
                 "currency": currency_info.get('currency', 'USD'),
@@ -4582,14 +4361,14 @@ class DataEnrichmentProcessor:
                 "standard_description": self._clean_description(description),
                 "ingested_on": datetime.utcnow().isoformat(),
                 "file_source": file_context.get('filename', 'unknown'),
-        "row_index": file_context.get('row_index', 0),
+                "row_index": file_context.get('row_index', 0),
                 
                 # AI classification metadata
                 "ai_confidence": ai_classification.get('confidence', 0.0),
                 "ai_reasoning": ai_classification.get('reasoning', ''),
-        "entities": ai_classification.get('entities', {}),
-        "relationships": ai_classification.get('relationships', {})
-        }
+                "entities": ai_classification.get('entities', {}),
+                "relationships": ai_classification.get('relationships', {})
+            }
             
             return enriched_payload
             
@@ -4597,8 +4376,8 @@ class DataEnrichmentProcessor:
             logger.error(f"Data enrichment failed: {e}")
             # Return basic payload if enrichment fails
             return {
-        "kind": ai_classification.get('row_type', 'transaction'),
-        "category": ai_classification.get('category', 'other'),
+                "kind": ai_classification.get('row_type', 'transaction'),
+                "category": ai_classification.get('category', 'other'),
                 "amount_original": self._extract_amount(row_data),
                 "amount_usd": self._extract_amount(row_data),
                 "currency": "USD",
@@ -4607,7 +4386,7 @@ class DataEnrichmentProcessor:
                 "platform": platform_info.get('platform', 'unknown'),
                 "ingested_on": datetime.utcnow().isoformat(),
                 "enrichment_error": str(e)
-        }
+            }
     
     def _extract_amount(self, row_data: Dict) -> float:
         """Extract amount from row data (case-insensitive key search and string parsing)."""
@@ -4821,7 +4600,7 @@ class DocumentAnalyzer:
                 'non_null_count': int(non_null_count),
                 'null_count': int(len(df) - non_null_count),
                 'completeness_percentage': (non_null_count / len(df)) * 100 if len(df) > 0 else 0
-        }
+            }
         
         # Detect anomalies
         anomalies = []
@@ -4843,6 +4622,7 @@ class DocumentAnalyzer:
                         'column': col,
                         'count': len(outliers),
                         'percentage': (len(outliers) / len(df)) * 100
+                    })
         
         # Check for inconsistent date formats
         date_cols = [col for col in df.columns if any(word in col.lower() for word in ['date', 'time'])]
@@ -4855,6 +4635,7 @@ class DocumentAnalyzer:
                     'column': col,
                     'count': len(df[df[col].notna()]),
                     'percentage': (len(df[df[col].notna()]) / len(df)) * 100
+                })
         
         quality_metrics['anomalies'] = anomalies
         
@@ -4933,7 +4714,7 @@ class DocumentAnalyzer:
             
             {{
                 "document_type": "income_statement|balance_sheet|cash_flow|payroll_data|expense_data|revenue_data|general_ledger|bank_statement|budget|unknown",
-        "source_platform": "gusto|quickbooks|xero|razorpay|freshbooks|unknown",
+                "source_platform": "gusto|quickbooks|xero|razorpay|freshbooks|unknown",
                 "confidence": 0.95,
                 "key_columns": ["col1", "col2"],
                 "analysis": "Brief explanation",
@@ -4944,11 +4725,11 @@ class DocumentAnalyzer:
                     "has_account_data": false,
                     "has_transaction_data": false,
                     "time_period": "monthly"
-        }},
+                }},
                 "classification_reasoning": "Step-by-step explanation",
                 "platform_indicators": ["indicator1"],
                 "document_indicators": ["indicator1"]
-        }}
+            }}
             
             IMPORTANT: Return ONLY the JSON object, no additional text or explanations.
             """
@@ -4984,7 +4765,7 @@ class DocumentAnalyzer:
                         "has_account_data": False,
                         "has_transaction_data": False,
                         "time_period": "unknown"
-        }
+                    }
                 
                 if 'classification_reasoning' not in parsed_result:
                     parsed_result['classification_reasoning'] = "Analysis completed but reasoning not provided"
@@ -5009,7 +4790,7 @@ class DocumentAnalyzer:
             logger.error(f"Error in document type detection: {e}")
             return {
                 "document_type": "unknown",
-        "source_platform": "unknown",
+                "source_platform": "unknown",
                 "confidence": 0.3,
                 "key_columns": list(df.columns),
                 "analysis": f"Error in analysis: {str(e)}",
@@ -5020,11 +4801,11 @@ class DocumentAnalyzer:
                     "has_account_data": False,
                     "has_transaction_data": False,
                     "time_period": "unknown"
-        },
+                },
                 "classification_reasoning": f"Error occurred during analysis: {str(e)}",
                 "platform_indicators": [],
                 "document_indicators": []
-        }
+            }
     
     def _extract_fallback_info(self, response: str, column_names: list) -> Dict[str, Any]:
         """Extract basic information from AI response when JSON parsing fails"""
@@ -5079,7 +4860,7 @@ class DocumentAnalyzer:
         
         return {
             "document_type": doc_type,
-        "source_platform": platform,
+            "source_platform": platform,
             "confidence": 0.6,
             "key_columns": column_names,
             "analysis": "Fallback analysis due to JSON parsing failure",
@@ -5090,7 +4871,7 @@ class DocumentAnalyzer:
                 "has_account_data": any(word in ' '.join(column_names).lower() for word in ['account', 'ledger']),
                 "has_transaction_data": any(word in ' '.join(column_names).lower() for word in ['transaction', 'payment']),
                 "time_period": "unknown"
-        },
+            },
             "classification_reasoning": f"Fallback classification based on column names: {column_names}",
             "platform_indicators": platform_indicators,
             "document_indicators": column_names
@@ -5106,7 +4887,7 @@ class DocumentAnalyzer:
                 "total_columns": len(df.columns),
                 "numeric_columns": len(numeric_columns),
                 "document_type": doc_analysis.get("document_type", "unknown"),
-        "source_platform": doc_analysis.get("source_platform", "unknown"),
+                "source_platform": doc_analysis.get("source_platform", "unknown"),
                 "confidence": doc_analysis.get("confidence", 0.5),
                 "key_columns": doc_analysis.get("key_columns", []),
                 "analysis": doc_analysis.get("analysis", ""),
@@ -5116,7 +4897,7 @@ class DocumentAnalyzer:
                 "document_indicators": doc_analysis.get("document_indicators", []),
                 "summary_stats": {},
                 "enhanced_analysis": {}
-        }
+            }
             
             # Calculate summary statistics for numeric columns
             for col in numeric_columns:
@@ -5126,7 +4907,7 @@ class DocumentAnalyzer:
                     "min": float(df[col].min()) if not df[col].empty else 0,
                     "max": float(df[col].max()) if not df[col].empty else 0,
                     "count": int(df[col].count())
-        }
+                }
             
             # Universal platform distribution and low-confidence handling
             platform_distribution = self._compute_platform_distribution(df)
@@ -5157,13 +4938,13 @@ class DocumentAnalyzer:
                     "revenue_analysis": self._analyze_revenue_data(df),
                     "expense_analysis": self._analyze_expense_data(df),
                     "profitability_metrics": self._calculate_profitability_metrics(df)
-        }
+                }
             elif doc_type == "balance_sheet":
                 insights["enhanced_analysis"] = {
                     "asset_analysis": self._analyze_assets(df),
                     "liability_analysis": self._analyze_liabilities(df),
                     "equity_analysis": self._analyze_equity(df)
-        }
+                }
             elif doc_type == "payroll_data":
                 payroll_summary = self._analyze_payroll_data(df)
                 employee_analysis = self._analyze_employee_data(df)
@@ -5189,7 +4970,7 @@ class DocumentAnalyzer:
                     "tax_analysis": tax_analysis,
                     "unique_employee_count": unique_employees,
                     "month_distribution": month_distribution
-        }
+                }
             elif doc_type == "expense_data":
                 # Per-vendor totals for vendor payments
                 if 'Vendor Name' in df.columns and 'Amount' in df.columns:
@@ -5212,7 +4993,7 @@ class DocumentAnalyzer:
                 "classification_reasoning": f"Error generating insights: {str(e)}",
                 "platform_indicators": [],
                 "document_indicators": []
-        }
+            }
     
     def _analyze_revenue_data(self, df: pd.DataFrame) -> Dict[str, Any]:
         """Analyze revenue-related data"""
@@ -5230,14 +5011,14 @@ class DocumentAnalyzer:
                         "total": float(numeric_data.sum()) if not numeric_data.empty else 0,
                         "average": float(numeric_data.mean()) if not numeric_data.empty else 0,
                         "growth_rate": self._calculate_growth_rate(numeric_data) if len(numeric_data) > 1 else None
-        }
+                    }
                 except Exception as e:
                     logger.warning(f"Could not analyze revenue column {col}: {e}")
                     analysis[col] = {
                         "total": 0,
                         "average": 0,
                         "growth_rate": None
-        }
+                    }
         return analysis
     
     def _analyze_expense_data(self, df: pd.DataFrame) -> Dict[str, Any]:
@@ -5256,14 +5037,14 @@ class DocumentAnalyzer:
                         "total": float(numeric_data.sum()) if not numeric_data.empty else 0,
                         "average": float(numeric_data.mean()) if not numeric_data.empty else 0,
                         "percentage_of_revenue": self._calculate_expense_ratio(df, col)
-        }
+                    }
                 except Exception as e:
                     logger.warning(f"Could not analyze expense column {col}: {e}")
                     analysis[col] = {
                         "total": 0,
                         "average": 0,
                         "percentage_of_revenue": 0
-        }
+                    }
         return analysis
     
     def _calculate_profitability_metrics(self, df: pd.DataFrame) -> Dict[str, Any]:
@@ -5423,98 +5204,98 @@ class PlatformDetector:
                 'data_patterns': ['employee_ssn', 'pay_rate', 'hours_worked', 'overtime', 'federal_tax', 'state_tax'],
                 'confidence_threshold': 0.7,
                 'description': 'Payroll and HR platform'
-        },
+            },
             'quickbooks': {
                 'keywords': ['quickbooks', 'qb', 'accounting', 'invoice', 'bill', 'qbo'],
                 'columns': ['account', 'memo', 'amount', 'date', 'type', 'ref_number', 'split'],
                 'data_patterns': ['account_number', 'class', 'customer', 'vendor', 'journal_entry'],
                 'confidence_threshold': 0.7,
                 'description': 'Accounting software'
-        },
+            },
             'xero': {
                 'keywords': ['xero', 'invoice', 'contact', 'account', 'xero'],
                 'columns': ['contact_name', 'invoice_number', 'amount', 'date', 'reference', 'tracking'],
                 'data_patterns': ['contact_id', 'invoice_id', 'tax_amount', 'line_amount', 'tracking_category'],
                 'confidence_threshold': 0.7,
                 'description': 'Cloud accounting platform'
-        },
+            },
             'razorpay': {
                 'keywords': ['razorpay', 'payment', 'transaction', 'merchant', 'settlement'],
                 'columns': ['transaction_id', 'merchant_id', 'amount', 'status', 'created_at', 'payment_id'],
                 'data_patterns': ['order_id', 'currency', 'method', 'description', 'fee_amount'],
                 'confidence_threshold': 0.7,
                 'description': 'Payment gateway'
-        },
+            },
             'freshbooks': {
                 'keywords': ['freshbooks', 'invoice', 'time_tracking', 'client', 'project'],
                 'columns': ['client_name', 'invoice_number', 'amount', 'date', 'project', 'time_logged'],
                 'data_patterns': ['client_id', 'project_id', 'rate', 'hours', 'service_type'],
                 'confidence_threshold': 0.7,
                 'description': 'Invoicing and time tracking'
-        },
+            },
             'wave': {
                 'keywords': ['wave', 'accounting', 'invoice', 'business'],
                 'columns': ['account_name', 'description', 'amount', 'date', 'category'],
                 'data_patterns': ['account_id', 'transaction_id', 'balance', 'wave_specific'],
                 'confidence_threshold': 0.7,
                 'description': 'Free accounting software'
-        },
+            },
             'sage': {
                 'keywords': ['sage', 'accounting', 'business', 'sage50', 'sage100'],
                 'columns': ['account', 'description', 'amount', 'date', 'reference'],
                 'data_patterns': ['account_number', 'journal_entry', 'period', 'sage_specific'],
                 'confidence_threshold': 0.7,
                 'description': 'Business management software'
-        },
+            },
             'bank_statement': {
                 'keywords': ['bank', 'statement', 'account', 'transaction', 'balance'],
                 'columns': ['date', 'description', 'amount', 'balance', 'type', 'reference'],
                 'data_patterns': ['debit', 'credit', 'opening_balance', 'closing_balance', 'bank_fee'],
                 'confidence_threshold': 0.8,
                 'description': 'Bank account statement'
-        },
+            },
             'netsuite': {
                 'keywords': ['netsuite', 'erp', 'enterprise', 'suite'],
                 'columns': ['account', 'memo', 'amount', 'date', 'entity', 'subsidiary'],
                 'data_patterns': ['internal_id', 'tran_id', 'line_id', 'netsuite_specific'],
                 'confidence_threshold': 0.7,
                 'description': 'Enterprise resource planning'
-        },
+            },
             'stripe': {
                 'keywords': ['stripe', 'payment', 'charge', 'customer', 'subscription'],
                 'columns': ['charge_id', 'customer_id', 'amount', 'status', 'created', 'currency'],
                 'data_patterns': ['payment_intent', 'transfer_id', 'fee_amount', 'payment_method'],
                 'confidence_threshold': 0.7,
                 'description': 'Payment processing platform'
-        },
+            },
             'square': {
                 'keywords': ['square', 'payment', 'transaction', 'merchant'],
                 'columns': ['transaction_id', 'merchant_id', 'amount', 'status', 'created_at'],
                 'data_patterns': ['location_id', 'device_id', 'tender_type', 'square_specific'],
                 'confidence_threshold': 0.7,
                 'description': 'Point of sale and payments'
-        },
+            },
             'paypal': {
                 'keywords': ['paypal', 'payment', 'transaction', 'merchant'],
                 'columns': ['transaction_id', 'merchant_id', 'amount', 'status', 'created_at'],
                 'data_patterns': ['paypal_id', 'fee_amount', 'currency', 'payment_type'],
                 'confidence_threshold': 0.7,
                 'description': 'Online payment system'
-        },
+            },
             'shopify': {
                 'keywords': ['shopify', 'order', 'product', 'sales', 'ecommerce'],
                 'columns': ['order_id', 'product_name', 'amount', 'date', 'customer'],
                 'data_patterns': ['shopify_id', 'product_id', 'variant_id', 'fulfillment_status'],
                 'confidence_threshold': 0.7,
                 'description': 'E-commerce platform'
-        },
+            },
             'zoho': {
                 'keywords': ['zoho', 'books', 'invoice', 'accounting'],
                 'columns': ['contact_name', 'invoice_number', 'amount', 'date', 'reference'],
                 'data_patterns': ['zoho_id', 'organization_id', 'zoho_specific'],
                 'confidence_threshold': 0.7,
                 'description': 'Business software suite'
-        }
+            }
         }
     
     def detect_platform(self, df: pd.DataFrame, filename: str) -> Dict[str, Any]:
@@ -5579,7 +5360,7 @@ class PlatformDetector:
                     'matched_patterns': matched_patterns,
                     'reasoning': self._generate_reasoning(platform, filename_matches, column_matches, len(matched_patterns)),
                     'description': patterns['description']
-        }
+                }
         
         return best_match
     
@@ -5708,7 +5489,7 @@ class PlatformDetector:
                 'typical_columns': self.platform_patterns[platform]['columns'],
                 'keywords': self.platform_patterns[platform]['keywords'],
                 'confidence_threshold': self.platform_patterns[platform]['confidence_threshold']
-        }
+            }
         return {
             'name': platform,
             'description': 'Unknown platform',
@@ -5737,7 +5518,7 @@ class AIRowClassifier:
                 'column_names': column_names,
                 'row_data': row_data,
                 'row_index': row.name if hasattr(row, 'name') else 'unknown'
-        }
+            }
             
             # AI prompt for semantic classification
             prompt = f"""
@@ -5750,28 +5531,28 @@ class AIRowClassifier:
             Classify this row and return ONLY a valid JSON object with this structure:
             
             {{
-        "row_type": "payroll_expense|salary_expense|revenue_income|operating_expense|capital_expense|invoice|bill|transaction|investment|tax|other",
-        "category": "payroll|revenue|expense|investment|tax|other",
-        "subcategory": "employee_salary|office_rent|client_payment|software_subscription|etc",
-        "entities": {{
+                "row_type": "payroll_expense|salary_expense|revenue_income|operating_expense|capital_expense|invoice|bill|transaction|investment|tax|other",
+                "category": "payroll|revenue|expense|investment|tax|other",
+                "subcategory": "employee_salary|office_rent|client_payment|software_subscription|etc",
+                "entities": {{
                     "employees": ["employee_name1", "employee_name2"],
                     "vendors": ["vendor_name1", "vendor_name2"],
                     "customers": ["customer_name1", "customer_name2"],
                     "projects": ["project_name1", "project_name2"]
-        }},
+                }},
                 "amount": "positive_number_or_null",
                 "currency": "USD|EUR|INR|etc",
                 "date": "YYYY-MM-DD_or_null",
-        "description": "human_readable_description",
+                "description": "human_readable_description",
                 "confidence": 0.95,
-        "reasoning": "explanation_of_classification",
-        "relationships": {{
+                "reasoning": "explanation_of_classification",
+                "relationships": {{
                     "employee_id": "extracted_or_null",
                     "vendor_id": "extracted_or_null",
                     "customer_id": "extracted_or_null",
                     "project_id": "extracted_or_null"
-        }}
-        }}
+                }}
+            }}
             
             IMPORTANT RULES:
             1. If you see salary/wage/payroll terms, classify as payroll_expense
@@ -5830,7 +5611,7 @@ class AIRowClassifier:
                                 'resolution_results': [],
                                 'total_resolved': 0,
                                 'total_attempted': 0
-        }
+                            }
                         
                         # Update classification with resolved entities
                         classification['resolved_entities'] = resolution_result['resolved_entities']
@@ -5838,7 +5619,7 @@ class AIRowClassifier:
                         classification['entity_resolution_stats'] = {
                             'total_resolved': resolution_result['total_resolved'],
                             'total_attempted': resolution_result['total_attempted']
-        }
+                        }
                         
                     except Exception as e:
                         logger.error(f"Entity resolution failed: {e}")
@@ -5987,6 +5768,7 @@ class BatchAIRowClassifier:
                     'index': i,
                     'row_data': row_data,
                     'row_index': row.name if hasattr(row, 'name') else f'row_{i}'
+                })
             
             # Create batch prompt
             prompt = f"""
@@ -5998,22 +5780,22 @@ class BatchAIRowClassifier:
             
             For each row, provide classification in this format:
             {{
-        "row_type": "payroll_expense|salary_expense|revenue_income|operating_expense|capital_expense|invoice|bill|transaction|investment|tax|other",
-        "category": "payroll|revenue|expense|investment|tax|other",
-        "subcategory": "employee_salary|office_rent|client_payment|software_subscription|etc",
-        "entities": {{
+                "row_type": "payroll_expense|salary_expense|revenue_income|operating_expense|capital_expense|invoice|bill|transaction|investment|tax|other",
+                "category": "payroll|revenue|expense|investment|tax|other",
+                "subcategory": "employee_salary|office_rent|client_payment|software_subscription|etc",
+                "entities": {{
                     "employees": ["name1", "name2"],
                     "vendors": ["vendor1", "vendor2"],
                     "customers": ["customer1", "customer2"],
                     "projects": ["project1", "project2"]
-        }},
+                }},
                 "amount": "number_or_null",
                 "currency": "USD|EUR|INR|etc",
                 "date": "YYYY-MM-DD_or_null",
-        "description": "human_readable_description",
+                "description": "human_readable_description",
                 "confidence": 0.95,
-        "reasoning": "brief_explanation"
-        }}
+                "reasoning": "brief_explanation"
+            }}
             
             ROW DATA:
             """
@@ -6272,6 +6054,7 @@ class RowProcessor:
                     ai_classification['entities'][key] = merged
 
         # Data enrichment - create enhanced payload
+        enriched_payload = await self.enrichment_processor.enrich_row_data(
             row_data=row_data,
             platform_info=platform_info,
             column_names=column_names,
@@ -6279,39 +6062,33 @@ class RowProcessor:
             file_context=file_context
         )
         
-        # Validate required fields before creating event
-        if not enriched_payload.get('kind'):
-            enriched_payload['kind'] = 'transaction'
-        if not enriched_payload.get('category'):
-            enriched_payload['category'] = 'other'
-                            
-                            # Create the event payload with enhanced metadata
+        # Create the event payload with enhanced metadata
         event = {
-        "provider": "excel-upload",
-        "kind": enriched_payload.get('kind', 'transaction'),
-        "source_platform": platform_info.get('platform', 'unknown'),
-        "payload": enriched_payload,  # Use enriched payload instead of raw
-        "row_index": row_index,
-        "sheet_name": sheet_name,
-        "source_filename": file_context['filename'],
-        "uploader": file_context['user_id'],
-        "ingest_ts": datetime.utcnow().isoformat(),
-        "status": "pending",
-        "confidence_score": enriched_payload.get('ai_confidence', 0.5),
-        "classification_metadata": {
-        "platform_detection": platform_info,
-        "ai_classification": ai_classification,
-        "enrichment_data": enriched_payload,
-        "row_type": enriched_payload.get('kind', 'transaction'),
-        "category": enriched_payload.get('category', 'other'),
-        "subcategory": enriched_payload.get('subcategory', 'general'),
-        "entities": enriched_payload.get('entities', {}),
-        "relationships": enriched_payload.get('relationships', {}),
-        "description": enriched_payload.get('standard_description', ''),
-        "reasoning": enriched_payload.get('ai_reasoning', ''),
-        "sheet_name": sheet_name,
-        "file_context": file_context
-        }
+            "provider": "excel-upload",
+            "kind": enriched_payload.get('kind', 'transaction'),
+            "source_platform": platform_info.get('platform', 'unknown'),
+            "payload": enriched_payload,  # Use enriched payload instead of raw
+            "row_index": row_index,
+            "sheet_name": sheet_name,
+            "source_filename": file_context['filename'],
+            "uploader": file_context['user_id'],
+            "ingest_ts": datetime.utcnow().isoformat(),
+            "status": "pending",
+            "confidence_score": enriched_payload.get('ai_confidence', 0.5),
+            "classification_metadata": {
+                "platform_detection": platform_info,
+                "ai_classification": ai_classification,
+                "enrichment_data": enriched_payload,
+                "row_type": enriched_payload.get('kind', 'transaction'),
+                "category": enriched_payload.get('category', 'other'),
+                "subcategory": enriched_payload.get('subcategory', 'general'),
+                "entities": enriched_payload.get('entities', {}),
+                "relationships": enriched_payload.get('relationships', {}),
+                "description": enriched_payload.get('standard_description', ''),
+                "reasoning": enriched_payload.get('ai_reasoning', ''),
+                "sheet_name": sheet_name,
+                "file_context": file_context
+            }
         }
         
         return event
@@ -6524,36 +6301,32 @@ class ExcelProcessor:
     
     async def process_file(self, job_id: str, file_content: bytes, filename: str, 
                           user_id: str, supabase: Client) -> Dict[str, Any]:
-        """Optimized processing pipeline with memory management and chunked processing for large files"""
-        
-        # Check memory before starting
-        if not memory_monitor.check_memory_limit():
-            memory_monitor.force_garbage_collection()
-            logger.warning(f"High memory usage detected: {memory_monitor.get_memory_usage():.1f}%")
-        
-        # Determine chunk size based on file size
-        file_size_mb = len(file_content) / 1024 / 1024
-        if file_size_mb > 100:  # Large file
-            chunk_size = 1000  # Process 1000 rows at a time
-            logger.info(f"Large file detected ({file_size_mb:.1f}MB), using chunked processing")
-        elif file_size_mb > 50:  # Medium file
-            chunk_size = 2000  # Process 2000 rows at a time
-            logger.info(f"Medium file detected ({file_size_mb:.1f}MB), using optimized processing")
-        else:  # Small file
-            chunk_size = 5000  # Process 5000 rows at a time
-            logger.info(f"Small file detected ({file_size_mb:.1f}MB), using standard processing")
         """Optimized processing pipeline with batch AI classification for large files"""
         
         # Step 1: Read the file
+        await manager.send_update(job_id, {
+            "step": "reading",
+            "message": f"📖 Reading and parsing your {filename}...",
+            "progress": 10
+        })
+        
         try:
             sheets = await self.read_file(file_content, filename)
         except Exception as e:
+            await manager.send_update(job_id, {
                 "step": "error",
                 "message": f"❌ Error reading file: {str(e)}",
                 "progress": 0
+            })
             raise HTTPException(status_code=400, detail=f"Failed to read file: {str(e)}")
         
         # Step 2: Detect platform and document type
+        await manager.send_update(job_id, {
+            "step": "analyzing",
+            "message": "🧠 Analyzing document structure and detecting platform...",
+            "progress": 20
+        })
+        
         # Use first sheet for platform detection
         first_sheet = list(sheets.values())[0]
         platform_info = self.platform_detector.detect_platform(first_sheet, filename)
@@ -6565,6 +6338,12 @@ class ExcelProcessor:
         self.row_processor = RowProcessor(self.platform_detector, self.ai_classifier, self.openai)
         
         # Step 3: Create raw_records entry
+        await manager.send_update(job_id, {
+            "step": "storing",
+            "message": "💾 Storing file metadata...",
+            "progress": 30
+        })
+        
         # Calculate file hash for duplicate detection
         file_hash = hashlib.sha256(file_content).hexdigest()
         
@@ -6581,7 +6360,7 @@ class ExcelProcessor:
                 'file_hash': file_hash,
                 'total_rows': sum(len(sheet) for sheet in sheets.values()),
                 'processed_at': datetime.utcnow().isoformat()
-        },
+            },
             'status': 'processing',
             'classification_status': 'processing'
         }).execute()
@@ -6602,7 +6381,7 @@ class ExcelProcessor:
                 'status': 'running',
                 'progress': 0,
                 'started_at': datetime.utcnow().isoformat()
-        }).execute()
+            }).execute()
 
             if not job_result.data:
                 raise HTTPException(status_code=500, detail="Failed to create ingestion job")
@@ -6615,26 +6394,19 @@ class ExcelProcessor:
                 'status': 'running',
                 'progress': 0,
                 'started_at': datetime.utcnow().isoformat()
-        }).eq('id', job_id).execute()
+            }).eq('id', job_id).execute()
 
             if not update_result.data:
                 raise HTTPException(status_code=500, detail="Failed to update ingestion job")
 
         # Now we can safely process rows since the job exists
-        # Step 5: Process each sheet with memory-optimized chunked processing
+        # Step 5: Process each sheet with optimized batch processing
         await manager.send_update(job_id, {
             "step": "streaming",
-            "message": f"🔄 Processing rows in memory-optimized chunks (chunk size: {chunk_size})...",
-            "progress": 40
-        })
-        # Memory monitoring during processing
-        memory_check_interval = max(1, total_rows // 20)  # Check memory every 5% of rows
-        await manager.send_update(job_id, {
-            "step": "streaming",
-        await manager.send_update(job_id, {
             "message": "🔄 Processing rows in optimized batches...",
             "progress": 40
         })
+        
         total_rows = sum(len(sheet) for sheet in sheets.values())
         processed_rows = 0
         events_created = 0
@@ -6752,7 +6524,7 @@ class ExcelProcessor:
                                 'platform_ids': enriched_payload.get('platform_ids', {}),
                                 'standard_description': enriched_payload.get('standard_description'),
                                 'ingested_on': enriched_payload.get('ingested_on')
-        }).execute()
+                            }).execute()
                             
                             if event_result.data:
                                 events_created += 1
@@ -6766,42 +6538,25 @@ class ExcelProcessor:
                         
                         processed_rows += 1
                     
-                    # Memory management: Check and clean memory periodically
-                    if processed_rows % memory_check_interval == 0:
-                        current_memory = memory_monitor.get_memory_usage()
-                        if current_memory > 75:  # 75% threshold
-                            memory_monitor.force_garbage_collection()
-                            logger.info(f"Memory cleaned at row {processed_rows}, usage: {current_memory:.1f}%")
-                        
-                        # Send memory status update
-                            "step": "memory_check",
-                            "message": f"🔄 Memory check: {current_memory:.1f}% usage, processed {processed_rows}/{total_rows} rows",
-                    
                     # Update progress every batch
-        await manager.send_update(job_id, {
+                    progress = 40 + (processed_rows / total_rows) * 40
+                    await manager.send_update(job_id, {
                         "step": "streaming",
                         "message": f"🔄 Processed {processed_rows}/{total_rows} rows ({events_created} events created)...",
                         "progress": int(progress)
+                    })
                 
                 except Exception as e:
                     error_msg = f"Error processing batch {batch_idx//batch_size + 1} in sheet {sheet_name}: {str(e)}"
                     errors.append(error_msg)
                     logger.error(error_msg)
         
-        # Step 6: Final memory cleanup and status update
-        # Force final garbage collection
-        memory_monitor.force_garbage_collection()
-        final_memory = memory_monitor.get_memory_info()
-        logger.info(f"Processing completed. Final memory usage: {final_memory['rss']:.1f}MB RSS, {final_memory['percent']:.1f}%")
-        
-            "step": "finalizing",
-            "message": f"✅ Finalizing processing... (Memory: {final_memory['percent']:.1f}%)",
-            "progress": 90
-        
-        # Step 7: Update raw_records with completion status
+        # Step 6: Update raw_records with completion status
+        await manager.send_update(job_id, {
             "step": "finalizing",
             "message": "✅ Finalizing processing...",
             "progress": 90
+        })
         
         supabase.table('raw_records').update({
             'status': 'completed',
@@ -6815,13 +6570,15 @@ class ExcelProcessor:
                 'events_created': events_created,
                 'errors': errors,
                 'processed_at': datetime.utcnow().isoformat()
-        }
+            }
         }).eq('id', file_id).execute()
         
         # Step 7: Generate insights
+        await manager.send_update(job_id, {
             "step": "insights",
             "message": "💡 Generating intelligent financial insights...",
             "progress": 95
+        })
         
         insights = await self.analyzer.generate_insights(first_sheet, doc_analysis)
         
@@ -6842,8 +6599,9 @@ class ExcelProcessor:
                 'batch_size': 20,
                 'ai_calls_reduced': f"{(total_rows - (total_rows // 20)) / total_rows * 100:.1f}%",
                 'file_type': filename.split('.')[-1].lower() if '.' in filename else 'unknown'
-        },
+            },
             'errors': errors
+        })
         
         # Add enhanced platform information if detected
         if platform_info.get('platform') != 'unknown':
@@ -6858,8 +6616,8 @@ class ExcelProcessor:
                 'matched_indicators': {
                     'columns': platform_info.get('matched_columns', []),
                     'patterns': platform_info.get('matched_patterns', [])
-        }
-        }
+                }
+            }
         
         # Step 8: Update ingestion_jobs with completion
         supabase.table('ingestion_jobs').update({
@@ -6867,9 +6625,11 @@ class ExcelProcessor:
             'updated_at': datetime.utcnow().isoformat()
         }).eq('id', job_id).execute()
         
+        await manager.send_update(job_id, {
             "step": "completed",
             "message": f"✅ Processing completed! {events_created} events created from {processed_rows} rows.",
             "progress": 100
+        })
         
         return insights
 
@@ -6898,6 +6658,7 @@ async def process_excel(request: ProcessRequest, background_tasks: BackgroundTas
             "step": "starting",
             "message": "🚀 Starting intelligent analysis with row-by-row processing...",
             "progress": 5
+        })
         
         # Download file from Supabase storage
         try:
@@ -6909,6 +6670,7 @@ async def process_excel(request: ProcessRequest, background_tasks: BackgroundTas
                 "step": "error",
                 "message": f"Failed to download file: {str(e)}",
                 "progress": 0
+            })
             raise HTTPException(status_code=400, detail=f"File download failed: {str(e)}")
         
         # Create or update job status to processing
@@ -6929,7 +6691,7 @@ async def process_excel(request: ProcessRequest, background_tasks: BackgroundTas
                     'status': 'processing',
                     'started_at': datetime.utcnow().isoformat(),
                     'progress': 10
-        }).execute()
+                }).execute()
         except Exception as e:
             logger.warning(f"Could not update job {request.job_id}, creating new one: {e}")
             # Create the job if update fails
@@ -6940,7 +6702,7 @@ async def process_excel(request: ProcessRequest, background_tasks: BackgroundTas
                 'status': 'processing',
                 'started_at': datetime.utcnow().isoformat(),
                 'progress': 10
-        }).execute()
+            }).execute()
         
         # Process the file with row-by-row streaming
         results = await processor.process_file(
@@ -6970,7 +6732,7 @@ async def process_excel(request: ProcessRequest, background_tasks: BackgroundTas
                 'status': 'failed',
                 'error_message': str(e),
                 'progress': 0
-        }).eq('id', request.job_id).execute()
+            }).eq('id', request.job_id).execute()
         except:
             pass
         
@@ -6978,6 +6740,7 @@ async def process_excel(request: ProcessRequest, background_tasks: BackgroundTas
             "step": "error",
             "message": f"Analysis failed: {str(e)}",
             "progress": 0
+        })
         
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -7010,7 +6773,7 @@ async def test_raw_events(user_id: str):
         recent_events = supabase.table('raw_events').select('*').eq('user_id', user_id).order('created_at', desc=True).limit(10).execute()
         
         return {
-        "status": "success",
+            "status": "success",
             "user_id": user_id,
             "statistics": result.data[0] if result.data else {},
             "recent_events": recent_events.data if recent_events.data else [],
@@ -7046,7 +6809,7 @@ async def health_check():
             status = "degraded"
         
         return {
-        "status": status,
+            "status": status,
             "service": "Finley AI Backend",
             "timestamp": datetime.utcnow().isoformat(),
             "issues": issues,
@@ -7054,7 +6817,7 @@ async def health_check():
         }
     except Exception as e:
         return {
-        "status": "unhealthy",
+            "status": "unhealthy",
             "service": "Finley AI Backend",
             "error": str(e),
             "timestamp": datetime.utcnow().isoformat()
@@ -7102,7 +6865,7 @@ async def upload_and_process(
         )
         
         return {
-        "status": "success", 
+            "status": "success", 
             "job_id": job_id, 
             "results": results,
             "message": "File processed successfully"
@@ -7124,7 +6887,7 @@ async def test_simple():
         import filetype
         
         return {
-        "status": "success",
+            "status": "success",
             "message": "Backend is working! All dependencies loaded successfully.",
             "timestamp": datetime.utcnow().isoformat(),
             "dependencies": {
@@ -7133,17 +6896,17 @@ async def test_simple():
                 "openai": "loaded",
                 "magic": "loaded",
                 "filetype": "loaded"
-        },
+            },
             "endpoints": {
                 "health": "/health",
                 "upload_and_process": "/upload-and-process",
                 "test_raw_events": "/test-raw-events/{user_id}",
                 "process_excel": "/process-excel"
-        }
+            }
         }
     except Exception as e:
         return {
-        "status": "error",
+            "status": "error",
             "message": f"Backend has issues: {str(e)}",
             "timestamp": datetime.utcnow().isoformat(),
             "error": str(e)
@@ -7174,13 +6937,13 @@ async def test_database():
         records_count = supabase.table('raw_records').select('id', count='exact').eq('user_id', test_user_id).execute()
         
         return {
-        "status": "success",
+            "status": "success",
             "database_connection": "working",
             "tables": {
                 "raw_events": events_count.count if hasattr(events_count, 'count') else 0,
                 "ingestion_jobs": jobs_count.count if hasattr(jobs_count, 'count') else 0,
                 "raw_records": records_count.count if hasattr(records_count, 'count') else 0
-        },
+            },
             "message": "Database connection and queries working"
         }
         
@@ -7202,7 +6965,7 @@ async def test_platform_detection():
                 'Amount': [1000, 500],
                 'Date': ['2024-01-01', '2024-01-02'],
                 'Ref Number': ['REF001', 'REF002']
-        }),
+            }),
             'gusto': pd.DataFrame({
                 'Employee Name': ['John Doe', 'Jane Smith'],
                 'Employee ID': ['EMP001', 'EMP002'],
@@ -7210,7 +6973,7 @@ async def test_platform_detection():
                 'Gross Pay': [5000, 6000],
                 'Net Pay': [3500, 4200],
                 'Tax Deductions': [1500, 1800]
-        }),
+            }),
             'stripe': pd.DataFrame({
                 'Charge ID': ['ch_001', 'ch_002'],
                 'Customer ID': ['cus_001', 'cus_002'],
@@ -7218,7 +6981,7 @@ async def test_platform_detection():
                 'Status': ['succeeded', 'succeeded'],
                 'Created': ['2024-01-01', '2024-01-02'],
                 'Currency': ['usd', 'usd']
-        }),
+            }),
             'xero': pd.DataFrame({
                 'Contact Name': ['Client A', 'Client B'],
                 'Invoice Number': ['INV001', 'INV002'],
@@ -7226,6 +6989,7 @@ async def test_platform_detection():
                 'Date': ['2024-01-01', '2024-01-02'],
                 'Reference': ['REF001', 'REF002'],
                 'Tracking': ['Project A', 'Project B']
+            })
         }
         
         results = {}
@@ -7241,17 +7005,17 @@ async def test_platform_detection():
                 'platform_info': platform_info,
                 'sample_columns': list(df.columns),
                 'sample_data_shape': df.shape
-        }
+            }
         
         return {
-        "status": "success",
+            "status": "success",
             "message": "Enhanced platform detection test completed",
             "test_cases": results,
             "summary": {
                 "total_platforms_tested": len(test_cases),
                 "detection_accuracy": sum(1 for r in results.values() 
                                         if r['detection_result']['platform'] != 'unknown') / len(results)
-        }
+            }
         }
         
     except Exception as e:
@@ -7266,27 +7030,27 @@ async def test_ai_row_classification():
     test_cases = [
         {
             "test_case": "Payroll Transaction",
-        "description": "Employee salary payment",
+            "description": "Employee salary payment",
             "row_data": {"Description": "Salary payment to John Smith", "Amount": 5000, "Date": "2024-01-15"}
         },
         {
             "test_case": "Revenue Transaction", 
-        "description": "Client payment received",
+            "description": "Client payment received",
             "row_data": {"Description": "Payment from ABC Corp", "Amount": 15000, "Date": "2024-01-20"}
         },
         {
             "test_case": "Expense Transaction",
-        "description": "Office rent payment",
+            "description": "Office rent payment",
             "row_data": {"Description": "Office rent to Building LLC", "Amount": -3000, "Date": "2024-01-10"}
         },
         {
             "test_case": "Investment Transaction",
-        "description": "Stock purchase",
+            "description": "Stock purchase",
             "row_data": {"Description": "Stock purchase - AAPL", "Amount": -5000, "Date": "2024-01-25"}
         },
         {
             "test_case": "Tax Transaction",
-        "description": "Tax payment",
+            "description": "Tax payment",
             "row_data": {"Description": "Income tax payment", "Amount": -2000, "Date": "2024-01-30"}
         }
     ]
@@ -7312,9 +7076,10 @@ async def test_ai_row_classification():
         
         test_results.append({
             "test_case": test_case["test_case"],
-        "description": test_case["description"],
+            "description": test_case["description"],
             "row_data": test_case["row_data"],
-        "ai_classification": ai_classification
+            "ai_classification": ai_classification
+        })
     
     return {
         "message": "AI Row Classification Test Results",
@@ -7527,7 +7292,7 @@ class EntityResolver:
                 'p_phone': identifiers.get('phone'),
                 'p_tax_id': identifiers.get('tax_id'),
                 'p_source_file': source_file
-        }).execute()
+            }).execute()
             
             if result.data:
                 entity_id = result.data
@@ -7536,7 +7301,7 @@ class EntityResolver:
                 entity_details = self.supabase.rpc('get_entity_details', {
                     'user_uuid': user_id,
                     'entity_id': entity_id
-        }).execute()
+                }).execute()
                 
                 return {
                     'entity_id': entity_id,
@@ -7548,7 +7313,7 @@ class EntityResolver:
                     'row_id': row_id,
                     'resolution_success': True,
                     'entity_details': entity_details.data[0] if entity_details.data else None
-        }
+                }
             else:
                 return {
                     'entity_id': None,
@@ -7560,7 +7325,7 @@ class EntityResolver:
                     'row_id': row_id,
                     'resolution_success': False,
                     'error': 'Database function returned no entity ID'
-        }
+                }
                 
         except Exception as e:
             return {
@@ -7573,7 +7338,7 @@ class EntityResolver:
                 'row_id': row_id,
                 'resolution_success': False,
                 'error': str(e)
-        }
+            }
     
 
     
@@ -7620,6 +7385,7 @@ class EntityResolver:
                             'name': entity_name,
                             'entity_id': resolution['entity_id'],
                             'resolved_name': resolution['resolved_name']
+                        })
         
         return {
             'resolved_entities': resolved_entities,
@@ -7651,44 +7417,44 @@ async def test_entity_resolution():
         test_cases = [
             {
                 "test_case": "Employee Name Resolution",
-        "description": "Test resolving employee names across platforms",
-        "entities": {
+                "description": "Test resolving employee names across platforms",
+                "entities": {
                     "employees": ["Abhishek A.", "Abhishek Arora", "John Smith"],
                     "vendors": ["Razorpay Payout", "Razorpay Payments Pvt. Ltd."],
                     "customers": ["Client ABC", "ABC Corp"],
                     "projects": ["Project Alpha", "Alpha Initiative"]
-        },
+                },
                 "platform": "gusto",
                 "user_id": "550e8400-e29b-41d4-a716-446655440000",
                 "row_data": {
                     "employee_name": "Abhishek A.",
                     "email": "abhishek@company.com",
                     "amount": "5000"
-        },
+                },
                 "column_names": ["employee_name", "email", "amount"],
                 "source_file": "test-payroll.xlsx",
                 "row_id": "row-1"
-        },
+            },
             {
                 "test_case": "Vendor Name Resolution",
-        "description": "Test resolving vendor names with different formats",
-        "entities": {
+                "description": "Test resolving vendor names with different formats",
+                "entities": {
                     "employees": [],
                     "vendors": ["Razorpay Payout", "Razorpay Payments Pvt. Ltd.", "Stripe Inc"],
                     "customers": [],
                     "projects": []
-        },
+                },
                 "platform": "razorpay",
                 "user_id": "550e8400-e29b-41d4-a716-446655440000",
                 "row_data": {
                     "vendor_name": "Razorpay Payout",
                     "bank_account": "1234567890",
                     "amount": "10000"
-        },
+                },
                 "column_names": ["vendor_name", "bank_account", "amount"],
                 "source_file": "test-payments.xlsx",
                 "row_id": "row-2"
-        }
+            }
         ]
         
         results = []
@@ -7708,20 +7474,22 @@ async def test_entity_resolution():
                 
                 results.append({
                     "test_case": test_case["test_case"],
-        "description": test_case["description"],
-        "entities": test_case["entities"],
+                    "description": test_case["description"],
+                    "entities": test_case["entities"],
                     "platform": test_case["platform"],
                     "resolution_result": resolution_result,
                     "success": True
+                })
                 
             except Exception as e:
                 results.append({
                     "test_case": test_case["test_case"],
-        "description": test_case["description"],
-        "entities": test_case["entities"],
+                    "description": test_case["description"],
+                    "entities": test_case["entities"],
                     "platform": test_case["platform"],
                     "error": str(e),
                     "success": False
+                })
         
         return {
             "message": "Entity Resolution Test Results",
@@ -7760,7 +7528,7 @@ async def test_entity_search(user_id: str, search_term: str = "Abhishek", entity
                 "user_id": user_id,
                 "results": [],
                 "total_results": 0
-        }
+            }
         
         if not supabase_key:
             return {
@@ -7771,7 +7539,7 @@ async def test_entity_search(user_id: str, search_term: str = "Abhishek", entity
                 "user_id": user_id,
                 "results": [],
                 "total_results": 0
-        }
+            }
         
         # Clean the JWT token (remove newlines and whitespace)
         supabase_key = supabase_key.strip().replace('\n', '').replace('\r', '')
@@ -7822,7 +7590,7 @@ async def test_entity_stats(user_id: str):
                 "user_id": user_id,
                 "stats": {},
                 "success": False
-        }
+            }
         
         if not supabase_key:
             return {
@@ -7831,7 +7599,7 @@ async def test_entity_stats(user_id: str):
                 "user_id": user_id,
                 "stats": {},
                 "success": False
-        }
+            }
         
         # Clean the JWT token (remove newlines and whitespace)
         supabase_key = supabase_key.strip().replace('\n', '').replace('\r', '')
@@ -7931,12 +7699,12 @@ class CrossFileRelationshipDetector:
             relationships = await self._find_relationships(payroll_events, payout_events)
             
             return {
-        "relationships": relationships,
+                "relationships": relationships,
                 "total_payroll_events": len(payroll_events),
                 "total_payout_events": len(payout_events),
                 "total_relationships": len(relationships),
                 "message": "Cross-file relationship analysis completed"
-        }
+            }
             
         except Exception as e:
             logger.error(f"Cross-file relationship detection failed: {e}")
@@ -8012,6 +7780,7 @@ class CrossFileRelationshipDetector:
                         "payout_amount": payout_amount,
                         "payroll_date": payroll_date,
                         "payout_date": payout_date
+                    })
         
         return relationships
     
@@ -8166,16 +7935,16 @@ class AIRelationshipDetector:
             logger.info(f"Relationship detection completed: {len(validated_relationships)} relationships found")
             
             return {
-        "relationships": validated_relationships,
+                "relationships": validated_relationships,
                 "total_relationships": len(validated_relationships),
                 "relationship_types": relationship_types,
                 "processing_stats": {
                     "total_events": len(events.data),
                     "event_groups": len(event_groups),
                     "max_relationships_per_type": 1000
-        },
+                },
                 "message": "Optimized AI-powered relationship analysis completed"
-        }
+            }
             
         except Exception as e:
             logger.error(f"AI relationship detection failed: {e}")
@@ -8249,8 +8018,8 @@ class AIRelationshipDetector:
                     "source_event_id": source['id'],
                     "target_event_id": target['id'],
                     "relationship_type": relationship_type,
-        "confidence_score": score,
-        "source_platform": source.get('source_platform'),
+                    "confidence_score": score,
+                    "source_platform": source.get('source_platform'),
                     "target_platform": target.get('source_platform'),
                     "source_amount": self._extract_amount(source.get('payload', {})),
                     "target_amount": self._extract_amount(target.get('payload', {})),
@@ -8260,7 +8029,7 @@ class AIRelationshipDetector:
                     "id_match": self._check_id_match(source, target),
                     "context_match": self._check_context_match(source, target),
                     "detection_method": "optimized_rule_based"
-        }
+                }
                 relationships.append(relationship)
                 
                 # OPTIMIZATION: Limit relationships per type
@@ -8577,8 +8346,8 @@ class AIRelationshipDetector:
                         "source_event_id": source['id'],
                         "target_event_id": target['id'],
                         "relationship_type": relationship_type,
-        "confidence_score": score,
-        "source_platform": source.get('source_platform'),
+                        "confidence_score": score,
+                        "source_platform": source.get('source_platform'),
                         "target_platform": target.get('source_platform'),
                         "source_amount": self._extract_amount(source.get('payload', {})),
                         "target_amount": self._extract_amount(target.get('payload', {})),
@@ -8588,7 +8357,7 @@ class AIRelationshipDetector:
                         "id_match": self._check_id_match(source, target),
                         "context_match": self._check_context_match(source, target),
                         "detection_method": "rule_based"
-        }
+                    }
                     relationships.append(relationship)
         
         return relationships
@@ -8604,10 +8373,10 @@ class AIRelationshipDetector:
                 messages=[{
                     "role": "system",
                     "content": "You are a financial data analyst. Analyze the financial events and identify potential relationships between them that might not be obvious. Return the relationships as a JSON array with source_event_id, target_event_id, relationship_type, and confidence_score."
-        }, {
+                }, {
                     "role": "user",
                     "content": f"Analyze these financial events and identify ALL possible relationships: {context}"
-        }],
+                }],
                 temperature=0.2
             )
             
@@ -8981,7 +8750,7 @@ class AIRelationshipDetector:
                     (r're_(\w+)', r'ch_\1'),    # refund_id to charge_id
                     (r'rfnd_(\w+)', r'pay_\1'), # refund_id to payment_id
                 ]
-        }
+            }
             
             pattern_list = patterns.get(relationship_type, [])
             
@@ -9043,7 +8812,7 @@ class AIRelationshipDetector:
                 'amount': self._extract_amount(event.get('payload', {})),
                 'vendor': event.get('vendor_standard'),
                 'description': event.get('payload', {}).get('description', '')
-        }
+            }
             summary_parts.append(str(event_summary))
         
         return '\n'.join(summary_parts)
@@ -9100,9 +8869,9 @@ class AIRelationshipDetector:
                         "source_event_id": rel.get('source_event_id'),
                         "target_event_id": rel.get('target_event_id'),
                         "relationship_type": rel.get('relationship_type', 'ai_discovered'),
-        "confidence_score": rel.get('confidence_score', 0.5),
+                        "confidence_score": rel.get('confidence_score', 0.5),
                         "detection_method": "ai_discovered"
-        }
+                    }
                     relationships.append(relationship)
                 
                 return relationships
@@ -9181,22 +8950,22 @@ async def test_currency_normalization():
         test_cases = [
             {
                 "amount": 9000,
-        "description": "Google Cloud Services ₹9000",
+                "description": "Google Cloud Services ₹9000",
                 "platform": "razorpay",
                 "expected_currency": "INR"
-        },
+            },
             {
                 "amount": 150.50,
-        "description": "Stripe payment $150.50",
+                "description": "Stripe payment $150.50",
                 "platform": "stripe",
                 "expected_currency": "USD"
-        },
+            },
             {
                 "amount": 2000,
-        "description": "Office rent €2000",
+                "description": "Office rent €2000",
                 "platform": "quickbooks",
                 "expected_currency": "EUR"
-        }
+            }
         ]
         
         results = []
@@ -9222,12 +8991,14 @@ async def test_currency_normalization():
                     "detected_currency": detected_currency,
                     "normalized_data": normalized,
                     "success": True
+                })
                 
             except Exception as e:
                 results.append({
                     "test_case": test_case,
                     "error": str(e),
                     "success": False
+                })
         
         return {
             "message": "Currency Normalization Test Results",
@@ -9255,22 +9026,22 @@ async def test_vendor_standardization():
                 "vendor_name": "Google LLC",
                 "platform": "razorpay",
                 "expected_standard": "Google"
-        },
+            },
             {
                 "vendor_name": "Microsoft Corporation",
                 "platform": "stripe",
                 "expected_standard": "Microsoft"
-        },
+            },
             {
                 "vendor_name": "AMAZON.COM INC",
                 "platform": "quickbooks",
                 "expected_standard": "Amazon"
-        },
+            },
             {
                 "vendor_name": "Apple Inc.",
                 "platform": "gusto",
                 "expected_standard": "Apple"
-        }
+            }
         ]
         
         results = []
@@ -9285,12 +9056,14 @@ async def test_vendor_standardization():
                     "test_case": test_case,
                     "standardized_data": standardized,
                     "success": True
+                })
                 
             except Exception as e:
                 results.append({
                     "test_case": test_case,
                     "error": str(e),
                     "success": False
+                })
         
         return {
             "message": "Vendor Standardization Test Results",
@@ -9319,31 +9092,31 @@ async def test_platform_id_extraction():
                     "payment_id": "pay_12345678901234",
                     "order_id": "order_98765432109876",
                     "amount": 1000,
-        "description": "Payment for services"
-        },
+                    "description": "Payment for services"
+                },
                 "platform": "razorpay",
                 "column_names": ["payment_id", "order_id", "amount", "description"]
-        },
+            },
             {
                 "row_data": {
                     "charge_id": "ch_123456789012345678901234",
                     "customer_id": "cus_12345678901234",
                     "amount": 50.00,
-        "description": "Stripe payment"
-        },
+                    "description": "Stripe payment"
+                },
                 "platform": "stripe",
                 "column_names": ["charge_id", "customer_id", "amount", "description"]
-        },
+            },
             {
                 "row_data": {
                     "employee_id": "emp_12345678",
                     "payroll_id": "pay_123456789012",
                     "amount": 5000,
-        "description": "Salary payment"
-        },
+                    "description": "Salary payment"
+                },
                 "platform": "gusto",
                 "column_names": ["employee_id", "payroll_id", "amount", "description"]
-        }
+            }
         ]
         
         results = []
@@ -9359,12 +9132,14 @@ async def test_platform_id_extraction():
                     "test_case": test_case,
                     "extracted_data": extracted,
                     "success": True
+                })
                 
             except Exception as e:
                 results.append({
                     "test_case": test_case,
                     "error": str(e),
                     "success": False
+                })
         
         return {
             "message": "Platform ID Extraction Test Results",
@@ -9392,36 +9167,36 @@ async def test_data_enrichment():
                 "row_data": {
                     "vendor_name": "Google LLC",
                     "amount": 9000,
-        "description": "Google Cloud Services ₹9000",
+                    "description": "Google Cloud Services ₹9000",
                     "payment_id": "pay_12345678901234"
-        },
+                },
                 "platform_info": {"platform": "razorpay", "confidence": 0.9},
                 "column_names": ["vendor_name", "amount", "description", "payment_id"],
-        "ai_classification": {
-        "row_type": "operating_expense",
-        "category": "expense",
-        "subcategory": "infrastructure",
+                "ai_classification": {
+                    "row_type": "operating_expense",
+                    "category": "expense",
+                    "subcategory": "infrastructure",
                     "confidence": 0.95
-        },
-        "file_context": {"filename": "test-payments.csv", "user_id": "test-user"}
-        },
+                },
+                "file_context": {"filename": "test-payments.csv", "user_id": "test-user"}
+            },
             {
                 "row_data": {
                     "vendor_name": "Microsoft Corporation",
                     "amount": 150.50,
-        "description": "Stripe payment $150.50 for software",
+                    "description": "Stripe payment $150.50 for software",
                     "charge_id": "ch_123456789012345678901234"
-        },
+                },
                 "platform_info": {"platform": "stripe", "confidence": 0.9},
                 "column_names": ["vendor_name", "amount", "description", "charge_id"],
-        "ai_classification": {
-        "row_type": "operating_expense",
-        "category": "expense",
-        "subcategory": "software",
+                "ai_classification": {
+                    "row_type": "operating_expense",
+                    "category": "expense",
+                    "subcategory": "software",
                     "confidence": 0.9
-        },
-        "file_context": {"filename": "test-payments.csv", "user_id": "test-user"}
-        }
+                },
+                "file_context": {"filename": "test-payments.csv", "user_id": "test-user"}
+            }
         ]
         
         results = []
@@ -9439,12 +9214,14 @@ async def test_data_enrichment():
                     "test_case": test_case,
                     "enriched_data": enriched,
                     "success": True
+                })
                 
             except Exception as e:
                 results.append({
                     "test_case": test_case,
                     "error": str(e),
                     "success": False
+                })
         
         return {
             "message": "Data Enrichment Test Results",
@@ -9473,7 +9250,7 @@ async def test_enrichment_stats(user_id: str):
             return {
                 "message": "Supabase credentials not configured",
                 "timestamp": datetime.utcnow().isoformat()
-        }
+            }
         
         supabase = create_client(supabase_url, supabase_key)
         
@@ -9485,13 +9262,13 @@ async def test_enrichment_stats(user_id: str):
                 "message": "Enrichment Statistics Retrieved Successfully",
                 "stats": result.data[0] if result.data else {},
                 "timestamp": datetime.utcnow().isoformat()
-        }
+            }
         else:
             return {
                 "message": "No enrichment statistics found",
                 "stats": {},
                 "timestamp": datetime.utcnow().isoformat()
-        }
+            }
         
     except Exception as e:
         return {
@@ -9512,7 +9289,7 @@ async def test_vendor_search(user_id: str, vendor_name: str = "Google"):
             return {
                 "message": "Supabase credentials not configured",
                 "timestamp": datetime.utcnow().isoformat()
-        }
+            }
         
         # Clean the JWT token (remove newlines and whitespace)
         supabase_key = supabase_key.strip().replace('\n', '').replace('\r', '').replace('\\n', '')
@@ -9532,7 +9309,7 @@ async def test_vendor_search(user_id: str, vendor_name: str = "Google"):
                 "results": result.data,
                 "count": len(result.data),
                 "timestamp": datetime.utcnow().isoformat()
-        }
+            }
         else:
             return {
                 "message": "No vendor search results found",
@@ -9540,7 +9317,7 @@ async def test_vendor_search(user_id: str, vendor_name: str = "Google"):
                 "results": [],
                 "count": 0,
                 "timestamp": datetime.utcnow().isoformat()
-        }
+            }
         
     except Exception as e:
         return {
@@ -9561,7 +9338,7 @@ async def test_currency_summary(user_id: str):
             return {
                 "message": "Supabase credentials not configured",
                 "timestamp": datetime.utcnow().isoformat()
-        }
+            }
         
         # Clean the JWT token (remove newlines and whitespace)
         supabase_key = supabase_key.strip().replace('\n', '').replace('\r', '').replace('\\n', '')
@@ -9576,13 +9353,13 @@ async def test_currency_summary(user_id: str):
                 "message": "Currency Summary Retrieved Successfully",
                 "summary": result.data,
                 "timestamp": datetime.utcnow().isoformat()
-        }
+            }
         else:
             return {
                 "message": "No currency summary found",
                 "summary": [],
                 "timestamp": datetime.utcnow().isoformat()
-        }
+            }
         
     except Exception as e:
         return {
@@ -9614,10 +9391,10 @@ class DynamicPlatformDetector:
                     messages=[{
                         "role": "system",
                         "content": "You are a financial data analyst specializing in platform detection. Analyze the financial data and identify the platform. Consider column names, data patterns, terminology, and file structure. Return a JSON object with platform name, confidence score, reasoning, and key indicators."
-        }, {
+                    }, {
                         "role": "user",
                         "content": f"Analyze this financial data and detect the platform: {context}"
-        }],
+                    }],
                     temperature=0.1
                 )
                 
@@ -9633,13 +9410,13 @@ class DynamicPlatformDetector:
                 
                 return {
                     "platform": platform_analysis['platform'],
-        "confidence_score": platform_analysis['confidence_score'],
-        "reasoning": platform_analysis['reasoning'],
+                    "confidence_score": platform_analysis['confidence_score'],
+                    "reasoning": platform_analysis['reasoning'],
                     "key_indicators": platform_analysis['key_indicators'],
                     "detection_method": "ai_dynamic",
                     "learned_patterns": len(self.learned_patterns),
                     "platform_info": ensure_json_serializable(platform_info)
-        }
+                }
                 
             except Exception as ai_error:
                 logger.error(f"AI detection failed, using fallback: {ai_error}")
@@ -9681,7 +9458,7 @@ class DynamicPlatformDetector:
                 "learned_patterns": len(learned_patterns),
                 "platforms_analyzed": list(learned_patterns.keys()),
                 "patterns": learned_patterns
-        }
+            }
             
         except Exception as e:
             logger.error(f"Platform learning failed: {e}")
@@ -9705,10 +9482,10 @@ class DynamicPlatformDetector:
                     messages=[{
                         "role": "system",
                         "content": "You are a financial data analyst. Analyze the financial events and identify any new or custom platforms that might not be in the standard list. Look for unique patterns, terminology, or data structures that suggest a custom platform."
-        }, {
+                    }, {
                         "role": "user",
                         "content": f"Analyze these financial events and discover any new platforms: {context}"
-        }],
+                    }],
                     temperature=0.2
                 )
                 
@@ -9723,7 +9500,7 @@ class DynamicPlatformDetector:
                     "message": "Platform discovery completed",
                     "new_platforms": new_platforms,
                     "total_platforms": len(new_platforms)
-        }
+                }
                 
             except Exception as ai_error:
                 logger.error(f"Platform discovery failed: {ai_error}")
@@ -9731,7 +9508,7 @@ class DynamicPlatformDetector:
                     "message": "Platform discovery failed",
                     "error": str(ai_error),
                     "new_platforms": []
-        }
+                }
             
         except Exception as e:
             logger.error(f"Platform discovery failed: {e}")
@@ -9758,7 +9535,7 @@ class DynamicPlatformDetector:
                 "custom_indicators": await self._get_custom_indicators(platform),
                 "is_known_platform": platform in ['stripe', 'razorpay', 'quickbooks', 'gusto', 'paypal', 'square'],
                 "total_learned_patterns": len(self.learned_patterns)
-        }
+            }
             
             return insights
             
@@ -9831,7 +9608,7 @@ class DynamicPlatformDetector:
                     'confidence_score': analysis.get('confidence_score', 0.5),
                     'reasoning': analysis.get('reasoning', ''),
                     'key_indicators': analysis.get('key_indicators', [])
-        }
+                }
         except:
             pass
         
@@ -9931,7 +9708,7 @@ class DynamicPlatformDetector:
                 'max': max(amounts),
                 'avg': sum(amounts) / len(amounts),
                 'count': len(amounts)
-        }
+            }
         
         # Analyze terminology patterns
         all_text = ' '.join([str(event.get('payload', {})) for event in events])
@@ -10012,16 +9789,16 @@ class DynamicPlatformDetector:
                         'currency': ['usd', 'eur'],
                         'status': ['succeeded', 'failed', 'pending'],
                         'payment_method': ['card', 'bank_transfer']
-        }
-        },
+                    }
+                },
                 'event_types': {'payment': 100, 'refund': 20, 'fee': 10},
                 'amount_patterns': {'min': 0.5, 'max': 10000.0, 'avg': 250.0},
                 'terminology_patterns': {
                     'payment_terms': ['payment', 'charge', 'transaction'],
                     'id_terms': ['charge_id', 'payment_intent_id'],
                     'status_terms': ['succeeded', 'failed', 'pending']
-        }
-        },
+                }
+            },
             'razorpay': {
                 'column_patterns': {
                     'columns': ['payment_id', 'amount', 'currency', 'description', 'created_at', 'status', 'method'],
@@ -10030,16 +9807,16 @@ class DynamicPlatformDetector:
                         'currency': ['inr', 'usd'],
                         'status': ['captured', 'failed', 'pending'],
                         'method': ['card', 'netbanking', 'upi']
-        }
-        },
+                    }
+                },
                 'event_types': {'payment': 80, 'refund': 15, 'fee': 5},
                 'amount_patterns': {'min': 1.0, 'max': 50000.0, 'avg': 500.0},
                 'terminology_patterns': {
                     'payment_terms': ['payment', 'transaction'],
                     'id_terms': ['payment_id', 'order_id'],
                     'status_terms': ['captured', 'failed', 'pending']
-        }
-        }
+                }
+            }
         }
         
         # Use learned patterns if available, otherwise use defaults
@@ -10052,7 +9829,7 @@ class DynamicPlatformDetector:
                 'event_types': patterns.get('event_types', {}),
                 'amount_patterns': patterns.get('amount_patterns', {}),
                 'terminology_patterns': patterns.get('terminology_patterns', {})
-        }
+            }
             
             # For unknown platforms, add some default characteristics
             if platform not in default_characteristics:
@@ -10061,14 +9838,15 @@ class DynamicPlatformDetector:
                         'columns': ['transaction_id', 'amount', 'description', 'date', 'status'],
                         'data_types': {'amount': 'float64', 'date': 'datetime64'},
                         'unique_values': {'status': ['completed', 'pending', 'failed']}
-        },
+                    },
                     'event_types': {'transaction': 100},
                     'amount_patterns': {'min': 0.01, 'max': 100000.0, 'avg': 100.0},
                     'terminology_patterns': {
                         'payment_terms': ['payment', 'transaction'],
                         'id_terms': ['transaction_id', 'reference_id'],
                         'status_terms': ['completed', 'pending', 'failed']
-        }
+                    }
+                })
             else:
                 # For known platforms, ensure we have the platform field
                 characteristics['platform'] = platform
@@ -10099,7 +9877,7 @@ class DynamicPlatformDetector:
                 'payment_terms': ['payment', 'transaction'],
                 'id_terms': ['transaction_id', 'reference_id'],
                 'status_terms': ['completed', 'pending', 'failed']
-        }
+            }
         
         # Ensure all nested dictionaries exist
         if 'column_patterns' not in characteristics:
@@ -10123,7 +9901,7 @@ class DynamicPlatformDetector:
                 'payment_terms': ['payment', 'transaction'],
                 'id_terms': ['transaction_id', 'reference_id'],
                 'status_terms': ['completed', 'pending', 'failed']
-        }
+            }
         
         return characteristics
     
@@ -10151,7 +9929,7 @@ class DynamicPlatformDetector:
                 'total_events': total_events,
                 'unique_users': unique_users,
                 'last_used': last_used
-        }
+            }
             
         except Exception as e:
             logger.error(f"Failed to get platform usage stats: {e}")
@@ -10234,7 +10012,7 @@ class DynamicPlatformDetector:
                     'patterns': platform_patterns,
                     'created_at': datetime.utcnow().isoformat(),
                     'updated_at': datetime.utcnow().isoformat()
-        }).execute()
+                }).execute()
         except Exception as e:
             logger.error(f"Failed to store learned patterns: {e}")
     
@@ -10248,7 +10026,7 @@ class DynamicPlatformDetector:
                     'discovery_reason': platform_info.get('reason', ''),
                     'confidence_score': platform_info.get('confidence', 0.5),
                     'discovered_at': datetime.utcnow().isoformat()
-        }).execute()
+                }).execute()
         except Exception as e:
             logger.error(f"Failed to store new platforms: {e}")
     
@@ -10292,13 +10070,14 @@ async def test_ai_relationship_detection(user_id: str):
     try:
         # Initialize OpenAI and Supabase clients
         openai_client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
-        supabase_url, supabase_key = _get_supabase_credentials()
+        supabase_url = os.getenv('SUPABASE_URL')
+        supabase_key = os.getenv('SUPABASE_KEY')
         
         if not supabase_url or not supabase_key:
             return {
                 "message": "Supabase credentials not configured",
                 "timestamp": datetime.utcnow().isoformat()
-        }
+            }
         
         supabase = create_client(supabase_url, supabase_key)
         
@@ -10334,7 +10113,7 @@ async def test_relationship_discovery(user_id: str):
             return {
                 "message": "Supabase credentials not configured",
                 "timestamp": datetime.utcnow().isoformat()
-        }
+            }
         
         supabase = create_client(supabase_url, supabase_key)
         
@@ -10346,7 +10125,7 @@ async def test_relationship_discovery(user_id: str):
                 "message": "No data found for relationship discovery",
                 "discovered_types": [],
                 "timestamp": datetime.utcnow().isoformat()
-        }
+            }
         
         # Initialize Enhanced Relationship Detector for better discovery
         enhanced_detector = EnhancedRelationshipDetector(openai_client, supabase)
@@ -10385,7 +10164,7 @@ async def test_ai_relationship_scoring(user_id: str):
             return {
                 "message": "Supabase credentials not configured",
                 "timestamp": datetime.utcnow().isoformat()
-        }
+            }
         
         supabase = create_client(supabase_url, supabase_key)
         
@@ -10397,7 +10176,7 @@ async def test_ai_relationship_scoring(user_id: str):
                 "message": "Insufficient data for relationship scoring test",
                 "scoring_results": [],
                 "timestamp": datetime.utcnow().isoformat()
-        }
+            }
         
         # Initialize AI Relationship Detector
         ai_detector = AIRelationshipDetector(openai_client, supabase)
@@ -10427,6 +10206,7 @@ async def test_ai_relationship_scoring(user_id: str):
                 "context_score": context_score,
                 "event1_id": event1.get('id'),
                 "event2_id": event2.get('id')
+            })
         
         return {
             "message": "AI Relationship Scoring Test Completed",
@@ -10454,7 +10234,7 @@ async def test_relationship_validation(user_id: str):
             return {
                 "message": "Supabase credentials not configured",
                 "timestamp": datetime.utcnow().isoformat()
-        }
+            }
         
         supabase = create_client(supabase_url, supabase_key)
         
@@ -10469,7 +10249,7 @@ async def test_relationship_validation(user_id: str):
                 "message": "No data found for relationship validation",
                 "validation_results": [],
                 "timestamp": datetime.utcnow().isoformat()
-        }
+            }
         
         # Create sample relationships for testing
         sample_relationships = []
@@ -10478,9 +10258,9 @@ async def test_relationship_validation(user_id: str):
                 "source_event_id": events.data[i]['id'],
                 "target_event_id": events.data[i + 1]['id'],
                 "relationship_type": "test_relationship",
-        "confidence_score": 0.8,
+                "confidence_score": 0.8,
                 "detection_method": "test"
-        }
+            }
             sample_relationships.append(relationship)
         
         # Validate relationships
@@ -10527,7 +10307,7 @@ async def test_dynamic_platform_detection():
             return {
                 "message": "Supabase credentials not configured",
                 "timestamp": datetime.utcnow().isoformat()
-        }
+            }
         
         supabase = create_client(supabase_url, supabase_key)
         
@@ -10544,7 +10324,7 @@ async def test_dynamic_platform_detection():
                 'created': ['2024-01-01', '2024-01-02'],
                 'status': ['succeeded', 'succeeded'],
                 'payment_method': ['card', 'card']
-        }),
+            }),
             'razorpay_sample': pd.DataFrame({
                 'payment_id': ['pay_1234567890abcdef', 'pay_0987654321fedcba'],
                 'amount': [5000, 7500],
@@ -10553,7 +10333,7 @@ async def test_dynamic_platform_detection():
                 'created_at': ['2024-01-01', '2024-01-02'],
                 'status': ['captured', 'captured'],
                 'method': ['card', 'netbanking']
-        }),
+            }),
             'custom_sample': pd.DataFrame({
                 'transaction_id': ['txn_001', 'txn_002'],
                 'amount': [1500, 3000],
@@ -10561,6 +10341,7 @@ async def test_dynamic_platform_detection():
                 'description': ['Custom payment system', 'Custom transaction platform'],
                 'date': ['2024-01-01', '2024-01-02'],
                 'type': ['payment', 'refund']
+            })
         }
         
         results = {}
@@ -10594,7 +10375,7 @@ async def test_platform_learning(user_id: str):
             return {
                 "message": "Supabase credentials not configured",
                 "timestamp": datetime.utcnow().isoformat()
-        }
+            }
         
         supabase = create_client(supabase_url, supabase_key)
         
@@ -10630,7 +10411,7 @@ async def test_platform_discovery(user_id: str):
             return {
                 "message": "Supabase credentials not configured",
                 "timestamp": datetime.utcnow().isoformat()
-        }
+            }
         
         supabase = create_client(supabase_url, supabase_key)
         
@@ -10666,7 +10447,7 @@ async def test_platform_insights(platform: str, user_id: str = None):
             return {
                 "message": "Supabase credentials not configured",
                 "timestamp": datetime.utcnow().isoformat()
-        }
+            }
         
         supabase = create_client(supabase_url, supabase_key)
         
@@ -10710,9 +10491,9 @@ class FlexibleRelationshipEngine:
             if not events.data:
                 return {
                     "message": "No data found for relationship discovery",
-        "relationships": [],
+                    "relationships": [],
                     "patterns_learned": 0
-        }
+                }
             
             # Step 1: Discover relationship types using AI
             relationship_types = await self._discover_relationship_types(events.data)
@@ -10733,10 +10514,10 @@ class FlexibleRelationshipEngine:
                 "message": "Relationship discovery completed",
                 "total_relationships": len(all_relationships),
                 "relationship_types": relationship_types,
-        "relationships": all_relationships,
+                "relationships": all_relationships,
                 "cross_platform_relationships": cross_platform_relationships,
                 "patterns_learned": len(self.learned_relationship_patterns)
-        }
+            }
             
         except Exception as e:
             logger.error(f"Relationship discovery failed: {e}")
@@ -10757,10 +10538,10 @@ class FlexibleRelationshipEngine:
                     Consider relationships like: invoice-to-payment, payroll-to-bank-transfer, expense-to-reimbursement,
                     subscription-to-billing, refund-to-original-payment, fee-to-transaction, etc.
                     Return only the relationship types as a JSON array of strings."""
-        }, {
+                }, {
                     "role": "user",
                     "content": f"Analyze these financial events and identify relationship types: {event_summary}"
-        }],
+                }],
                 temperature=0.1
             )
             
@@ -10812,10 +10593,10 @@ class FlexibleRelationshipEngine:
                     "content": f"""You are a financial data analyst. Analyze the financial events and identify 
                     {relationship_type} relationships between them. Return the relationships as a JSON array with 
                     source_event_id, target_event_id, relationship_type, confidence_score, and reasoning."""
-        }, {
+                }, {
                     "role": "user",
                     "content": f"Analyze these financial events and identify {relationship_type} relationships: {context}"
-        }],
+                }],
                 temperature=0.2
             )
             
@@ -10859,11 +10640,11 @@ class FlexibleRelationshipEngine:
                         "source_event_id": event1.get('id'),
                         "target_event_id": event2.get('id'),
                         "relationship_type": pattern.get('relationship_type'),
-        "confidence_score": self._calculate_pattern_confidence(event1, event2, pattern),
+                        "confidence_score": self._calculate_pattern_confidence(event1, event2, pattern),
                         "detection_method": "learned_pattern",
                         "pattern_id": pattern.get('id'),
-        "reasoning": f"Matched learned pattern: {pattern.get('description', '')}"
-        }
+                        "reasoning": f"Matched learned pattern: {pattern.get('description', '')}"
+                    }
                     relationships.append(relationship)
         
         return relationships
@@ -10974,8 +10755,8 @@ class FlexibleRelationshipEngine:
                 "entity_match": len(entity_matches) / len(relationships) > 0.5,
                 "id_pattern": max(set(id_patterns), key=id_patterns.count) if id_patterns else None,
                 "confidence_threshold": 0.7,
-        "description": f"Learned pattern for {relationship_type} relationships"
-        }
+                "description": f"Learned pattern for {relationship_type} relationships"
+            }
             
             return pattern
             
@@ -11000,10 +10781,10 @@ class FlexibleRelationshipEngine:
                         cross_platform_rel = {
                             **rel,
                             "cross_platform": True,
-        "source_platform": source_platform,
+                            "source_platform": source_platform,
                             "target_platform": target_platform,
                             "platform_compatibility": self._assess_platform_compatibility(source_platform, target_platform)
-        }
+                        }
                         cross_platform.append(cross_platform_rel)
             
             return cross_platform
@@ -11055,7 +10836,7 @@ class FlexibleRelationshipEngine:
                 "relationship_type": pattern.get('relationship_type'),
                 "pattern_data": pattern,
                 "created_at": datetime.utcnow().isoformat()
-        }
+            }
             
             # Use upsert to handle duplicate key constraints
             self.supabase.table('relationship_patterns').upsert(pattern_data).execute()
@@ -11301,7 +11082,7 @@ async def test_flexible_relationship_discovery(user_id: str):
             return {
                 "message": "Supabase credentials not configured",
                 "timestamp": datetime.utcnow().isoformat()
-        }
+            }
         
         supabase = create_client(supabase_url, supabase_key)
         
@@ -11337,7 +11118,7 @@ async def test_relationship_pattern_learning(user_id: str):
             return {
                 "message": "Supabase credentials not configured",
                 "timestamp": datetime.utcnow().isoformat()
-        }
+            }
         
         supabase = create_client(supabase_url, supabase_key)
         
@@ -11351,7 +11132,7 @@ async def test_relationship_pattern_learning(user_id: str):
             return {
                 "message": "No data found for pattern learning",
                 "timestamp": datetime.utcnow().isoformat()
-        }
+            }
         
         # Discover relationship types
         relationship_types = await relationship_engine._discover_relationship_types(events.data)
@@ -11392,7 +11173,7 @@ async def test_cross_platform_relationship_mapping(user_id: str):
             return {
                 "message": "Supabase credentials not configured",
                 "timestamp": datetime.utcnow().isoformat()
-        }
+            }
         
         supabase = create_client(supabase_url, supabase_key)
         
@@ -11406,7 +11187,7 @@ async def test_cross_platform_relationship_mapping(user_id: str):
             return {
                 "message": "No data found for cross-platform mapping",
                 "timestamp": datetime.utcnow().isoformat()
-        }
+            }
         
         # Create sample relationships for testing
         sample_relationships = []
@@ -11424,8 +11205,9 @@ async def test_cross_platform_relationship_mapping(user_id: str):
                         "source_event_id": platform1_events[0].get('id'),
                         "target_event_id": platform2_events[0].get('id'),
                         "relationship_type": "cross_platform_transfer",
-        "confidence_score": 0.8,
+                        "confidence_score": 0.8,
                         "detection_method": "manual_test"
+                    })
         
         # Map cross-platform relationships
         cross_platform_relationships = await relationship_engine._map_cross_platform_relationships(sample_relationships)
@@ -11457,7 +11239,7 @@ async def test_relationship_patterns(user_id: str):
             return {
                 "message": "Supabase credentials not configured",
                 "timestamp": datetime.utcnow().isoformat()
-        }
+            }
         
         supabase = create_client(supabase_url, supabase_key)
         
@@ -11526,7 +11308,7 @@ class EnhancedRelationshipDetector:
             logger.info(f"Enhanced relationship detection completed: {len(validated_relationships)} relationships found")
             
             return {
-        "relationships": validated_relationships,
+                "relationships": validated_relationships,
                 "total_relationships": len(validated_relationships),
                 "cross_file_relationships": len(cross_file_relationships),
                 "within_file_relationships": len(within_file_relationships),
@@ -11534,9 +11316,9 @@ class EnhancedRelationshipDetector:
                     "total_events": len(events.data),
                     "files_analyzed": len(events_by_file),
                     "relationship_types_found": list(set([r.get('relationship_type', 'unknown') for r in validated_relationships]))
-        },
+                },
                 "message": "Enhanced relationship detection completed successfully"
-        }
+            }
             
         except Exception as e:
             logger.error(f"Enhanced relationship detection failed: {e}")
@@ -11562,27 +11344,27 @@ class EnhancedRelationshipDetector:
                 'source_files': ['company_invoices.csv', 'comprehensive_vendor_payments.csv'],
                 'relationship_type': 'invoice_to_payment',
                 'description': 'Invoice payments'
-        },
+            },
             {
                 'source_files': ['company_revenue.csv', 'comprehensive_cash_flow.csv'],
                 'relationship_type': 'revenue_to_cashflow',
                 'description': 'Revenue cash flow'
-        },
+            },
             {
                 'source_files': ['company_expenses.csv', 'company_bank_statements.csv'],
                 'relationship_type': 'expense_to_bank',
                 'description': 'Expense bank transactions'
-        },
+            },
             {
                 'source_files': ['comprehensive_payroll_data.csv', 'company_bank_statements.csv'],
                 'relationship_type': 'payroll_to_bank',
                 'description': 'Payroll bank transactions'
-        },
+            },
             {
                 'source_files': ['company_invoices.csv', 'company_accounts_receivable.csv'],
                 'relationship_type': 'invoice_to_receivable',
                 'description': 'Invoice receivables'
-        }
+            }
         ]
         
         for pattern in cross_file_patterns:
@@ -11637,7 +11419,7 @@ class EnhancedRelationshipDetector:
                             'target_file': target_event.get('source_filename'),
                             'detection_method': 'cross_file_analysis',
                             'reasoning': await self._generate_detailed_reasoning(source_event, target_event, relationship_type, score)
-        }
+                        }
                         relationships.append(relationship)
         
         return relationships
@@ -11666,7 +11448,7 @@ class EnhancedRelationshipDetector:
                             'target_file': filename,
                             'detection_method': 'within_file_analysis',
                             'reasoning': await self._generate_detailed_reasoning(event1, event2, relationship_type, score)
-        }
+                        }
                         relationships.append(relationship)
         
         return relationships
@@ -11959,6 +11741,7 @@ class EnhancedRelationshipDetector:
                 desc = payload['description']
                 if isinstance(desc, str):
                     # Look for patterns like "Payment to [Company]" or "Invoice from [Vendor]"
+                    import re
                     patterns = [
                         r'to\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)',  # "to Company Name"
                         r'from\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)',  # "from Vendor Name"
@@ -12210,7 +11993,7 @@ async def test_enhanced_relationship_detection(user_id: str):
             return {
                 "message": "Supabase credentials not configured",
                 "timestamp": datetime.utcnow().isoformat()
-        }
+            }
         
         supabase = create_client(supabase_url, supabase_key)
         

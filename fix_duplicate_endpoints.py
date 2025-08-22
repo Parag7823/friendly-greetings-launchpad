@@ -1,40 +1,54 @@
 #!/usr/bin/env python3
 """
-Fix duplicate endpoints and hardcoded user ID issues in fastapi_backend.py
+Fix Duplicate Endpoints
+
+This script removes duplicate endpoints from fastapi_backend.py
 """
 
-import re
-
-def fix_fastapi_backend():
-    """Fix the duplicate endpoints and hardcoded user ID issues"""
+def fix_duplicate_endpoints():
+    """Remove duplicate endpoints from fastapi_backend.py"""
+    
+    print("🔧 Fixing duplicate endpoints...")
     
     # Read the file
     with open('fastapi_backend.py', 'r', encoding='utf-8') as f:
-        content = f.read()
+        lines = f.readlines()
     
-    # Fix the first occurrence of hardcoded user ID
-    content = re.sub(
-        r'user_id: str = Form\("550e8400-e29b-41d4-a716-446655440000"\),  # Default test user ID',
-        'user_id: str = Form(...),  # Required user ID - no default',
-        content,
-        count=1  # Only fix the first occurrence
-    )
+    # Find and remove duplicate endpoints
+    endpoints_to_remove = []
+    seen_endpoints = set()
     
-    # Remove the duplicate upload-and-process endpoint
-    # Find the second occurrence and remove it
-    pattern = r'@app\.post\("/upload-and-process"\)\s+async def upload_and_process\([^)]*\):\s+"""[^"]*"""\s+try:[^}]*except Exception as e:[^}]*raise HTTPException\([^)]*\)'
+    for i, line in enumerate(lines):
+        if line.strip().startswith('@app.get("/test-cross-file-relationships/{user_id}")'):
+            if '/test-cross-file-relationships/{user_id}' in seen_endpoints:
+                # This is a duplicate, mark for removal
+                endpoints_to_remove.append(i)
+                print(f"📝 Found duplicate endpoint at line {i+1}")
+            else:
+                seen_endpoints.add('/test-cross-file-relationships/{user_id}')
     
-    # More specific pattern to match the duplicate
-    duplicate_pattern = r'@app\.post\("/upload-and-process"\)\s+async def upload_and_process\([^)]*\):\s+"""Direct file upload and processing endpoint for testing"""\s+try:[^}]*except Exception as e:\s+logger\.error\(f"Upload and process error: \{e\}"\)\s+raise HTTPException\(status_code=500, detail=str\(e\)\)'
+    # Remove duplicate endpoints (in reverse order to maintain line numbers)
+    for line_num in reversed(endpoints_to_remove):
+        # Find the end of the function (look for the next @app.get or class definition)
+        start_line = line_num
+        end_line = start_line
+        
+        for j in range(start_line + 1, len(lines)):
+            if (lines[j].strip().startswith('@app.get') or 
+                lines[j].strip().startswith('class ') or
+                lines[j].strip().startswith('def ') and j > start_line + 5):
+                end_line = j - 1
+                break
+        
+        # Remove the duplicate function
+        del lines[start_line:end_line + 1]
+        print(f"🗑️ Removed duplicate endpoint from lines {start_line+1}-{end_line+1}")
     
-    # Remove the duplicate
-    content = re.sub(duplicate_pattern, '', content, flags=re.DOTALL)
-    
-    # Write the fixed content back
+    # Write back to file
     with open('fastapi_backend.py', 'w', encoding='utf-8') as f:
-        f.write(content)
+        f.writelines(lines)
     
-    print("✅ Fixed duplicate endpoints and hardcoded user ID issues")
+    print("✅ Successfully fixed duplicate endpoints!")
 
 if __name__ == "__main__":
-    fix_fastapi_backend() 
+    fix_duplicate_endpoints() 

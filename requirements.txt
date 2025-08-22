@@ -15,7 +15,6 @@ requests==2.31.0
 python-multipart==0.0.6
 pydantic==2.5.0
 aiohttp==3.9.1
-psutil==5.9.6
 
 # Enhanced file processing capabilities
 odfpy==1.4.1
