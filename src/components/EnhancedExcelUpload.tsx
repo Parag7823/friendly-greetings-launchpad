@@ -207,7 +207,9 @@ const processFileEnhanced = async (file: File, fileId: string, customPrompt?: st
         name: file.name,
         uploadedAt: new Date(),
         analysisResults: result,
-        sheets: result.sheets || []
+        sheets: result.sheets || [],
+        eventsCreated: result.insights?.processing_stats?.events_created || 0,
+        relationshipsDetected: result.insights?.automatic_relationships?.total_relationships || 0
       }]
     }));
     return result;

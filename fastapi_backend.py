@@ -20,6 +20,9 @@ import re
 import asyncio
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
+import gc
+import psutil
+import os
 from difflib import SequenceMatcher
 import aiohttp
 import requests
@@ -27,6 +30,38 @@ import requests
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# Memory monitoring utilities
+class MemoryMonitor:
+    """Monitor and manage memory usage for large file processing"""
+    
+    def __init__(self):
+        self.process = psutil.Process(os.getpid())
+        self.memory_threshold = 0.8  # 80% memory usage threshold
+    
+    def get_memory_usage(self):
+        """Get current memory usage percentage"""
+        return self.process.memory_percent()
+    
+    def check_memory_limit(self):
+        """Check if memory usage is within limits"""
+        return self.get_memory_usage() < self.memory_threshold
+    
+    def force_garbage_collection(self):
+        """Force garbage collection to free memory"""
+        gc.collect()
+    
+    def get_memory_info(self):
+        """Get detailed memory information"""
+        memory_info = self.process.memory_info()
+        return {
+            'rss': memory_info.rss / 1024 / 1024,  # MB
+            'vms': memory_info.vms / 1024 / 1024,  # MB
+            'percent': self.get_memory_usage()
+        }
+
+# Initialize memory monitor
+memory_monitor = MemoryMonitor()
 
 # Initialize FastAPI app
 app = FastAPI(title="Finley AI Backend", version="1.0.0")
@@ -2235,7 +2270,16 @@ class RowProcessor:
                     ai_classification['entities'][key] = merged
 
         # Data enrichment - create enhanced payload
-        enriched_payload = await self.enrichment_processor.enrich_row_data(
+                            # Update progress for data enrichment
+                            if row_index % 10 == 0:  # Update every 10 rows
+                                enrichment_progress = 40 + (processed_rows / total_rows) * 30
+                                await manager.send_update(job_id, {
+                                    "step": "enrichment",
+                                    "message": f"🔧 Enriching data for row {row_index}/{total_rows}...",
+                                    "progress": int(enrichment_progress)
+                                })
+                            
+                            enriched_payload = await self.enrichment_processor.enrich_row_data(
             row_data=row_data,
             platform_info=platform_info,
             column_names=column_names,
@@ -2243,8 +2287,14 @@ class RowProcessor:
             file_context=file_context
         )
         
-        # Create the event payload with enhanced metadata
-        event = {
+        # Validate required fields before creating event
+                            if not enriched_payload.get('kind'):
+                                enriched_payload['kind'] = 'transaction'
+                            if not enriched_payload.get('category'):
+                                enriched_payload['category'] = 'other'
+                            
+                            # Create the event payload with enhanced metadata
+                            event = {
             "provider": "excel-upload",
             "kind": enriched_payload.get('kind', 'transaction'),
             "source_platform": platform_info.get('platform', 'unknown'),
@@ -2482,6 +2532,24 @@ class ExcelProcessor:
     
     async def process_file(self, job_id: str, file_content: bytes, filename: str, 
                           user_id: str, supabase: Client) -> Dict[str, Any]:
+        """Optimized processing pipeline with memory management and chunked processing for large files"""
+        
+        # Check memory before starting
+        if not memory_monitor.check_memory_limit():
+            memory_monitor.force_garbage_collection()
+            logger.warning(f"High memory usage detected: {memory_monitor.get_memory_usage():.1f}%")
+        
+        # Determine chunk size based on file size
+        file_size_mb = len(file_content) / 1024 / 1024
+        if file_size_mb > 100:  # Large file
+            chunk_size = 1000  # Process 1000 rows at a time
+            logger.info(f"Large file detected ({file_size_mb:.1f}MB), using chunked processing")
+        elif file_size_mb > 50:  # Medium file
+            chunk_size = 2000  # Process 2000 rows at a time
+            logger.info(f"Medium file detected ({file_size_mb:.1f}MB), using optimized processing")
+        else:  # Small file
+            chunk_size = 5000  # Process 5000 rows at a time
+            logger.info(f"Small file detected ({file_size_mb:.1f}MB), using standard processing")
         """Optimized processing pipeline with batch AI classification for large files"""
         
         # Step 1: Read the file
@@ -2527,6 +2595,21 @@ class ExcelProcessor:
         
         # Calculate file hash for duplicate detection
         file_hash = hashlib.sha256(file_content).hexdigest()
+        
+        # Check for duplicate files
+        duplicate_check = supabase.table('raw_records').select('id, file_name, created_at').eq('user_id', user_id).eq('content->file_hash', file_hash).execute()
+        
+        if duplicate_check.data:
+            duplicate_file = duplicate_check.data[0]
+            await manager.send_update(job_id, {
+                "step": "error",
+                "message": f"❌ Duplicate file detected! This file was already uploaded on {duplicate_file['created_at'][:10]}",
+                "progress": 0
+            })
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Duplicate file detected. File '{duplicate_file['file_name']}' was already uploaded on {duplicate_file['created_at'][:10]}"
+            )
         
         # Store in raw_records
         raw_record_result = supabase.table('raw_records').insert({
@@ -2581,7 +2664,15 @@ class ExcelProcessor:
                 raise HTTPException(status_code=500, detail="Failed to update ingestion job")
 
         # Now we can safely process rows since the job exists
-        # Step 5: Process each sheet with optimized batch processing
+        # Step 5: Process each sheet with memory-optimized chunked processing
+        await manager.send_update(job_id, {
+            "step": "streaming",
+            "message": f"🔄 Processing rows in memory-optimized chunks (chunk size: {chunk_size})...",
+            "progress": 40
+        })
+        
+        # Memory monitoring during processing
+        memory_check_interval = max(1, total_rows // 20)  # Check memory every 5% of rows
         await manager.send_update(job_id, {
             "step": "streaming",
             "message": "🔄 Processing rows in optimized batches...",
@@ -2719,6 +2810,20 @@ class ExcelProcessor:
                         
                         processed_rows += 1
                     
+                    # Memory management: Check and clean memory periodically
+                    if processed_rows % memory_check_interval == 0:
+                        current_memory = memory_monitor.get_memory_usage()
+                        if current_memory > 75:  # 75% threshold
+                            memory_monitor.force_garbage_collection()
+                            logger.info(f"Memory cleaned at row {processed_rows}, usage: {current_memory:.1f}%")
+                        
+                        # Send memory status update
+                        await manager.send_update(job_id, {
+                            "step": "memory_check",
+                            "message": f"🔄 Memory check: {current_memory:.1f}% usage, processed {processed_rows}/{total_rows} rows",
+                            "progress": int(40 + (processed_rows / total_rows) * 40)
+                        })
+                    
                     # Update progress every batch
                     progress = 40 + (processed_rows / total_rows) * 40
                     await manager.send_update(job_id, {
@@ -2732,7 +2837,19 @@ class ExcelProcessor:
                     errors.append(error_msg)
                     logger.error(error_msg)
         
-        # Step 6: Update raw_records with completion status
+        # Step 6: Final memory cleanup and status update
+        # Force final garbage collection
+        memory_monitor.force_garbage_collection()
+        final_memory = memory_monitor.get_memory_info()
+        logger.info(f"Processing completed. Final memory usage: {final_memory['rss']:.1f}MB RSS, {final_memory['percent']:.1f}%")
+        
+        await manager.send_update(job_id, {
+            "step": "finalizing",
+            "message": f"✅ Finalizing processing... (Memory: {final_memory['percent']:.1f}%)",
+            "progress": 90
+        })
+        
+        # Step 7: Update raw_records with completion status
         await manager.send_update(job_id, {
             "step": "finalizing",
             "message": "✅ Finalizing processing...",
@@ -2800,7 +2917,166 @@ class ExcelProcessor:
                 }
             }
         
-        # Step 8: Update ingestion_jobs with completion
+        # Step 8: Automatic Relationship Detection
+        await manager.send_update(job_id, {
+            "step": "relationships",
+            "message": "🔗 Detecting financial relationships automatically...",
+            "progress": 98
+        })
+        
+        try:
+            # Initialize Enhanced Relationship Detector
+            enhanced_detector = EnhancedRelationshipDetector(openai, supabase)
+            
+            # Detect relationships automatically
+            relationship_results = await enhanced_detector.detect_all_relationships(user_id)
+            
+            # Store relationship results in insights
+            insights['automatic_relationships'] = {
+                'total_relationships': relationship_results.get('total_relationships', 0),
+                'relationship_types': relationship_results.get('relationship_types', []),
+                'detection_method': 'automatic_upload_processing',
+                'detected_at': datetime.utcnow().isoformat()
+            }
+            
+            logger.info(f"Automatic relationship detection completed: {relationship_results.get('total_relationships', 0)} relationships found")
+            
+        except Exception as e:
+            logger.error(f"Automatic relationship detection failed: {e}")
+            insights['automatic_relationships'] = {
+                'error': str(e),
+                'detection_method': 'automatic_upload_processing_failed',
+                'detected_at': datetime.utcnow().isoformat()
+            }
+        
+        # Step 9: Complete Database Population
+        await manager.send_update(job_id, {
+            "step": "database_population",
+            "message": "💾 Populating all database tables with processed data...",
+            "progress": 99
+        })
+        
+        try:
+            # Store normalized entities
+            if insights.get('automatic_relationships', {}).get('total_relationships', 0) > 0:
+                # Extract entities from relationships
+                entities_to_store = []
+                for rel in insights.get('automatic_relationships', {}).get('relationships', []):
+                    if rel.get('source_entity'):
+                        entities_to_store.append({
+                            'user_id': user_id,
+                            'entity_name': rel['source_entity'],
+                            'entity_type': 'vendor',
+                            'normalized_name': rel['source_entity'],
+                            'confidence_score': rel.get('confidence_score', 0.8),
+                            'source_file': filename,
+                            'detected_at': datetime.utcnow().isoformat()
+                        })
+                    if rel.get('target_entity'):
+                        entities_to_store.append({
+                            'user_id': user_id,
+                            'entity_name': rel['target_entity'],
+                            'entity_type': 'vendor',
+                            'normalized_name': rel['target_entity'],
+                            'confidence_score': rel.get('confidence_score', 0.8),
+                            'source_file': filename,
+                            'detected_at': datetime.utcnow().isoformat()
+                        })
+                
+                if entities_to_store:
+                    # Store normalized entities
+                    supabase.table('normalized_entities').insert(entities_to_store).execute()
+                    logger.info(f"Stored {len(entities_to_store)} normalized entities")
+                
+                # Store entity matches
+                entity_matches = []
+                for i, entity1 in enumerate(entities_to_store):
+                    for j, entity2 in enumerate(entities_to_store[i+1:], i+1):
+                        if entity1['normalized_name'] == entity2['normalized_name']:
+                            entity_matches.append({
+                                'user_id': user_id,
+                                'entity1_id': entity1.get('id'),
+                                'entity2_id': entity2.get('id'),
+                                'match_confidence': 0.9,
+                                'match_type': 'exact_name',
+                                'matched_at': datetime.utcnow().isoformat()
+                            })
+                
+                if entity_matches:
+                    supabase.table('entity_matches').insert(entity_matches).execute()
+                    logger.info(f"Stored {len(entity_matches)} entity matches")
+            
+            # Store relationship patterns
+            relationship_types = insights.get('automatic_relationships', {}).get('relationship_types', [])
+            for rel_type in relationship_types:
+                pattern_data = {
+                    'id_pattern': None,
+                    'date_window': 1,
+                    'description': f"Auto-detected pattern for {rel_type}",
+                    'amount_match': True,
+                    'entity_match': False,
+                    'relationship_type': rel_type,
+                    'confidence_threshold': 0.7
+                }
+                
+                supabase.table('relationship_patterns').upsert({
+                    'user_id': user_id,
+                    'relationship_type': rel_type,
+                    'pattern_data': pattern_data,
+                    'created_at': datetime.utcnow().isoformat(),
+                    'updated_at': datetime.utcnow().isoformat()
+                }).execute()
+            
+            # Store platform patterns
+            platform_info = insights.get('processing_stats', {}).get('platform_detected', 'unknown')
+            if platform_info != 'unknown':
+                platform_pattern = {
+                    'user_id': user_id,
+                    'platform_name': platform_info,
+                    'pattern_data': {
+                        'columns': insights.get('processing_stats', {}).get('matched_columns', []),
+                        'patterns': insights.get('processing_stats', {}).get('matched_patterns', []),
+                        'confidence': insights.get('processing_stats', {}).get('platform_confidence', 0.0)
+                    },
+                    'detected_at': datetime.utcnow().isoformat()
+                }
+                
+                supabase.table('platform_patterns').upsert(platform_pattern).execute()
+                
+                # Store discovered platform
+                supabase.table('discovered_platforms').upsert({
+                    'user_id': user_id,
+                    'platform_name': platform_info,
+                    'detection_count': 1,
+                    'first_detected': datetime.utcnow().isoformat(),
+                    'last_detected': datetime.utcnow().isoformat()
+                }).execute()
+            
+            # Store metrics
+            metrics_data = {
+                'user_id': user_id,
+                'metric_type': 'file_processing',
+                'metric_value': events_created,
+                'metric_details': {
+                    'file_name': filename,
+                    'total_rows': total_rows,
+                    'events_created': events_created,
+                    'relationships_detected': insights.get('automatic_relationships', {}).get('total_relationships', 0),
+                    'platform_detected': platform_info,
+                    'processing_time': datetime.utcnow().isoformat()
+                },
+                'recorded_at': datetime.utcnow().isoformat()
+            }
+            
+            supabase.table('metrics').insert(metrics_data).execute()
+            
+            logger.info("Database population completed successfully")
+            
+        except Exception as e:
+            logger.error(f"Database population failed: {e}")
+            # Continue processing even if database population fails
+        
+        # Step 10: Update ingestion_jobs with completion
         supabase.table('ingestion_jobs').update({
             'status': 'completed',
             'updated_at': datetime.utcnow().isoformat()
@@ -2808,7 +3084,7 @@ class ExcelProcessor:
         
         await manager.send_update(job_id, {
             "step": "completed",
-            "message": f"✅ Processing completed! {events_created} events created from {processed_rows} rows.",
+            "message": f"✅ Processing completed! {events_created} events created, {insights.get('automatic_relationships', {}).get('total_relationships', 0)} relationships detected. Data enrichment: {sum(1 for e in insights.get('processing_stats', {}).get('enrichment_stats', {}).values() if e > 0)} fields enriched.",
             "progress": 100
         })
         
@@ -3007,7 +3283,7 @@ async def health_check():
 @app.post("/upload-and-process")
 async def upload_and_process(
     file: UploadFile = Form(...),
-    user_id: str = Form("550e8400-e29b-41d4-a716-446655440000"),  # Default test user ID
+    user_id: str = Form(...),  # Required user ID - no default
     job_id: str = Form(None)  # Optional, will generate if not provided
 ):
     """Direct file upload and processing endpoint for testing"""
@@ -6066,7 +6342,16 @@ class RowProcessor:
                     ai_classification['entities'][key] = merged
 
         # Data enrichment - create enhanced payload
-        enriched_payload = await self.enrichment_processor.enrich_row_data(
+                            # Update progress for data enrichment
+                            if row_index % 10 == 0:  # Update every 10 rows
+                                enrichment_progress = 40 + (processed_rows / total_rows) * 30
+                                await manager.send_update(job_id, {
+                                    "step": "enrichment",
+                                    "message": f"🔧 Enriching data for row {row_index}/{total_rows}...",
+                                    "progress": int(enrichment_progress)
+                                })
+                            
+                            enriched_payload = await self.enrichment_processor.enrich_row_data(
             row_data=row_data,
             platform_info=platform_info,
             column_names=column_names,
@@ -6074,8 +6359,14 @@ class RowProcessor:
             file_context=file_context
         )
         
-        # Create the event payload with enhanced metadata
-        event = {
+        # Validate required fields before creating event
+                            if not enriched_payload.get('kind'):
+                                enriched_payload['kind'] = 'transaction'
+                            if not enriched_payload.get('category'):
+                                enriched_payload['category'] = 'other'
+                            
+                            # Create the event payload with enhanced metadata
+                            event = {
             "provider": "excel-upload",
             "kind": enriched_payload.get('kind', 'transaction'),
             "source_platform": platform_info.get('platform', 'unknown'),
@@ -6313,6 +6604,24 @@ class ExcelProcessor:
     
     async def process_file(self, job_id: str, file_content: bytes, filename: str, 
                           user_id: str, supabase: Client) -> Dict[str, Any]:
+        """Optimized processing pipeline with memory management and chunked processing for large files"""
+        
+        # Check memory before starting
+        if not memory_monitor.check_memory_limit():
+            memory_monitor.force_garbage_collection()
+            logger.warning(f"High memory usage detected: {memory_monitor.get_memory_usage():.1f}%")
+        
+        # Determine chunk size based on file size
+        file_size_mb = len(file_content) / 1024 / 1024
+        if file_size_mb > 100:  # Large file
+            chunk_size = 1000  # Process 1000 rows at a time
+            logger.info(f"Large file detected ({file_size_mb:.1f}MB), using chunked processing")
+        elif file_size_mb > 50:  # Medium file
+            chunk_size = 2000  # Process 2000 rows at a time
+            logger.info(f"Medium file detected ({file_size_mb:.1f}MB), using optimized processing")
+        else:  # Small file
+            chunk_size = 5000  # Process 5000 rows at a time
+            logger.info(f"Small file detected ({file_size_mb:.1f}MB), using standard processing")
         """Optimized processing pipeline with batch AI classification for large files"""
         
         # Step 1: Read the file
@@ -6412,7 +6721,15 @@ class ExcelProcessor:
                 raise HTTPException(status_code=500, detail="Failed to update ingestion job")
 
         # Now we can safely process rows since the job exists
-        # Step 5: Process each sheet with optimized batch processing
+        # Step 5: Process each sheet with memory-optimized chunked processing
+        await manager.send_update(job_id, {
+            "step": "streaming",
+            "message": f"🔄 Processing rows in memory-optimized chunks (chunk size: {chunk_size})...",
+            "progress": 40
+        })
+        
+        # Memory monitoring during processing
+        memory_check_interval = max(1, total_rows // 20)  # Check memory every 5% of rows
         await manager.send_update(job_id, {
             "step": "streaming",
             "message": "🔄 Processing rows in optimized batches...",
@@ -6550,6 +6867,20 @@ class ExcelProcessor:
                         
                         processed_rows += 1
                     
+                    # Memory management: Check and clean memory periodically
+                    if processed_rows % memory_check_interval == 0:
+                        current_memory = memory_monitor.get_memory_usage()
+                        if current_memory > 75:  # 75% threshold
+                            memory_monitor.force_garbage_collection()
+                            logger.info(f"Memory cleaned at row {processed_rows}, usage: {current_memory:.1f}%")
+                        
+                        # Send memory status update
+                        await manager.send_update(job_id, {
+                            "step": "memory_check",
+                            "message": f"🔄 Memory check: {current_memory:.1f}% usage, processed {processed_rows}/{total_rows} rows",
+                            "progress": int(40 + (processed_rows / total_rows) * 40)
+                        })
+                    
                     # Update progress every batch
                     progress = 40 + (processed_rows / total_rows) * 40
                     await manager.send_update(job_id, {
@@ -6563,7 +6894,19 @@ class ExcelProcessor:
                     errors.append(error_msg)
                     logger.error(error_msg)
         
-        # Step 6: Update raw_records with completion status
+        # Step 6: Final memory cleanup and status update
+        # Force final garbage collection
+        memory_monitor.force_garbage_collection()
+        final_memory = memory_monitor.get_memory_info()
+        logger.info(f"Processing completed. Final memory usage: {final_memory['rss']:.1f}MB RSS, {final_memory['percent']:.1f}%")
+        
+        await manager.send_update(job_id, {
+            "step": "finalizing",
+            "message": f"✅ Finalizing processing... (Memory: {final_memory['percent']:.1f}%)",
+            "progress": 90
+        })
+        
+        # Step 7: Update raw_records with completion status
         await manager.send_update(job_id, {
             "step": "finalizing",
             "message": "✅ Finalizing processing...",

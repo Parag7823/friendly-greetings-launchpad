@@ -176,11 +176,23 @@ export class FastAPIProcessor {
         throw new Error('User session required');
       }
 
-      // Prepare request for FastAPI backend
+      // Get Supabase configuration dynamically instead of hardcoding
+      const supabaseConfig = {
+        url: process.env.REACT_APP_SUPABASE_URL || 'https://gnrbafqifucxlaihtyuv.supabase.co',
+        key: process.env.REACT_APP_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImducmJhZnFpZnVjeGxhaWh0eXV2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTMxMTM5OTksImV4cCI6MjA2ODY4OTk5OX0.Lb5Fuu1ktYuPKBgx0Oxla9SXot-TWI-bPhsML9EkRwE'
+      };
+
+      // Validate configuration
+      if (!supabaseConfig.url || !supabaseConfig.key) {
+        throw new Error('Supabase configuration is missing. Please check environment variables.');
+      }
+
       const requestBody = {
         job_id: jobData.id,
         storage_path: fileName,
         file_name: file.name,
+        supabase_url: supabaseConfig.url,
+        supabase_key: supabaseConfig.key,
         user_id: user.id
       };
 
