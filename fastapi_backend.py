@@ -5220,24 +5220,6 @@ class AIRelationshipDetector:
         
         return 0.0
     
-    def _create_event_summary(self, events: List[Dict]) -> str:
-        """Create a summary of events for AI analysis"""
-        summary_parts = []
-        
-        for event in events[:10]:  # Limit to first 10 events
-            event_summary = {
-                'id': event.get('id'),
-                'kind': event.get('kind'),
-                'category': event.get('category'),
-                'platform': event.get('source_platform'),
-                'amount': self._extract_amount(event.get('payload', {})),
-                'vendor': event.get('vendor_standard'),
-                'description': event.get('payload', {}).get('description', '')
-            }
-            summary_parts.append(str(event_summary))
-        
-        return '\n'.join(summary_parts)
-    
     def _create_comprehensive_context(self, events: List[Dict]) -> str:
         """Create comprehensive context for AI analysis"""
         context_parts = []
@@ -5257,49 +5239,6 @@ class AIRelationshipDetector:
                 context_parts.append(f"- {event.get('kind')}: {event.get('payload', {}).get('description', '')}")
         
         return '\n'.join(context_parts)
-    
-    def _parse_relationship_types(self, response_text: str) -> List[str]:
-        """Parse relationship types from AI response"""
-        try:
-            # Try to extract JSON array
-            if '[' in response_text and ']' in response_text:
-                start = response_text.find('[')
-                end = response_text.rfind(']') + 1
-                json_str = response_text[start:end]
-                return json.loads(json_str)
-        except:
-            pass
-        
-        # Fallback to common relationship types
-        return ["invoice_to_payment", "fee_to_transaction", "refund_to_original"]
-    
-    def _parse_ai_relationships(self, response_text: str, events: List[Dict]) -> List[Dict]:
-        """Parse AI-discovered relationships from response"""
-        try:
-            # Try to extract JSON array
-            if '[' in response_text and ']' in response_text:
-                start = response_text.find('[')
-                end = response_text.rfind(']') + 1
-                json_str = response_text[start:end]
-                ai_relationships = json.loads(json_str)
-                
-                # Convert to standard format
-                relationships = []
-                for rel in ai_relationships:
-                    relationship = {
-                        "source_event_id": rel.get('source_event_id'),
-                        "target_event_id": rel.get('target_event_id'),
-                        "relationship_type": rel.get('relationship_type', 'ai_discovered'),
-                        "confidence_score": rel.get('confidence_score', 0.5),
-                        "detection_method": "ai_discovered"
-                    }
-                    relationships.append(relationship)
-                
-                return relationships
-        except:
-            pass
-        
-        return []
     
     async def _validate_relationships(self, relationships: List[Dict]) -> List[Dict]:
         """Validate and filter relationships"""
@@ -7298,37 +7237,6 @@ class FlexibleRelationshipEngine:
         
         return '\n'.join(context_parts)
     
-    def _parse_relationship_types(self, response_text: str) -> List[str]:
-        """Parse relationship types from AI response"""
-        try:
-            # Try to extract JSON array
-            if '[' in response_text and ']' in response_text:
-                start = response_text.find('[')
-                end = response_text.rfind(']') + 1
-                json_str = response_text[start:end]
-                return json.loads(json_str)
-        except:
-            pass
-        
-        # Fallback parsing
-        types = []
-        response_lower = response_text.lower()
-        
-        # Common relationship types
-        common_types = [
-            'invoice_to_payment', 'payroll_to_bank_transfer', 'expense_to_reimbursement',
-            'subscription_to_billing', 'refund_to_original_payment', 'fee_to_transaction',
-            'tax_to_payment', 'commission_to_sale'
-        ]
-        
-        for rel_type in common_types:
-            if rel_type.replace('_', ' ') in response_lower:
-                types.append(rel_type)
-        
-        return types if types else ['invoice_to_payment', 'payroll_to_bank_transfer']
-    
-    def _parse_ai_relationships(self, response_text: str, events: List[Dict]) -> List[Dict]:
-        """Parse AI-detected relationships from response"""
         try:
             # Try to extract JSON array
             if '[' in response_text and ']' in response_text:
