@@ -3,7 +3,7 @@ import io
 import logging
 import hashlib
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, Any, List, Optional, Tuple, AsyncGenerator
 import pandas as pd
 import numpy as np
@@ -13,7 +13,10 @@ from pydantic import BaseModel
 from supabase import create_client, Client
 import openai
 import magic
-import filetype
+try:
+    import filetype
+except ImportError:
+    filetype = None
 from openai import OpenAI
 import time
 import json
@@ -22,7 +25,10 @@ import asyncio
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from difflib import SequenceMatcher
-import aiohttp
+try:
+    import aiohttp
+except ImportError:
+    aiohttp = None
 import requests
 from contextlib import asynccontextmanager
 import weakref
@@ -34,6 +40,11 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+# Utility function for timezone-aware datetime
+def utc_now():
+    """Return current UTC datetime in timezone-aware format"""
+    return datetime.now(timezone.utc)
 
 # Initialize FastAPI app
 app = FastAPI(title="Finley AI Backend", version="2.0.0")
@@ -548,7 +559,7 @@ class DataEnrichmentProcessor:
                 
                 # Enhanced metadata
                 "standard_description": self._clean_description(description),
-                "ingested_on": datetime.utcnow().isoformat(),
+                "ingested_on": utc_now().isoformat(),
                 "file_source": file_context.get('filename', 'unknown'),
                 "row_index": file_context.get('row_index', 0),
                 
@@ -573,7 +584,7 @@ class DataEnrichmentProcessor:
                 "vendor_raw": self._extract_vendor_name(row_data, column_names),
                 "vendor_standard": self._extract_vendor_name(row_data, column_names),
                 "platform": platform_info.get('platform', 'unknown'),
-                "ingested_on": datetime.utcnow().isoformat(),
+                "ingested_on": utc_now().isoformat(),
                 "enrichment_error": str(e)
             }
     
@@ -696,8 +707,8 @@ class ConnectionInfo:
     """Information about a WebSocket connection"""
     websocket: WebSocket
     job_id: str
-    created_at: datetime = field(default_factory=datetime.utcnow)
-    last_activity: datetime = field(default_factory=datetime.utcnow)
+    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    last_activity: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
 class ConnectionManager:
     """Enhanced WebSocket connection manager with proper cleanup and memory management"""
@@ -1939,35 +1950,6 @@ platform_id_extractor = PlatformIDExtractor()
 data_enrichment_processor = DataEnrichmentProcessor(
     currency_normalizer, vendor_standardizer, platform_id_extractor
 )
-            'square': {
-                'keywords': ['square', 'payment', 'transaction', 'merchant'],
-                'columns': ['transaction_id', 'merchant_id', 'amount', 'status', 'created_at'],
-                'data_patterns': ['location_id', 'device_id', 'tender_type', 'square_specific'],
-                'confidence_threshold': 0.7,
-                'description': 'Point of sale and payments'
-            },
-            'paypal': {
-                'keywords': ['paypal', 'payment', 'transaction', 'merchant'],
-                'columns': ['transaction_id', 'merchant_id', 'amount', 'status', 'created_at'],
-                'data_patterns': ['paypal_id', 'fee_amount', 'currency', 'payment_type'],
-                'confidence_threshold': 0.7,
-                'description': 'Online payment system'
-            },
-            'shopify': {
-                'keywords': ['shopify', 'order', 'product', 'sales', 'ecommerce'],
-                'columns': ['order_id', 'product_name', 'amount', 'date', 'customer'],
-                'data_patterns': ['shopify_id', 'product_id', 'variant_id', 'fulfillment_status'],
-                'confidence_threshold': 0.7,
-                'description': 'E-commerce platform'
-            },
-            'zoho': {
-                'keywords': ['zoho', 'books', 'invoice', 'accounting'],
-                'columns': ['contact_name', 'invoice_number', 'amount', 'date', 'reference'],
-                'data_patterns': ['zoho_id', 'organization_id', 'zoho_specific'],
-                'confidence_threshold': 0.7,
-                'description': 'Business software suite'
-            }
-        }
     
     def detect_platform(self, df: pd.DataFrame, filename: str) -> Dict[str, Any]:
         """Enhanced platform detection with multiple analysis methods"""
@@ -2743,7 +2725,7 @@ class RowProcessor:
             "sheet_name": sheet_name,
             "source_filename": file_context['filename'],
             "uploader": file_context['user_id'],
-            "ingest_ts": datetime.utcnow().isoformat(),
+            "ingest_ts": utc_now().isoformat(),
             "status": "pending",
             "confidence_score": enriched_payload.get('ai_confidence', 0.5),
             "classification_metadata": {
@@ -2947,7 +2929,7 @@ class ExcelProcessor:
                 'document_analysis': doc_analysis,
                 'file_hash': file_hash,
                 'total_rows': sum(len(sheet) for sheet in sheets.values()),
-                'processed_at': datetime.utcnow().isoformat()
+                'processed_at': utc_now().isoformat()
             },
             'status': 'processing',
             'classification_status': 'processing'
@@ -2968,7 +2950,7 @@ class ExcelProcessor:
                 'job_type': 'classification',
                 'status': 'running',
                 'progress': 0,
-                'started_at': datetime.utcnow().isoformat()
+                'started_at': utc_now().isoformat()
             }).execute()
 
             if not job_result.data:
@@ -2981,7 +2963,7 @@ class ExcelProcessor:
                 'record_id': file_id,
                 'status': 'running',
                 'progress': 0,
-                'started_at': datetime.utcnow().isoformat()
+                'started_at': utc_now().isoformat()
             }).eq('id', job_id).execute()
 
             if not update_result.data:
@@ -3157,7 +3139,7 @@ class ExcelProcessor:
                 'total_rows': total_rows,
                 'events_created': events_created,
                 'errors': errors,
-                'processed_at': datetime.utcnow().isoformat()
+                'processed_at': utc_now().isoformat()
             }
         }).eq('id', file_id).execute()
         
@@ -3210,7 +3192,7 @@ class ExcelProcessor:
         # Step 8: Update ingestion_jobs with completion
         supabase.table('ingestion_jobs').update({
             'status': 'completed',
-            'updated_at': datetime.utcnow().isoformat()
+            'updated_at': utc_now().isoformat()
         }).eq('id', job_id).execute()
         
         await manager.send_update(job_id, {
@@ -3267,7 +3249,7 @@ async def process_excel(request: ProcessRequest, background_tasks: BackgroundTas
             # Try to update existing job
             result = supabase.table('ingestion_jobs').update({
             'status': 'processing',
-            'started_at': datetime.utcnow().isoformat(),
+            'started_at': utc_now().isoformat(),
             'progress': 10
         }).eq('id', request.job_id).execute()
         
@@ -3278,7 +3260,7 @@ async def process_excel(request: ProcessRequest, background_tasks: BackgroundTas
                     'job_type': 'fastapi_excel_analysis',
                     'user_id': request.user_id,
                     'status': 'processing',
-                    'started_at': datetime.utcnow().isoformat(),
+                    'started_at': utc_now().isoformat(),
                     'progress': 10
                 }).execute()
         except Exception as e:
@@ -3289,7 +3271,7 @@ async def process_excel(request: ProcessRequest, background_tasks: BackgroundTas
                 'job_type': 'fastapi_excel_analysis',
                 'user_id': request.user_id,
                 'status': 'processing',
-                'started_at': datetime.utcnow().isoformat(),
+                'started_at': utc_now().isoformat(),
                 'progress': 10
             }).execute()
         
@@ -3305,7 +3287,7 @@ async def process_excel(request: ProcessRequest, background_tasks: BackgroundTas
         # Update job with results
         supabase.table('ingestion_jobs').update({
             'status': 'completed',
-            'completed_at': datetime.utcnow().isoformat(),
+            'completed_at': utc_now().isoformat(),
             'progress': 100,
             'result': results
         }).eq('id', request.job_id).execute()
@@ -3400,7 +3382,7 @@ async def health_check():
         return {
             "status": status,
             "service": "Finley AI Backend",
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": utc_now().isoformat(),
             "issues": issues,
             "environment_configured": len(issues) == 0
         }
@@ -3409,7 +3391,7 @@ async def health_check():
             "status": "unhealthy",
             "service": "Finley AI Backend",
             "error": str(e),
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": utc_now().isoformat()
         }
 
 @app.post("/upload-and-process")
@@ -3478,7 +3460,7 @@ async def test_simple():
         return {
             "status": "success",
             "message": "Backend is working! All dependencies loaded successfully.",
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": utc_now().isoformat(),
             "dependencies": {
                 "pandas": "loaded",
                 "numpy": "loaded", 
@@ -3497,7 +3479,7 @@ async def test_simple():
         return {
             "status": "error",
             "message": f"Backend has issues: {str(e)}",
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": utc_now().isoformat(),
             "error": str(e)
         }
 
@@ -4780,7 +4762,7 @@ class DataEnrichmentProcessor:
                 
                 # Enhanced metadata
                 "standard_description": self._clean_description(description),
-                "ingested_on": datetime.utcnow().isoformat(),
+                "ingested_on": utc_now().isoformat(),
                 "file_source": file_context.get('filename', 'unknown'),
                 "row_index": file_context.get('row_index', 0),
                 
@@ -4805,7 +4787,7 @@ class DataEnrichmentProcessor:
                 "vendor_raw": self._extract_vendor_name(row_data, column_names),
                 "vendor_standard": self._extract_vendor_name(row_data, column_names),
                 "platform": platform_info.get('platform', 'unknown'),
-                "ingested_on": datetime.utcnow().isoformat(),
+                "ingested_on": utc_now().isoformat(),
                 "enrichment_error": str(e)
             }
     
@@ -6367,7 +6349,7 @@ class RowProcessor:
             "sheet_name": sheet_name,
             "source_filename": file_context['filename'],
             "uploader": file_context['user_id'],
-            "ingest_ts": datetime.utcnow().isoformat(),
+            "ingest_ts": utc_now().isoformat(),
             "status": "pending",
             "confidence_score": enriched_payload.get('ai_confidence', 0.5),
             "classification_metadata": {
@@ -6654,7 +6636,7 @@ class ExcelProcessor:
                 'document_analysis': doc_analysis,
                 'file_hash': file_hash,
                 'total_rows': sum(len(sheet) for sheet in sheets.values()),
-                'processed_at': datetime.utcnow().isoformat()
+                'processed_at': utc_now().isoformat()
             },
             'status': 'processing',
             'classification_status': 'processing'
@@ -6675,7 +6657,7 @@ class ExcelProcessor:
                 'job_type': 'classification',
                 'status': 'running',
                 'progress': 0,
-                'started_at': datetime.utcnow().isoformat()
+                'started_at': utc_now().isoformat()
             }).execute()
 
             if not job_result.data:
@@ -6688,7 +6670,7 @@ class ExcelProcessor:
                 'record_id': file_id,
                 'status': 'running',
                 'progress': 0,
-                'started_at': datetime.utcnow().isoformat()
+                'started_at': utc_now().isoformat()
             }).eq('id', job_id).execute()
 
             if not update_result.data:
@@ -6864,7 +6846,7 @@ class ExcelProcessor:
                 'total_rows': total_rows,
                 'events_created': events_created,
                 'errors': errors,
-                'processed_at': datetime.utcnow().isoformat()
+                'processed_at': utc_now().isoformat()
             }
         }).eq('id', file_id).execute()
         
@@ -6917,7 +6899,7 @@ class ExcelProcessor:
         # Step 8: Update ingestion_jobs with completion
         supabase.table('ingestion_jobs').update({
             'status': 'completed',
-            'updated_at': datetime.utcnow().isoformat()
+            'updated_at': utc_now().isoformat()
         }).eq('id', job_id).execute()
         
         await manager.send_update(job_id, {
@@ -6973,7 +6955,7 @@ async def process_excel(request: ProcessRequest, background_tasks: BackgroundTas
             # Try to update existing job
             result = supabase.table('ingestion_jobs').update({
             'status': 'processing',
-            'started_at': datetime.utcnow().isoformat(),
+            'started_at': utc_now().isoformat(),
             'progress': 10
         }).eq('id', request.job_id).execute()
         
@@ -6984,7 +6966,7 @@ async def process_excel(request: ProcessRequest, background_tasks: BackgroundTas
                     'job_type': 'fastapi_excel_analysis',
                     'user_id': request.user_id,
                     'status': 'processing',
-                    'started_at': datetime.utcnow().isoformat(),
+                    'started_at': utc_now().isoformat(),
                     'progress': 10
                 }).execute()
         except Exception as e:
@@ -6995,7 +6977,7 @@ async def process_excel(request: ProcessRequest, background_tasks: BackgroundTas
                 'job_type': 'fastapi_excel_analysis',
                 'user_id': request.user_id,
                 'status': 'processing',
-                'started_at': datetime.utcnow().isoformat(),
+                'started_at': utc_now().isoformat(),
                 'progress': 10
             }).execute()
         
@@ -7011,7 +6993,7 @@ async def process_excel(request: ProcessRequest, background_tasks: BackgroundTas
         # Update job with results
         supabase.table('ingestion_jobs').update({
             'status': 'completed',
-            'completed_at': datetime.utcnow().isoformat(),
+            'completed_at': utc_now().isoformat(),
             'progress': 100,
             'result': results
         }).eq('id', request.job_id).execute()
@@ -7106,7 +7088,7 @@ async def health_check():
         return {
             "status": status,
             "service": "Finley AI Backend",
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": utc_now().isoformat(),
             "issues": issues,
             "environment_configured": len(issues) == 0
         }
@@ -7115,7 +7097,7 @@ async def health_check():
             "status": "unhealthy",
             "service": "Finley AI Backend",
             "error": str(e),
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": utc_now().isoformat()
         }
 
 @app.post("/upload-and-process")
@@ -7184,7 +7166,7 @@ async def test_simple():
         return {
             "status": "success",
             "message": "Backend is working! All dependencies loaded successfully.",
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": utc_now().isoformat(),
             "dependencies": {
                 "pandas": "loaded",
                 "numpy": "loaded", 
@@ -7203,7 +7185,7 @@ async def test_simple():
         return {
             "status": "error",
             "message": f"Backend has issues: {str(e)}",
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": utc_now().isoformat(),
             "error": str(e)
         }
 
@@ -9226,14 +9208,14 @@ async def debug_environment():
         return {
             "message": "Environment Variables Debug",
             "environment_variables": key_status,
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": utc_now().isoformat()
         }
         
     except Exception as e:
         return {
             "message": "Debug Environment Failed",
             "error": str(e),
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": utc_now().isoformat()
         }
 
 @app.get("/test-currency-normalization")
@@ -9544,7 +9526,7 @@ async def test_enrichment_stats(user_id: str):
         if not supabase_url or not supabase_key:
             return {
                 "message": "Supabase credentials not configured",
-                "timestamp": datetime.utcnow().isoformat()
+                "timestamp": utc_now().isoformat()
             }
         
         supabase = create_client(supabase_url, supabase_key)
@@ -9556,20 +9538,20 @@ async def test_enrichment_stats(user_id: str):
             return {
                 "message": "Enrichment Statistics Retrieved Successfully",
                 "stats": result.data[0] if result.data else {},
-                "timestamp": datetime.utcnow().isoformat()
+                "timestamp": utc_now().isoformat()
             }
         else:
             return {
                 "message": "No enrichment statistics found",
                 "stats": {},
-                "timestamp": datetime.utcnow().isoformat()
+                "timestamp": utc_now().isoformat()
             }
         
     except Exception as e:
         return {
             "message": "Enrichment Statistics Test Failed",
             "error": str(e),
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": utc_now().isoformat()
         }
 
 @app.get("/test-vendor-search/{user_id}")
@@ -9583,7 +9565,7 @@ async def test_vendor_search(user_id: str, vendor_name: str = "Google"):
         if not supabase_url or not supabase_key:
             return {
                 "message": "Supabase credentials not configured",
-                "timestamp": datetime.utcnow().isoformat()
+                "timestamp": utc_now().isoformat()
             }
         
         # Clean the JWT token (remove newlines and whitespace)
@@ -9603,7 +9585,7 @@ async def test_vendor_search(user_id: str, vendor_name: str = "Google"):
                 "vendor_name": vendor_name,
                 "results": result.data,
                 "count": len(result.data),
-                "timestamp": datetime.utcnow().isoformat()
+                "timestamp": utc_now().isoformat()
             }
         else:
             return {
@@ -9611,14 +9593,14 @@ async def test_vendor_search(user_id: str, vendor_name: str = "Google"):
                 "vendor_name": vendor_name,
                 "results": [],
                 "count": 0,
-                "timestamp": datetime.utcnow().isoformat()
+                "timestamp": utc_now().isoformat()
             }
         
     except Exception as e:
         return {
             "message": "Vendor Search Test Failed",
             "error": str(e),
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": utc_now().isoformat()
         }
 
 @app.get("/test-currency-summary/{user_id}")
@@ -9632,7 +9614,7 @@ async def test_currency_summary(user_id: str):
         if not supabase_url or not supabase_key:
             return {
                 "message": "Supabase credentials not configured",
-                "timestamp": datetime.utcnow().isoformat()
+                "timestamp": utc_now().isoformat()
             }
         
         # Clean the JWT token (remove newlines and whitespace)
@@ -9647,20 +9629,20 @@ async def test_currency_summary(user_id: str):
             return {
                 "message": "Currency Summary Retrieved Successfully",
                 "summary": result.data,
-                "timestamp": datetime.utcnow().isoformat()
+                "timestamp": utc_now().isoformat()
             }
         else:
             return {
                 "message": "No currency summary found",
                 "summary": [],
-                "timestamp": datetime.utcnow().isoformat()
+                "timestamp": utc_now().isoformat()
             }
         
     except Exception as e:
         return {
             "message": "Currency Summary Test Failed",
             "error": str(e),
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": utc_now().isoformat()
         }
 
 class DynamicPlatformDetector:
@@ -9968,7 +9950,7 @@ class DynamicPlatformDetector:
         
         self.learned_patterns[platform]['column_patterns'] = column_patterns
         self.learned_patterns[platform]['detection_count'] = self.learned_patterns[platform].get('detection_count', 0) + 1
-        self.learned_patterns[platform]['last_detected'] = datetime.utcnow().isoformat()
+        self.learned_patterns[platform]['last_detected'] = utc_now().isoformat()
     
     async def _extract_platform_patterns(self, events: List[Dict], platform: str) -> Dict[str, Any]:
         """Extract patterns from platform events"""
@@ -10305,8 +10287,8 @@ class DynamicPlatformDetector:
                     'user_id': user_id,
                     'platform': platform,
                     'patterns': platform_patterns,
-                    'created_at': datetime.utcnow().isoformat(),
-                    'updated_at': datetime.utcnow().isoformat()
+                    'created_at': utc_now().isoformat(),
+                    'updated_at': utc_now().isoformat()
                 }).execute()
         except Exception as e:
             logger.error(f"Failed to store learned patterns: {e}")
@@ -10320,7 +10302,7 @@ class DynamicPlatformDetector:
                     'platform_name': platform_info.get('name', 'unknown'),
                     'discovery_reason': platform_info.get('reason', ''),
                     'confidence_score': platform_info.get('confidence', 0.5),
-                    'discovered_at': datetime.utcnow().isoformat()
+                    'discovered_at': utc_now().isoformat()
                 }).execute()
         except Exception as e:
             logger.error(f"Failed to store new platforms: {e}")
@@ -10371,7 +10353,7 @@ async def test_ai_relationship_detection(user_id: str):
         if not supabase_url or not supabase_key:
             return {
                 "message": "Supabase credentials not configured",
-                "timestamp": datetime.utcnow().isoformat()
+                "timestamp": utc_now().isoformat()
             }
         
         supabase = create_client(supabase_url, supabase_key)
@@ -10385,14 +10367,14 @@ async def test_ai_relationship_detection(user_id: str):
         return {
             "message": "AI Relationship Detection Test Completed",
             "result": result,
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": utc_now().isoformat()
         }
         
     except Exception as e:
         return {
             "message": "AI Relationship Detection Test Failed",
             "error": str(e),
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": utc_now().isoformat()
         }
 
 @app.get("/test-relationship-discovery/{user_id}")
@@ -10407,7 +10389,7 @@ async def test_relationship_discovery(user_id: str):
         if not supabase_url or not supabase_key:
             return {
                 "message": "Supabase credentials not configured",
-                "timestamp": datetime.utcnow().isoformat()
+                "timestamp": utc_now().isoformat()
             }
         
         supabase = create_client(supabase_url, supabase_key)
@@ -10419,7 +10401,7 @@ async def test_relationship_discovery(user_id: str):
             return {
                 "message": "No data found for relationship discovery",
                 "discovered_types": [],
-                "timestamp": datetime.utcnow().isoformat()
+                "timestamp": utc_now().isoformat()
             }
         
         # Initialize Enhanced Relationship Detector for better discovery
@@ -10436,14 +10418,14 @@ async def test_relationship_discovery(user_id: str):
             "discovered_types": relationship_types,
             "total_events": len(events.data),
             "total_relationships": len(result.get('relationships', [])),
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": utc_now().isoformat()
         }
         
     except Exception as e:
         return {
             "message": "Relationship Discovery Test Failed",
             "error": str(e),
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": utc_now().isoformat()
         }
 
 @app.get("/test-ai-relationship-scoring/{user_id}")
@@ -10458,7 +10440,7 @@ async def test_ai_relationship_scoring(user_id: str):
         if not supabase_url or not supabase_key:
             return {
                 "message": "Supabase credentials not configured",
-                "timestamp": datetime.utcnow().isoformat()
+                "timestamp": utc_now().isoformat()
             }
         
         supabase = create_client(supabase_url, supabase_key)
@@ -10470,7 +10452,7 @@ async def test_ai_relationship_scoring(user_id: str):
             return {
                 "message": "Insufficient data for relationship scoring test",
                 "scoring_results": [],
-                "timestamp": datetime.utcnow().isoformat()
+                "timestamp": utc_now().isoformat()
             }
         
         # Initialize AI Relationship Detector
@@ -10506,14 +10488,14 @@ async def test_ai_relationship_scoring(user_id: str):
         return {
             "message": "AI Relationship Scoring Test Completed",
             "scoring_results": scoring_results,
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": utc_now().isoformat()
         }
         
     except Exception as e:
         return {
             "message": "AI Relationship Scoring Test Failed",
             "error": str(e),
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": utc_now().isoformat()
         }
 
 @app.get("/test-relationship-validation/{user_id}")
@@ -10528,7 +10510,7 @@ async def test_relationship_validation(user_id: str):
         if not supabase_url or not supabase_key:
             return {
                 "message": "Supabase credentials not configured",
-                "timestamp": datetime.utcnow().isoformat()
+                "timestamp": utc_now().isoformat()
             }
         
         supabase = create_client(supabase_url, supabase_key)
@@ -10543,7 +10525,7 @@ async def test_relationship_validation(user_id: str):
             return {
                 "message": "No data found for relationship validation",
                 "validation_results": [],
-                "timestamp": datetime.utcnow().isoformat()
+                "timestamp": utc_now().isoformat()
             }
         
         # Create sample relationships for testing
@@ -10566,14 +10548,14 @@ async def test_relationship_validation(user_id: str):
             "total_relationships": len(sample_relationships),
             "validated_relationships": len(validated_relationships),
             "validation_results": validated_relationships,
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": utc_now().isoformat()
         }
         
     except Exception as e:
         return {
             "message": "Relationship Validation Test Failed",
             "error": str(e),
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": utc_now().isoformat()
         }
 
 def ensure_json_serializable(obj):
@@ -10601,7 +10583,7 @@ async def test_dynamic_platform_detection():
         if not supabase_url or not supabase_key:
             return {
                 "message": "Supabase credentials not configured",
-                "timestamp": datetime.utcnow().isoformat()
+                "timestamp": utc_now().isoformat()
             }
         
         supabase = create_client(supabase_url, supabase_key)
@@ -10647,14 +10629,14 @@ async def test_dynamic_platform_detection():
         return {
             "message": "Dynamic Platform Detection Test Completed",
             "results": results,
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": utc_now().isoformat()
         }
         
     except Exception as e:
         return {
             "message": "Dynamic Platform Detection Test Failed",
             "error": str(e),
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": utc_now().isoformat()
         }
 
 @app.get("/test-platform-learning/{user_id}")
@@ -10669,7 +10651,7 @@ async def test_platform_learning(user_id: str):
         if not supabase_url or not supabase_key:
             return {
                 "message": "Supabase credentials not configured",
-                "timestamp": datetime.utcnow().isoformat()
+                "timestamp": utc_now().isoformat()
             }
         
         supabase = create_client(supabase_url, supabase_key)
@@ -10683,14 +10665,14 @@ async def test_platform_learning(user_id: str):
         return {
             "message": "Platform Learning Test Completed",
             "result": result,
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": utc_now().isoformat()
         }
         
     except Exception as e:
         return {
             "message": "Platform Learning Test Failed",
             "error": str(e),
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": utc_now().isoformat()
         }
 
 @app.get("/test-platform-discovery/{user_id}")
@@ -10705,7 +10687,7 @@ async def test_platform_discovery(user_id: str):
         if not supabase_url or not supabase_key:
             return {
                 "message": "Supabase credentials not configured",
-                "timestamp": datetime.utcnow().isoformat()
+                "timestamp": utc_now().isoformat()
             }
         
         supabase = create_client(supabase_url, supabase_key)
@@ -10719,14 +10701,14 @@ async def test_platform_discovery(user_id: str):
         return {
             "message": "Platform Discovery Test Completed",
             "result": result,
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": utc_now().isoformat()
         }
         
     except Exception as e:
         return {
             "message": "Platform Discovery Test Failed",
             "error": str(e),
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": utc_now().isoformat()
         }
 
 @app.get("/test-platform-insights/{platform}")
@@ -10741,7 +10723,7 @@ async def test_platform_insights(platform: str, user_id: str = None):
         if not supabase_url or not supabase_key:
             return {
                 "message": "Supabase credentials not configured",
-                "timestamp": datetime.utcnow().isoformat()
+                "timestamp": utc_now().isoformat()
             }
         
         supabase = create_client(supabase_url, supabase_key)
@@ -10755,14 +10737,14 @@ async def test_platform_insights(platform: str, user_id: str = None):
         return {
             "message": "Platform Insights Test Completed",
             "insights": insights,
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": utc_now().isoformat()
         }
         
     except Exception as e:
         return {
             "message": "Platform Insights Test Failed",
             "error": str(e),
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": utc_now().isoformat()
         }
 
 class FlexibleRelationshipEngine:
@@ -11130,7 +11112,7 @@ class FlexibleRelationshipEngine:
                 "user_id": user_id,
                 "relationship_type": pattern.get('relationship_type'),
                 "pattern_data": pattern,
-                "created_at": datetime.utcnow().isoformat()
+                "created_at": utc_now().isoformat()
             }
             
             # Use upsert to handle duplicate key constraints
@@ -11376,7 +11358,7 @@ async def test_flexible_relationship_discovery(user_id: str):
         if not supabase_url or not supabase_key:
             return {
                 "message": "Supabase credentials not configured",
-                "timestamp": datetime.utcnow().isoformat()
+                "timestamp": utc_now().isoformat()
             }
         
         supabase = create_client(supabase_url, supabase_key)
@@ -11390,14 +11372,14 @@ async def test_flexible_relationship_discovery(user_id: str):
         return {
             "message": "Flexible Relationship Discovery Test Completed",
             "result": ensure_json_serializable(result),
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": utc_now().isoformat()
         }
         
     except Exception as e:
         return {
             "message": "Flexible Relationship Discovery Test Failed",
             "error": str(e),
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": utc_now().isoformat()
         }
 
 @app.get("/test-relationship-pattern-learning/{user_id}")
@@ -11412,7 +11394,7 @@ async def test_relationship_pattern_learning(user_id: str):
         if not supabase_url or not supabase_key:
             return {
                 "message": "Supabase credentials not configured",
-                "timestamp": datetime.utcnow().isoformat()
+                "timestamp": utc_now().isoformat()
             }
         
         supabase = create_client(supabase_url, supabase_key)
@@ -11426,7 +11408,7 @@ async def test_relationship_pattern_learning(user_id: str):
         if not events.data:
             return {
                 "message": "No data found for pattern learning",
-                "timestamp": datetime.utcnow().isoformat()
+                "timestamp": utc_now().isoformat()
             }
         
         # Discover relationship types
@@ -11445,14 +11427,14 @@ async def test_relationship_pattern_learning(user_id: str):
             "relationship_types_discovered": relationship_types,
             "learned_patterns": learned_patterns,
             "total_patterns_learned": len(relationship_engine.learned_relationship_patterns),
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": utc_now().isoformat()
         }
         
     except Exception as e:
         return {
             "message": "Relationship Pattern Learning Test Failed",
             "error": str(e),
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": utc_now().isoformat()
         }
 
 @app.get("/test-cross-platform-relationship-mapping/{user_id}")
@@ -11467,7 +11449,7 @@ async def test_cross_platform_relationship_mapping(user_id: str):
         if not supabase_url or not supabase_key:
             return {
                 "message": "Supabase credentials not configured",
-                "timestamp": datetime.utcnow().isoformat()
+                "timestamp": utc_now().isoformat()
             }
         
         supabase = create_client(supabase_url, supabase_key)
@@ -11481,7 +11463,7 @@ async def test_cross_platform_relationship_mapping(user_id: str):
         if not events.data:
             return {
                 "message": "No data found for cross-platform mapping",
-                "timestamp": datetime.utcnow().isoformat()
+                "timestamp": utc_now().isoformat()
             }
         
         # Create sample relationships for testing
@@ -11512,14 +11494,14 @@ async def test_cross_platform_relationship_mapping(user_id: str):
             "total_relationships": len(sample_relationships),
             "cross_platform_relationships": ensure_json_serializable(cross_platform_relationships),
             "platforms_analyzed": platforms,
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": utc_now().isoformat()
         }
         
     except Exception as e:
         return {
             "message": "Cross-Platform Relationship Mapping Test Failed",
             "error": str(e),
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": utc_now().isoformat()
         }
 
 @app.get("/test-relationship-patterns/{user_id}")
@@ -11533,7 +11515,7 @@ async def test_relationship_patterns(user_id: str):
         if not supabase_url or not supabase_key:
             return {
                 "message": "Supabase credentials not configured",
-                "timestamp": datetime.utcnow().isoformat()
+                "timestamp": utc_now().isoformat()
             }
         
         supabase = create_client(supabase_url, supabase_key)
@@ -11554,14 +11536,14 @@ async def test_relationship_patterns(user_id: str):
             "total_patterns": len(patterns.data),
             "patterns_by_type": pattern_analysis,
             "stored_patterns": ensure_json_serializable(patterns.data),
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": utc_now().isoformat()
         }
         
     except Exception as e:
         return {
             "message": "Relationship Patterns Test Failed",
             "error": str(e),
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": utc_now().isoformat()
         }
 
 # Enhanced Relationship Detector - FIXES CORE ISSUES
@@ -12287,7 +12269,7 @@ async def test_enhanced_relationship_detection(user_id: str):
         if not supabase_url or not supabase_key:
             return {
                 "message": "Supabase credentials not configured",
-                "timestamp": datetime.utcnow().isoformat()
+                "timestamp": utc_now().isoformat()
             }
         
         supabase = create_client(supabase_url, supabase_key)
@@ -12301,14 +12283,14 @@ async def test_enhanced_relationship_detection(user_id: str):
         return {
             "message": "Enhanced Relationship Detection Test Completed",
             "result": ensure_json_serializable(result),
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": utc_now().isoformat()
         }
         
     except Exception as e:
         return {
             "message": "Enhanced Relationship Detection Test Failed",
             "error": str(e),
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": utc_now().isoformat()
         }
 
 if __name__ == "__main__":
