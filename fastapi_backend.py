@@ -716,12 +716,18 @@ class ConnectionManager:
     def __init__(self):
         self.active_connections: Dict[str, List[ConnectionInfo]] = {}
         self._cleanup_task: Optional[asyncio.Task] = None
-        self._start_cleanup_task()
+        self._cleanup_started = False
 
     def _start_cleanup_task(self):
         """Start the background cleanup task"""
-        if self._cleanup_task is None or self._cleanup_task.done():
-            self._cleanup_task = asyncio.create_task(self._periodic_cleanup())
+        try:
+            if not self._cleanup_started and (self._cleanup_task is None or self._cleanup_task.done()):
+                loop = asyncio.get_running_loop()
+                self._cleanup_task = loop.create_task(self._periodic_cleanup())
+                self._cleanup_started = True
+        except RuntimeError:
+            # No event loop running, will start when needed
+            pass
 
     async def _periodic_cleanup(self):
         """Periodically clean up stale connections"""
@@ -738,6 +744,9 @@ class ConnectionManager:
         """Connect a WebSocket for a specific job"""
         try:
             await websocket.accept()
+            
+            # Start cleanup task if not already started
+            self._start_cleanup_task()
 
             if job_id not in self.active_connections:
                 self.active_connections[job_id] = []
