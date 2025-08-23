@@ -90,50 +90,161 @@ class EnhancedRelationshipDetector:
         """Detect relationships between different files"""
         relationships = []
         
-        # Define cross-file relationship patterns
+        # Define cross-file relationship patterns - EXPANDED for all sample files
         cross_file_patterns = [
+            # Invoice to Payment relationships
             {
                 'source_files': ['company_invoices.csv', 'comprehensive_vendor_payments.csv'],
                 'relationship_type': 'invoice_to_payment',
                 'description': 'Invoice payments'
             },
             {
+                'source_files': ['company_invoices.csv', 'company_bank_statements.csv'],
+                'relationship_type': 'invoice_to_bank',
+                'description': 'Invoice bank payments'
+            },
+            # Revenue to Cash Flow relationships
+            {
                 'source_files': ['company_revenue.csv', 'comprehensive_cash_flow.csv'],
                 'relationship_type': 'revenue_to_cashflow',
                 'description': 'Revenue cash flow'
             },
+            {
+                'source_files': ['company_revenue.csv', 'company_bank_statements.csv'],
+                'relationship_type': 'revenue_to_bank',
+                'description': 'Revenue bank deposits'
+            },
+            # Expense relationships
             {
                 'source_files': ['company_expenses.csv', 'company_bank_statements.csv'],
                 'relationship_type': 'expense_to_bank',
                 'description': 'Expense bank transactions'
             },
             {
+                'source_files': ['company_expenses.csv', 'comprehensive_vendor_payments.csv'],
+                'relationship_type': 'expense_to_payment',
+                'description': 'Expense payments'
+            },
+            # Payroll relationships
+            {
                 'source_files': ['comprehensive_payroll_data.csv', 'company_bank_statements.csv'],
                 'relationship_type': 'payroll_to_bank',
                 'description': 'Payroll bank transactions'
             },
             {
+                'source_files': ['comprehensive_payroll_data.csv', 'comprehensive_cash_flow.csv'],
+                'relationship_type': 'payroll_to_cashflow',
+                'description': 'Payroll cash flow impact'
+            },
+            # Receivables relationships
+            {
                 'source_files': ['company_invoices.csv', 'company_accounts_receivable.csv'],
                 'relationship_type': 'invoice_to_receivable',
                 'description': 'Invoice receivables'
+            },
+            {
+                'source_files': ['company_accounts_receivable.csv', 'company_bank_statements.csv'],
+                'relationship_type': 'receivable_to_bank',
+                'description': 'Receivable collections'
+            },
+            # Tax relationships
+            {
+                'source_files': ['company_tax_filings.csv', 'company_expenses.csv'],
+                'relationship_type': 'tax_to_expense',
+                'description': 'Tax expense relationships'
+            },
+            {
+                'source_files': ['company_tax_filings.csv', 'company_revenue.csv'],
+                'relationship_type': 'tax_to_revenue',
+                'description': 'Tax revenue relationships'
+            },
+            # Asset relationships
+            {
+                'source_files': ['company_assets.csv', 'company_expenses.csv'],
+                'relationship_type': 'asset_to_expense',
+                'description': 'Asset depreciation expenses'
+            },
+            {
+                'source_files': ['company_assets.csv', 'company_bank_statements.csv'],
+                'relationship_type': 'asset_to_bank',
+                'description': 'Asset purchases/sales'
             }
         ]
         
+        # Log available files for debugging
+        available_files = list(events_by_file.keys())
+        logger.info(f"Available files for cross-file analysis: {available_files}")
+
         for pattern in cross_file_patterns:
             source_file = pattern['source_files'][0]
             target_file = pattern['source_files'][1]
-            
+
+            # Check exact match first
             if source_file in events_by_file and target_file in events_by_file:
                 source_events = events_by_file[source_file]
                 target_events = events_by_file[target_file]
-                
+
+                logger.info(f"Found exact match for pattern: {source_file} ({len(source_events)} events) ↔ {target_file} ({len(target_events)} events)")
+
                 file_relationships = await self._find_file_relationships(
                     source_events, target_events, pattern['relationship_type']
                 )
                 relationships.extend(file_relationships)
+            else:
+                # Try fuzzy matching for similar file names
+                source_match = self._find_similar_filename(source_file, available_files)
+                target_match = self._find_similar_filename(target_file, available_files)
+
+                if source_match and target_match and source_match != target_match:
+                    source_events = events_by_file[source_match]
+                    target_events = events_by_file[target_match]
+
+                    logger.info(f"Found fuzzy match for pattern: {source_match} ({len(source_events)} events) ↔ {target_match} ({len(target_events)} events)")
+
+                    file_relationships = await self._find_file_relationships(
+                        source_events, target_events, pattern['relationship_type']
+                    )
+                    relationships.extend(file_relationships)
+                else:
+                    logger.debug(f"No match found for pattern: {source_file} ↔ {target_file}")
         
         return relationships
-    
+
+    def _find_similar_filename(self, target_filename: str, available_files: List[str]) -> Optional[str]:
+        """Find a similar filename using fuzzy matching"""
+        import difflib
+
+        # Extract key terms from target filename
+        target_base = target_filename.lower().replace('.csv', '').replace('_', ' ')
+        target_words = set(target_base.split())
+
+        best_match = None
+        best_score = 0.0
+
+        for available_file in available_files:
+            available_base = available_file.lower().replace('.csv', '').replace('_', ' ')
+            available_words = set(available_base.split())
+
+            # Calculate word overlap score
+            common_words = target_words.intersection(available_words)
+            if common_words:
+                word_score = len(common_words) / max(len(target_words), len(available_words))
+
+                # Calculate sequence similarity
+                seq_score = difflib.SequenceMatcher(None, target_base, available_base).ratio()
+
+                # Combined score
+                combined_score = (word_score * 0.7) + (seq_score * 0.3)
+
+                if combined_score > best_score and combined_score > 0.4:  # Minimum threshold
+                    best_score = combined_score
+                    best_match = available_file
+
+        if best_match:
+            logger.info(f"Fuzzy match: '{target_filename}' → '{best_match}' (score: {best_score:.3f})")
+
+        return best_match
+
     async def _detect_within_file_relationships(self, events: List[Dict]) -> List[Dict]:
         """Detect relationships within the same file"""
         relationships = []
