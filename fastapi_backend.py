@@ -2,24 +2,18 @@ import os
 import io
 import logging
 import hashlib
-import uuid
-from datetime import datetime, timedelta, timezone
-from typing import Dict, Any, List, Optional, Tuple, AsyncGenerator
+from datetime import datetime, timedelta
+from typing import Dict, Any, List, Optional, Tuple
+from dataclasses import dataclass
 import pandas as pd
 import numpy as np
 from fastapi import FastAPI, HTTPException, BackgroundTasks, WebSocket, WebSocketDisconnect, UploadFile, Form, File
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from supabase import create_client, Client
 import openai
 import magic
-try:
-    import filetype
-except ImportError:
-    filetype = None
+import filetype
 from openai import OpenAI
 import time
 import json
@@ -28,29 +22,16 @@ import asyncio
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from difflib import SequenceMatcher
-try:
-    import aiohttp
-except ImportError:
-    aiohttp = None
+import aiohttp
+from duplicate_detection_service import DuplicateDetectionService
 import requests
-from contextlib import asynccontextmanager
-import weakref
-from dataclasses import dataclass, field
 
 # Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Utility function for timezone-aware datetime
-def utc_now():
-    """Return current UTC datetime in timezone-aware format"""
-    return datetime.now(timezone.utc)
-
 # Initialize FastAPI app
-app = FastAPI(title="Finley AI Backend", version="2.0.0")
+app = FastAPI(title="Finley AI Backend", version="1.0.0")
 
 # Add CORS middleware
 app.add_middleware(
@@ -61,84 +42,28 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Mount static files for React frontend
-try:
-    app.mount("/static", StaticFiles(directory="dist/static"), name="static")
-    app.mount("/assets", StaticFiles(directory="dist/assets"), name="assets")
-except Exception as e:
-    logger.warning(f"Static files directory not found: {e}")
-
-# Root endpoint to serve React frontend
-@app.get("/", response_class=HTMLResponse)
-async def serve_frontend():
-    """Serve the React frontend application"""
-    try:
-        # Try to serve the built React app
-        return FileResponse("dist/index.html")
-    except Exception as e:
-        logger.warning(f"Frontend not built yet: {e}")
-        # Fallback to a simple HTML page with links to API endpoints
-        return HTMLResponse("""
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <title>Finley AI - Financial Analysis Platform</title>
-            <style>
-                body { font-family: Arial, sans-serif; margin: 40px; background: #1a1a1a; color: #fff; }
-                .container { max-width: 800px; margin: 0 auto; }
-                .header { text-align: center; margin-bottom: 40px; }
-                .logo { font-size: 2.5em; color: #00ff88; margin-bottom: 10px; }
-                .subtitle { color: #888; font-size: 1.2em; }
-                .endpoints { background: #2a2a2a; padding: 20px; border-radius: 10px; margin: 20px 0; }
-                .endpoint { margin: 10px 0; padding: 10px; background: #3a3a3a; border-radius: 5px; }
-                .method { color: #00ff88; font-weight: bold; }
-                .url { color: #ffaa00; font-family: monospace; }
-                .status { color: #00ff88; }
-                .warning { background: #ff6600; color: white; padding: 15px; border-radius: 5px; margin: 20px 0; }
-            </style>
-        </head>
-        <body>
-            <div class="container">
-                <div class="header">
-                    <div class="logo">🚀</div>
-                    <h1>Finley AI</h1>
-                    <div class="subtitle">Intelligent Financial Analysis Platform</div>
-                </div>
-                
-                <div class="warning">
-                    <strong>⚠️ Frontend Not Built Yet</strong><br>
-                    The React frontend is not currently built. This is a temporary page.
-                </div>
-                
-                <div class="endpoints">
-                    <h2>🔄 Available API Endpoints</h2>
-                    <div class="endpoint">
-                        <span class="method">POST</span> 
-                        <span class="url">/process-excel</span> 
-                        <span class="status">✅ Working</span>
-                    </div>
-                    <div class="endpoint">
-                        <span class="method">GET</span> 
-                        <span class="url">/docs</span> 
-                        <span class="status">✅ API Documentation</span>
-                    </div>
-                    <div class="endpoint">
-                        <span class="method">WebSocket</span> 
-                        <span class="url">/ws/{job_id}</span> 
-                        <span class="status">✅ Real-time Updates</span>
-                    </div>
-                </div>
-                
-                <div style="text-align: center; margin-top: 40px; color: #888;">
-                    <p>🎯 <strong>Next Step:</strong> Build and deploy the React frontend to see the full interface!</p>
-                </div>
-            </div>
-        </body>
-        </html>
-        """)
-
 # Initialize OpenAI client
 openai = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+
+# Advanced functionality imports
+try:
+    import zipfile
+    import py7zr
+    import rarfile
+    from odf.opendocument import load as load_ods
+    from odf.table import Table, TableRow, TableCell
+    from odf.text import P
+    import tabula
+    import camelot
+    import pdfplumber
+    import pytesseract
+    from PIL import Image
+    import cv2
+    import xlwings as xw
+    ADVANCED_FEATURES_AVAILABLE = True
+except ImportError as e:
+    logger.warning(f"Advanced file processing features not available: {e}")
+    ADVANCED_FEATURES_AVAILABLE = False
 
 # Global configuration
 @dataclass
@@ -147,13 +72,579 @@ class Config:
     max_file_size: int = 500 * 1024 * 1024  # 500MB
     chunk_size: int = 8192  # 8KB chunks for streaming
     websocket_timeout: int = 300  # 5 minutes
-    platform_confidence_threshold: float = 0.85  # Increased from 0.7
-    entity_similarity_threshold: float = 0.9  # Increased from 0.8
+    platform_confidence_threshold: float = 0.85
+    entity_similarity_threshold: float = 0.9
     max_concurrent_ai_calls: int = 5
     cache_ttl: int = 3600  # 1 hour
     batch_size: int = 50  # Standardized batch size for all processing operations
+    # Advanced features configuration
+    enable_advanced_file_processing: bool = True
+    enable_duplicate_detection: bool = True
+    enable_ocr_processing: bool = True
+    enable_archive_processing: bool = True
 
 config = Config()
+
+class DuplicateDetectionService:
+    """
+    Comprehensive duplicate detection service implementing:
+    - Phase 1: Basic hash-based duplicate detection
+    - Phase 2: Near-duplicate detection with content similarity
+    - Phase 3: Intelligent version selection and recommendations
+    """
+    
+    def __init__(self, supabase: Client):
+        self.supabase = supabase
+        
+    async def check_exact_duplicate(self, user_id: str, file_hash: str, filename: str) -> Dict[str, Any]:
+        """Check if an identical file (by hash) already exists for this user"""
+        try:
+            # Query for existing files with same hash
+            result = self.supabase.table('raw_records').select(
+                'id, file_name, created_at, status, content'
+            ).eq('user_id', user_id).eq('file_hash', file_hash).execute()
+            
+            if not result.data:
+                return {
+                    'is_duplicate': False,
+                    'duplicate_files': [],
+                    'recommendation': 'proceed'
+                }
+            
+            duplicate_files = []
+            for record in result.data:
+                duplicate_files.append({
+                    'id': record['id'],
+                    'filename': record['file_name'],
+                    'uploaded_at': record['created_at'],
+                    'status': record['status'],
+                    'total_rows': record.get('content', {}).get('total_rows', 0)
+                })
+            
+            # Generate recommendation
+            latest_duplicate = max(duplicate_files, key=lambda x: x['uploaded_at'])
+            
+            return {
+                'is_duplicate': True,
+                'duplicate_files': duplicate_files,
+                'latest_duplicate': latest_duplicate,
+                'recommendation': 'replace_or_skip',
+                'message': f"Identical file '{latest_duplicate['filename']}' was uploaded on {latest_duplicate['uploaded_at'][:10]}. Do you want to replace it or skip this upload?"
+            }
+            
+        except Exception as e:
+            logger.error(f"Error checking exact duplicate: {e}")
+            return {
+                'is_duplicate': False,
+                'error': str(e),
+                'recommendation': 'proceed_with_caution'
+            }
+    
+    def calculate_file_hash(self, file_content: bytes) -> str:
+        """Calculate SHA256 hash of file content"""
+        return hashlib.sha256(file_content).hexdigest()
+    
+    async def handle_duplicate_decision(self, user_id: str, file_hash: str, 
+                                      decision: str, new_file_id: str = None) -> Dict[str, Any]:
+        """Handle user's decision about duplicate file"""
+        try:
+            if decision == 'replace':
+                # Mark old files as replaced
+                self.supabase.table('raw_records').update({
+                    'status': 'replaced',
+                    'updated_at': datetime.utcnow().isoformat()
+                }).eq('user_id', user_id).eq('file_hash', file_hash).execute()
+                
+                return {'status': 'replaced_old_files', 'action': 'proceed_with_new'}
+                
+            elif decision == 'keep_both':
+                return {'status': 'kept_both_files', 'action': 'proceed_with_new'}
+                
+            elif decision == 'skip':
+                return {'status': 'skipped_upload', 'action': 'abort'}
+                
+            else:
+                return {'status': 'invalid_decision', 'action': 'abort'}
+                
+        except Exception as e:
+            logger.error(f"Error handling duplicate decision: {e}")
+            return {'status': 'error', 'action': 'abort', 'error': str(e)}
+    
+    async def check_near_duplicate(self, user_id: str, file_content: bytes, filename: str) -> Dict[str, Any]:
+        """Check for near-duplicate files using content similarity"""
+        try:
+            # Get recent files for this user
+            recent_files = self.supabase.table('raw_records').select(
+                'id, file_name, created_at, status, content, file_hash'
+            ).eq('user_id', user_id).gte('created_at', (datetime.utcnow() - timedelta(days=30)).isoformat()).execute()
+            
+            if not recent_files.data:
+                return {'is_near_duplicate': False, 'similarity_score': 0.0}
+            
+            # Calculate content similarity
+            best_match = None
+            best_score = 0.0
+            
+            for file_record in recent_files.data:
+                if file_record['file_name'] == filename:
+                    continue
+                    
+                # Simple text similarity (can be enhanced)
+                similarity = self._calculate_content_similarity(file_content, file_record)
+                if similarity > best_score:
+                    best_score = similarity
+                    best_match = file_record
+            
+            # Threshold for near-duplicate
+            if best_score > 0.8:
+                return {
+                    'is_near_duplicate': True,
+                    'similarity_score': best_score,
+                    'similar_file': best_match,
+                    'recommendation': 'review_before_upload'
+                }
+            
+            return {'is_near_duplicate': False, 'similarity_score': best_score}
+            
+        except Exception as e:
+            logger.error(f"Error checking near duplicate: {e}")
+            return {'is_near_duplicate': False, 'error': str(e)}
+    
+    def _calculate_content_similarity(self, file_content: bytes, file_record: Dict) -> float:
+        """Calculate content similarity between files"""
+        try:
+            # Extract text content for comparison
+            current_text = str(file_content).lower()
+            stored_content = str(file_record.get('content', {})).lower()
+            
+            # Use sequence matcher for similarity
+            similarity = SequenceMatcher(None, current_text, stored_content).ratio()
+            return similarity
+            
+        except Exception as e:
+            logger.error(f"Error calculating content similarity: {e}")
+            return 0.0
+
+class EnhancedFileProcessor:
+    """Enhanced file processor with 100X capabilities for advanced file formats"""
+    
+    def __init__(self):
+        self.supported_formats = {
+            # Spreadsheet formats
+            'excel': ['.xlsx', '.xls', '.xlsm', '.xlsb'],
+            'csv': ['.csv', '.tsv', '.txt'],
+            'ods': ['.ods'],
+            
+            # Document formats with tables
+            'pdf': ['.pdf'],
+            
+            # Archive formats
+            'zip': ['.zip', '.7z', '.rar'],
+            
+            # Image formats
+            'image': ['.png', '.jpg', '.jpeg', '.bmp', '.tiff', '.gif']
+        }
+        
+        # Configure OCR if available
+        self.ocr_config = '--oem 3 --psm 6' if ADVANCED_FEATURES_AVAILABLE else None
+        
+    async def process_file_enhanced(self, file_content: bytes, filename: str, 
+                                  progress_callback=None) -> Dict[str, pd.DataFrame]:
+        """Enhanced file processing with support for multiple formats"""
+        try:
+            if progress_callback:
+                await progress_callback("detecting", "🔍 Detecting advanced file format and structure...", 5)
+            
+            # Detect file format
+            file_format = self._detect_file_format(filename, file_content)
+            logger.info(f"Enhanced processor detected format: {file_format} for {filename}")
+            
+            if progress_callback:
+                await progress_callback("processing", f"📊 Processing {file_format} file with advanced capabilities...", 15)
+            
+            # Route to appropriate processor
+            if file_format == 'excel':
+                return await self._process_excel_enhanced(file_content, filename, progress_callback)
+            elif file_format == 'csv':
+                return await self._process_csv_enhanced(file_content, filename, progress_callback)
+            elif file_format == 'ods':
+                return await self._process_ods(file_content, filename, progress_callback)
+            elif file_format == 'pdf':
+                return await self._process_pdf(file_content, filename, progress_callback)
+            elif file_format == 'archive':
+                return await self._process_archive(file_content, filename, progress_callback)
+            elif file_format == 'image':
+                return await self._process_image(file_content, filename, progress_callback)
+            else:
+                # Fallback to basic processing
+                logger.warning(f"Unsupported format {file_format}, falling back to basic processing")
+                return await self._fallback_processing(file_content, filename, progress_callback)
+                
+        except Exception as e:
+            logger.error(f"Enhanced file processing failed for {filename}: {e}")
+            # Fallback to basic processing
+            return await self._fallback_processing(file_content, filename, progress_callback)
+    
+    def _detect_file_format(self, filename: str, file_content: bytes) -> str:
+        """Enhanced file format detection"""
+        filename_lower = filename.lower()
+        
+        # Check file extension first
+        for format_type, extensions in self.supported_formats.items():
+            if any(filename_lower.endswith(ext) for ext in extensions):
+                return format_type
+        
+        # Check for archive formats
+        if filename_lower.endswith(('.zip', '.7z', '.rar')):
+            return 'archive'
+        
+        # Use magic number detection if available
+        if ADVANCED_FEATURES_AVAILABLE:
+            try:
+                file_type = filetype.guess(file_content)
+                if file_type:
+                    if file_type.extension in ['pdf']:
+                        return 'pdf'
+                    elif file_type.extension in ['png', 'jpg', 'jpeg', 'bmp', 'tiff', 'gif']:
+                        return 'image'
+            except Exception:
+                pass
+        
+        # Default to excel for unknown formats
+        return 'excel'
+    
+    async def _process_excel_enhanced(self, file_content: bytes, filename: str, progress_callback=None) -> Dict[str, pd.DataFrame]:
+        """Enhanced Excel processing with repair capabilities"""
+        try:
+            if progress_callback:
+                await progress_callback("processing", "🔧 Processing Excel file with enhanced capabilities...", 20)
+            
+            # Try standard processing first
+            try:
+                file_stream = io.BytesIO(file_content)
+                excel_file = pd.ExcelFile(file_stream)
+                sheets = {}
+                
+                for sheet_name in excel_file.sheet_names:
+                    df = pd.read_excel(file_stream, sheet_name=sheet_name)
+                    if not df.empty:
+                        sheets[sheet_name] = df
+                
+                if sheets:
+                    return sheets
+                    
+            except Exception as e:
+                logger.warning(f"Standard Excel processing failed: {e}")
+            
+            # Try repair if available
+            if ADVANCED_FEATURES_AVAILABLE:
+                try:
+                    if progress_callback:
+                        await progress_callback("repairing", "🔧 Attempting to repair corrupted Excel file...", 20)
+                    
+                    # Use xlwings for repair
+                    with tempfile.NamedTemporaryFile(suffix='.xlsx', delete=False) as temp_file:
+                        temp_file.write(file_content)
+                        temp_file.flush()
+                        
+                        app = xw.App(visible=False)
+                        try:
+                            wb = app.books.open(temp_file.name)
+                            # Extract data from repaired workbook
+                            sheets = {}
+                            for sheet in wb.sheets:
+                                data = sheet.used_range.value
+                                if data:
+                                    df = pd.DataFrame(data[1:], columns=data[0])
+                                    if not df.empty:
+                                        sheets[sheet.name] = df
+                            
+                            wb.close()
+                            return sheets
+                            
+                        finally:
+                            app.quit()
+                            os.unlink(temp_file.name)
+                            
+                except Exception as repair_error:
+                    logger.error(f"Excel repair failed: {repair_error}")
+            
+            # Final fallback
+            raise Exception("All Excel processing methods failed")
+            
+        except Exception as e:
+            logger.error(f"Enhanced Excel processing failed: {e}")
+            raise
+    
+    async def _process_csv_enhanced(self, file_content: bytes, filename: str, progress_callback=None) -> Dict[str, pd.DataFrame]:
+        """Enhanced CSV processing with multiple encodings"""
+        if progress_callback:
+            await progress_callback("processing", "📊 Processing CSV with enhanced encoding detection...", 20)
+        
+        encodings = ['utf-8', 'latin-1', 'cp1252', 'iso-8859-1', 'utf-16']
+        
+        for encoding in encodings:
+            try:
+                file_stream = io.BytesIO(file_content)
+                df = pd.read_csv(file_stream, encoding=encoding)
+                if not df.empty:
+                    return {'Sheet1': df}
+            except Exception as e:
+                continue
+        
+        raise Exception("Could not read CSV with any encoding")
+    
+    async def _process_ods(self, file_content: bytes, filename: str, progress_callback=None) -> Dict[str, pd.DataFrame]:
+        """Process OpenDocument Spreadsheet files"""
+        if not ADVANCED_FEATURES_AVAILABLE:
+            raise Exception("ODS processing not available")
+        
+        if progress_callback:
+            await progress_callback("processing", "📊 Processing ODS file...", 20)
+        
+        try:
+            with tempfile.NamedTemporaryFile(suffix='.ods', delete=False) as temp_file:
+                temp_file.write(file_content)
+                temp_file.flush()
+                
+                doc = load_ods(temp_file.name)
+                sheets = {}
+                
+                for table in doc.spreadsheet.getElementsByType(Table):
+                    sheet_name = table.getAttribute('name') or f"Sheet{len(sheets)+1}"
+                    data = []
+                    
+                    for row in table.getElementsByType(TableRow):
+                        row_data = []
+                        for cell in row.getElementsByType(TableCell):
+                            text_elements = cell.getElementsByType(P)
+                            cell_text = ' '.join([p.getAttribute('text') or '' for p in text_elements])
+                            row_data.append(cell_text)
+                        if row_data:
+                            data.append(row_data)
+                    
+                    if data:
+                        df = pd.DataFrame(data[1:], columns=data[0] if data else [])
+                        if not df.empty:
+                            sheets[sheet_name] = df
+                
+                os.unlink(temp_file.name)
+                return sheets
+                
+        except Exception as e:
+            logger.error(f"ODS processing failed: {e}")
+            raise
+    
+    async def _process_pdf(self, file_content: bytes, filename: str, progress_callback=None) -> Dict[str, pd.DataFrame]:
+        """Process PDF files with table extraction"""
+        if not ADVANCED_FEATURES_AVAILABLE:
+            raise Exception("PDF processing not available")
+        
+        if progress_callback:
+            await progress_callback("processing", "📄 Processing PDF with table extraction...", 20)
+        
+        try:
+            with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as temp_file:
+                temp_file.write(file_content)
+                temp_file.flush()
+                
+                sheets = {}
+                sheet_count = 0
+                
+                # Try multiple PDF table extraction methods
+                try:
+                    # Method 1: Tabula
+                    tables = tabula.read_pdf(temp_file.name, pages='all')
+                    for i, table in enumerate(tables):
+                        if not table.empty:
+                            sheet_name = f"Table_{i+1}"
+                            sheets[sheet_name] = table
+                            sheet_count += 1
+                            
+                except Exception as tabula_error:
+                    logger.warning(f"Tabula failed: {tabula_error}")
+                
+                # Method 2: Camelot if tabula failed
+                if not sheets:
+                    try:
+                        tables = camelot.read_pdf(temp_file.name, pages='all')
+                        for i, table in enumerate(tables):
+                            if table.df is not None and not table.df.empty:
+                                sheet_name = f"Table_{i+1}"
+                                sheets[sheet_name] = table.df
+                                sheet_count += 1
+                                
+                    except Exception as camelot_error:
+                        logger.warning(f"Camelot failed: {camelot_error}")
+                
+                # Method 3: PDFPlumber as final fallback
+                if not sheets:
+                    try:
+                        with pdfplumber.open(temp_file.name) as pdf:
+                            for page_num, page in enumerate(pdf.pages):
+                                tables = page.extract_tables()
+                                for table_num, table in enumerate(tables):
+                                    if table:
+                                        df = pd.DataFrame(table[1:], columns=table[0] if table else [])
+                                        if not df.empty:
+                                            sheet_name = f"Page_{page_num+1}_Table_{table_num+1}"
+                                            sheets[sheet_name] = df
+                                            sheet_count += 1
+                                            
+                    except Exception as pdfplumber_error:
+                        logger.warning(f"PDFPlumber failed: {pdfplumber_error}")
+                
+                os.unlink(temp_file.name)
+                
+                if sheets:
+                    return sheets
+                else:
+                    raise Exception("No tables could be extracted from PDF")
+                    
+        except Exception as e:
+            logger.error(f"PDF processing failed: {e}")
+            raise
+    
+    async def _process_archive(self, file_content: bytes, filename: str, progress_callback=None) -> Dict[str, pd.DataFrame]:
+        """Process archive files (ZIP, 7Z, RAR)"""
+        if not ADVANCED_FEATURES_AVAILABLE:
+            raise Exception("Archive processing not available")
+        
+        if progress_callback:
+            await progress_callback("processing", "📦 Processing archive file...", 20)
+        
+        try:
+            with tempfile.TemporaryDirectory() as temp_dir:
+                temp_file_path = os.path.join(temp_dir, filename)
+                
+                with open(temp_file_path, 'wb') as temp_file:
+                    temp_file.write(file_content)
+                
+                # Extract archive
+                if filename.lower().endswith('.zip'):
+                    with zipfile.ZipFile(temp_file_path, 'r') as zip_ref:
+                        zip_ref.extractall(temp_dir)
+                elif filename.lower().endswith('.7z'):
+                    with py7zr.SevenZipFile(temp_file_path, 'r') as seven_zip:
+                        seven_zip.extractall(temp_dir)
+                elif filename.lower().endswith('.rar'):
+                    with rarfile.RarFile(temp_file_path, 'r') as rar_ref:
+                        rar_ref.extractall(temp_dir)
+                
+                # Process extracted files
+                all_sheets = {}
+                for root, dirs, files in os.walk(temp_dir):
+                    for file in files:
+                        if file.lower().endswith(('.xlsx', '.xls', '.csv', '.ods')):
+                            file_path = os.path.join(root, file)
+                            try:
+                                # Recursively process extracted files
+                                with open(file_path, 'rb') as f:
+                                    file_content = f.read()
+                                
+                                # Use basic processor for extracted files
+                                basic_processor = StreamingFileProcessor()
+                                extracted_sheets = await basic_processor.read_file_streaming(file_content, file)
+                                
+                                # Prefix sheet names with archive name
+                                for sheet_name, df in extracted_sheets.items():
+                                    prefixed_name = f"{filename}_{file}_{sheet_name}"
+                                    all_sheets[prefixed_name] = df
+                                    
+                            except Exception as extract_error:
+                                logger.warning(f"Failed to process extracted file {file}: {extract_error}")
+                
+                if all_sheets:
+                    return all_sheets
+                else:
+                    raise Exception("No processable files found in archive")
+                    
+        except Exception as e:
+            logger.error(f"Archive processing failed: {e}")
+            raise
+    
+    async def _process_image(self, file_content: bytes, filename: str, progress_callback=None) -> Dict[str, pd.DataFrame]:
+        """Process image files with OCR table extraction"""
+        if not ADVANCED_FEATURES_AVAILABLE:
+            raise Exception("Image processing not available")
+        
+        if progress_callback:
+            await progress_callback("processing", "🖼️ Processing image with OCR...", 20)
+        
+        try:
+            with tempfile.NamedTemporaryFile(suffix=os.path.splitext(filename)[1], delete=False) as temp_file:
+                temp_file.write(file_content)
+                temp_file.flush()
+                
+                # Load image
+                image = Image.open(temp_file.name)
+                
+                # OCR processing
+                ocr_text = pytesseract.image_to_string(image, config=self.ocr_config)
+                
+                # Try to extract table structure from OCR text
+                lines = ocr_text.split('\n')
+                table_data = []
+                
+                for line in lines:
+                    if line.strip():
+                        # Split by common delimiters
+                        row = re.split(r'[\t|,;]', line.strip())
+                        if len(row) > 1:  # Likely table row
+                            table_data.append(row)
+                
+                os.unlink(temp_file.name)
+                
+                if table_data:
+                    # Create DataFrame from extracted table
+                    df = pd.DataFrame(table_data[1:], columns=table_data[0] if table_data else [])
+                    return {'OCR_Extracted_Table': df}
+                else:
+                    # Return OCR text as single column
+                    df = pd.DataFrame({'OCR_Text': [ocr_text]})
+                    return {'OCR_Text': df}
+                    
+        except Exception as e:
+            logger.error(f"Image processing failed: {e}")
+            raise
+    
+    async def _fallback_processing(self, file_content: bytes, filename: str, progress_callback=None) -> Dict[str, pd.DataFrame]:
+        """Fallback to basic processing if advanced methods fail"""
+        if progress_callback:
+            await progress_callback("fallback", "⚠️ Falling back to basic processing...", 15)
+        
+        try:
+            # For now, use basic pandas processing
+            # This will be enhanced when we integrate with the existing file processor
+            file_stream = io.BytesIO(file_content)
+            
+            # Try Excel first
+            try:
+                excel_file = pd.ExcelFile(file_stream)
+                sheets = {}
+                for sheet_name in excel_file.sheet_names:
+                    df = pd.read_excel(file_stream, sheet_name=sheet_name)
+                    if not df.empty:
+                        sheets[sheet_name] = df
+                if sheets:
+                    return sheets
+            except Exception:
+                pass
+            
+            # Try CSV
+            try:
+                file_stream.seek(0)
+                df = pd.read_csv(file_stream)
+                if not df.empty:
+                    return {'Sheet1': df}
+            except Exception:
+                pass
+            
+            raise Exception("Fallback processing failed")
+            
+        except Exception as e:
+            logger.error(f"Fallback processing also failed: {e}")
+            raise
 
 class CurrencyNormalizer:
     """Handles currency detection, conversion, and normalization"""
@@ -483,26 +974,6 @@ class PlatformIDExtractor:
                 'invoice_id': r'INV-[0-9]{4}-[0-9]{6}',
                 'contact_id': r'[a-zA-Z0-9]{8}-[a-zA-Z0-9]{4}-[a-zA-Z0-9]{4}',
                 'bank_transaction_id': r'BT-[0-9]{8}'
-            },
-            'bank_statement': {
-                'invoice_id': r'INV-[0-9]{3}',
-                'payroll_id': r'pay_[0-9]{3}',
-                'stripe_id': r'ch_[a-zA-Z0-9]{16}',
-                'aws_id': r'aws_[0-9]{3}',
-                'google_ads_id': r'GA-[0-9]{3}',
-                'facebook_id': r'FB-[0-9]{3}',
-                'adobe_id': r'AD-[0-9]{3}',
-                'coursera_id': r'CR-[0-9]{3}',
-                'expedia_id': r'EXP-[0-9]{3}',
-                'legal_id': r'LF-[0-9]{3}',
-                'insurance_id': r'INS-[0-9]{3}',
-                'apple_store_id': r'AS-[0-9]{3}',
-                'utilities_id': r'UC-[0-9]{3}',
-                'maintenance_id': r'MC-[0-9]{3}',
-                'office_supplies_id': r'OD-[0-9]{3}',
-                'internet_id': r'ISP-[0-9]{3}',
-                'lease_id': r'LL-[0-9]{3}',
-                'bank_fee_id': r'BANK-FEE-[0-9]{3}'
             }
         }
     
@@ -563,7 +1034,7 @@ class DataEnrichmentProcessor:
         self.platform_id_extractor = PlatformIDExtractor()
     
     async def enrich_row_data(self, row_data: Dict, platform_info: Dict, column_names: List[str], 
-                            ai_classification: Dict, file_context: Dict, fast_mode: bool = False) -> Dict[str, Any]:
+                            ai_classification: Dict, file_context: Dict) -> Dict[str, Any]:
         """Enrich row data with currency, vendor, and platform information"""
         try:
             # Extract basic information
@@ -571,46 +1042,29 @@ class DataEnrichmentProcessor:
             description = self._extract_description(row_data)
             platform = platform_info.get('platform', 'unknown')
             date = self._extract_date(row_data)
-            vendor_name = self._extract_vendor_name(row_data, column_names)
             
-            # Fast mode: Skip expensive operations
-            if fast_mode:
-                currency_info = {
-                    'currency': 'USD',
-                    'amount_original': amount,
-                    'amount_usd': amount,
-                    'exchange_rate': 1.0,
-                    'exchange_date': None
-                }
-                vendor_info = {
-                    'vendor_raw': vendor_name,
-                    'vendor_standard': vendor_name,
-                    'confidence': 1.0,
-                    'cleaning_method': 'fast_mode'
-                }
-                platform_ids = {'extracted_ids': {}}
-            else:
-                # 1. Currency normalization
-                currency_info = await self.currency_normalizer.normalize_currency(
-                    amount=amount,
-                    currency=None,  # Will be detected
-                    description=description,
-                    platform=platform,
-                    date=date
-                )
-                
-                # 2. Vendor standardization
-                vendor_info = await self.vendor_standardizer.standardize_vendor(
-                    vendor_name=vendor_name,
-                    platform=platform
-                )
-                
-                # 3. Platform ID extraction
-                platform_ids = self.platform_id_extractor.extract_platform_ids(
-                    row_data=row_data,
-                    platform=platform,
-                    column_names=column_names
-                )
+            # 1. Currency normalization
+            currency_info = await self.currency_normalizer.normalize_currency(
+                amount=amount,
+                currency=None,  # Will be detected
+                description=description,
+                platform=platform,
+                date=date
+            )
+            
+            # 2. Vendor standardization
+            vendor_name = self._extract_vendor_name(row_data, column_names)
+            vendor_info = await self.vendor_standardizer.standardize_vendor(
+                vendor_name=vendor_name,
+                platform=platform
+            )
+            
+            # 3. Platform ID extraction
+            platform_ids = self.platform_id_extractor.extract_platform_ids(
+                row_data=row_data,
+                platform=platform,
+                column_names=column_names
+            )
             
             # 4. Create enhanced payload
             enriched_payload = {
@@ -639,7 +1093,7 @@ class DataEnrichmentProcessor:
                 
                 # Enhanced metadata
                 "standard_description": self._clean_description(description),
-                "ingested_on": utc_now().isoformat(),
+                "ingested_on": datetime.utcnow().isoformat(),
                 "file_source": file_context.get('filename', 'unknown'),
                 "row_index": file_context.get('row_index', 0),
                 
@@ -664,37 +1118,25 @@ class DataEnrichmentProcessor:
                 "vendor_raw": self._extract_vendor_name(row_data, column_names),
                 "vendor_standard": self._extract_vendor_name(row_data, column_names),
                 "platform": platform_info.get('platform', 'unknown'),
-                "ingested_on": utc_now().isoformat(),
+                "ingested_on": datetime.utcnow().isoformat(),
                 "enrichment_error": str(e)
             }
     
     def _extract_amount(self, row_data: Dict) -> float:
-        """Extract amount from row data (case-insensitive key search and string parsing)."""
+        """Extract amount from row data"""
         try:
-            amount_fields = {'amount', 'total', 'value', 'sum', 'payment_amount', 'price'}
-            # Direct, case-insensitive lookup
-            for key, value in row_data.items():
-                if str(key).lower() in amount_fields:
+            # Look for amount fields
+            amount_fields = ['amount', 'total', 'value', 'sum', 'payment_amount', 'price']
+            for field in amount_fields:
+                if field in row_data:
+                    value = row_data[field]
                     if isinstance(value, (int, float)):
                         return float(value)
-                    if isinstance(value, str):
+                    elif isinstance(value, str):
+                        # Remove currency symbols and convert
                         cleaned = re.sub(r'[^\d.-]', '', value)
-                        if cleaned not in (None, ''):
-                            try:
-                                return float(cleaned)
-                            except:
-                                pass
-            # Fallback: scan strings for currency-amount patterns
-            for value in row_data.values():
-                if isinstance(value, str):
-                    m = re.search(r'([-+]?[0-9]{1,3}(?:,[0-9]{3})*(?:\.[0-9]+)?|[-+]?[0-9]+\.[0-9]+)', value)
-                    if m:
-                        cleaned = m.group(1).replace(',', '')
-                        try:
-                            return float(cleaned)
-                        except:
-                            continue
-        except Exception:
+                        return float(cleaned) if cleaned else 0.0
+        except:
             pass
         return 0.0
     
@@ -718,30 +1160,6 @@ class DataEnrichmentProcessor:
             if any(vendor_word in col.lower() for vendor_word in ['vendor', 'payee', 'recipient', 'company']):
                 if col in row_data:
                     return str(row_data[col])
-        
-        # Extract vendor from description (for bank statements)
-        description = row_data.get('description', '') or row_data.get('Description', '')
-        if description:
-            # Common patterns in bank statement descriptions
-            vendor_patterns = [
-                r'^([^-]+?)\s*[-–]\s*',  # "Vendor - Description"
-                r'^([^-]+?)\s*Payment\s*[-–]\s*',  # "Vendor Payment - Description"
-                r'^([^-]+?)\s*Services?\s*[-–]\s*',  # "Vendor Services - Description"
-                r'^([^-]+?)\s*Purchase\s*[-–]\s*',  # "Vendor Purchase - Description"
-                r'^([^-]+?)\s*Campaign\s*[-–]\s*',  # "Vendor Campaign - Description"
-                r'^([^-]+?)\s*Expenses?\s*[-–]\s*',  # "Vendor Expenses - Description"
-                r'^([^-]+?)\s*Bill\s*[-–]\s*',  # "Vendor Bill - Description"
-                r'^([^-]+?)\s*Premium\s*[-–]\s*',  # "Vendor Premium - Description"
-                r'^([^-]+?)\s*License\s*[-–]\s*',  # "Vendor License - Description"
-                r'^([^-]+?)\s*Development\s*[-–]\s*',  # "Vendor Development - Description"
-            ]
-            
-            for pattern in vendor_patterns:
-                match = re.search(pattern, description, re.IGNORECASE)
-                if match:
-                    vendor = match.group(1).strip()
-                    if vendor and len(vendor) > 2:  # Avoid very short matches
-                        return vendor
         
         return ""
     
@@ -782,171 +1200,29 @@ class DataEnrichmentProcessor:
             logger.error(f"Description cleaning failed: {e}")
             return description
 
-@dataclass
-class ConnectionInfo:
-    """Information about a WebSocket connection"""
-    websocket: WebSocket
-    job_id: str
-    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
-    last_activity: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
-
+# WebSocket connection manager
 class ConnectionManager:
-    """Enhanced WebSocket connection manager with proper cleanup and memory management"""
-
     def __init__(self):
-        self.active_connections: Dict[str, List[ConnectionInfo]] = {}
-        self._cleanup_task: Optional[asyncio.Task] = None
-        self._cleanup_started = False
+        self.active_connections: Dict[str, List[WebSocket]] = {}
 
-    def _start_cleanup_task(self):
-        """Start the background cleanup task"""
-        try:
-            if not self._cleanup_started and (self._cleanup_task is None or self._cleanup_task.done()):
-                loop = asyncio.get_running_loop()
-                self._cleanup_task = loop.create_task(self._periodic_cleanup())
-                self._cleanup_started = True
-        except RuntimeError:
-            # No event loop running, will start when needed
-            pass
-
-    async def _periodic_cleanup(self):
-        """Periodically clean up stale connections"""
-        while True:
-            try:
-                await asyncio.sleep(300)  # Clean up every 5 minutes
-                await self.cleanup_stale_connections()
-            except asyncio.CancelledError:
-                break
-            except Exception as e:
-                logger.error(f"Error in periodic cleanup: {e}")
-
-    async def connect(self, websocket: WebSocket, job_id: str) -> bool:
-        """Connect a WebSocket for a specific job"""
-        try:
-            await websocket.accept()
-            
-            # Start cleanup task if not already started
-            self._start_cleanup_task()
-
-            if job_id not in self.active_connections:
-                self.active_connections[job_id] = []
-
-            connection_info = ConnectionInfo(websocket=websocket, job_id=job_id)
-            self.active_connections[job_id].append(connection_info)
-
-            logger.info(f"WebSocket connected for job {job_id}. Total connections: {len(self.active_connections[job_id])}")
-            return True
-
-        except Exception as e:
-            logger.error(f"Failed to connect WebSocket for job {job_id}: {e}")
-            return False
-
-    async def disconnect(self, job_id: str, websocket: Optional[WebSocket] = None):
-        """Disconnect WebSocket(s) for a specific job"""
+    async def connect(self, websocket: WebSocket, job_id: str):
+        await websocket.accept()
         if job_id not in self.active_connections:
-            return
+            self.active_connections[job_id] = []
+        self.active_connections[job_id].append(websocket)
 
-        if websocket is None:
-            # Disconnect all connections for this job
-            for conn_info in self.active_connections[job_id]:
+    def disconnect(self, job_id: str):
+        if job_id in self.active_connections:
+            self.active_connections[job_id] = []
+
+    async def send_update(self, job_id: str, message: dict):
+        if job_id in self.active_connections:
+            for connection in self.active_connections[job_id]:
                 try:
-                    await conn_info.websocket.close()
-                except Exception as e:
-                    logger.warning(f"Error closing WebSocket: {e}")
-
-            del self.active_connections[job_id]
-            logger.info(f"All WebSocket connections disconnected for job {job_id}")
-        else:
-            # Disconnect specific WebSocket
-            self.active_connections[job_id] = [
-                conn for conn in self.active_connections[job_id]
-                if conn.websocket != websocket
-            ]
-
-            if not self.active_connections[job_id]:
-                del self.active_connections[job_id]
-
-            try:
-                await websocket.close()
-            except Exception as e:
-                logger.warning(f"Error closing specific WebSocket: {e}")
-
-    async def send_update(self, job_id: str, message: Dict[str, Any]) -> int:
-        """Send update to all connections for a job. Returns number of successful sends."""
-        if job_id not in self.active_connections:
-            return 0
-
-        successful_sends = 0
-        failed_connections = []
-
-        for i, conn_info in enumerate(self.active_connections[job_id]):
-            try:
-                await conn_info.websocket.send_json(message)
-                conn_info.last_activity = datetime.utcnow()
-                successful_sends += 1
-            except Exception as e:
-                logger.warning(f"Failed to send message to connection {i} for job {job_id}: {e}")
-                failed_connections.append(i)
-
-        # Remove failed connections in reverse order to maintain indices
-        for i in reversed(failed_connections):
-            self.active_connections[job_id].pop(i)
-
-        # Clean up empty job entries
-        if not self.active_connections[job_id]:
-            del self.active_connections[job_id]
-
-        return successful_sends
-
-    async def cleanup_stale_connections(self):
-        """Clean up connections that haven't been active for a while"""
-        current_time = datetime.utcnow()
-        stale_jobs = []
-
-        for job_id, connections in self.active_connections.items():
-            stale_connections = []
-
-            for i, conn_info in enumerate(connections):
-                if (current_time - conn_info.last_activity).total_seconds() > config.websocket_timeout:
-                    stale_connections.append(i)
-
-            # Remove stale connections
-            for i in reversed(stale_connections):
-                try:
-                    await connections[i].websocket.close()
-                except Exception:
+                    await connection.send_json(message)
+                except:
                     pass
-                connections.pop(i)
 
-            # Mark job for removal if no connections left
-            if not connections:
-                stale_jobs.append(job_id)
-
-        # Remove empty jobs
-        for job_id in stale_jobs:
-            del self.active_connections[job_id]
-            logger.info(f"Cleaned up stale connections for job {job_id}")
-
-    def get_connection_count(self, job_id: Optional[str] = None) -> int:
-        """Get connection count for a specific job or total"""
-        if job_id:
-            return len(self.active_connections.get(job_id, []))
-        return sum(len(connections) for connections in self.active_connections.values())
-
-    async def shutdown(self):
-        """Shutdown the connection manager and clean up resources"""
-        if self._cleanup_task:
-            self._cleanup_task.cancel()
-            try:
-                await self._cleanup_task
-            except asyncio.CancelledError:
-                pass
-
-        # Close all connections
-        for job_id in list(self.active_connections.keys()):
-            await self.disconnect(job_id)
-
-# Global connection manager instance
 manager = ConnectionManager()
 
 class ProcessRequest(BaseModel):
@@ -957,321 +1233,10 @@ class ProcessRequest(BaseModel):
     supabase_key: str
     user_id: str
 
-class StreamingFileProcessor:
-    """Handles streaming file processing to avoid memory issues with large files"""
-
-    def __init__(self):
-        self.supported_engines = ['openpyxl', 'xlrd']  # Removed None to avoid engine conflicts
-
-    async def detect_file_type(self, file_content: bytes, filename: str) -> str:
-        """Enhanced file type detection with better accuracy"""
-        try:
-            filename_lower = filename.lower()
-
-            # Check file extension first (most reliable)
-            if filename_lower.endswith('.csv'):
-                return 'csv'
-            elif filename_lower.endswith('.xlsx'):
-                return 'xlsx'
-            elif filename_lower.endswith('.xls'):
-                return 'xls'
-            elif filename_lower.endswith('.xlsm'):
-                return 'xlsx'  # Treat macro-enabled as xlsx
-            elif filename_lower.endswith('.xlsb'):
-                return 'xlsb'
-
-            # Use filetype library for magic number detection
-            file_type = filetype.guess(file_content)
-            if file_type:
-                if file_type.extension in ['xlsx', 'xls', 'xlsm']:
-                    return file_type.extension
-                elif file_type.extension == 'csv':
-                    return 'csv'
-
-            # Fallback to content analysis
-            try:
-                # Try to decode as text for CSV detection
-                text_content = file_content[:1024].decode('utf-8', errors='ignore')
-                if ',' in text_content and '\n' in text_content:
-                    return 'csv'
-            except Exception:
-                pass
-
-            # Default fallback
-            logger.warning(f"Could not determine file type for {filename}, defaulting to xlsx")
-            return 'xlsx'
-
-        except Exception as e:
-            logger.error(f"File type detection failed for {filename}: {e}")
-            return 'xlsx'  # Safe default
-
-    async def read_file_streaming(self, file_content: bytes, filename: str) -> Dict[str, pd.DataFrame]:
-        """Read file with proper engine selection and error handling"""
-        try:
-            file_type = await self.detect_file_type(file_content, filename)
-            file_stream = io.BytesIO(file_content)
-
-            if file_type == 'csv':
-                return await self._read_csv_with_fallback(file_stream, filename)
-            else:
-                return await self._read_excel_with_fallback(file_stream, filename, file_type)
-
-        except Exception as e:
-            logger.error(f"Failed to read file {filename}: {e}")
-            raise HTTPException(status_code=400, detail=f"Failed to read file: {str(e)}")
-
-    async def _read_csv_with_fallback(self, file_stream: io.BytesIO, filename: str) -> Dict[str, pd.DataFrame]:
-        """Read CSV with encoding fallback"""
-        encodings = ['utf-8', 'latin-1', 'cp1252', 'iso-8859-1']
-
-        for encoding in encodings:
-            try:
-                file_stream.seek(0)
-                df = pd.read_csv(file_stream, encoding=encoding)
-
-                if not df.empty:
-                    logger.info(f"Successfully read CSV {filename} with encoding {encoding}")
-                    return {'Sheet1': df}
-
-            except Exception as e:
-                logger.warning(f"Failed to read CSV {filename} with encoding {encoding}: {e}")
-                continue
-
-        raise HTTPException(status_code=400, detail=f"Could not read CSV file {filename} with any encoding")
-
-    async def _read_excel_with_fallback(self, file_stream: io.BytesIO, filename: str, file_type: str) -> Dict[str, pd.DataFrame]:
-        """Read Excel with proper engine selection"""
-
-        # Select appropriate engines based on file type
-        if file_type == 'xlsx' or file_type == 'xlsm':
-            engines_to_try = ['openpyxl']  # Only openpyxl supports .xlsx
-        elif file_type == 'xls':
-            engines_to_try = ['xlrd']  # Only xlrd supports .xls
-        else:
-            engines_to_try = ['openpyxl', 'xlrd']  # Try both for unknown types
-
-        last_error = None
-
-        for engine in engines_to_try:
-            try:
-                file_stream.seek(0)
-
-                # Read all sheets
-                excel_file = pd.ExcelFile(file_stream, engine=engine)
-                sheets = {}
-
-                for sheet_name in excel_file.sheet_names:
-                    try:
-                        file_stream.seek(0)
-                        df = pd.read_excel(file_stream, sheet_name=sheet_name, engine=engine)
-
-                        if not df.empty:
-                            sheets[sheet_name] = df
-                        else:
-                            logger.warning(f"Sheet '{sheet_name}' in {filename} is empty")
-
-                    except Exception as sheet_error:
-                        logger.warning(f"Failed to read sheet '{sheet_name}' in {filename}: {sheet_error}")
-                        continue
-
-                if sheets:
-                    logger.info(f"Successfully read Excel file {filename} with engine {engine}")
-                    return sheets
-                else:
-                    raise Exception("No readable sheets found")
-
-            except Exception as e:
-                last_error = e
-                logger.warning(f"Failed to read Excel file {filename} with engine {engine}: {e}")
-                continue
-
-        # If all Excel engines failed, try CSV fallback
-        try:
-            logger.info(f"Attempting CSV fallback for {filename}")
-            file_stream.seek(0)
-            return await self._read_csv_with_fallback(file_stream, filename)
-
-        except Exception as csv_error:
-            logger.error(f"CSV fallback also failed for {filename}: {csv_error}")
-
-        # Final failure
-        error_msg = f"Could not read file {filename} with any method. Last error: {last_error}"
-        logger.error(error_msg)
-        raise HTTPException(status_code=400, detail=error_msg)
-
-    async def validate_file_size(self, file_content: bytes, filename: str) -> bool:
-        """Validate file size against limits"""
-        file_size = len(file_content)
-
-        if file_size > config.max_file_size:
-            size_mb = file_size / (1024 * 1024)
-            max_mb = config.max_file_size / (1024 * 1024)
-            raise HTTPException(
-                status_code=413,
-                detail=f"File {filename} is too large ({size_mb:.1f}MB). Maximum allowed size is {max_mb:.1f}MB"
-            )
-
-        return True
-
-# Global streaming processor instance
-streaming_processor = StreamingFileProcessor()
-
 class DocumentAnalyzer:
     def __init__(self, openai_client):
         self.openai = openai_client
     
-    # ---------- Universal helpers for quality and platform analysis ----------
-    def _get_date_columns(self, df: pd.DataFrame) -> list:
-        column_names = list(df.columns)
-        return [col for col in column_names if any(word in col.lower() for word in ['date', 'time', 'period', 'month', 'year'])]
-
-    def _safe_parse_dates(self, series: pd.Series) -> pd.Series:
-        try:
-            return pd.to_datetime(series, errors='coerce', utc=False)
-        except Exception:
-            # If parsing fails entirely, return all NaT
-            return pd.to_datetime(pd.Series([None] * len(series)))
-
-    def _compute_platform_distribution(self, df: pd.DataFrame) -> Dict[str, int]:
-        if 'Platform' in df.columns:
-            platform_series = df['Platform'].astype(str).str.strip()
-            platform_series = platform_series[platform_series != '']
-            counts = platform_series.value_counts(dropna=True)
-            return {str(k): int(v) for k, v in counts.items()}
-        return {}
-
-    def _compute_missing_counts(self, df: pd.DataFrame, columns: list) -> Dict[str, int]:
-        missing_counts: Dict[str, int] = {}
-        for col in columns:
-            if col in df.columns:
-                series = df[col]
-                # Treat NaN or blank strings as missing
-                blank_mask = series.astype(str).str.strip() == ''
-                missing_mask = series.isna() | blank_mask
-                missing_counts[col] = int(missing_mask.sum())
-        return missing_counts
-    
-    def _compute_data_quality_metrics(self, df: pd.DataFrame) -> Dict[str, Any]:
-        """Compute comprehensive data quality metrics"""
-        quality_metrics = {
-            'total_rows': len(df),
-            'total_columns': len(df.columns),
-            'missing_data_percentage': 0.0,
-            'duplicate_rows': 0,
-            'data_types': {},
-            'column_completeness': {},
-            'anomalies': []
-        }
-        
-        # Calculate missing data percentage
-        total_cells = len(df) * len(df.columns)
-        missing_cells = df.isnull().sum().sum()
-        quality_metrics['missing_data_percentage'] = (missing_cells / total_cells) * 100 if total_cells > 0 else 0
-        
-        # Count duplicate rows
-        quality_metrics['duplicate_rows'] = len(df[df.duplicated()])
-        
-        # Analyze data types
-        for col in df.columns:
-            quality_metrics['data_types'][col] = str(df[col].dtype)
-            
-            # Column completeness
-            non_null_count = df[col].notna().sum()
-            quality_metrics['column_completeness'][col] = {
-                'non_null_count': int(non_null_count),
-                'null_count': int(len(df) - non_null_count),
-                'completeness_percentage': (non_null_count / len(df)) * 100 if len(df) > 0 else 0
-            }
-        
-        # Detect anomalies
-        anomalies = []
-        
-        # Check for extreme values in numeric columns
-        numeric_cols = df.select_dtypes(include=[np.number]).columns
-        for col in numeric_cols:
-            if len(df[col].dropna()) > 0:
-                q1 = df[col].quantile(0.25)
-                q3 = df[col].quantile(0.75)
-                iqr = q3 - q1
-                lower_bound = q1 - 1.5 * iqr
-                upper_bound = q3 + 1.5 * iqr
-                
-                outliers = df[(df[col] < lower_bound) | (df[col] > upper_bound)]
-                if len(outliers) > 0:
-                    anomalies.append({
-                        'type': 'outlier',
-                        'column': col,
-                        'count': len(outliers),
-                        'percentage': (len(outliers) / len(df)) * 100
-                    })
-        
-        # Check for inconsistent date formats
-        date_cols = [col for col in df.columns if any(word in col.lower() for word in ['date', 'time'])]
-        for col in date_cols:
-            try:
-                pd.to_datetime(df[col], errors='raise')
-            except:
-                anomalies.append({
-                    'type': 'invalid_date_format',
-                    'column': col,
-                    'count': len(df[df[col].notna()]),
-                    'percentage': (len(df[df[col].notna()]) / len(df)) * 100
-                })
-        
-        quality_metrics['anomalies'] = anomalies
-        
-        return quality_metrics
-
-    def _build_required_columns_by_type(self, doc_type: str) -> list:
-        mapping = {
-            'bank_statement': ['Date', 'Description', 'Amount', 'Balance'],
-            'expense_data': ['Vendor Name', 'Amount', 'Payment Date'],
-            'revenue_data': ['Client Name', 'Amount', 'Issue Date'],
-            'payroll_data': ['Employee Name', 'Salary', 'Payment Date'],
-        }
-        return mapping.get(doc_type, [])
-
-    def _analyze_general_quality(self, df: pd.DataFrame, doc_type: str) -> Dict[str, Any]:
-        data_quality: Dict[str, Any] = {
-            'missing_field_counts': {},
-            'invalid_dates': {},
-            'zero_amount_rows': 0,
-        }
-
-        # Required fields
-        required_cols = self._build_required_columns_by_type(doc_type)
-        if required_cols:
-            data_quality['missing_field_counts'] = self._compute_missing_counts(df, required_cols)
-
-        # Date anomalies
-        for date_col in self._get_date_columns(df):
-            if date_col in df.columns:
-                raw_series = df[date_col].astype(str)
-                parsed = self._safe_parse_dates(raw_series)
-                # invalid if original non-empty and parsed is NaT
-                non_empty = raw_series.str.strip() != ''
-                invalid_count = int(((parsed.isna()) & non_empty).sum())
-                if invalid_count > 0:
-                    data_quality['invalid_dates'][date_col] = invalid_count
-
-        # Zero amount checks
-        if 'Amount' in df.columns:
-            try:
-                numeric_amount = pd.to_numeric(df['Amount'], errors='coerce').fillna(0)
-                data_quality['zero_amount_rows'] = int((numeric_amount == 0).sum())
-            except Exception:
-                data_quality['zero_amount_rows'] = 0
-
-        # Payroll-specific zero salary
-        if doc_type == 'payroll_data' and 'Salary' in df.columns:
-            try:
-                numeric_salary = pd.to_numeric(df['Salary'], errors='coerce').fillna(0)
-                data_quality['zero_salary_rows'] = int((numeric_salary == 0).sum())
-            except Exception:
-                data_quality['zero_salary_rows'] = 0
-
-        return data_quality
-
     async def detect_document_type(self, df: pd.DataFrame, filename: str) -> Dict[str, Any]:
         """Enhanced document type detection using AI analysis"""
         try:
@@ -1294,7 +1259,7 @@ class DocumentAnalyzer:
             Based on the column names and data, classify this document and return ONLY a valid JSON object with this structure:
             
             {{
-                "document_type": "income_statement|balance_sheet|cash_flow|payroll_data|expense_data|revenue_data|general_ledger|bank_statement|budget|unknown",
+                "document_type": "income_statement|balance_sheet|cash_flow|payroll_data|expense_data|revenue_data|general_ledger|budget|unknown",
                 "source_platform": "gusto|quickbooks|xero|razorpay|freshbooks|unknown",
                 "confidence": 0.95,
                 "key_columns": ["col1", "col2"],
@@ -1403,9 +1368,6 @@ class DocumentAnalyzer:
             doc_type = "payroll_data"
         elif any(word in ' '.join(column_names).lower() for word in ['asset', 'liability', 'equity']):
             doc_type = "balance_sheet"
-        elif any(word in ' '.join(column_names).lower() for word in ['balance', 'debit', 'credit']) and \
-             any(word in ' '.join(column_names).lower() for word in ['date', 'description', 'amount']):
-            doc_type = "bank_statement"
         
         # Enhanced platform detection using column patterns
         platform = "unknown"
@@ -1490,28 +1452,6 @@ class DocumentAnalyzer:
                     "count": int(df[col].count())
                 }
             
-            # Universal platform distribution and low-confidence handling
-            platform_distribution = self._compute_platform_distribution(df)
-            if platform_distribution:
-                insights["platform_distribution"] = platform_distribution
-                insights["detected_platforms"] = list(platform_distribution.keys())
-                # If more than one platform present, treat as mixed and low confidence
-                if len(platform_distribution.keys()) > 1:
-                    insights["source_platform"] = "mixed"
-                    insights["low_confidence"] = True
-            # Low confidence flag from AI doc analysis
-            if insights.get("confidence", 1.0) < 0.7:
-                insights["low_confidence"] = True
-
-            # Data quality and anomalies
-            doc_type = insights.get("document_type", "unknown")
-            insights["data_quality"] = self._analyze_general_quality(df, doc_type)
-
-            # Optional currency breakdown if present
-            if 'Currency' in df.columns:
-                cur_counts = df['Currency'].astype(str).str.strip().value_counts(dropna=True)
-                insights['currency_breakdown'] = {str(k): int(v) for k, v in cur_counts.items()}
-
             # Enhanced analysis based on document type
             doc_type = doc_analysis.get("document_type", "unknown")
             if doc_type == "income_statement":
@@ -1527,40 +1467,11 @@ class DocumentAnalyzer:
                     "equity_analysis": self._analyze_equity(df)
                 }
             elif doc_type == "payroll_data":
-                payroll_summary = self._analyze_payroll_data(df)
-                employee_analysis = self._analyze_employee_data(df)
-                tax_analysis = self._analyze_tax_data(df)
-                # Add unique employee metrics and month distribution
-                if 'Employee ID' in df.columns:
-                    unique_employees = int(df['Employee ID'].astype(str).nunique())
-                elif 'Employee Name' in df.columns:
-                    unique_employees = int(df['Employee Name'].astype(str).nunique())
-                else:
-                    unique_employees = None
-
-                date_cols = self._get_date_columns(df)
-                month_distribution = {}
-                if date_cols:
-                    dt = self._safe_parse_dates(df[date_cols[0]].astype(str))
-                    month_distribution = dt.dt.to_period('M').value_counts().sort_index()
-                    month_distribution = {str(k): int(v) for k, v in month_distribution.items()}
-
                 insights["enhanced_analysis"] = {
-                    "payroll_summary": payroll_summary,
-                    "employee_analysis": employee_analysis,
-                    "tax_analysis": tax_analysis,
-                    "unique_employee_count": unique_employees,
-                    "month_distribution": month_distribution
+                    "payroll_summary": self._analyze_payroll_data(df),
+                    "employee_analysis": self._analyze_employee_data(df),
+                    "tax_analysis": self._analyze_tax_data(df)
                 }
-            elif doc_type == "expense_data":
-                # Per-vendor totals for vendor payments
-                if 'Vendor Name' in df.columns and 'Amount' in df.columns:
-                    try:
-                        amounts = pd.to_numeric(df['Amount'], errors='coerce')
-                        per_vendor = amounts.groupby(df['Vendor Name']).sum().sort_values(ascending=False).head(20)
-                        insights.setdefault('enhanced_analysis', {})['per_vendor_totals'] = {str(k): float(v) for k, v in per_vendor.items()}
-                    except Exception:
-                        pass
             
             return insights
             
@@ -1775,269 +1686,238 @@ class DocumentAnalyzer:
         return {"tax_columns": tax_cols, "total_taxes": total_taxes}
 
 class PlatformDetector:
-    """Optimized platform detector with improved accuracy and reduced database queries"""
-
+    """Enhanced platform detection for financial systems"""
+    
     def __init__(self):
-        # Cache for platform detection results
-        self.detection_cache: Dict[str, Dict[str, Any]] = {}
-        self.cache_ttl = config.cache_ttl
-
-        # Enhanced platform patterns with higher confidence thresholds
         self.platform_patterns = {
             'gusto': {
                 'keywords': ['gusto', 'payroll', 'employee', 'salary', 'wage', 'paystub'],
                 'columns': ['employee_name', 'employee_id', 'pay_period', 'gross_pay', 'net_pay', 'tax_deductions', 'benefits'],
                 'data_patterns': ['employee_ssn', 'pay_rate', 'hours_worked', 'overtime', 'federal_tax', 'state_tax'],
-                'confidence_threshold': config.platform_confidence_threshold,
-                'description': 'Payroll and HR platform',
-                'priority': 1
+                'confidence_threshold': 0.7,
+                'description': 'Payroll and HR platform'
             },
             'quickbooks': {
                 'keywords': ['quickbooks', 'qb', 'accounting', 'invoice', 'bill', 'qbo'],
                 'columns': ['account', 'memo', 'amount', 'date', 'type', 'ref_number', 'split'],
                 'data_patterns': ['account_number', 'class', 'customer', 'vendor', 'journal_entry'],
-                'confidence_threshold': config.platform_confidence_threshold,
-                'description': 'Accounting software',
-                'priority': 1
+                'confidence_threshold': 0.7,
+                'description': 'Accounting software'
             },
             'xero': {
-                'keywords': ['xero', 'invoice', 'contact', 'account'],
+                'keywords': ['xero', 'invoice', 'contact', 'account', 'xero'],
                 'columns': ['contact_name', 'invoice_number', 'amount', 'date', 'reference', 'tracking'],
                 'data_patterns': ['contact_id', 'invoice_id', 'tax_amount', 'line_amount', 'tracking_category'],
-                'confidence_threshold': config.platform_confidence_threshold,
-                'description': 'Cloud accounting platform',
-                'priority': 1
+                'confidence_threshold': 0.7,
+                'description': 'Cloud accounting platform'
             },
             'razorpay': {
                 'keywords': ['razorpay', 'payment', 'transaction', 'merchant', 'settlement'],
                 'columns': ['transaction_id', 'merchant_id', 'amount', 'status', 'created_at', 'payment_id'],
                 'data_patterns': ['order_id', 'currency', 'method', 'description', 'fee_amount'],
-                'confidence_threshold': config.platform_confidence_threshold,
-                'description': 'Payment gateway',
-                'priority': 1
+                'confidence_threshold': 0.7,
+                'description': 'Payment gateway'
+            },
+            'freshbooks': {
+                'keywords': ['freshbooks', 'invoice', 'time_tracking', 'client', 'project'],
+                'columns': ['client_name', 'invoice_number', 'amount', 'date', 'project', 'time_logged'],
+                'data_patterns': ['client_id', 'project_id', 'rate', 'hours', 'service_type'],
+                'confidence_threshold': 0.7,
+                'description': 'Invoicing and time tracking'
+            },
+            'wave': {
+                'keywords': ['wave', 'accounting', 'invoice', 'business'],
+                'columns': ['account_name', 'description', 'amount', 'date', 'category'],
+                'data_patterns': ['account_id', 'transaction_id', 'balance', 'wave_specific'],
+                'confidence_threshold': 0.7,
+                'description': 'Free accounting software'
+            },
+            'sage': {
+                'keywords': ['sage', 'accounting', 'business', 'sage50', 'sage100'],
+                'columns': ['account', 'description', 'amount', 'date', 'reference'],
+                'data_patterns': ['account_number', 'journal_entry', 'period', 'sage_specific'],
+                'confidence_threshold': 0.7,
+                'description': 'Business management software'
+            },
+            'netsuite': {
+                'keywords': ['netsuite', 'erp', 'enterprise', 'suite'],
+                'columns': ['account', 'memo', 'amount', 'date', 'entity', 'subsidiary'],
+                'data_patterns': ['internal_id', 'tran_id', 'line_id', 'netsuite_specific'],
+                'confidence_threshold': 0.7,
+                'description': 'Enterprise resource planning'
             },
             'stripe': {
                 'keywords': ['stripe', 'payment', 'charge', 'customer', 'subscription'],
-                'columns': ['charge_id', 'customer_id', 'amount', 'currency', 'status', 'created'],
-                'data_patterns': ['payment_intent', 'invoice_id', 'fee', 'net', 'description'],
-                'confidence_threshold': config.platform_confidence_threshold,
-                'description': 'Payment processing platform',
-                'priority': 1
+                'columns': ['charge_id', 'customer_id', 'amount', 'status', 'created', 'currency'],
+                'data_patterns': ['payment_intent', 'transfer_id', 'fee_amount', 'payment_method'],
+                'confidence_threshold': 0.7,
+                'description': 'Payment processing platform'
             },
-            'bank_statement': {
-                'keywords': ['bank', 'statement', 'account', 'transaction', 'balance'],
-                'columns': ['date', 'description', 'amount', 'balance', 'type', 'reference'],
-                'data_patterns': ['debit', 'credit', 'opening_balance', 'closing_balance', 'bank_fee'],
-                'confidence_threshold': 0.9,  # Higher threshold for bank statements
-                'description': 'Bank account statement',
-                'priority': 2
+            'square': {
+                'keywords': ['square', 'payment', 'transaction', 'merchant'],
+                'columns': ['transaction_id', 'merchant_id', 'amount', 'status', 'created_at'],
+                'data_patterns': ['location_id', 'device_id', 'tender_type', 'square_specific'],
+                'confidence_threshold': 0.7,
+                'description': 'Point of sale and payments'
             },
-            'generic_financial': {
-                'keywords': ['amount', 'date', 'transaction', 'payment', 'invoice'],
-                'columns': ['date', 'amount', 'description'],
-                'data_patterns': ['currency', 'total', 'subtotal'],
-                'confidence_threshold': 0.6,  # Lower threshold for generic
-                'description': 'Generic financial data',
-                'priority': 3  # Lowest priority
+            'paypal': {
+                'keywords': ['paypal', 'payment', 'transaction', 'merchant'],
+                'columns': ['transaction_id', 'merchant_id', 'amount', 'status', 'created_at'],
+                'data_patterns': ['paypal_id', 'fee_amount', 'currency', 'payment_type'],
+                'confidence_threshold': 0.7,
+                'description': 'Online payment system'
+            },
+            'shopify': {
+                'keywords': ['shopify', 'order', 'product', 'sales', 'ecommerce'],
+                'columns': ['order_id', 'product_name', 'amount', 'date', 'customer'],
+                'data_patterns': ['shopify_id', 'product_id', 'variant_id', 'fulfillment_status'],
+                'confidence_threshold': 0.7,
+                'description': 'E-commerce platform'
+            },
+            'zoho': {
+                'keywords': ['zoho', 'books', 'invoice', 'accounting'],
+                'columns': ['contact_name', 'invoice_number', 'amount', 'date', 'reference'],
+                'data_patterns': ['zoho_id', 'organization_id', 'zoho_specific'],
+                'confidence_threshold': 0.7,
+                'description': 'Business software suite'
             }
         }
-
-        # Batch query optimization
-        self.batch_size = 50
-        self.query_cache: Dict[str, Any] = {}
-
-    def _get_cache_key(self, df: pd.DataFrame, filename: str) -> str:
-        """Generate cache key for detection results"""
-        # Use file hash and basic structure for caching
-        columns_hash = hashlib.md5(str(sorted(df.columns.tolist())).encode()).hexdigest()
-        return f"{filename}_{columns_hash}_{len(df)}"
-
-    def _is_cache_valid(self, cache_entry: Dict[str, Any]) -> bool:
-        """Check if cache entry is still valid"""
-        if 'timestamp' not in cache_entry:
-            return False
-
-        age = time.time() - cache_entry['timestamp']
-        return age < self.cache_ttl
-
-    async def detect_platform_optimized(self, df: pd.DataFrame, filename: str = "") -> Dict[str, Any]:
-        """Optimized platform detection with caching and reduced queries"""
-        try:
-            # Check cache first
-            cache_key = self._get_cache_key(df, filename)
-            if cache_key in self.detection_cache:
-                cache_entry = self.detection_cache[cache_key]
-                if self._is_cache_valid(cache_entry):
-                    logger.info(f"Using cached platform detection for {filename}")
-                    return cache_entry['result']
-
-            # Perform detection
-            result = await self._perform_detection(df, filename)
-
-            # Cache the result
-            self.detection_cache[cache_key] = {
-                'result': result,
-                'timestamp': time.time()
-            }
-
-            return result
-
-        except Exception as e:
-            logger.error(f"Platform detection failed for {filename}: {e}")
-            return {
-                'platform': 'unknown',
-                'confidence': 0.0,
-                'reasoning': f"Detection failed: {str(e)}",
-                'indicators': []
-            }
-
-    async def _perform_detection(self, df: pd.DataFrame, filename: str) -> Dict[str, Any]:
-        """Perform the actual platform detection"""
-        if df.empty:
-            return {
-                'platform': 'unknown',
-                'confidence': 0.0,
-                'reasoning': 'Empty dataframe',
-                'indicators': []
-            }
-
-        column_names = [col.lower().strip() for col in df.columns]
+    
+    def detect_platform(self, df: pd.DataFrame, filename: str) -> Dict[str, Any]:
+        """Enhanced platform detection with multiple analysis methods"""
         filename_lower = filename.lower()
-
-        # Score each platform
-        platform_scores = {}
-
-        for platform_name, pattern in self.platform_patterns.items():
-            score = self._calculate_platform_score(
-                column_names, filename_lower, df, pattern
-            )
-
-            if score > 0:
-                platform_scores[platform_name] = {
-                    'score': score,
-                    'priority': pattern.get('priority', 2),
-                    'threshold': pattern['confidence_threshold'],
-                    'description': pattern['description']
-                }
-
-        # Find best match considering priority and score
-        best_platform = self._select_best_platform(platform_scores)
-
-        return best_platform
-
-    def _calculate_platform_score(self, column_names: List[str], filename: str,
-                                 df: pd.DataFrame, pattern: Dict[str, Any]) -> float:
-        """Calculate score for a specific platform pattern"""
-        score = 0.0
-
-        # Filename keyword matching (20% weight)
-        filename_score = 0.0
-        for keyword in pattern['keywords']:
-            if keyword in filename:
-                filename_score += 1.0
-        filename_score = min(filename_score / len(pattern['keywords']), 1.0) * 0.2
-
-        # Column name matching (40% weight)
-        column_score = 0.0
-        pattern_columns = [col.lower() for col in pattern['columns']]
-        for pattern_col in pattern_columns:
-            for actual_col in column_names:
-                if pattern_col in actual_col or actual_col in pattern_col:
-                    column_score += 1.0
-                    break
-        column_score = min(column_score / len(pattern_columns), 1.0) * 0.4
-
-        # Data pattern matching (30% weight)
-        data_score = 0.0
-        if not df.empty:
-            sample_data = df.head(10).astype(str).values.flatten()
+        columns_lower = [col.lower() for col in df.columns]
+        
+        best_match = {
+            'platform': 'unknown',
+            'confidence': 0.0,
+            'matched_columns': [],
+            'matched_patterns': [],
+            'reasoning': 'No clear platform match found',
+            'description': 'Unknown platform'
+        }
+        
+        for platform, patterns in self.platform_patterns.items():
+            confidence = 0.0
+            matched_columns = []
+            matched_patterns = []
+            
+            # 1. Filename keyword matching (25% weight)
+            filename_matches = 0
+            for keyword in patterns['keywords']:
+                if keyword in filename_lower:
+                    filename_matches += 1
+                    confidence += 0.25 / len(patterns['keywords'])
+            
+            # 2. Column name matching (40% weight)
+            column_matches = 0
+            for expected_col in patterns['columns']:
+                for actual_col in columns_lower:
+                    if expected_col in actual_col or actual_col in expected_col:
+                        matched_columns.append(actual_col)
+                        column_matches += 1
+                        confidence += 0.4 / len(patterns['columns'])
+            
+            # 3. Data pattern analysis (20% weight)
+            if len(matched_columns) > 0:
+                confidence += 0.2
+            
+            # 4. Data content analysis (15% weight)
+            sample_data = df.head(3).astype(str).values.flatten()
             sample_text = ' '.join(sample_data).lower()
-
-            for data_pattern in pattern['data_patterns']:
-                if data_pattern.lower() in sample_text:
-                    data_score += 1.0
-        data_score = min(data_score / len(pattern['data_patterns']), 1.0) * 0.3
-
-        # Structure matching (10% weight)
-        structure_score = 0.0
-        if len(df.columns) >= 3:  # Minimum structure requirement
-            structure_score = 0.1
-
-        total_score = filename_score + column_score + data_score + structure_score
-        return total_score
-
-    def _select_best_platform(self, platform_scores: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
-        """Select the best platform considering priority and confidence"""
-        if not platform_scores:
+            
+            for pattern in patterns.get('data_patterns', []):
+                if pattern in sample_text:
+                    confidence += 0.15 / len(patterns.get('data_patterns', []))
+                    matched_patterns.append(pattern)
+            
+            # 5. Platform-specific terminology detection
+            platform_terms = self._detect_platform_terminology(df, platform)
+            if platform_terms:
+                confidence += 0.1
+                matched_patterns.extend(platform_terms)
+            
+            if confidence > best_match['confidence']:
+                best_match = {
+                    'platform': platform,
+                    'confidence': min(confidence, 1.0),
+                    'matched_columns': matched_columns,
+                    'matched_patterns': matched_patterns,
+                    'reasoning': self._generate_reasoning(platform, filename_matches, column_matches, len(matched_patterns)),
+                    'description': patterns['description']
+                }
+        
+        return best_match
+    
+    def _detect_platform_terminology(self, df: pd.DataFrame, platform: str) -> List[str]:
+        """Detect platform-specific terminology in the data"""
+        platform_terms = []
+        
+        if platform == 'quickbooks':
+            # QB-specific terms
+            qb_terms = ['ref number', 'split', 'class', 'customer', 'vendor', 'journal entry']
+            for term in qb_terms:
+                if any(term in str(col).lower() for col in df.columns):
+                    platform_terms.append(f"qb_term: {term}")
+        
+        elif platform == 'xero':
+            # Xero-specific terms
+            xero_terms = ['tracking', 'reference', 'contact', 'line amount']
+            for term in xero_terms:
+                if any(term in str(col).lower() for col in df.columns):
+                    platform_terms.append(f"xero_term: {term}")
+        
+        elif platform == 'gusto':
+            # Gusto-specific terms
+            gusto_terms = ['pay period', 'gross pay', 'net pay', 'tax deductions', 'benefits']
+            for term in gusto_terms:
+                if any(term in str(col).lower() for col in df.columns):
+                    platform_terms.append(f"gusto_term: {term}")
+        
+        elif platform == 'stripe':
+            # Stripe-specific terms
+            stripe_terms = ['charge id', 'payment intent', 'transfer id', 'fee amount']
+            for term in stripe_terms:
+                if any(term in str(col).lower() for col in df.columns):
+                    platform_terms.append(f"stripe_term: {term}")
+        
+        return platform_terms
+    
+    def _generate_reasoning(self, platform: str, filename_matches: int, column_matches: int, pattern_matches: int) -> str:
+        """Generate detailed reasoning for platform detection"""
+        reasoning_parts = []
+        
+        if filename_matches > 0:
+            reasoning_parts.append(f"Filename contains {filename_matches} {platform} keywords")
+        
+        if column_matches > 0:
+            reasoning_parts.append(f"Matched {column_matches} column patterns typical of {platform}")
+        
+        if pattern_matches > 0:
+            reasoning_parts.append(f"Detected {pattern_matches} {platform}-specific data patterns")
+        
+        if not reasoning_parts:
+            return f"No clear indicators for {platform}"
+        
+        return f"{platform} detected: {'; '.join(reasoning_parts)}"
+    
+    def get_platform_info(self, platform: str) -> Dict[str, Any]:
+        """Get detailed information about a platform"""
+        if platform in self.platform_patterns:
             return {
-                'platform': 'unknown',
-                'confidence': 0.0,
-                'reasoning': 'No platform patterns matched',
-                'indicators': []
+                'name': platform,
+                'description': self.platform_patterns[platform]['description'],
+                'typical_columns': self.platform_patterns[platform]['columns'],
+                'keywords': self.platform_patterns[platform]['keywords'],
+                'confidence_threshold': self.platform_patterns[platform]['confidence_threshold']
             }
-
-        # Sort by priority first, then by score
-        sorted_platforms = sorted(
-            platform_scores.items(),
-            key=lambda x: (x[1]['priority'], x[1]['score']),
-            reverse=False  # Lower priority number = higher priority
-        )
-
-        best_platform_name, best_data = sorted_platforms[0]
-
-        # Check if confidence meets threshold
-        if best_data['score'] >= best_data['threshold']:
-            return {
-                'platform': best_platform_name,
-                'confidence': best_data['score'],
-                'reasoning': f"Matched {best_platform_name} with {best_data['score']:.2f} confidence",
-                'indicators': [best_data['description']],
-                'all_scores': platform_scores
-            }
-        else:
-            return {
-                'platform': 'unknown',
-                'confidence': best_data['score'],
-                'reasoning': f"Best match {best_platform_name} ({best_data['score']:.2f}) below threshold ({best_data['threshold']})",
-                'indicators': [],
-                'all_scores': platform_scores
-            }
-
-    def clear_cache(self):
-        """Clear the detection cache"""
-        self.detection_cache.clear()
-        logger.info("Platform detection cache cleared")
-
-    def detect_platform(self, df: pd.DataFrame, filename: str = "") -> Dict[str, Any]:
-        """Backward compatibility method - delegates to optimized version"""
-        import asyncio
-        try:
-            # Run the async method in a sync context
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                # If we're already in an async context, create a task
-                import concurrent.futures
-                with concurrent.futures.ThreadPoolExecutor() as executor:
-                    future = executor.submit(asyncio.run, self.detect_platform_optimized(df, filename))
-                    return future.result()
-            else:
-                return asyncio.run(self.detect_platform_optimized(df, filename))
-        except Exception as e:
-            logger.error(f"Platform detection failed: {e}")
-            return {
-                'platform': 'unknown',
-                'confidence': 0.0,
-                'reasoning': f"Detection failed: {str(e)}",
-                'indicators': []
-            }
-
-# Global instances for optimized components
-platform_detector = PlatformDetector()
-currency_normalizer = CurrencyNormalizer()
-vendor_standardizer = VendorStandardizer(openai)
-platform_id_extractor = PlatformIDExtractor()
-data_enrichment_processor = DataEnrichmentProcessor(openai)
-streaming_processor = StreamingFileProcessor()
+        return {
+            'name': platform,
+            'description': 'Unknown platform',
+            'typical_columns': [],
+            'keywords': [],
+            'confidence_threshold': 0.0
+        }
 
 class AIRowClassifier:
     def __init__(self, openai_client, entity_resolver = None):
@@ -2285,7 +2165,7 @@ class BatchAIRowClassifier:
     def __init__(self, openai_client):
         self.openai = openai_client
         self.cache = {}  # Simple cache for similar rows
-        self.batch_size = 50  # Process 50 rows at once
+        self.batch_size = 20  # Process 20 rows at once
         self.max_concurrent_batches = 3  # Process 3 batches simultaneously
     
     async def classify_row_with_ai(self, row: pd.Series, platform_info: Dict, column_names: List[str]) -> Dict[str, Any]:
@@ -2560,19 +2440,16 @@ class BatchAIRowClassifier:
 class RowProcessor:
     """Processes individual rows and creates events"""
     
-    def __init__(self, platform_detector: PlatformDetector, ai_classifier, openai_client):
+    def __init__(self, platform_detector: PlatformDetector, ai_classifier):
         self.platform_detector = platform_detector
         self.ai_classifier = ai_classifier
-        self.enrichment_processor = DataEnrichmentProcessor(openai_client)
     
     async def process_row(self, row: pd.Series, row_index: int, sheet_name: str, 
-                   platform_info: Dict, file_context: Dict, column_names: List[str], 
-                   ai_classification: Dict = None) -> Dict[str, Any]:
+                   platform_info: Dict, file_context: Dict, column_names: List[str]) -> Dict[str, Any]:
         """Process a single row and create an event with AI-powered classification and enrichment"""
         
-        # Use provided AI classification or generate new one
-        if ai_classification is None:
-            ai_classification = await self.ai_classifier.classify_row_with_ai(row, platform_info, column_names, file_context)
+        # AI-powered row classification
+        ai_classification = await self.ai_classifier.classify_row_with_ai(row, platform_info, column_names, file_context)
         
         # Convert row to JSON-serializable format
         row_data = self._convert_row_to_json_serializable(row)
@@ -2580,20 +2457,6 @@ class RowProcessor:
         # Update file context with row index
         file_context['row_index'] = row_index
         
-        # Ensure entities exist by inferring from columns/description to feed downstream resolution and storage
-        inferred_entities = self._extract_entities_from_columns(row_data, column_names)
-        if ai_classification is None:
-            ai_classification = {}
-        if not ai_classification.get('entities'):
-            ai_classification['entities'] = inferred_entities
-        else:
-            for key in ['employees', 'vendors', 'customers', 'projects']:
-                existing = ai_classification['entities'].get(key, []) or []
-                inferred = inferred_entities.get(key, []) or []
-                merged = list(dict.fromkeys([*existing, *inferred]))
-                if merged:
-                    ai_classification['entities'][key] = merged
-
         # Data enrichment - create enhanced payload
         enriched_payload = await self.enrichment_processor.enrich_row_data(
             row_data=row_data,
@@ -2613,7 +2476,7 @@ class RowProcessor:
             "sheet_name": sheet_name,
             "source_filename": file_context['filename'],
             "uploader": file_context['user_id'],
-            "ingest_ts": utc_now().isoformat(),
+            "ingest_ts": datetime.utcnow().isoformat(),
             "status": "pending",
             "confidence_score": enriched_payload.get('ai_confidence', 0.5),
             "classification_metadata": {
@@ -2670,683 +2533,314 @@ class RowProcessor:
             return obj
         else:
             return str(obj)
-
-    def _extract_entities_from_columns(self, row_data: Dict[str, Any], column_names: List[str]) -> Dict[str, List[str]]:
-        entities: Dict[str, List[str]] = {
-            'employees': [],
-            'vendors': [],
-            'customers': [],
-            'projects': []
-        }
-
-        # Column-based extraction
-        joined_cols = ' '.join([str(c).lower() for c in column_names])
-        for key, value in row_data.items():
-            key_l = str(key).lower()
-            val = str(value).strip()
-            if not val:
-                continue
-            if ('client' in key_l) or ('customer' in key_l):
-                entities['customers'].append(val)
-            if ('vendor' in key_l) or ('supplier' in key_l):
-                entities['vendors'].append(val)
-            if ('employee' in key_l) or ('name' in key_l and 'employee' in joined_cols):
-                entities['employees'].append(val)
-            if 'project' in key_l:
-                entities['projects'].append(val)
-
-        # Description-based extraction
-        desc = str(row_data.get('Description') or row_data.get('description') or '')
-        if desc:
-            m_client = re.search(r'Client Payment\s*[-–]\s*([^,]+)', desc, re.IGNORECASE)
-            if m_client:
-                name = m_client.group(1).strip()
-                if name:
-                    entities['customers'].append(name)
-
-            m_emp = re.search(r'Employee Salary\s*[-–]\s*([^,]+)', desc, re.IGNORECASE)
-            if m_emp:
-                name = m_emp.group(1).strip()
-                if name:
-                    entities['employees'].append(name)
-
-            m_vendor = re.search(r'^([^\-–]+?)\s*[-–]\s*', desc)
-            if m_vendor:
-                cand = m_vendor.group(1).strip()
-                if cand and len(cand) > 2 and not cand.lower().startswith(('client payment', 'employee salary')):
-                    entities['vendors'].append(cand)
-
-        for k in entities:
-            if entities[k]:
-                entities[k] = list(dict.fromkeys(entities[k]))
-
-        return entities
     
 
 
 class ExcelProcessor:
-    """Optimized Excel processor with proper dependency injection and error handling"""
-
     def __init__(self):
         self.openai = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
         self.analyzer = DocumentAnalyzer(self.openai)
-        # Use optimized global instances
-        self.platform_detector = platform_detector
-        self.streaming_processor = streaming_processor
+        self.platform_detector = PlatformDetector()
         # Entity resolver and AI classifier will be initialized per request with Supabase client
         self.entity_resolver = None
         self.ai_classifier = None
         self.row_processor = None
         self.batch_classifier = BatchAIRowClassifier(self.openai)
-        # Use global enrichment processor
-        self.enrichment_processor = data_enrichment_processor
+        # Initialize data enrichment processor
+        self.enrichment_processor = DataEnrichmentProcessor(self.openai)
     
-    async def _begin_transaction(self, supabase: Client) -> str:
-        """Begin a database transaction and return transaction ID"""
+    async def detect_file_type(self, file_content: bytes, filename: str) -> str:
+        """Detect file type using magic numbers and filetype library"""
         try:
-            # Create a transaction record in our custom transactions table
-            transaction_result = supabase.table('processing_transactions').insert({
-                'id': str(uuid.uuid4()),
-                'status': 'active',
-                'started_at': utc_now().isoformat(),
-                'operation_type': 'file_processing'
-            }).execute()
+            # Check file extension first
+            if filename.lower().endswith('.csv'):
+                return 'csv'
+            elif filename.lower().endswith('.xlsx'):
+                return 'xlsx'
+            elif filename.lower().endswith('.xls'):
+                return 'xls'
             
-            if transaction_result.data:
-                transaction_id = transaction_result.data[0]['id']
-                logger.info(f"Transaction {transaction_id} started")
-                return transaction_id
+            # Try filetype library
+            file_type = filetype.guess(file_content)
+            if file_type:
+                if file_type.extension == 'csv':
+                    return 'csv'
+                elif file_type.extension in ['xlsx', 'xls']:
+                    return file_type.extension
+            
+            # Fallback to python-magic
+            mime_type = magic.from_buffer(file_content, mime=True)
+            if 'csv' in mime_type or 'text/plain' in mime_type:
+                return 'csv'
+            elif 'excel' in mime_type or 'spreadsheet' in mime_type:
+                return 'xlsx'
             else:
-                raise Exception("Failed to create transaction record")
-                
+                return 'unknown'
         except Exception as e:
-            logger.error(f"Failed to begin transaction: {e}")
-            raise Exception(f"Transaction initialization failed: {str(e)}")
-    
-    async def _commit_transaction(self, supabase: Client, transaction_id: str) -> bool:
-        """Commit a database transaction"""
-        try:
-            # Mark transaction as committed
-            result = supabase.table('processing_transactions').update({
-                'status': 'committed',
-                'committed_at': utc_now().isoformat()
-            }).eq('id', transaction_id).execute()
-            
-            if result.data:
-                logger.info(f"Transaction {transaction_id} committed successfully")
-                return True
-            else:
-                raise Exception("Failed to commit transaction")
-                
-        except Exception as e:
-            logger.error(f"Failed to commit transaction {transaction_id}: {e}")
-            raise Exception(f"Transaction commit failed: {str(e)}")
-    
-    async def _rollback_transaction(self, supabase: Client, transaction_id: str, error_details: str = None) -> bool:
-        """Rollback a database transaction and clean up partial data"""
-        try:
-            logger.warning(f"Rolling back transaction {transaction_id}")
-            
-            # Mark transaction as rolled back
-            result = supabase.table('processing_transactions').update({
-                'status': 'rolled_back',
-                'rolled_back_at': utc_now().isoformat(),
-                'error_details': error_details or 'Unknown error'
-            }).eq('id', transaction_id).execute()
-            
-            # Clean up any partial data that was created
-            await self._cleanup_partial_data(supabase, transaction_id)
-            
-            if result.data:
-                logger.info(f"Transaction {transaction_id} rolled back successfully")
-                return True
-            else:
-                logger.error(f"Failed to update transaction status for rollback")
-                return False
-                
-        except Exception as e:
-            logger.error(f"Failed to rollback transaction {transaction_id}: {e}")
-            return False
-    
-    async def _cleanup_partial_data(self, supabase: Client, transaction_id: str):
-        """Clean up any partial data created during a failed transaction"""
-        try:
-            # Clean up raw_events
-            events_result = supabase.table('raw_events').delete().eq('transaction_id', transaction_id).execute()
-            if events_result.data:
-                logger.info(f"Cleaned up {len(events_result.data)} raw events from failed transaction")
-            
-            # Clean up raw_records
-            records_result = supabase.table('raw_records').delete().eq('transaction_id', transaction_id).execute()
-            if records_result.data:
-                logger.info(f"Cleaned up {len(records_result.data)} raw records from failed transaction")
-            
-            # Clean up ingestion_jobs
-            jobs_result = supabase.table('ingestion_jobs').delete().eq('transaction_id', transaction_id).execute()
-            if jobs_result.data:
-                logger.info(f"Cleaned up {len(jobs_result.data)} ingestion jobs from failed transaction")
-            
-            # Clean up normalized_entities (only those created in this transaction)
-            entities_result = supabase.table('normalized_entities').delete().eq('transaction_id', transaction_id).execute()
-            if entities_result.data:
-                logger.info(f"Cleaned up {len(entities_result.data)} normalized entities from failed transaction")
-            
-            # Clean up platform_patterns
-            patterns_result = supabase.table('platform_patterns').delete().eq('transaction_id', transaction_id).execute()
-            if patterns_result.data:
-                logger.info(f"Cleaned up {len(patterns_result.data)} platform patterns from failed transaction")
-            
-            # Clean up relationship_instances
-            relationships_result = supabase.table('relationship_instances').delete().eq('transaction_id', transaction_id).execute()
-            if relationships_result.data:
-                logger.info(f"Cleaned up {len(relationships_result.data)} relationship instances from failed transaction")
-                
-        except Exception as e:
-            logger.error(f"Failed to cleanup partial data for transaction {transaction_id}: {e}")
-    
-    def _validate_event_data(self, event_data: Dict) -> Tuple[bool, List[str]]:
-        """Validate event data before database insertion"""
-        errors = []
-        
-        # Required fields validation
-        required_fields = {
-            'user_id': 'User ID',
-            'file_id': 'File ID', 
-            'provider': 'Provider',
-            'kind': 'Event Kind',
-            'payload': 'Payload',
-            'row_index': 'Row Index',
-            'source_filename': 'Source Filename'
-        }
-        
-        for field, field_name in required_fields.items():
-            if field not in event_data or event_data[field] is None:
-                errors.append(f"Missing required field: {field_name}")
-            elif isinstance(event_data[field], str) and event_data[field].strip() == '':
-                errors.append(f"Required field {field_name} cannot be empty")
-        
-        # Data type validation
-        if 'user_id' in event_data and not isinstance(event_data['user_id'], str):
-            errors.append("User ID must be a string")
-        
-        if 'row_index' in event_data and not isinstance(event_data['row_index'], int):
-            errors.append("Row index must be an integer")
-        
-        if 'confidence_score' in event_data:
-            score = event_data['confidence_score']
-            if not isinstance(score, (int, float)) or score < 0 or score > 1:
-                errors.append("Confidence score must be a number between 0 and 1")
-        
-        # Payload validation
-        if 'payload' in event_data:
-            payload = event_data['payload']
-            if not isinstance(payload, dict):
-                errors.append("Payload must be a dictionary")
-            elif not payload:
-                errors.append("Payload cannot be empty")
-        
-        # Entity validation
-        if 'entities' in event_data:
-            entities = event_data['entities']
-            if not isinstance(entities, dict):
-                errors.append("Entities must be a dictionary")
-            else:
-                for entity_type, entity_list in entities.items():
-                    if not isinstance(entity_list, list):
-                        errors.append(f"Entity list for {entity_type} must be a list")
-                    elif entity_list:
-                        for entity in entity_list:
-                            if not isinstance(entity, str) or entity.strip() == '':
-                                errors.append(f"Entity names must be non-empty strings")
-        
-        # Classification metadata validation
-        if 'classification_metadata' in event_data:
-            metadata = event_data['classification_metadata']
-            if not isinstance(metadata, dict):
-                errors.append("Classification metadata must be a dictionary")
-            else:
-                if 'category' in metadata and metadata['category']:
-                    valid_categories = ['payroll', 'revenue', 'expense', 'investment', 'tax', 'other']
-                    if metadata['category'] not in valid_categories:
-                        errors.append(f"Invalid category: {metadata['category']}. Must be one of {valid_categories}")
-        
-        return len(errors) == 0, errors
-    
-    def _validate_platform_info(self, platform_info: Dict) -> Tuple[bool, List[str]]:
-        """Validate platform detection information"""
-        errors = []
-        
-        if not isinstance(platform_info, dict):
-            errors.append("Platform info must be a dictionary")
-            return False, errors
-        
-        # Required fields
-        if 'platform' not in platform_info:
-            errors.append("Platform name is required")
-        
-        if 'confidence' in platform_info:
-            confidence = platform_info['confidence']
-            if not isinstance(confidence, (int, float)) or confidence < 0 or confidence > 1:
-                errors.append("Platform confidence must be a number between 0 and 1")
-        
-        # Platform name validation
-        if 'platform' in platform_info:
-            platform = platform_info['platform']
-            if not isinstance(platform, str):
-                errors.append("Platform name must be a string")
-            elif platform.strip() == '':
-                errors.append("Platform name cannot be empty")
-            else:
-                # Check for valid platform names
-                valid_platforms = ['razorpay', 'stripe', 'paypal', 'gusto', 'quickbooks', 'xero', 'unknown']
-                if platform not in valid_platforms:
-                    errors.append(f"Unknown platform: {platform}")
-        
-        return len(errors) == 0, errors
-    
-    def _validate_entity_data(self, entity_data: Dict) -> Tuple[bool, List[str]]:
-        """Validate entity data before storage"""
-        errors = []
-        
-        if not isinstance(entity_data, dict):
-            errors.append("Entity data must be a dictionary")
-            return False, errors
-        
-        for entity_type, entity_list in entity_data.items():
-            if not isinstance(entity_type, str) or entity_type.strip() == '':
-                errors.append("Entity type must be a non-empty string")
-                continue
-            
-            if not isinstance(entity_list, list):
-                errors.append(f"Entity list for {entity_type} must be a list")
-                continue
-            
-            for entity in entity_list:
-                if not isinstance(entity, str) or entity.strip() == '':
-                    errors.append(f"Entity name must be a non-empty string, got: {entity}")
-        
-        return len(errors) == 0, errors
-    
-    def _validate_relationship_data(self, relationship_data: Dict) -> Tuple[bool, List[str]]:
-        """Validate relationship data before storage"""
-        errors = []
-        
-        if not isinstance(relationship_data, dict):
-            errors.append("Relationship data must be a dictionary")
-            return False, errors
-        
-        # Required fields
-        required_fields = ['source_event_id', 'target_event_id', 'relationship_type', 'confidence_score']
-        for field in required_fields:
-            if field not in relationship_data:
-                errors.append(f"Missing required field: {field}")
-        
-        # Field validation
-        if 'source_event_id' in relationship_data and not relationship_data['source_event_id']:
-            errors.append("Source event ID cannot be empty")
-        
-        if 'target_event_id' in relationship_data and not relationship_data['target_event_id']:
-            errors.append("Target event ID cannot be empty")
-        
-        if 'relationship_type' in relationship_data:
-            rel_type = relationship_data['relationship_type']
-            valid_types = ['invoice_to_payment', 'fee_to_transaction', 'refund_to_original', 
-                          'payroll_to_payout', 'salary_to_payout', 'ai_discovered']
-            if rel_type not in valid_types:
-                errors.append(f"Invalid relationship type: {rel_type}")
-        
-        if 'confidence_score' in relationship_data:
-            score = relationship_data['confidence_score']
-            if not isinstance(score, (int, float)) or score < 0 or score > 1:
-                errors.append("Confidence score must be a number between 0 and 1")
-        
-        return len(errors) == 0, errors
-    
-    async def _store_normalized_entities(self, entities: Dict, user_id: str, supabase: Client) -> List[str]:
-        """Store normalized entities in the database"""
-        try:
-            stored_entity_ids = []
-            
-            for entity_type, entity_list in entities.items():
-                if not entity_list:
-                    continue
-                    
-                for entity_name in entity_list:
-                    if not entity_name or entity_name.strip() == '':
-                        continue
-                        
-                    # Check if entity already exists
-                    existing = supabase.table('normalized_entities').select('id').eq('user_id', user_id).eq('entity_type', entity_type).eq('canonical_name', entity_name.strip()).execute()
-                    
-                    if existing.data:
-                        stored_entity_ids.append(existing.data[0]['id'])
-                        continue
-                    
-                    # Create new normalized entity
-                    result = supabase.table('normalized_entities').insert({
-                        'user_id': user_id,
-                        'entity_type': entity_type,
-                        'canonical_name': entity_name.strip(),
-                        'aliases': [entity_name.strip()],
-                        'confidence_score': 0.8,
-                        'first_seen_at': utc_now().isoformat(),
-                        'last_seen_at': utc_now().isoformat()
-                    }).execute()
-                    
-                    if result.data:
-                        stored_entity_ids.append(result.data[0]['id'])
-                        
-            return stored_entity_ids
-            
-        except Exception as e:
-            logger.error(f"Failed to store normalized entities: {e}")
-            return []
-    
-    async def _store_platform_patterns(self, platform_info: Dict, user_id: str, supabase: Client) -> str:
-        """Store platform patterns for future detection"""
-        try:
-            platform_name = platform_info.get('platform', 'unknown')
-            if platform_name == 'unknown':
-                return None
-                
-            # Check if pattern already exists
-            existing = supabase.table('platform_patterns').select('id').eq('user_id', user_id).eq('platform_name', platform_name).execute()
-            
-            if existing.data:
-                # Update existing pattern
-                result = supabase.table('platform_patterns').update({
-                    'detection_count': existing.data[0].get('detection_count', 0) + 1,
-                    'last_detected_at': utc_now().isoformat(),
-                    'confidence_scores': existing.data[0].get('confidence_scores', []) + [platform_info.get('confidence', 0.0)],
-                    'matched_columns': platform_info.get('matched_columns', []),
-                    'matched_patterns': platform_info.get('matched_patterns', [])
-                }).eq('id', existing.data[0]['id']).execute()
-            else:
-                # Create new pattern
-                result = supabase.table('platform_patterns').insert({
-                    'user_id': user_id,
-                    'platform_name': platform_name,
-                    'detection_count': 1,
-                    'first_detected_at': utc_now().isoformat(),
-                    'last_detected_at': utc_now().isoformat(),
-                    'confidence_scores': [platform_info.get('confidence', 0.0)],
-                    'matched_columns': platform_info.get('matched_columns', []),
-                    'matched_patterns': platform_info.get('matched_patterns', []),
-                    'platform_metadata': {
-                        'description': platform_info.get('description', ''),
-                        'reasoning': platform_info.get('reasoning', ''),
-                        'typical_columns': platform_info.get('typical_columns', [])
-                    }
-                }).execute()
-            
-            if result.data:
-                return result.data[0]['id']
-            return None
-            
-        except Exception as e:
-            logger.error(f"Failed to store platform patterns: {e}")
-            return None
-    
-    async def _store_relationship_instances(self, relationships: List[Dict], user_id: str, supabase: Client) -> int:
-        """Store relationship instances in the database"""
-        try:
-            stored_count = 0
-            
-            for relationship in relationships:
-                try:
-                    result = supabase.table('relationship_instances').insert({
-                        'user_id': user_id,
-                        'source_event_id': relationship.get('source_event_id'),
-                        'target_event_id': relationship.get('target_event_id'),
-                        'relationship_type': relationship.get('relationship_type', 'ai_discovered'),
-                        'confidence_score': relationship.get('confidence_score', 0.5),
-                        'detection_method': 'ai_discovered',
-                        'relationship_metadata': {
-                            'source_platform': relationship.get('source_platform'),
-                            'target_platform': relationship.get('target_platform'),
-                            'amount_relationship': relationship.get('amount_relationship'),
-                            'temporal_relationship': relationship.get('temporal_relationship'),
-                            'entity_overlap': relationship.get('entity_overlap', [])
-                        },
-                        'detected_at': utc_now().isoformat()
-                    }).execute()
-                    
-                    if result.data:
-                        stored_count += 1
-                        
-                except Exception as rel_err:
-                    logger.error(f"Failed to store relationship {relationship}: {rel_err}")
-                    continue
-                    
-            return stored_count
-            
-        except Exception as e:
-            logger.error(f"Failed to store relationship instances: {e}")
-            return 0
-    
-    async def _store_computed_metrics(self, metrics: Dict, user_id: str, supabase: Client) -> str:
-        """Store computed metrics for the file processing"""
-        try:
-            result = supabase.table('metrics').insert({
-                'user_id': user_id,
-                'metric_type': 'file_processing',
-                'metric_name': 'processing_summary',
-                'metric_value': json.dumps(metrics),
-                'metadata': {
-                    'file_processing': True,
-                    'processing_timestamp': utc_now().isoformat(),
-                    'metrics_version': '1.0'
-                },
-                'computed_at': utc_now().isoformat()
-            }).execute()
-            
-            if result.data:
-                return result.data[0]['id']
-            return None
-            
-        except Exception as e:
-            logger.error(f"Failed to store computed metrics: {e}")
-            return None
-    
-    async def _store_discovered_platform(self, platform_info: Dict, user_id: str, supabase: Client) -> str:
-        """Store discovered platform information"""
-        try:
-            platform_name = platform_info.get('platform', 'unknown')
-            if platform_name == 'unknown':
-                return None
-                
-            # Check if platform already exists
-            existing = supabase.table('discovered_platforms').select('id').eq('user_id', user_id).eq('platform_name', platform_name).execute()
-            
-            if existing.data:
-                # Update existing platform
-                result = supabase.table('discovered_platforms').update({
-                    'detection_count': existing.data[0].get('detection_count', 0) + 1,
-                    'last_detected_at': utc_now().isoformat(),
-                    'confidence_scores': existing.data[0].get('confidence_scores', []) + [platform_info.get('confidence', 0.0)],
-                    'platform_metadata': {
-                        'description': platform_info.get('description', ''),
-                        'reasoning': platform_info.get('reasoning', ''),
-                        'typical_columns': platform_info.get('typical_columns', []),
-                        'matched_columns': platform_info.get('matched_columns', []),
-                        'matched_patterns': platform_info.get('matched_patterns', [])
-                    }
-                }).eq('id', existing.data[0]['id']).execute()
-            else:
-                # Create new platform discovery
-                result = supabase.table('discovered_platforms').insert({
-                    'user_id': user_id,
-                    'platform_name': platform_name,
-                    'detection_count': 1,
-                    'first_detected_at': utc_now().isoformat(),
-                    'last_detected_at': utc_now().isoformat(),
-                    'confidence_scores': [platform_info.get('confidence', 0.0)],
-                    'platform_metadata': {
-                        'description': platform_info.get('description', ''),
-                        'reasoning': platform_info.get('reasoning', ''),
-                        'typical_columns': platform_info.get('typical_columns', []),
-                        'matched_columns': platform_info.get('matched_columns', []),
-                        'matched_patterns': platform_info.get('matched_patterns', [])
-                    }
-                }).execute()
-            
-            if result.data:
-                return result.data[0]['id']
-            return None
-            
-        except Exception as e:
-            logger.error(f"Failed to store discovered platform: {e}")
-            return None
+            logger.error(f"File type detection failed: {e}")
+            return 'unknown'
     
     async def read_file(self, file_content: bytes, filename: str) -> Dict[str, pd.DataFrame]:
-        """Read file using optimized streaming processor"""
+        """Read Excel or CSV file and return dictionary of sheets"""
         try:
-            # Validate file size first
-            await self.streaming_processor.validate_file_size(file_content, filename)
-
-            # Use streaming processor for file reading
-            return await self.streaming_processor.read_file_streaming(file_content, filename)
-
-        except HTTPException:
-            raise  # Re-raise HTTP exceptions as-is
+            # Create a BytesIO object from the file content
+            file_stream = io.BytesIO(file_content)
+            
+            # Check file type and read accordingly
+            if filename.lower().endswith('.csv'):
+                # Handle CSV files
+                df = pd.read_csv(file_stream)
+                if not df.empty:
+                    return {'Sheet1': df}
+                else:
+                    raise HTTPException(status_code=400, detail="CSV file is empty")
+            else:
+                # Handle Excel files with explicit engine specification
+                sheets = {}
+                
+                # Try different engines in order of preference
+                engines_to_try = ['openpyxl', 'xlrd', None]  # None means default engine
+                
+                for engine in engines_to_try:
+                    try:
+                        file_stream.seek(0)  # Reset stream position for each attempt
+                        
+                        if engine:
+                            # Try with specific engine
+                            excel_file = pd.ExcelFile(file_stream, engine=engine)
+                            for sheet_name in excel_file.sheet_names:
+                                df = pd.read_excel(file_stream, sheet_name=sheet_name, engine=engine)
+                                if not df.empty:
+                                    sheets[sheet_name] = df
+                        else:
+                            # Try with default engine (no engine specified)
+                            excel_file = pd.ExcelFile(file_stream)
+                            for sheet_name in excel_file.sheet_names:
+                                df = pd.read_excel(file_stream, sheet_name=sheet_name)
+                                if not df.empty:
+                                    sheets[sheet_name] = df
+                        
+                        # If we successfully read any sheets, return them
+                        if sheets:
+                            return sheets
+                            
+                    except Exception as e:
+                        logger.warning(f"Failed to read Excel with engine {engine}: {e}")
+                        continue
+                
+                # If all engines failed, try to read as CSV (some Excel files are actually CSV)
+                try:
+                    file_stream.seek(0)
+                    # Try to read as CSV with different encodings
+                    for encoding in ['utf-8', 'latin-1', 'cp1252']:
+                        try:
+                            file_stream.seek(0)
+                            df = pd.read_csv(file_stream, encoding=encoding)
+                            if not df.empty:
+                                logger.info(f"Successfully read file as CSV with encoding {encoding}")
+                                return {'Sheet1': df}
+                        except Exception as csv_e:
+                            logger.warning(f"Failed to read as CSV with encoding {encoding}: {csv_e}")
+                            continue
+                except Exception as csv_fallback_e:
+                    logger.warning(f"CSV fallback failed: {csv_fallback_e}")
+                
+                # If all attempts failed, raise an error
+                raise HTTPException(status_code=400, detail="Could not read Excel file with any available engine or as CSV")
+                
         except Exception as e:
-            logger.error(f"Failed to read file {filename}: {e}")
-            raise HTTPException(status_code=400, detail=f"Failed to read file: {str(e)}")
-            # This code was replaced by streaming processor
+            logger.error(f"Error reading file {filename}: {e}")
+            raise HTTPException(status_code=400, detail=f"Error reading file {filename}: {str(e)}")
     
-    async def process_file(self, job_id: str, file_content: bytes, filename: str, 
+    async def process_file(self, job_id: str, file_content: bytes, filename: str,
                           user_id: str, supabase: Client) -> Dict[str, Any]:
-        """Optimized processing pipeline with batch AI classification for large files and transaction management"""
-        
-        transaction_id = None
-        file_id = None
-        
+        """Optimized processing pipeline with duplicate detection and batch AI classification"""
+
+        # Initialize duplicate detection service
+        duplicate_service = DuplicateDetectionService(supabase)
+
+        # Step 1: Read the file
+        await manager.send_update(job_id, {
+            "step": "reading",
+            "message": f"📖 Reading and parsing your {filename}...",
+            "progress": 5
+        })
+
         try:
-            # TRANSACTION MANAGEMENT: Begin transaction
-            await manager.send_update(job_id, {
-                "step": "initializing",
-                "message": "🚀 Initializing secure processing transaction...",
-                "progress": 5
-            })
-            
-            transaction_id = await self._begin_transaction(supabase)
-            logger.info(f"Processing file {filename} with transaction {transaction_id}")
-            
-            # Step 1: Read the file
-            await manager.send_update(job_id, {
-                "step": "reading",
-                "message": f"📖 Reading and parsing your {filename}...",
-                "progress": 10
-            })
-            
             sheets = await self.read_file(file_content, filename)
-            
-            # Step 2: Detect platform and document type
+        except Exception as e:
             await manager.send_update(job_id, {
-                "step": "analyzing",
-                "message": "🧠 Analyzing document structure and detecting platform...",
+                "step": "error",
+                "message": f"❌ Error reading file: {str(e)}",
+                "progress": 0
+            })
+            raise HTTPException(status_code=400, detail=f"Failed to read file: {str(e)}")
+
+        # Step 2: Comprehensive Duplicate Detection
+        await manager.send_update(job_id, {
+            "step": "duplicate_check",
+            "message": "🔍 Checking for duplicates and similar files...",
+            "progress": 15
+        })
+
+        try:
+            duplicate_analysis = await duplicate_service.process_file_upload(
+                user_id, file_content, filename, sheets
+            )
+
+            # Handle different duplicate detection phases
+            if duplicate_analysis['phase'] == 'basic_duplicate_detected':
+                await manager.send_update(job_id, {
+                    "step": "duplicate_found",
+                    "message": "⚠️ Identical file detected! User decision required.",
+                    "progress": 20,
+                    "duplicate_info": duplicate_analysis['duplicate_info'],
+                    "requires_user_decision": True
+                })
+
+                # Return early - wait for user decision
+                return {
+                    "status": "duplicate_detected",
+                    "duplicate_analysis": duplicate_analysis,
+                    "job_id": job_id,
+                    "requires_user_decision": True
+                }
+
+            elif duplicate_analysis['phase'] == 'versions_detected':
+                await manager.send_update(job_id, {
+                    "step": "versions_found",
+                    "message": f"📋 Found {len(duplicate_analysis['similar_files'])} similar files - analyzing versions...",
+                    "progress": 25,
+                    "version_info": {
+                        "similar_files": duplicate_analysis['similar_files'],
+                        "version_candidates": duplicate_analysis['version_candidates']
+                    }
+                })
+
+                # Generate intelligent recommendations
+                if len(duplicate_analysis['version_candidates']) > 1:
+                    # Create temporary version group for analysis
+                    version_group_id = str(uuid.uuid4())
+
+                    # Generate version recommendation
+                    recommendation = await duplicate_service.generate_version_recommendation(version_group_id)
+
+                    await manager.send_update(job_id, {
+                        "step": "version_analysis",
+                        "message": "🧠 Generated intelligent version recommendation",
+                        "progress": 30,
+                        "recommendation": recommendation
+                    })
+
+                    return {
+                        "status": "versions_detected",
+                        "duplicate_analysis": duplicate_analysis,
+                        "recommendation": recommendation,
+                        "job_id": job_id,
+                        "requires_user_decision": True
+                    }
+
+            elif duplicate_analysis['phase'] == 'similar_files_found':
+                await manager.send_update(job_id, {
+                    "step": "similar_files",
+                    "message": f"📄 Found {len(duplicate_analysis['similar_files'])} similar files",
+                    "progress": 20,
+                    "similar_files": duplicate_analysis['similar_files']
+                })
+
+            # Continue with normal processing if no blocking duplicates
+            await manager.send_update(job_id, {
+                "step": "processing",
+                "message": "✅ No blocking duplicates found - proceeding with processing",
+                "progress": 25
+            })
+
+        except Exception as e:
+            logger.warning(f"Duplicate detection failed: {e} - proceeding with normal processing")
+            duplicate_analysis = {'phase': 'error', 'error': str(e)}
+
+            await manager.send_update(job_id, {
+                "step": "duplicate_check_failed",
+                "message": "⚠️ Duplicate check failed - proceeding with upload",
                 "progress": 20
             })
-            
-            # Use first sheet for platform detection
-            first_sheet = list(sheets.values())[0]
-            platform_info = await self.platform_detector.detect_platform_optimized(first_sheet, filename)
-            doc_analysis = await self.analyzer.detect_document_type(first_sheet, filename)
-            
-            # VALIDATION: Validate platform info before proceeding
-            platform_valid, platform_errors = self._validate_platform_info(platform_info)
-            if not platform_valid:
-                error_msg = f"Platform validation failed: {', '.join(platform_errors)}"
-                logger.error(error_msg)
-                raise HTTPException(status_code=400, detail=error_msg)
-            
-            # Initialize EntityResolver and AI classifier with Supabase client
-            self.entity_resolver = EntityResolver(supabase)
-            self.ai_classifier = AIRowClassifier(self.openai, self.entity_resolver)
-            self.row_processor = RowProcessor(self.platform_detector, self.ai_classifier, self.openai)
-            
-            # Step 3: Create raw_records entry with transaction ID
-            await manager.send_update(job_id, {
-                "step": "storing",
-                "message": "💾 Storing file metadata securely...",
-                "progress": 30
-            })
-            
-            # Calculate file hash for duplicate detection
-            file_hash = hashlib.sha256(file_content).hexdigest()
-            
-            # VALIDATION: Validate required data before storage
-            raw_record_data = {
-                'user_id': user_id,
-                'file_name': filename,
-                'file_size': len(file_content),
-                'source': 'file_upload',
-                'transaction_id': transaction_id,  # Link to transaction
-                'content': {
-                    'sheets': list(sheets.keys()),
-                    'platform_detection': platform_info,
-                    'document_analysis': doc_analysis,
-                    'file_hash': file_hash,
-                    'total_rows': sum(len(sheet) for sheet in sheets.values()),
-                    'processed_at': utc_now().isoformat()
-                },
-                'status': 'processing',
-                'classification_status': 'processing'
-            }
-            
-            # Validate raw record data
-            if not user_id or not filename or not file_hash:
-                raise HTTPException(status_code=400, detail="Missing required file metadata")
-            
-            # Store in raw_records
-            raw_record_result = supabase.table('raw_records').insert(raw_record_data).execute()
-            
-            if raw_record_result.data:
-                file_id = raw_record_result.data[0]['id']
-                logger.info(f"Created raw record {file_id} in transaction {transaction_id}")
-            else:
-                raise HTTPException(status_code=500, detail="Failed to create raw record")
-            
-            # Step 4: Create ingestion_jobs entry with transaction ID
-            # Create the job entry - this must exist before processing rows
-            job_data = {
+        
+        # Step 2: Detect platform and document type
+        await manager.send_update(job_id, {
+            "step": "analyzing",
+            "message": "🧠 Analyzing document structure and detecting platform...",
+            "progress": 20
+        })
+        
+        # Use first sheet for platform detection
+        first_sheet = list(sheets.values())[0]
+        platform_info = self.platform_detector.detect_platform(first_sheet, filename)
+        doc_analysis = await self.analyzer.detect_document_type(first_sheet, filename)
+        
+        # Initialize EntityResolver and AI classifier with Supabase client
+        self.entity_resolver = EntityResolver(supabase)
+        self.ai_classifier = AIRowClassifier(self.openai, self.entity_resolver)
+        self.row_processor = RowProcessor(self.platform_detector, self.ai_classifier)
+        
+        # Step 3: Create raw_records entry
+        await manager.send_update(job_id, {
+            "step": "storing",
+            "message": "💾 Storing file metadata...",
+            "progress": 35
+        })
+
+        # Calculate file hash for duplicate detection
+        file_hash = hashlib.sha256(file_content).hexdigest()
+
+        # Store in raw_records with dedicated file_hash column
+        raw_record_result = supabase.table('raw_records').insert({
+            'user_id': user_id,
+            'file_name': filename,
+            'file_size': len(file_content),
+            'file_hash': file_hash,  # Dedicated column for fast duplicate detection
+            'source': 'file_upload',
+            'content': {
+                'sheets': list(sheets.keys()),
+                'platform_detection': platform_info,
+                'document_analysis': doc_analysis,
+                'file_hash': file_hash,  # Also keep in content for backward compatibility
+                'total_rows': sum(len(sheet) for sheet in sheets.values()),
+                'processed_at': datetime.utcnow().isoformat(),
+                'duplicate_analysis': duplicate_analysis  # Store duplicate analysis results
+            },
+            'status': 'processing',
+            'classification_status': 'processing'
+        }).execute()
+        
+        if raw_record_result.data:
+            file_id = raw_record_result.data[0]['id']
+        else:
+            raise HTTPException(status_code=500, detail="Failed to create raw record")
+        
+        # Step 4: Create or update ingestion_jobs entry
+        try:
+            # Try to create the job entry if it doesn't exist
+            job_result = supabase.table('ingestion_jobs').insert({
                 'id': job_id,
                 'user_id': user_id,
-                'record_id': file_id,
-                'transaction_id': transaction_id,  # Link to transaction
-                'job_type': 'classification',
-                'status': 'running',
-                'progress': 0,
-                'started_at': utc_now().isoformat()
-            }
-            
-            # Validate job data
-            if not job_id or not user_id or not file_id:
-                raise HTTPException(status_code=400, detail="Missing required job metadata")
-            
-            try:
-                job_result = supabase.table('ingestion_jobs').insert(job_data).execute()
-                if not job_result.data:
-                    raise HTTPException(status_code=500, detail="Failed to create ingestion job")
-            except Exception as e:
-                # If job already exists, update it
-                logger.info(f"Job {job_id} already exists, updating...")
-                update_result = supabase.table('ingestion_jobs').update({
-                    'record_id': file_id,
-                    'transaction_id': transaction_id,  # Link to transaction
-                    'status': 'running',
-                    'progress': 0,
-                    'started_at': utc_now().isoformat()
-                }).eq('id', job_id).execute()
-
-                if not update_result.data:
-                    raise HTTPException(status_code=500, detail="Failed to update ingestion job")
-
-        # Now we can safely process rows since the job exists
+                'file_id': file_id,
+                'status': 'processing',
+                'created_at': datetime.utcnow().isoformat(),
+                'updated_at': datetime.utcnow().isoformat()
+            }).execute()
+        except Exception as e:
+            # If job already exists, update it
+            logger.info(f"Job {job_id} already exists, updating...")
+            supabase.table('ingestion_jobs').update({
+                'file_id': file_id,
+                'status': 'processing',
+                'updated_at': datetime.utcnow().isoformat()
+            }).eq('id', job_id).execute()
+        
         # Step 5: Process each sheet with optimized batch processing
         await manager.send_update(job_id, {
             "step": "streaming",
-            "message": "🔄 Processing rows in optimized batches securely...",
+            "message": "🔄 Processing rows in optimized batches...",
             "progress": 40
         })
         
@@ -3359,13 +2853,8 @@ class ExcelProcessor:
             'filename': filename,
             'user_id': user_id,
             'file_id': file_id,
-            'job_id': job_id,
-            'transaction_id': transaction_id  # Include transaction ID in context
+            'job_id': job_id
         }
-        
-        # Performance optimization: Pre-calculate common values
-        platform_name = platform_info.get('platform', 'unknown')
-        platform_confidence = platform_info.get('confidence', 0.0)
         
         # Process each sheet with batch optimization
         for sheet_name, df in sheets.items():
@@ -3376,7 +2865,7 @@ class ExcelProcessor:
             rows = list(df.iterrows())
             
             # Process rows in batches for efficiency
-            batch_size = config.batch_size  # Use centralized configuration
+            batch_size = 20  # Process 20 rows at once
             total_batches = (len(rows) + batch_size - 1) // batch_size
             
             for batch_idx in range(0, len(rows), batch_size):
@@ -3387,7 +2876,7 @@ class ExcelProcessor:
                     row_data = [row[1] for row in batch_rows]  # row[1] is the Series
                     row_indices = [row[0] for row in batch_rows]  # row[0] is the index
                     
-                    # Process batch with AI classification (single API call for multiple rows)
+                    # Process batch with AI classification
                     batch_classifications = await self.batch_classifier.classify_rows_batch(
                         row_data, platform_info, column_names
                     )
@@ -3395,50 +2884,22 @@ class ExcelProcessor:
                     # Store each row from the batch
                     for i, (row_index, row) in enumerate(batch_rows):
                         try:
-                            # Use batch classification result directly
-                            ai_classification = batch_classifications[i] if i < len(batch_classifications) else {}
-                            
-                            # Create event for this row with pre-classified data
+                            # Create event for this row
                             event = await self.row_processor.process_row(
-                                row, row_index, sheet_name, platform_info, file_context, column_names, ai_classification
+                                row, row_index, sheet_name, platform_info, file_context, column_names
                             )
-
-                            # Entity resolution (batch mode previously skipped). Resolve if entities present
-                            try:
-                                ai_entities = ai_classification.get('entities', {}) if isinstance(ai_classification, dict) else {}
-                                if ai_entities:
-                                    # Convert row to simple dict for identifier extraction
-                                    row_data_dict = {}
-                                    for col, val in row.items():
-                                        if pd.notna(val):
-                                            row_data_dict[str(col)] = str(val)
-
-                                    resolution_result = await self.entity_resolver.resolve_entities_batch(
-                                        ai_entities,
-                                        platform_info.get('platform', 'unknown'),
-                                        user_id,
-                                        row_data_dict,
-                                        column_names,
-                                        filename,
-                                        f"row-{row_index}"
-                                    )
-
-                                    # Inject resolved entities into event metadata
-                                    if resolution_result and 'resolved_entities' in resolution_result:
-                                        event['classification_metadata']['entities'] = resolution_result['resolved_entities']
-                            except Exception as entity_err:
-                                logger.error(f"Entity resolution failed for row {row_index}: {entity_err}")
                             
-                            # Ensure classification_metadata reflects final entities
-                            if 'entities' not in event['classification_metadata'] or not event['classification_metadata']['entities']:
-                                event['classification_metadata']['entities'] = event['payload'].get('entities', {})
-
-                            # VALIDATION: Validate event data before storage
-                            event_data_for_storage = {
+                            # Use batch classification result
+                            if i < len(batch_classifications):
+                                ai_classification = batch_classifications[i]
+                                event['classification_metadata'].update(ai_classification)
+                            
+                            # Store event in raw_events table with enrichment fields
+                            enriched_payload = event['payload']  # This is now the enriched payload
+                            event_result = supabase.table('raw_events').insert({
                                 'user_id': user_id,
                                 'file_id': file_id,
                                 'job_id': job_id,
-                                'transaction_id': transaction_id,  # Link to transaction
                                 'provider': event['provider'],
                                 'kind': event['kind'],
                                 'source_platform': event['source_platform'],
@@ -3453,7 +2914,7 @@ class ExcelProcessor:
                                 'status': event['status'],
                                 'confidence_score': event['confidence_score'],
                                 'classification_metadata': event['classification_metadata'],
-                                'entities': event['classification_metadata'].get('entities', {}) or enriched_payload.get('entities', {}),
+                                'entities': event['classification_metadata'].get('entities', {}),
                                 'relationships': event['classification_metadata'].get('relationships', {}),
                                 # Enrichment fields
                                 'amount_original': enriched_payload.get('amount_original'),
@@ -3468,19 +2929,7 @@ class ExcelProcessor:
                                 'platform_ids': enriched_payload.get('platform_ids', {}),
                                 'standard_description': enriched_payload.get('standard_description'),
                                 'ingested_on': enriched_payload.get('ingested_on')
-                            }
-                            
-                            # Validate event data before storage
-                            event_valid, event_errors = self._validate_event_data(event_data_for_storage)
-                            if not event_valid:
-                                error_msg = f"Event validation failed for row {row_index}: {', '.join(event_errors)}"
-                                logger.error(error_msg)
-                                errors.append(error_msg)
-                                continue  # Skip this event and continue with next row
-                            
-                            # Store event in raw_events table with enrichment fields
-                            enriched_payload = event['payload']  # This is now the enriched payload
-                            event_result = supabase.table('raw_events').insert(event_data_for_storage).execute()
+                            }).execute()
                             
                             if event_result.data:
                                 events_created += 1
@@ -3525,7 +2974,7 @@ class ExcelProcessor:
                 'total_rows': total_rows,
                 'events_created': events_created,
                 'errors': errors,
-                'processed_at': utc_now().isoformat()
+                'processed_at': datetime.utcnow().isoformat()
             }
         }).eq('id', file_id).execute()
         
@@ -3552,8 +3001,8 @@ class ExcelProcessor:
                 'matched_patterns': platform_info.get('matched_patterns', []),
                 'file_hash': file_hash,
                 'processing_mode': 'batch_optimized',
-                'batch_size': config.batch_size,
-                'ai_calls_reduced': f"{(total_rows - (total_rows // {config.batch_size})) / total_rows * 100:.1f}%",
+                'batch_size': 20,
+                'ai_calls_reduced': f"{(total_rows - (total_rows // 20)) / total_rows * 100:.1f}%",
                 'file_type': filename.split('.')[-1].lower() if '.' in filename else 'unknown'
             },
             'errors': errors
@@ -3575,187 +3024,24 @@ class ExcelProcessor:
                 }
             }
         
-        # Step 8: Store data in normalized tables
-        await manager.send_update(job_id, {
-            "step": "storing_normalized",
-            "message": "💾 Storing normalized data and patterns...",
-            "progress": 96
-        })
-        
-        try:
-            # Collect all entities from processed events
-            all_entities = {}
-            
-            # Get entities from the events we just created
-            events_result = supabase.table('raw_events').select('entities').eq('user_id', user_id).eq('file_id', file_id).execute()
-            
-            if events_result.data:
-                for event in events_result.data:
-                    event_entities = event.get('entities', {})
-                    if isinstance(event_entities, dict):
-                        for entity_type, entity_list in event_entities.items():
-                            if entity_type not in all_entities:
-                                all_entities[entity_type] = set()
-                            if isinstance(entity_list, list):
-                                all_entities[entity_type].update(entity_list)
-                            elif entity_list:
-                                all_entities[entity_type].add(str(entity_list))
-            
-            # Convert sets to lists for storage
-            entities_for_storage = {k: list(v) for k, v in all_entities.items()}
-            
-            # Store normalized entities
-            stored_entity_ids = await self._store_normalized_entities(entities_for_storage, user_id, supabase)
-            logger.info(f"Stored {len(stored_entity_ids)} normalized entities")
-            
-            # Store platform patterns
-            platform_pattern_id = await self._store_platform_patterns(platform_info, user_id, supabase)
-            if platform_pattern_id:
-                logger.info(f"Stored platform pattern with ID: {platform_pattern_id}")
-            
-            # Store discovered platform
-            discovered_platform_id = await self._store_discovered_platform(platform_info, user_id, supabase)
-            if discovered_platform_id:
-                logger.info(f"Stored discovered platform with ID: {discovered_platform_id}")
-            
-            # Store computed metrics
-            metrics_data = {
-                'total_rows': total_rows,
-                'events_created': events_created,
-                'platform_detected': platform_info.get('platform', 'unknown'),
-                'processing_time': time.time(),
-                'entities_found': len(stored_entity_ids),
-                'platform_patterns_stored': 1 if platform_pattern_id else 0,
-                'discovered_platforms_stored': 1 if discovered_platform_id else 0
-            }
-            metrics_id = await self._store_computed_metrics(metrics_data, user_id, supabase)
-            if metrics_id:
-                logger.info(f"Stored metrics with ID: {metrics_id}")
-                
-        except Exception as e:
-            logger.error(f"Failed to store normalized data: {e}")
-            errors.append(f"Normalized data storage failed: {str(e)}")
-        
-        # Step 9: Automatic Relationship Detection
-        await manager.send_update(job_id, {
-            "step": "relationships",
-            "message": "🔗 Detecting financial relationships automatically...",
-            "progress": 97
-        })
-        
-        try:
-            # Initialize Enhanced Relationship Detector
-            enhanced_detector = EnhancedRelationshipDetector(self.openai, supabase)
-            
-            # Detect relationships automatically
-            relationship_results = await enhanced_detector.detect_all_relationships(user_id)
-            
-            if relationship_results and 'relationships' in relationship_results:
-                relationships = relationship_results['relationships']
-                
-                # Store relationship instances
-                stored_relationships = await self._store_relationship_instances(relationships, user_id, supabase)
-                logger.info(f"Stored {stored_relationships} relationship instances")
-                
-                # Add relationship summary to insights
-                insights['relationship_summary'] = {
-                    'total_relationships_found': len(relationships),
-                    'relationships_stored': stored_relationships,
-                    'relationship_types': list(set(rel.get('relationship_type', 'unknown') for rel in relationships)),
-                    'detection_method': 'automatic',
-                    'detected_at': utc_now().isoformat()
-                }
-                
-                await manager.send_update(job_id, {
-                    "step": "relationships",
-                    "message": f"🔗 Found and stored {stored_relationships} financial relationships!",
-                    "progress": 98
-                })
-            else:
-                logger.info("No relationships detected automatically")
-                insights['relationship_summary'] = {
-                    'total_relationships_found': 0,
-                    'relationships_stored': 0,
-                    'relationship_types': [],
-                    'detection_method': 'automatic',
-                    'detected_at': utc_now().isoformat()
-                }
-                
-        except Exception as e:
-            logger.error(f"Automatic relationship detection failed: {e}")
-            errors.append(f"Relationship detection failed: {str(e)}")
-            insights['relationship_summary'] = {
-                'total_relationships_found': 0,
-                'relationships_stored': 0,
-                'relationship_types': [],
-                'detection_method': 'automatic',
-                'error': str(e),
-                'detected_at': utc_now().isoformat()
-            }
-        
-        # Step 10: Update ingestion_jobs with completion
+        # Step 8: Update ingestion_jobs with completion
         supabase.table('ingestion_jobs').update({
             'status': 'completed',
-            'updated_at': utc_now().isoformat()
+            'updated_at': datetime.utcnow().isoformat()
         }).eq('id', job_id).execute()
-        
-        # TRANSACTION MANAGEMENT: Commit transaction on success
-        await manager.send_update(job_id, {
-            "step": "committing",
-            "message": "🔒 Committing transaction securely...",
-            "progress": 99
-        })
-        
-        try:
-            await self._commit_transaction(supabase, transaction_id)
-            logger.info(f"Transaction {transaction_id} committed successfully for file {filename}")
-        except Exception as commit_error:
-            logger.error(f"Failed to commit transaction {transaction_id}: {commit_error}")
-            # Even if commit fails, we've processed the data successfully
-            # The transaction will be marked as failed but data remains
-            errors.append(f"Transaction commit failed: {str(commit_error)}")
         
         await manager.send_update(job_id, {
             "step": "completed",
-            "message": f"✅ Processing completed! {events_created} events created, {len(stored_entity_ids) if 'stored_entity_ids' in locals() else 0} entities normalized, {insights.get('relationship_summary', {}).get('relationships_stored', 0)} relationships detected.",
+            "message": f"✅ Processing completed! {events_created} events created from {processed_rows} rows.",
             "progress": 100
         })
         
         return insights
-        
-        except Exception as processing_error:
-            # TRANSACTION MANAGEMENT: Rollback transaction on failure
-            logger.error(f"Processing failed for file {filename}: {processing_error}")
-            
-            if transaction_id:
-                try:
-                    await self._rollback_transaction(supabase, transaction_id, str(processing_error))
-                    logger.info(f"Transaction {transaction_id} rolled back successfully")
-                except Exception as rollback_error:
-                    logger.error(f"Failed to rollback transaction {transaction_id}: {rollback_error}")
-            
-            # Update job status to failed
-            try:
-                supabase.table('ingestion_jobs').update({
-                    'status': 'failed',
-                    'error_details': str(processing_error),
-                    'updated_at': utc_now().isoformat()
-                }).eq('id', job_id).execute()
-            except Exception as update_error:
-                logger.error(f"Failed to update job status: {update_error}")
-            
-            # Send error update to user
-            await manager.send_update(job_id, {
-                "step": "error",
-                "message": f"❌ Processing failed: {str(processing_error)}",
-                "progress": 0
-            })
-            
-            # Re-raise the error for proper HTTP error handling
-            raise HTTPException(status_code=500, detail=f"File processing failed: {str(processing_error)}")
 
-# Global optimized processor instance
 processor = ExcelProcessor()
+
+# Global enhanced processor instance
+enhanced_processor = EnhancedFileProcessor() if ADVANCED_FEATURES_AVAILABLE else None
 
 @app.websocket("/ws/{job_id}")
 async def websocket_endpoint(websocket: WebSocket, job_id: str):
@@ -3800,7 +3086,7 @@ async def process_excel(request: ProcessRequest, background_tasks: BackgroundTas
             # Try to update existing job
             result = supabase.table('ingestion_jobs').update({
             'status': 'processing',
-            'started_at': utc_now().isoformat(),
+            'started_at': datetime.utcnow().isoformat(),
             'progress': 10
         }).eq('id', request.job_id).execute()
         
@@ -3811,7 +3097,7 @@ async def process_excel(request: ProcessRequest, background_tasks: BackgroundTas
                     'job_type': 'fastapi_excel_analysis',
                     'user_id': request.user_id,
                     'status': 'processing',
-                    'started_at': utc_now().isoformat(),
+                    'started_at': datetime.utcnow().isoformat(),
                     'progress': 10
                 }).execute()
         except Exception as e:
@@ -3822,7 +3108,7 @@ async def process_excel(request: ProcessRequest, background_tasks: BackgroundTas
                 'job_type': 'fastapi_excel_analysis',
                 'user_id': request.user_id,
                 'status': 'processing',
-                'started_at': utc_now().isoformat(),
+                'started_at': datetime.utcnow().isoformat(),
                 'progress': 10
             }).execute()
         
@@ -3838,7 +3124,7 @@ async def process_excel(request: ProcessRequest, background_tasks: BackgroundTas
         # Update job with results
         supabase.table('ingestion_jobs').update({
             'status': 'completed',
-            'completed_at': utc_now().isoformat(),
+            'completed_at': datetime.utcnow().isoformat(),
             'progress': 100,
             'result': results
         }).eq('id', request.job_id).execute()
@@ -3876,8 +3162,7 @@ async def test_raw_events(user_id: str):
     try:
         # Initialize Supabase client (you'll need to provide credentials)
         supabase_url = os.environ.get("SUPABASE_URL")
-        # Use SERVICE_KEY consistently
-        supabase_key = os.environ.get("SUPABASE_SERVICE_KEY")
+        supabase_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
         
         # Clean the JWT token (remove newlines and whitespace)
         if supabase_key:
@@ -3933,7 +3218,7 @@ async def health_check():
         return {
             "status": status,
             "service": "Finley AI Backend",
-            "timestamp": utc_now().isoformat(),
+            "timestamp": datetime.utcnow().isoformat(),
             "issues": issues,
             "environment_configured": len(issues) == 0
         }
@@ -3942,7 +3227,7 @@ async def health_check():
             "status": "unhealthy",
             "service": "Finley AI Backend",
             "error": str(e),
-            "timestamp": utc_now().isoformat()
+            "timestamp": datetime.utcnow().isoformat()
         }
 
 @app.post("/upload-and-process")
@@ -3951,50 +3236,187 @@ async def upload_and_process(
     user_id: str = Form("550e8400-e29b-41d4-a716-446655440000"),  # Default test user ID
     job_id: str = Form(None)  # Optional, will generate if not provided
 ):
-    """Direct file upload and processing endpoint for testing"""
+    """Direct file upload and processing endpoint with duplicate detection"""
     try:
         # Generate job_id if not provided
         if not job_id:
-            import uuid
-            job_id = str(uuid.uuid4())
-        
+            job_id = f"test-job-{int(time.time())}"
+
         # Read file content
         file_content = await file.read()
-        
+
         # Initialize Supabase client
         supabase_url = os.environ.get("SUPABASE_URL")
-        supabase_key = os.environ.get("SUPABASE_SERVICE_KEY")
-        
+        supabase_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
+
         # Clean the JWT token (remove newlines and whitespace)
         if supabase_key:
             supabase_key = supabase_key.strip().replace('\n', '').replace('\r', '')
-        
+
         if not supabase_url or not supabase_key:
             raise HTTPException(status_code=500, detail="Supabase credentials not configured")
-        
+
         supabase: Client = create_client(supabase_url, supabase_key)
-        
+
         # Create ExcelProcessor instance
         excel_processor = ExcelProcessor()
-        
-        # Process the file directly
+
+        # Process the file with duplicate detection
         results = await excel_processor.process_file(
-            job_id, 
-            file_content, 
+            job_id,
+            file_content,
             file.filename,
             user_id,
             supabase
         )
-        
+
         return {
-            "status": "success", 
-            "job_id": job_id, 
+            "status": "success",
+            "job_id": job_id,
             "results": results,
             "message": "File processed successfully"
         }
-        
+
     except Exception as e:
         logger.error(f"Upload and process error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# ============================================================================
+# DUPLICATE HANDLING ENDPOINTS
+# ============================================================================
+
+class DuplicateDecisionRequest(BaseModel):
+    job_id: str
+    user_id: str
+    decision: str  # 'replace', 'keep_both', 'skip'
+    file_hash: str
+
+@app.post("/handle-duplicate-decision")
+async def handle_duplicate_decision(request: DuplicateDecisionRequest):
+    """Handle user's decision about duplicate files"""
+    try:
+        # Initialize Supabase client
+        supabase_url = os.environ.get("SUPABASE_URL")
+        supabase_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
+
+        if supabase_key:
+            supabase_key = supabase_key.strip().replace('\n', '').replace('\r', '')
+
+        if not supabase_url or not supabase_key:
+            raise HTTPException(status_code=500, detail="Supabase credentials not configured")
+
+        supabase: Client = create_client(supabase_url, supabase_key)
+        duplicate_service = DuplicateDetectionService(supabase)
+
+        # Handle the duplicate decision
+        result = await duplicate_service.handle_duplicate_decision(
+            request.user_id,
+            request.file_hash,
+            request.decision
+        )
+
+        # Send update to WebSocket
+        await manager.send_update(request.job_id, {
+            "step": "duplicate_decision_processed",
+            "message": f"✅ Duplicate decision processed: {request.decision}",
+            "progress": 30,
+            "decision_result": result
+        })
+
+        # If decision is to proceed, continue with processing
+        if result['action'] == 'proceed_with_new':
+            await manager.send_update(request.job_id, {
+                "step": "continuing_processing",
+                "message": "🔄 Continuing with file processing...",
+                "progress": 35
+            })
+
+        return {
+            "status": "success",
+            "decision_result": result,
+            "message": f"Duplicate decision '{request.decision}' processed successfully"
+        }
+
+    except Exception as e:
+        logger.error(f"Error handling duplicate decision: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+class VersionRecommendationFeedback(BaseModel):
+    recommendation_id: str
+    user_id: str
+    accepted: bool
+    feedback: Optional[str] = None
+
+@app.post("/version-recommendation-feedback")
+async def submit_version_recommendation_feedback(request: VersionRecommendationFeedback):
+    """Submit user feedback on version recommendations"""
+    try:
+        # Initialize Supabase client
+        supabase_url = os.environ.get("SUPABASE_URL")
+        supabase_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
+
+        if supabase_key:
+            supabase_key = supabase_key.strip().replace('\n', '').replace('\r', '')
+
+        if not supabase_url or not supabase_key:
+            raise HTTPException(status_code=500, detail="Supabase credentials not configured")
+
+        supabase: Client = create_client(supabase_url, supabase_key)
+        duplicate_service = DuplicateDetectionService(supabase)
+
+        # Update recommendation with feedback
+        success = await duplicate_service.update_recommendation_feedback(
+            request.recommendation_id,
+            request.accepted,
+            request.feedback
+        )
+
+        if success:
+            return {
+                "status": "success",
+                "message": "Feedback submitted successfully"
+            }
+        else:
+            raise HTTPException(status_code=500, detail="Failed to submit feedback")
+
+    except Exception as e:
+        logger.error(f"Error submitting version feedback: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/duplicate-analysis/{user_id}")
+async def get_duplicate_analysis(user_id: str):
+    """Get duplicate analysis and recommendations for a user"""
+    try:
+        # Initialize Supabase client
+        supabase_url = os.environ.get("SUPABASE_URL")
+        supabase_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
+
+        if supabase_key:
+            supabase_key = supabase_key.strip().replace('\n', '').replace('\r', '')
+
+        if not supabase_url or not supabase_key:
+            raise HTTPException(status_code=500, detail="Supabase credentials not configured")
+
+        supabase: Client = create_client(supabase_url, supabase_key)
+
+        # Get file versions for user
+        versions_result = supabase.table('file_versions').select(
+            '*'
+        ).eq('user_id', user_id).execute()
+
+        # Get pending recommendations
+        recommendations_result = supabase.table('version_recommendations').select(
+            '*'
+        ).eq('user_id', user_id).is_('user_accepted', 'null').execute()
+
+        return {
+            "status": "success",
+            "file_versions": versions_result.data,
+            "pending_recommendations": recommendations_result.data
+        }
+
+    except Exception as e:
+        logger.error(f"Error getting duplicate analysis: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/test-simple")
@@ -4011,7 +3433,7 @@ async def test_simple():
         return {
             "status": "success",
             "message": "Backend is working! All dependencies loaded successfully.",
-            "timestamp": utc_now().isoformat(),
+            "timestamp": datetime.utcnow().isoformat(),
             "dependencies": {
                 "pandas": "loaded",
                 "numpy": "loaded", 
@@ -4030,7 +3452,7 @@ async def test_simple():
         return {
             "status": "error",
             "message": f"Backend has issues: {str(e)}",
-            "timestamp": utc_now().isoformat(),
+            "timestamp": datetime.utcnow().isoformat(),
             "error": str(e)
         }
 
@@ -4208,7 +3630,7 @@ async def test_ai_row_classification():
         "total_tests": len(test_results),
         "test_results": test_results,
         "processing_mode": "batch_optimized",
-        "batch_size": 50,
+        "batch_size": 20,
         "performance_notes": "Batch processing reduces AI calls by 95% for large files"
     }
 
@@ -4269,12 +3691,12 @@ async def test_batch_processing():
         "category_breakdown": dict(categories),
         "row_type_breakdown": dict(row_types),
         "average_confidence": round(avg_confidence, 3),
-        "batch_size": 50,
+        "batch_size": 20,
         "processing_mode": "batch_optimized",
         "performance_improvement": {
             "speed": "20x faster for large files",
             "cost": "95% reduction in AI API calls",
-            "efficiency": "Batch processing of 50 rows per AI call"
+            "efficiency": "Batch processing of 20 rows per AI call"
         }
     }
 
@@ -4397,13 +3819,13 @@ class EntityResolver:
     async def resolve_entity(self, entity_name: str, entity_type: str, platform: str, 
                            user_id: str, row_data: Dict, column_names: List[str], 
                            source_file: str, row_id: str) -> Dict[str, Any]:
-        """Resolve entity using database functions with improved over-merging prevention"""
+        """Resolve entity using database functions and return resolution details"""
         
         # Extract strong identifiers
         identifiers = self.extract_strong_identifiers(row_data, column_names)
         
         try:
-            # Call the improved database function that now includes name similarity checks
+            # Call database function to find or create entity
             result = self.supabase.rpc('find_or_create_entity', {
                 'p_user_id': user_id,
                 'p_entity_name': entity_name,
@@ -4462,8 +3884,6 @@ class EntityResolver:
                 'error': str(e)
             }
     
-
-    
     async def resolve_entities_batch(self, entities: Dict[str, List[str]], platform: str, 
                                    user_id: str, row_data: Dict, column_names: List[str],
                                    source_file: str, row_id: str) -> Dict[str, Any]:
@@ -4477,21 +3897,12 @@ class EntityResolver:
         
         resolution_results = []
         
-        # Map plural keys from AI/classification to singular types expected by SQL
-        type_map = {
-            'employees': 'employee',
-            'vendors': 'vendor',
-            'customers': 'customer',
-            'projects': 'project'
-        }
-
         for entity_type, entity_list in entities.items():
-            normalized_type = type_map.get(entity_type, entity_type)
             for entity_name in entity_list:
                 if entity_name and entity_name.strip():
                     resolution = await self.resolve_entity(
                         entity_name.strip(),
-                        normalized_type,
+                        entity_type,
                         platform,
                         user_id,
                         row_data,
@@ -4752,45 +4163,173 @@ async def test_entity_stats(user_id: str):
 
 @app.get("/test-cross-file-relationships/{user_id}")
 async def test_cross_file_relationships(user_id: str):
-    """Test cross-file relationship detection using EnhancedRelationshipDetector"""
+    """Test cross-file relationship detection (payroll ↔ payout)"""
     try:
-        # Initialize OpenAI client
-        openai_client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
-        
-        # Initialize Supabase client
+        # Create test Supabase client
         supabase_url = os.getenv('SUPABASE_URL')
-        supabase_key = os.getenv('SUPABASE_KEY')
-        
-        if not supabase_url or not supabase_key:
-            return {
-                "message": "Supabase credentials not configured",
-                "user_id": user_id,
-                "success": False
-            }
-        
+        supabase_key = os.getenv('SUPABASE_SERVICE_KEY')
+
+        # Clean the JWT token (remove newlines and whitespace)
+        if supabase_key:
+            supabase_key = supabase_key.strip().replace('\n', '').replace('\r', '')
+
         supabase = create_client(supabase_url, supabase_key)
-        
-        # Initialize Enhanced Relationship Detector
-        enhanced_detector = EnhancedRelationshipDetector(openai_client, supabase)
-        
+
+        # Initialize relationship detector
+        relationship_detector = CrossFileRelationshipDetector(supabase)
+
         # Detect relationships
-        results = await enhanced_detector.detect_all_relationships(user_id)
-        
+        results = await relationship_detector.detect_cross_file_relationships(user_id)
+
         return {
-            "message": "Enhanced Cross-File Relationship Analysis Completed",
+            "message": "Cross-File Relationship Analysis",
             "user_id": user_id,
             "success": True,
             **results
         }
-        
+
     except Exception as e:
-        logger.error(f"Enhanced cross-file relationship test failed: {e}")
+        logger.error(f"Cross-file relationship test failed: {e}")
         return {
-            "message": "Enhanced Cross-File Relationship Test Failed",
+            "message": "Cross-File Relationship Test Failed",
             "error": str(e),
             "user_id": user_id,
             "relationships": [],
             "success": False
+        }
+
+@app.get("/test-enhanced-relationship-detection/{user_id}")
+async def test_enhanced_relationship_detection(user_id: str):
+    """Test ENHANCED relationship detection with cross-file capabilities"""
+    try:
+        # Import the enhanced detector
+        from enhanced_relationship_detector import EnhancedRelationshipDetector
+
+        # Create test Supabase client
+        supabase_url = os.getenv('SUPABASE_URL')
+        supabase_key = os.getenv('SUPABASE_SERVICE_KEY')
+
+        # Clean the JWT token (remove newlines and whitespace)
+        if supabase_key:
+            supabase_key = supabase_key.strip().replace('\n', '').replace('\r', '')
+
+        supabase = create_client(supabase_url, supabase_key)
+
+        # Initialize enhanced relationship detector
+        enhanced_detector = EnhancedRelationshipDetector(supabase)
+
+        # Detect ALL relationships (cross-file + within-file)
+        results = await enhanced_detector.detect_all_relationships(user_id)
+
+        return {
+            "message": "Enhanced Relationship Detection Test Completed",
+            "user_id": user_id,
+            "success": True,
+            "result": results,
+            "timestamp": datetime.utcnow().isoformat()
+        }
+
+    except Exception as e:
+        logger.error(f"Enhanced relationship detection test failed: {e}")
+        return {
+            "message": "Enhanced Relationship Detection Test Failed",
+            "error": str(e),
+            "user_id": user_id,
+            "success": False,
+            "timestamp": datetime.utcnow().isoformat()
+        }
+
+@app.get("/debug-cross-file-data/{user_id}")
+async def debug_cross_file_data(user_id: str):
+    """Debug endpoint to check what files and data exist for cross-file analysis"""
+    try:
+        # Create test Supabase client
+        supabase_url = os.getenv('SUPABASE_URL')
+        supabase_key = os.getenv('SUPABASE_SERVICE_KEY')
+
+        # Clean the JWT token (remove newlines and whitespace)
+        if supabase_key:
+            supabase_key = supabase_key.strip().replace('\n', '').replace('\r', '')
+
+        supabase = create_client(supabase_url, supabase_key)
+
+        # Get all events for the user
+        events = supabase.table('raw_events').select('*').eq('user_id', user_id).execute()
+
+        if not events.data:
+            return {
+                "message": "No data found for user",
+                "user_id": user_id,
+                "total_events": 0,
+                "files": [],
+                "timestamp": datetime.utcnow().isoformat()
+            }
+
+        # Group events by file
+        events_by_file = {}
+        for event in events.data:
+            filename = event.get('source_filename', 'unknown')
+            if filename not in events_by_file:
+                events_by_file[filename] = []
+            events_by_file[filename].append(event)
+
+        # Create file summary
+        file_summary = []
+        for filename, file_events in events_by_file.items():
+            file_summary.append({
+                "filename": filename,
+                "event_count": len(file_events),
+                "sample_event_ids": [e.get('id') for e in file_events[:3]],
+                "sample_amounts": [e.get('amount') for e in file_events[:3] if e.get('amount')],
+                "date_range": {
+                    "earliest": min([e.get('event_date') for e in file_events if e.get('event_date')], default=None),
+                    "latest": max([e.get('event_date') for e in file_events if e.get('event_date')], default=None)
+                }
+            })
+
+        # Check for potential cross-file relationships
+        potential_relationships = []
+        cross_file_patterns = [
+            ['company_invoices.csv', 'comprehensive_vendor_payments.csv'],
+            ['company_revenue.csv', 'comprehensive_cash_flow.csv'],
+            ['company_expenses.csv', 'company_bank_statements.csv'],
+            ['comprehensive_payroll_data.csv', 'company_bank_statements.csv'],
+            ['company_invoices.csv', 'company_accounts_receivable.csv']
+        ]
+
+        for pattern in cross_file_patterns:
+            source_file, target_file = pattern
+            source_exists = source_file in events_by_file
+            target_exists = target_file in events_by_file
+
+            potential_relationships.append({
+                "source_file": source_file,
+                "target_file": target_file,
+                "source_exists": source_exists,
+                "target_exists": target_exists,
+                "source_events": len(events_by_file.get(source_file, [])),
+                "target_events": len(events_by_file.get(target_file, [])),
+                "can_analyze": source_exists and target_exists
+            })
+
+        return {
+            "message": "Cross-file data analysis completed",
+            "user_id": user_id,
+            "total_events": len(events.data),
+            "total_files": len(events_by_file),
+            "files": file_summary,
+            "potential_cross_file_relationships": potential_relationships,
+            "analysis_ready": sum(1 for p in potential_relationships if p["can_analyze"]),
+            "timestamp": datetime.utcnow().isoformat()
+        }
+
+    except Exception as e:
+        logger.error(f"Cross-file data debug failed: {e}")
+        return {
+            "message": "Cross-file data debug failed",
+            "error": str(e),
+            "user_id": user_id,
+            "timestamp": datetime.utcnow().isoformat()
         }
 
 @app.get("/test-websocket/{job_id}")
@@ -4852,12 +4391,12 @@ class CrossFileRelationshipDetector:
                 payload = event.get('payload', {})
                 platform = event.get('source_platform', 'unknown')
                 
-                # Identify payroll events - UNIVERSAL DETECTION
-                if self._is_payroll_event(payload):
+                # Identify payroll events
+                if platform in ['gusto', 'quickbooks'] and self._is_payroll_event(payload):
                     payroll_events.append(event)
                 
-                # Identify payout events - UNIVERSAL DETECTION  
-                if self._is_payout_event(payload):
+                # Identify payout events  
+                if platform in ['razorpay', 'stripe'] and self._is_payout_event(payload):
                     payout_events.append(event)
             
             # Find relationships
@@ -4876,35 +4415,17 @@ class CrossFileRelationshipDetector:
             return {"relationships": [], "error": str(e)}
     
     def _is_payroll_event(self, payload: Dict) -> bool:
-        """Check if event is a payroll entry - UNIVERSAL DETECTION"""
-        # Check for payroll indicators - expanded for all financial systems
+        """Check if event is a payroll entry"""
+        # Check for payroll indicators
         text = str(payload).lower()
-        payroll_keywords = [
-            'payroll', 'salary', 'wage', 'employee', 'staff', 'worker', 'compensation',
-            'payment', 'pay', 'earnings', 'income', 'remuneration', 'bonus', 'commission',
-            'overtime', 'hourly', 'monthly', 'weekly', 'biweekly', 'paycheck', 'paystub',
-            'direct deposit', 'bank transfer', 'ach', 'electronic', 'digital', 'online',
-            'mobile', 'card', 'check', 'cash', 'deposit', 'credit', 'debit', 'transaction',
-            'settlement', 'clearing', 'reconciliation', 'balance', 'account', 'fund',
-            'disbursement', 'distribution', 'allocation', 'remittance', 'wire', 'ach'
-        ]
+        payroll_keywords = ['salary', 'payroll', 'wage', 'employee', 'payment']
         return any(keyword in text for keyword in payroll_keywords)
     
     def _is_payout_event(self, payload: Dict) -> bool:
-        """Check if event is a payout entry - UNIVERSAL DETECTION"""
-        # Check for payout indicators - expanded for all financial systems
+        """Check if event is a payout entry"""
+        # Check for payout indicators
         text = str(payload).lower()
-        payout_keywords = [
-            'payout', 'transfer', 'bank', 'withdrawal', 'payment', 'salary', 'payroll', 
-            'direct deposit', 'bank transfer', 'wire transfer', 'ach', 'electronic transfer',
-            'debit', 'credit', 'transaction', 'deposit', 'withdrawal', 'fee', 'charge',
-            'settlement', 'clearing', 'reconciliation', 'balance', 'account', 'fund',
-            'disbursement', 'distribution', 'allocation', 'remittance', 'wire', 'ach',
-            'electronic', 'digital', 'online', 'mobile', 'card', 'check', 'cash',
-            # ADDITIONAL: Detect payroll expenses as payout events
-            'employee salary', 'employee payment', 'salary payment', 'payroll payment',
-            'direct deposit', 'bank debit', 'debit transaction'
-        ]
+        payout_keywords = ['payout', 'transfer', 'bank', 'withdrawal', 'payment']
         return any(keyword in text for keyword in payout_keywords)
     
     async def _find_relationships(self, payroll_events: List, payout_events: List) -> List[Dict]:
@@ -4930,7 +4451,7 @@ class CrossFileRelationshipDetector:
                     payroll_date, payout_date
                 )
                 
-                if relationship_score > 0.3:  # UNIVERSAL: Lower threshold for better detection
+                if relationship_score > 0.7:  # High confidence threshold
                     relationships.append({
                         "payroll_event_id": payroll.get('id'),
                         "payout_event_id": payout.get('id'),
@@ -5064,7 +4585,7 @@ class AIRelationshipDetector:
         self.learned_patterns = {}
         
     async def detect_all_relationships(self, user_id: str) -> Dict[str, Any]:
-        """Detect ALL possible relationships between financial events - OPTIMIZED FOR PRODUCTION SCALE"""
+        """Detect ALL possible relationships between financial events"""
         try:
             # Get all events for the user
             events = self.supabase.table('raw_events').select('*').eq('user_id', user_id).execute()
@@ -5072,419 +4593,61 @@ class AIRelationshipDetector:
             if not events.data:
                 return {"relationships": [], "message": "No data found for relationship analysis"}
             
-            logger.info(f"Processing {len(events.data)} events for relationship detection")
+            # Use AI to discover relationship types
+            relationship_types = await self._discover_relationship_types(events.data)
             
-            # OPTIMIZATION 1: Pre-filter events by type to reduce matrix size
-            event_groups = self._group_events_by_type(events.data)
-            
-            # OPTIMIZATION 2: Use predefined relationship types for faster processing
-            relationship_types = ["invoice_to_payment", "fee_to_transaction", "refund_to_original", "payroll_to_payout", "salary_to_payout"]
-            
-            # OPTIMIZATION 3: Process relationships in batches
+            # Detect relationships for each type
             all_relationships = []
             for rel_type in relationship_types:
-                logger.info(f"Processing relationship type: {rel_type}")
-                type_relationships = await self._detect_relationships_by_type_optimized(
-                    events.data, rel_type, event_groups
-                )
+                type_relationships = await self._detect_relationships_by_type(events.data, rel_type)
                 all_relationships.extend(type_relationships)
-                
-                # OPTIMIZATION 4: Limit relationships per type to prevent explosion
-                if len(type_relationships) > 1000:
-                    logger.warning(f"Limiting {rel_type} relationships to 1000")
-                    type_relationships = type_relationships[:1000]
             
-            # OPTIMIZATION 5: Batch validate relationships
-            validated_relationships = await self._validate_relationships_batch(all_relationships)
+            # Use AI to discover new relationship patterns
+            ai_discovered = await self._ai_discover_relationships(events.data)
+            all_relationships.extend(ai_discovered)
             
-            logger.info(f"Relationship detection completed: {len(validated_relationships)} relationships found")
+            # Validate and score relationships
+            validated_relationships = await self._validate_relationships(all_relationships)
             
             return {
                 "relationships": validated_relationships,
                 "total_relationships": len(validated_relationships),
                 "relationship_types": relationship_types,
-                "processing_stats": {
-                    "total_events": len(events.data),
-                    "event_groups": len(event_groups),
-                    "max_relationships_per_type": 1000
-                },
-                "message": "Optimized AI-powered relationship analysis completed"
+                "ai_discovered_count": len(ai_discovered),
+                "message": "Comprehensive AI-powered relationship analysis completed"
             }
             
         except Exception as e:
             logger.error(f"AI relationship detection failed: {e}")
             return {"relationships": [], "error": str(e)}
     
-    def _group_events_by_type(self, events: List[Dict]) -> Dict[str, List[Dict]]:
-        """Group events by type to reduce relationship matrix size"""
-        groups = {
-            'payroll': [],
-            'payment': [],
-            'invoice': [],
-            'fee': [],
-            'refund': [],
-            'other': []
-        }
-        
-        for event in events:
-            payload = event.get('payload', {})
-            text = str(payload).lower()
-            
-            if any(word in text for word in ['payroll', 'salary', 'wage', 'employee', 'direct deposit']):
-                groups['payroll'].append(event)
-            elif any(word in text for word in ['payment', 'charge', 'transaction', 'debit']):
-                groups['payment'].append(event)
-            elif any(word in text for word in ['invoice', 'bill', 'receivable']):
-                groups['invoice'].append(event)
-            elif any(word in text for word in ['fee', 'commission', 'charge']):
-                groups['fee'].append(event)
-            elif any(word in text for word in ['refund', 'return', 'reversal']):
-                groups['refund'].append(event)
-            else:
-                groups['other'].append(event)
-        
-        return groups
-    
-    async def _detect_relationships_by_type_optimized(self, events: List[Dict], relationship_type: str, event_groups: Dict[str, List[Dict]]) -> List[Dict]:
-        """OPTIMIZED: Detect relationships for a specific type with smart filtering"""
-        relationships = []
-        
-        # OPTIMIZATION: Use event groups to reduce comparison matrix
-        source_group, target_group = self._get_relationship_groups(relationship_type, event_groups)
-        
-        if not source_group or not target_group:
-            return relationships
-        
-        source_events = source_group
-        target_events = target_group
-        
-        logger.info(f"Processing {len(source_events)} source events vs {len(target_events)} target events for {relationship_type}")
-        
-        # OPTIMIZATION: Use smart filtering to reduce combinations
-        filtered_combinations = self._filter_relevant_combinations(source_events, target_events, relationship_type)
-        
-        logger.info(f"After filtering: {len(filtered_combinations)} relevant combinations")
-        
-        # Process filtered combinations
-        for source, target in filtered_combinations:
-            if source['id'] == target['id']:
-                continue
-            
-            # OPTIMIZATION: Use cached scoring for better performance
-            cache_key = f"{source['id']}_{target['id']}_{relationship_type}"
-            if cache_key in self.relationship_cache:
-                score = self.relationship_cache[cache_key]
-            else:
-                score = await self._calculate_comprehensive_score_optimized(source, target, relationship_type)
-                self.relationship_cache[cache_key] = score
-            
-            if score >= 0.3:  # UNIVERSAL: Lower threshold for better detection
-                relationship = {
-                    "source_event_id": source['id'],
-                    "target_event_id": target['id'],
-                    "relationship_type": relationship_type,
-                    "confidence_score": score,
-                    "source_platform": source.get('source_platform'),
-                    "target_platform": target.get('source_platform'),
-                    "source_amount": self._extract_amount(source.get('payload', {})),
-                    "target_amount": self._extract_amount(target.get('payload', {})),
-                    "amount_match": self._check_amount_match(source, target),
-                    "date_match": self._check_date_match(source, target),
-                    "entity_match": self._check_entity_match(source, target),
-                    "id_match": self._check_id_match(source, target),
-                    "context_match": self._check_context_match(source, target),
-                    "detection_method": "optimized_rule_based"
-                }
-                relationships.append(relationship)
-                
-                # OPTIMIZATION: Limit relationships per type
-                if len(relationships) >= 1000:
-                    logger.warning(f"Reached max relationships limit for {relationship_type}")
-                    return relationships
-        
-        return relationships
-    
     async def _discover_relationship_types(self, events: List[Dict]) -> List[str]:
-        """Discover relationship types from events using AI"""
+        """Use AI to discover what types of relationships exist in the data"""
         try:
             # Create context for AI analysis
             event_summary = self._create_event_summary(events)
             
-            prompt = f"""
-            Analyze the following financial events and identify possible relationship types between them.
-            
-            Events Summary:
-            {event_summary}
-            
-            Identify relationship types that could exist between these events. Consider:
-            1. Invoice to payment relationships
-            2. Fee to transaction relationships  
-            3. Refund to original transaction relationships
-            4. Payroll to payout relationships
-            5. Revenue to expense relationships
-            6. Any other logical financial relationships
-            
-            Return only the relationship type names, one per line, without explanations.
-            """
-            
-            response = self.openai.chat.completions.create(
+            ai_response = await self.openai.chat.completions.create(
                 model="gpt-4o-mini",
-                messages=[{"role": "user", "content": prompt}],
-                max_tokens=200,
+                messages=[{
+                    "role": "system",
+                    "content": "You are a financial data analyst. Analyze the financial events and identify what types of relationships might exist between them. Return only the relationship types as a JSON array."
+                }, {
+                    "role": "user",
+                    "content": f"Analyze these financial events and identify relationship types: {event_summary}"
+                }],
                 temperature=0.1
             )
             
-            response_text = response.choices[0].message.content.strip()
+            # Parse AI response
+            response_text = ai_response.choices[0].message.content
             relationship_types = self._parse_relationship_types(response_text)
             
-            # Add default types if AI doesn't find any
-            if not relationship_types:
-                relationship_types = ["invoice_to_payment", "fee_to_transaction", "refund_to_original", "payroll_to_payout"]
-            
-            return relationship_types[:10]  # Limit to 10 types
+            return relationship_types
             
         except Exception as e:
             logger.error(f"AI relationship type discovery failed: {e}")
-            # Return default relationship types
-            return ["invoice_to_payment", "fee_to_transaction", "refund_to_original", "payroll_to_payout"]
-    
-    def _create_event_summary(self, events: List[Dict]) -> str:
-        """Create a summary of events for AI analysis"""
-        if not events:
-            return "No events found"
-        
-        # Group events by platform and type
-        platform_counts = {}
-        type_counts = {}
-        
-        for event in events:
-            platform = event.get('source_platform', 'unknown')
-            platform_counts[platform] = platform_counts.get(platform, 0) + 1
-            
-            payload = event.get('payload', {})
-            text = str(payload).lower()
-            
-            if any(word in text for word in ['invoice', 'bill']):
-                type_counts['invoice'] = type_counts.get('invoice', 0) + 1
-            elif any(word in text for word in ['payment', 'charge']):
-                type_counts['payment'] = type_counts.get('payment', 0) + 1
-            elif any(word in text for word in ['payroll', 'salary']):
-                type_counts['payroll'] = type_counts.get('payroll', 0) + 1
-            elif any(word in text for word in ['refund', 'return']):
-                type_counts['refund'] = type_counts.get('refund', 0) + 1
-            else:
-                type_counts['other'] = type_counts.get('other', 0) + 1
-        
-        summary = f"Total events: {len(events)}\n"
-        summary += f"Platforms: {', '.join([f'{k}({v})' for k, v in platform_counts.items()])}\n"
-        summary += f"Event types: {', '.join([f'{k}({v})' for k, v in type_counts.items()])}"
-        
-        return summary
-    
-    def _parse_relationship_types(self, response_text: str) -> List[str]:
-        """Parse relationship types from AI response"""
-        lines = response_text.strip().split('\n')
-        types = []
-        
-        for line in lines:
-            line = line.strip()
-            if line and not line.startswith('#') and not line.startswith('-'):
-                # Clean up the line
-                clean_type = line.lower().replace(' ', '_').replace('-', '_')
-                if clean_type:
-                    types.append(clean_type)
-        
-        return types
-    
-    def _get_relationship_groups(self, relationship_type: str, event_groups: Dict[str, List[Dict]]) -> Tuple[List[Dict], List[Dict]]:
-        """Get relevant event groups for a relationship type"""
-        group_mapping = {
-            'invoice_to_payment': ('invoice', 'payment'),
-            'fee_to_transaction': ('fee', 'payment'),
-            'refund_to_original': ('refund', 'payment'),
-            'payroll_to_payout': ('payroll', 'payment'),
-            'salary_to_payout': ('payroll', 'payment')
-        }
-        
-        source_group_name, target_group_name = group_mapping.get(relationship_type, ('other', 'other'))
-        return event_groups.get(source_group_name, []), event_groups.get(target_group_name, [])
-    
-    def _filter_relevant_combinations(self, source_events: List[Dict], target_events: List[Dict], relationship_type: str) -> List[Tuple[Dict, Dict]]:
-        """Smart filtering to reduce the number of combinations to process"""
-        relevant_combinations = []
-        
-        # OPTIMIZATION: Pre-calculate date ranges for faster filtering
-        source_dates = {}
-        target_dates = {}
-        
-        for event in source_events:
-            date = self._extract_date(event.get('payload', {}))
-            if date:
-                source_dates[event['id']] = date
-        
-        for event in target_events:
-            date = self._extract_date(event.get('payload', {}))
-            if date:
-                target_dates[event['id']] = date
-        
-        # OPTIMIZATION: Only compare events within reasonable date ranges
-        for source in source_events:
-            source_date = source_dates.get(source['id'])
-            
-            for target in target_events:
-                target_date = target_dates.get(target['id'])
-                
-                # Skip if dates are too far apart (more than 30 days)
-                if source_date and target_date:
-                    date_diff = abs((source_date - target_date).days)
-                    if date_diff > 30:
-                        continue
-                
-                # Skip if amounts are too different
-                source_amount = self._extract_amount(source.get('payload', {}))
-                target_amount = self._extract_amount(target.get('payload', {}))
-                
-                if source_amount and target_amount:
-                    amount_ratio = min(source_amount, target_amount) / max(source_amount, target_amount)
-                    if amount_ratio < 0.1:  # Amounts are too different
-                        continue
-                
-                relevant_combinations.append((source, target))
-        
-        return relevant_combinations
-    
-    async def _calculate_comprehensive_score_optimized(self, source: Dict, target: Dict, relationship_type: str) -> float:
-        """UNIVERSAL: Calculate comprehensive relationship score - More lenient for real-world data"""
-        # Calculate individual scores
-        amount_score = self._calculate_amount_score_optimized(source, target)
-        date_score = self._calculate_date_score_optimized(source, target)
-        entity_score = self._calculate_entity_score_optimized(source, target)
-        
-        # UNIVERSAL: More balanced weighting for real-world data
-        comprehensive_score = (amount_score * 0.35 + date_score * 0.35 + entity_score * 0.30)
-        
-        # Boost score for any meaningful matches
-        if amount_score > 0.3 or date_score > 0.3 or entity_score > 0.3:
-            comprehensive_score = min(1.0, comprehensive_score + 0.1)
-        
-        return comprehensive_score
-    
-    def _calculate_amount_score_optimized(self, source: Dict, target: Dict) -> float:
-        """UNIVERSAL: Calculate amount similarity score - More lenient for real-world data"""
-        source_amount = self._extract_amount(source.get('payload', {}))
-        target_amount = self._extract_amount(target.get('payload', {}))
-        
-        if source_amount == 0 and target_amount == 0:
-            return 0.5  # Both zero - neutral score
-        elif source_amount == 0 or target_amount == 0:
-            return 0.3  # One zero - low but not zero score
-        
-        # Calculate percentage difference
-        diff = abs(source_amount - target_amount)
-        max_amount = max(abs(source_amount), abs(target_amount))
-        percentage_diff = diff / max_amount if max_amount > 0 else 1.0
-        
-        # UNIVERSAL SCORING - More lenient for real-world data
-        if percentage_diff <= 0.01:  # 1% or less
-            return 1.0
-        elif percentage_diff <= 0.05:  # 5% or less
-            return 0.9
-        elif percentage_diff <= 0.10:  # 10% or less
-            return 0.8
-        elif percentage_diff <= 0.20:  # 20% or less
-            return 0.7
-        elif percentage_diff <= 0.50:  # 50% or less
-            return 0.5
-        elif percentage_diff <= 1.0:  # 100% or less
-            return 0.3
-        else:
-            return 0.1  # Very different amounts
-    
-    def _calculate_date_score_optimized(self, source: Dict, target: Dict) -> float:
-        """UNIVERSAL: Calculate date similarity score - More flexible for real-world data"""
-        source_date = self._extract_date(source.get('payload', {}))
-        target_date = self._extract_date(target.get('payload', {}))
-        
-        if not source_date or not target_date:
-            return 0.2  # Missing dates - give some score instead of zero
-        
-        # Use flexible day difference scoring
-        date_diff = abs((source_date - target_date).days)
-        
-        if date_diff == 0:
-            return 1.0
-        elif date_diff <= 1:
-            return 0.95
-        elif date_diff <= 3:
-            return 0.9
-        elif date_diff <= 7:
-            return 0.8
-        elif date_diff <= 14:
-            return 0.7
-        elif date_diff <= 30:
-            return 0.6
-        elif date_diff <= 60:
-            return 0.4
-        elif date_diff <= 90:
-            return 0.3
-        else:
-            return 0.1  # Very different dates but not zero
-    
-    def _calculate_entity_score_optimized(self, source: Dict, target: Dict) -> float:
-        """UNIVERSAL: Calculate entity similarity score - More flexible for real-world data"""
-        source_entities = self._extract_entities(source.get('payload', {}))
-        target_entities = self._extract_entities(target.get('payload', {}))
-        
-        if not source_entities and not target_entities:
-            return 0.5  # Both empty - neutral score
-        elif not source_entities or not target_entities:
-            return 0.3  # One empty - low but not zero score
-        
-        # UNIVERSAL: Use flexible entity matching
-        source_set = set(entity.lower().strip() for entity in source_entities if entity.strip())
-        target_set = set(entity.lower().strip() for entity in target_entities if entity.strip())
-        
-        if not source_set and not target_set:
-            return 0.5  # Both empty after cleaning
-        
-        intersection = source_set.intersection(target_set)
-        union = source_set.union(target_set)
-        
-        if not union:
-            return 0.3  # No valid entities after cleaning
-        
-        # Calculate Jaccard similarity
-        jaccard = len(intersection) / len(union)
-        
-        # Boost score for partial matches
-        if jaccard > 0:
-            return min(1.0, jaccard + 0.2)  # Boost by 0.2 for any match
-        else:
-            return 0.2  # No exact matches but give some score
-    
-    async def _validate_relationships_batch(self, relationships: List[Dict]) -> List[Dict]:
-        """OPTIMIZED: Validate relationships in batches"""
-        if not relationships:
-            return []
-        
-        # OPTIMIZATION: Validate in batches to prevent timeout
-        batch_size = 50
-        validated_relationships = []
-        
-        for i in range(0, len(relationships), batch_size):
-            batch = relationships[i:i + batch_size]
-            
-            # OPTIMIZATION: Use simple validation for better performance
-            for rel in batch:
-                if self._validate_relationship_structure(rel):
-                    validated_relationships.append(rel)
-        
-        return validated_relationships
-    
-    def _validate_relationship_structure(self, rel: Dict) -> bool:
-        """Simple relationship structure validation"""
-        required_fields = ['source_event_id', 'target_event_id', 'relationship_type', 'confidence_score']
-        return all(field in rel for field in required_fields) and rel['confidence_score'] >= 0.0
+            return ["invoice_to_payment", "fee_to_transaction", "refund_to_original"]
     
     async def _detect_relationships_by_type(self, events: List[Dict], relationship_type: str) -> List[Dict]:
         """Detect relationships for a specific type"""
@@ -5506,7 +4669,7 @@ class AIRelationshipDetector:
                 # Calculate comprehensive relationship score
                 score = await self._calculate_comprehensive_score(source, target, relationship_type)
                 
-                if score >= 0.3:  # UNIVERSAL: Lower threshold for better detection
+                if score >= 0.6:  # Configurable threshold
                     relationship = {
                         "source_event_id": source['id'],
                         "target_event_id": target['id'],
@@ -5533,7 +4696,7 @@ class AIRelationshipDetector:
             # Create comprehensive context
             context = self._create_comprehensive_context(events)
             
-            ai_response = self.openai.chat.completions.create(
+            ai_response = await self.openai.chat.completions.create(
                 model="gpt-4o-mini",
                 messages=[{
                     "role": "system",
@@ -5556,89 +4719,96 @@ class AIRelationshipDetector:
             return []
     
     async def _calculate_comprehensive_score(self, source: Dict, target: Dict, relationship_type: str) -> float:
-        """UNIVERSAL: Calculate comprehensive relationship score - More lenient for real-world data"""
-        # Calculate individual scores
+        """Calculate comprehensive relationship score using multiple dimensions"""
+        score = 0.0
+        
+        # Amount matching (30% weight)
         amount_score = self._calculate_amount_score(source, target, relationship_type)
+        score += amount_score * 0.3
+        
+        # Date matching (20% weight)
         date_score = self._calculate_date_score(source, target, relationship_type)
+        score += date_score * 0.2
+        
+        # Entity matching (20% weight)
         entity_score = self._calculate_entity_score(source, target, relationship_type)
+        score += entity_score * 0.2
+        
+        # ID matching (15% weight)
         id_score = self._calculate_id_score(source, target, relationship_type)
+        score += id_score * 0.15
+        
+        # Context matching (15% weight)
         context_score = self._calculate_context_score(source, target, relationship_type)
+        score += context_score * 0.15
         
-        # UNIVERSAL: More balanced weighting for real-world data
-        comprehensive_score = (
-            amount_score * 0.35 + 
-            date_score * 0.25 + 
-            entity_score * 0.20 + 
-            id_score * 0.10 + 
-            context_score * 0.10
-        )
-        
-        # Boost score for any meaningful matches
-        if amount_score > 0.3 or date_score > 0.3 or entity_score > 0.3:
-            comprehensive_score = min(1.0, comprehensive_score + 0.1)
-        
-        return comprehensive_score
+        return min(score, 1.0)
     
     def _calculate_amount_score(self, source: Dict, target: Dict, relationship_type: str) -> float:
-        """UNIVERSAL: Calculate amount matching score - More lenient for real-world data"""
+        """Calculate amount matching score with intelligent tolerance"""
         source_amount = self._extract_amount(source.get('payload', {}))
         target_amount = self._extract_amount(target.get('payload', {}))
         
-        if source_amount == 0 and target_amount == 0:
-            return 0.5  # Both zero - neutral score
-        elif source_amount == 0 or target_amount == 0:
-            return 0.3  # One zero - low but not zero score
+        if source_amount == 0 or target_amount == 0:
+            return 0.0
         
-        # Calculate percentage difference
-        diff = abs(source_amount - target_amount)
-        max_amount = max(abs(source_amount), abs(target_amount))
-        percentage_diff = diff / max_amount if max_amount > 0 else 1.0
+        # Different tolerance based on relationship type
+        tolerance_map = {
+            'invoice_to_payment': 0.001,  # Exact match
+            'fee_to_transaction': 0.01,   # 1% tolerance
+            'refund_to_original': 0.001,  # Exact match
+            'payroll_to_payout': 0.05,    # 5% tolerance
+            'tax_to_income': 0.02,        # 2% tolerance
+            'expense_to_reimbursement': 0.001,  # Exact match
+            'subscription_to_payment': 0.001,   # Exact match
+            'loan_to_payment': 0.01,      # 1% tolerance
+            'investment_to_return': 0.1,  # 10% tolerance
+        }
         
-        # UNIVERSAL SCORING - More lenient for real-world data
-        if percentage_diff <= 0.01:  # 1% or less
+        tolerance = tolerance_map.get(relationship_type, 0.01)
+        amount_diff = abs(source_amount - target_amount)
+        
+        if amount_diff <= tolerance:
             return 1.0
-        elif percentage_diff <= 0.05:  # 5% or less
-            return 0.9
-        elif percentage_diff <= 0.10:  # 10% or less
+        elif amount_diff <= source_amount * tolerance:
             return 0.8
-        elif percentage_diff <= 0.20:  # 20% or less
-            return 0.7
-        elif percentage_diff <= 0.50:  # 50% or less
-            return 0.5
-        elif percentage_diff <= 1.0:  # 100% or less
-            return 0.3
+        elif amount_diff <= source_amount * tolerance * 2:
+            return 0.6
         else:
-            return 0.1  # Very different amounts
+            return 0.0
     
     def _calculate_date_score(self, source: Dict, target: Dict, relationship_type: str) -> float:
-        """UNIVERSAL: Calculate date matching score - More flexible for real-world data"""
+        """Calculate date matching score with configurable windows"""
         source_date = self._extract_date(source.get('payload', {}))
         target_date = self._extract_date(target.get('payload', {}))
         
         if not source_date or not target_date:
-            return 0.2  # Missing dates - give some score instead of zero
+            return 0.0
         
-        # Use flexible day difference scoring
+        # Different date windows based on relationship type
+        window_map = {
+            'invoice_to_payment': 7,      # 7 days
+            'fee_to_transaction': 1,      # Same day
+            'refund_to_original': 30,     # 30 days
+            'payroll_to_payout': 3,       # 3 days
+            'tax_to_income': 90,          # 90 days
+            'expense_to_reimbursement': 30,  # 30 days
+            'subscription_to_payment': 7,     # 7 days
+            'loan_to_payment': 1,         # Same day
+            'investment_to_return': 365,  # 1 year
+        }
+        
+        window_days = window_map.get(relationship_type, 7)
         date_diff = abs((source_date - target_date).days)
         
         if date_diff == 0:
             return 1.0
-        elif date_diff <= 1:
-            return 0.95
-        elif date_diff <= 3:
-            return 0.9
-        elif date_diff <= 7:
+        elif date_diff <= window_days:
             return 0.8
-        elif date_diff <= 14:
-            return 0.7
-        elif date_diff <= 30:
+        elif date_diff <= window_days * 2:
             return 0.6
-        elif date_diff <= 60:
-            return 0.4
-        elif date_diff <= 90:
-            return 0.3
         else:
-            return 0.1  # Very different dates but not zero
+            return 0.0
     
     def _calculate_entity_score(self, source: Dict, target: Dict, relationship_type: str) -> float:
         """Calculate entity matching score with fuzzy logic"""
@@ -5658,16 +4828,9 @@ class AIRelationshipDetector:
         return max_similarity
     
     def _calculate_id_score(self, source: Dict, target: Dict, relationship_type: str) -> float:
-        """Calculate ID matching score with pattern recognition - Enhanced for real-world data"""
-        # Try platform_ids first
+        """Calculate ID matching score with pattern recognition"""
         source_ids = source.get('platform_ids', {})
         target_ids = target.get('platform_ids', {})
-        
-        # If no platform_ids, try to extract IDs from payload
-        if not source_ids:
-            source_ids = self._extract_ids_from_payload(source.get('payload', {}))
-        if not target_ids:
-            target_ids = self._extract_ids_from_payload(target.get('payload', {}))
         
         if not source_ids or not target_ids:
             return 0.0
@@ -5801,44 +4964,18 @@ class AIRelationshipDetector:
         return 0.0
     
     def _extract_entities(self, payload: Dict) -> List[str]:
-        """Extract entity names from payload - Enhanced for real-world data"""
+        """Extract entity names from payload"""
         entities = []
         try:
-            # Direct field extraction
-            name_fields = ['employee_name', 'name', 'recipient', 'payee', 'description', 'vendor_name', 'vendor', 'company', 'business']
+            name_fields = ['employee_name', 'name', 'recipient', 'payee', 'description', 'vendor_name']
             for field in name_fields:
                 if field in payload:
                     value = payload[field]
                     if isinstance(value, str) and value.strip():
                         entities.append(value.strip())
-            
-            # Extract from description field if it contains entity-like information
-            if 'description' in payload:
-                desc = payload['description']
-                if isinstance(desc, str):
-                    # Look for patterns like "Payment to [Company]" or "Invoice from [Vendor]"
-                    import re
-                    patterns = [
-                        r'to\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)',  # "to Company Name"
-                        r'from\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)',  # "from Vendor Name"
-                        r'for\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)',  # "for Client Name"
-                    ]
-                    for pattern in patterns:
-                        matches = re.findall(pattern, desc)
-                        entities.extend(matches)
-            
-            # Extract from any field that might contain entity information
-            for key, value in payload.items():
-                if isinstance(value, str) and len(value) > 3 and len(value) < 100:
-                    # Check if it looks like a company/vendor name
-                    if any(word in key.lower() for word in ['name', 'vendor', 'company', 'business', 'client', 'customer']):
-                        if value.strip() and not value.isdigit():
-                            entities.append(value.strip())
-            
-        except Exception as e:
-            logger.error(f"Error extracting entities: {e}")
-        
-        return list(set(entities))  # Remove duplicates
+        except:
+            pass
+        return entities
     
     def _extract_date(self, payload: Dict) -> Optional[datetime]:
         """Extract date from payload"""
@@ -5854,22 +4991,6 @@ class AIRelationshipDetector:
         except:
             pass
         return None
-    
-    def _extract_ids_from_payload(self, payload: Dict) -> Dict[str, str]:
-        """Extract IDs from payload fields"""
-        ids = {}
-        try:
-            id_fields = ['id', 'transaction_id', 'invoice_id', 'payment_id', 'reference', 'reference_id', 'order_id', 'receipt_id']
-            for field in id_fields:
-                if field in payload:
-                    value = payload[field]
-                    if isinstance(value, str) and value.strip():
-                        ids[field] = value.strip()
-                    elif isinstance(value, (int, float)):
-                        ids[field] = str(value)
-        except Exception as e:
-            logger.error(f"Error extracting IDs: {e}")
-        return ids
     
     def _extract_context(self, event: Dict) -> str:
         """Extract context from event"""
@@ -5900,40 +5021,32 @@ class AIRelationshipDetector:
     def _check_id_pattern_match(self, id1: str, id2: str, relationship_type: str) -> bool:
         """Check if IDs match a pattern for the relationship type"""
         import re
-        try:
-            # Define patterns for different relationship types
-            patterns = {
-                'invoice_to_payment': [
-                    (r'inv_(\w+)', r'pay_\1'),  # invoice_id to payment_id
-                    (r'in_(\w+)', r'pi_\1'),    # invoice_id to payment_intent
-                ],
-                'fee_to_transaction': [
-                    (r'fee_(\w+)', r'ch_\1'),   # fee_id to charge_id
-                    (r'fee_(\w+)', r'txn_\1'),  # fee_id to transaction_id
-                ],
-                'refund_to_original': [
-                    (r're_(\w+)', r'ch_\1'),    # refund_id to charge_id
-                    (r'rfnd_(\w+)', r'pay_\1'), # refund_id to payment_id
-                ]
-            }
+        # Define patterns for different relationship types
+        patterns = {
+            'invoice_to_payment': [
+                (r'inv_(\w+)', r'pay_\1'),  # invoice_id to payment_id
+                (r'in_(\w+)', r'pi_\1'),    # invoice_id to payment_intent
+            ],
+            'fee_to_transaction': [
+                (r'fee_(\w+)', r'ch_\1'),   # fee_id to charge_id
+                (r'fee_(\w+)', r'txn_\1'),  # fee_id to transaction_id
+            ],
+            'refund_to_original': [
+                (r're_(\w+)', r'ch_\1'),    # refund_id to charge_id
+                (r'rfnd_(\w+)', r'pay_\1'), # refund_id to payment_id
+            ]
+        }
+        
+        pattern_list = patterns.get(relationship_type, [])
+        
+        for pattern1, pattern2 in pattern_list:
+            match1 = re.match(pattern1, id1)
+            match2 = re.match(pattern2, id2)
             
-            pattern_list = patterns.get(relationship_type, [])
-            
-            for pattern1, pattern2 in pattern_list:
-                try:
-                    match1 = re.match(pattern1, id1)
-                    match2 = re.match(pattern2, id2)
-                    
-                    if match1 and match2 and match1.group(1) == match2.group(1):
-                        return True
-                except (re.error, IndexError):
-                    # Skip invalid patterns
-                    continue
-            
-            return False
-        except Exception as e:
-            logger.error(f"Error in ID pattern matching: {e}")
-            return False
+            if match1 and match2 and match1.group(1) == match2.group(1):
+                return True
+        
+        return False
     
     def _get_context_boost(self, context1: str, context2: str, relationship_type: str) -> float:
         """Get context boost for expected relationship patterns"""
@@ -5964,6 +5077,24 @@ class AIRelationshipDetector:
         
         return 0.0
     
+    def _create_event_summary(self, events: List[Dict]) -> str:
+        """Create a summary of events for AI analysis"""
+        summary_parts = []
+        
+        for event in events[:10]:  # Limit to first 10 events
+            event_summary = {
+                'id': event.get('id'),
+                'kind': event.get('kind'),
+                'category': event.get('category'),
+                'platform': event.get('source_platform'),
+                'amount': self._extract_amount(event.get('payload', {})),
+                'vendor': event.get('vendor_standard'),
+                'description': event.get('payload', {}).get('description', '')
+            }
+            summary_parts.append(str(event_summary))
+        
+        return '\n'.join(summary_parts)
+    
     def _create_comprehensive_context(self, events: List[Dict]) -> str:
         """Create comprehensive context for AI analysis"""
         context_parts = []
@@ -5983,6 +5114,49 @@ class AIRelationshipDetector:
                 context_parts.append(f"- {event.get('kind')}: {event.get('payload', {}).get('description', '')}")
         
         return '\n'.join(context_parts)
+    
+    def _parse_relationship_types(self, response_text: str) -> List[str]:
+        """Parse relationship types from AI response"""
+        try:
+            # Try to extract JSON array
+            if '[' in response_text and ']' in response_text:
+                start = response_text.find('[')
+                end = response_text.rfind(']') + 1
+                json_str = response_text[start:end]
+                return json.loads(json_str)
+        except:
+            pass
+        
+        # Fallback to common relationship types
+        return ["invoice_to_payment", "fee_to_transaction", "refund_to_original"]
+    
+    def _parse_ai_relationships(self, response_text: str, events: List[Dict]) -> List[Dict]:
+        """Parse AI-discovered relationships from response"""
+        try:
+            # Try to extract JSON array
+            if '[' in response_text and ']' in response_text:
+                start = response_text.find('[')
+                end = response_text.rfind(']') + 1
+                json_str = response_text[start:end]
+                ai_relationships = json.loads(json_str)
+                
+                # Convert to standard format
+                relationships = []
+                for rel in ai_relationships:
+                    relationship = {
+                        "source_event_id": rel.get('source_event_id'),
+                        "target_event_id": rel.get('target_event_id'),
+                        "relationship_type": rel.get('relationship_type', 'ai_discovered'),
+                        "confidence_score": rel.get('confidence_score', 0.5),
+                        "detection_method": "ai_discovered"
+                    }
+                    relationships.append(relationship)
+                
+                return relationships
+        except:
+            pass
+        
+        return []
     
     async def _validate_relationships(self, relationships: List[Dict]) -> List[Dict]:
         """Validate and filter relationships"""
@@ -6035,14 +5209,14 @@ async def debug_environment():
         return {
             "message": "Environment Variables Debug",
             "environment_variables": key_status,
-            "timestamp": utc_now().isoformat()
+            "timestamp": datetime.utcnow().isoformat()
         }
         
     except Exception as e:
         return {
             "message": "Debug Environment Failed",
             "error": str(e),
-            "timestamp": utc_now().isoformat()
+            "timestamp": datetime.utcnow().isoformat()
         }
 
 @app.get("/test-currency-normalization")
@@ -6353,7 +5527,7 @@ async def test_enrichment_stats(user_id: str):
         if not supabase_url or not supabase_key:
             return {
                 "message": "Supabase credentials not configured",
-                "timestamp": utc_now().isoformat()
+                "timestamp": datetime.utcnow().isoformat()
             }
         
         supabase = create_client(supabase_url, supabase_key)
@@ -6365,20 +5539,20 @@ async def test_enrichment_stats(user_id: str):
             return {
                 "message": "Enrichment Statistics Retrieved Successfully",
                 "stats": result.data[0] if result.data else {},
-                "timestamp": utc_now().isoformat()
+                "timestamp": datetime.utcnow().isoformat()
             }
         else:
             return {
                 "message": "No enrichment statistics found",
                 "stats": {},
-                "timestamp": utc_now().isoformat()
+                "timestamp": datetime.utcnow().isoformat()
             }
         
     except Exception as e:
         return {
             "message": "Enrichment Statistics Test Failed",
             "error": str(e),
-            "timestamp": utc_now().isoformat()
+            "timestamp": datetime.utcnow().isoformat()
         }
 
 @app.get("/test-vendor-search/{user_id}")
@@ -6387,16 +5561,13 @@ async def test_vendor_search(user_id: str, vendor_name: str = "Google"):
     try:
         # Initialize Supabase client
         supabase_url = os.getenv('SUPABASE_URL')
-        supabase_key = os.getenv('SUPABASE_SERVICE_KEY')
+        supabase_key = os.getenv('SUPABASE_KEY')
         
         if not supabase_url or not supabase_key:
             return {
                 "message": "Supabase credentials not configured",
-                "timestamp": utc_now().isoformat()
+                "timestamp": datetime.utcnow().isoformat()
             }
-        
-        # Clean the JWT token (remove newlines and whitespace)
-        supabase_key = supabase_key.strip().replace('\n', '').replace('\r', '').replace('\\n', '')
         
         supabase = create_client(supabase_url, supabase_key)
         
@@ -6412,7 +5583,7 @@ async def test_vendor_search(user_id: str, vendor_name: str = "Google"):
                 "vendor_name": vendor_name,
                 "results": result.data,
                 "count": len(result.data),
-                "timestamp": utc_now().isoformat()
+                "timestamp": datetime.utcnow().isoformat()
             }
         else:
             return {
@@ -6420,14 +5591,14 @@ async def test_vendor_search(user_id: str, vendor_name: str = "Google"):
                 "vendor_name": vendor_name,
                 "results": [],
                 "count": 0,
-                "timestamp": utc_now().isoformat()
+                "timestamp": datetime.utcnow().isoformat()
             }
         
     except Exception as e:
         return {
             "message": "Vendor Search Test Failed",
             "error": str(e),
-            "timestamp": utc_now().isoformat()
+            "timestamp": datetime.utcnow().isoformat()
         }
 
 @app.get("/test-currency-summary/{user_id}")
@@ -6436,16 +5607,13 @@ async def test_currency_summary(user_id: str):
     try:
         # Initialize Supabase client
         supabase_url = os.getenv('SUPABASE_URL')
-        supabase_key = os.getenv('SUPABASE_SERVICE_KEY')
+        supabase_key = os.getenv('SUPABASE_KEY')
         
         if not supabase_url or not supabase_key:
             return {
                 "message": "Supabase credentials not configured",
-                "timestamp": utc_now().isoformat()
+                "timestamp": datetime.utcnow().isoformat()
             }
-        
-        # Clean the JWT token (remove newlines and whitespace)
-        supabase_key = supabase_key.strip().replace('\n', '').replace('\r', '').replace('\\n', '')
         
         supabase = create_client(supabase_url, supabase_key)
         
@@ -6456,21 +5624,655 @@ async def test_currency_summary(user_id: str):
             return {
                 "message": "Currency Summary Retrieved Successfully",
                 "summary": result.data,
-                "timestamp": utc_now().isoformat()
+                "timestamp": datetime.utcnow().isoformat()
             }
         else:
             return {
                 "message": "No currency summary found",
                 "summary": [],
-                "timestamp": utc_now().isoformat()
+                "timestamp": datetime.utcnow().isoformat()
             }
         
     except Exception as e:
         return {
             "message": "Currency Summary Test Failed",
             "error": str(e),
-            "timestamp": utc_now().isoformat()
+            "timestamp": datetime.utcnow().isoformat()
         }
+
+class AIRelationshipDetector:
+    """AI-powered universal relationship detection for ANY financial data"""
+    
+    def __init__(self, openai_client, supabase_client: Client):
+        self.openai = openai_client
+        self.supabase = supabase_client
+        self.relationship_cache = {}
+        self.learned_patterns = {}
+        
+    async def detect_all_relationships(self, user_id: str) -> Dict[str, Any]:
+        """Detect ALL possible relationships between financial events"""
+        try:
+            # Get all events for the user
+            events = self.supabase.table('raw_events').select('*').eq('user_id', user_id).execute()
+            
+            if not events.data:
+                return {"relationships": [], "message": "No data found for relationship analysis"}
+            
+            # Use AI to discover relationship types
+            relationship_types = await self._discover_relationship_types(events.data)
+            
+            # Detect relationships for each type
+            all_relationships = []
+            for rel_type in relationship_types:
+                type_relationships = await self._detect_relationships_by_type(events.data, rel_type)
+                all_relationships.extend(type_relationships)
+            
+            # Use AI to discover new relationship patterns
+            ai_discovered = await self._ai_discover_relationships(events.data)
+            all_relationships.extend(ai_discovered)
+            
+            # Validate and score relationships
+            validated_relationships = await self._validate_relationships(all_relationships)
+            
+            # Store relationships in database
+            await self._store_relationships(validated_relationships, user_id)
+            
+            return {
+                "relationships": validated_relationships,
+                "total_relationships": len(validated_relationships),
+                "relationship_types": relationship_types,
+                "ai_discovered_count": len(ai_discovered),
+                "message": "Comprehensive AI-powered relationship analysis completed"
+            }
+            
+        except Exception as e:
+            logger.error(f"AI relationship detection failed: {e}")
+            return {"relationships": [], "error": str(e)}
+    
+    async def _discover_relationship_types(self, events: List[Dict]) -> List[str]:
+        """Use AI to discover what types of relationships exist in the data"""
+        try:
+            # Create context for AI analysis
+            event_summary = self._create_event_summary(events)
+            
+            ai_response = await self.openai.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[{
+                    "role": "system",
+                    "content": "You are a financial data analyst. Analyze the financial events and identify what types of relationships might exist between them. Return only the relationship types as a JSON array."
+                }, {
+                    "role": "user",
+                    "content": f"Analyze these financial events and identify relationship types: {event_summary}"
+                }],
+                temperature=0.1
+            )
+            
+            # Parse AI response
+            response_text = ai_response.choices[0].message.content
+            relationship_types = self._parse_relationship_types(response_text)
+            
+            return relationship_types
+            
+        except Exception as e:
+            logger.error(f"AI relationship type discovery failed: {e}")
+            return ["invoice_to_payment", "fee_to_transaction", "refund_to_original"]
+    
+    async def _detect_relationships_by_type(self, events: List[Dict], relationship_type: str) -> List[Dict]:
+        """Detect relationships for a specific type"""
+        relationships = []
+        
+        # Get source and target event filters for this relationship type
+        source_filter, target_filter = self._get_relationship_filters(relationship_type)
+        
+        # Filter events
+        source_events = [e for e in events if self._matches_event_filter(e, source_filter)]
+        target_events = [e for e in events if self._matches_event_filter(e, target_filter)]
+        
+        # Find relationships
+        for source in source_events:
+            for target in target_events:
+                if source['id'] == target['id']:
+                    continue
+                
+                # Calculate comprehensive relationship score
+                score = await self._calculate_comprehensive_score(source, target, relationship_type)
+                
+                if score >= 0.6:  # Configurable threshold
+                    relationship = {
+                        "source_event_id": source['id'],
+                        "target_event_id": target['id'],
+                        "relationship_type": relationship_type,
+                        "confidence_score": score,
+                        "source_platform": source.get('source_platform'),
+                        "target_platform": target.get('source_platform'),
+                        "source_amount": self._extract_amount(source.get('payload', {})),
+                        "target_amount": self._extract_amount(target.get('payload', {})),
+                        "amount_match": self._check_amount_match(source, target),
+                        "date_match": self._check_date_match(source, target),
+                        "entity_match": self._check_entity_match(source, target),
+                        "id_match": self._check_id_match(source, target),
+                        "context_match": self._check_context_match(source, target),
+                        "detection_method": "rule_based"
+                    }
+                    relationships.append(relationship)
+        
+        return relationships
+    
+    async def _ai_discover_relationships(self, events: List[Dict]) -> List[Dict]:
+        """Use AI to discover relationships we haven't seen before"""
+        try:
+            # Create comprehensive context
+            context = self._create_comprehensive_context(events)
+            
+            ai_response = await self.openai.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[{
+                    "role": "system",
+                    "content": "You are a financial data analyst. Analyze the financial events and identify potential relationships between them that might not be obvious. Return the relationships as a JSON array with source_event_id, target_event_id, relationship_type, and confidence_score."
+                }, {
+                    "role": "user",
+                    "content": f"Analyze these financial events and identify ALL possible relationships: {context}"
+                }],
+                temperature=0.2
+            )
+            
+            # Parse AI discoveries
+            response_text = ai_response.choices[0].message.content
+            ai_relationships = self._parse_ai_relationships(response_text, events)
+            
+            return ai_relationships
+            
+        except Exception as e:
+            logger.error(f"AI relationship discovery failed: {e}")
+            return []
+    
+    async def _calculate_comprehensive_score(self, source: Dict, target: Dict, relationship_type: str) -> float:
+        """Calculate comprehensive relationship score using multiple dimensions"""
+        score = 0.0
+        
+        # Amount matching (30% weight)
+        amount_score = self._calculate_amount_score(source, target, relationship_type)
+        score += amount_score * 0.3
+        
+        # Date matching (20% weight)
+        date_score = self._calculate_date_score(source, target, relationship_type)
+        score += date_score * 0.2
+        
+        # Entity matching (20% weight)
+        entity_score = self._calculate_entity_score(source, target, relationship_type)
+        score += entity_score * 0.2
+        
+        # ID matching (15% weight)
+        id_score = self._calculate_id_score(source, target, relationship_type)
+        score += id_score * 0.15
+        
+        # Context matching (15% weight)
+        context_score = self._calculate_context_score(source, target, relationship_type)
+        score += context_score * 0.15
+        
+        return min(score, 1.0)
+    
+    def _calculate_amount_score(self, source: Dict, target: Dict, relationship_type: str) -> float:
+        """Calculate amount matching score with intelligent tolerance"""
+        source_amount = self._extract_amount(source.get('payload', {}))
+        target_amount = self._extract_amount(target.get('payload', {}))
+        
+        if source_amount == 0 or target_amount == 0:
+            return 0.0
+        
+        # Different tolerance based on relationship type
+        tolerance_map = {
+            'invoice_to_payment': 0.001,  # Exact match
+            'fee_to_transaction': 0.01,   # 1% tolerance
+            'refund_to_original': 0.001,  # Exact match
+            'payroll_to_payout': 0.05,    # 5% tolerance
+            'tax_to_income': 0.02,        # 2% tolerance
+            'expense_to_reimbursement': 0.001,  # Exact match
+            'subscription_to_payment': 0.001,   # Exact match
+            'loan_to_payment': 0.01,      # 1% tolerance
+            'investment_to_return': 0.1,  # 10% tolerance
+        }
+        
+        tolerance = tolerance_map.get(relationship_type, 0.01)
+        amount_diff = abs(source_amount - target_amount)
+        
+        if amount_diff <= tolerance:
+            return 1.0
+        elif amount_diff <= source_amount * tolerance:
+            return 0.8
+        elif amount_diff <= source_amount * tolerance * 2:
+            return 0.6
+        else:
+            return 0.0
+    
+    def _calculate_date_score(self, source: Dict, target: Dict, relationship_type: str) -> float:
+        """Calculate date matching score with configurable windows"""
+        source_date = self._extract_date(source.get('payload', {}))
+        target_date = self._extract_date(target.get('payload', {}))
+        
+        if not source_date or not target_date:
+            return 0.0
+        
+        # Different date windows based on relationship type
+        window_map = {
+            'invoice_to_payment': 7,      # 7 days
+            'fee_to_transaction': 1,      # Same day
+            'refund_to_original': 30,     # 30 days
+            'payroll_to_payout': 3,       # 3 days
+            'tax_to_income': 90,          # 90 days
+            'expense_to_reimbursement': 30,  # 30 days
+            'subscription_to_payment': 7,     # 7 days
+            'loan_to_payment': 1,         # Same day
+            'investment_to_return': 365,  # 1 year
+        }
+        
+        window_days = window_map.get(relationship_type, 7)
+        date_diff = abs((source_date - target_date).days)
+        
+        if date_diff == 0:
+            return 1.0
+        elif date_diff <= window_days:
+            return 0.8
+        elif date_diff <= window_days * 2:
+            return 0.6
+        else:
+            return 0.0
+    
+    def _calculate_entity_score(self, source: Dict, target: Dict, relationship_type: str) -> float:
+        """Calculate entity matching score with fuzzy logic"""
+        source_entities = self._extract_entities(source.get('payload', {}))
+        target_entities = self._extract_entities(target.get('payload', {}))
+        
+        if not source_entities or not target_entities:
+            return 0.0
+        
+        # Calculate similarity for each entity pair
+        max_similarity = 0.0
+        for source_entity in source_entities:
+            for target_entity in target_entities:
+                similarity = self._calculate_text_similarity(source_entity, target_entity)
+                max_similarity = max(max_similarity, similarity)
+        
+        return max_similarity
+    
+    def _calculate_id_score(self, source: Dict, target: Dict, relationship_type: str) -> float:
+        """Calculate ID matching score with pattern recognition"""
+        source_ids = source.get('platform_ids', {})
+        target_ids = target.get('platform_ids', {})
+        
+        if not source_ids or not target_ids:
+            return 0.0
+        
+        # Check for exact ID matches
+        for source_key, source_id in source_ids.items():
+            for target_key, target_id in target_ids.items():
+                if source_id == target_id:
+                    return 1.0
+                elif source_id in target_id or target_id in source_id:
+                    return 0.8
+        
+        # Check for pattern matches
+        for source_key, source_id in source_ids.items():
+            for target_key, target_id in target_ids.items():
+                if self._check_id_pattern_match(source_id, target_id, relationship_type):
+                    return 0.6
+        
+        return 0.0
+    
+    def _calculate_context_score(self, source: Dict, target: Dict, relationship_type: str) -> float:
+        """Calculate context matching score using semantic analysis"""
+        source_context = self._extract_context(source)
+        target_context = self._extract_context(target)
+        
+        if not source_context or not target_context:
+            return 0.0
+        
+        # Calculate semantic similarity
+        similarity = self._calculate_text_similarity(source_context, target_context)
+        
+        # Boost score for expected relationship contexts
+        context_boost = self._get_context_boost(source_context, target_context, relationship_type)
+        
+        return min(similarity + context_boost, 1.0)
+    
+    def _check_amount_match(self, source: Dict, target: Dict) -> bool:
+        """Check if amounts match within tolerance"""
+        return self._calculate_amount_score(source, target, "generic") > 0.8
+    
+    def _check_date_match(self, source: Dict, target: Dict) -> bool:
+        """Check if dates are within acceptable window"""
+        return self._calculate_date_score(source, target, "generic") > 0.8
+    
+    def _check_entity_match(self, source: Dict, target: Dict) -> bool:
+        """Check if entities match"""
+        return self._calculate_entity_score(source, target, "generic") > 0.8
+    
+    def _check_id_match(self, source: Dict, target: Dict) -> bool:
+        """Check if IDs match"""
+        return self._calculate_id_score(source, target, "generic") > 0.8
+    
+    def _check_context_match(self, source: Dict, target: Dict) -> bool:
+        """Check if contexts match"""
+        return self._calculate_context_score(source, target, "generic") > 0.8
+    
+    def _get_relationship_filters(self, relationship_type: str) -> Tuple[Dict, Dict]:
+        """Get source and target filters for a relationship type"""
+        filters = {
+            'invoice_to_payment': (
+                {'keywords': ['invoice', 'bill', 'receivable']},
+                {'keywords': ['payment', 'charge', 'transaction']}
+            ),
+            'fee_to_transaction': (
+                {'keywords': ['fee', 'commission', 'charge']},
+                {'keywords': ['transaction', 'payment', 'charge']}
+            ),
+            'refund_to_original': (
+                {'keywords': ['refund', 'return', 'reversal']},
+                {'keywords': ['payment', 'charge', 'transaction']}
+            ),
+            'payroll_to_payout': (
+                {'keywords': ['payroll', 'salary', 'wage', 'employee']},
+                {'keywords': ['payout', 'transfer', 'withdrawal']}
+            ),
+            'tax_to_income': (
+                {'keywords': ['tax', 'withholding', 'deduction']},
+                {'keywords': ['income', 'revenue', 'salary']}
+            ),
+            'expense_to_reimbursement': (
+                {'keywords': ['expense', 'cost', 'outlay']},
+                {'keywords': ['reimbursement', 'refund', 'return']}
+            ),
+            'subscription_to_payment': (
+                {'keywords': ['subscription', 'recurring', 'monthly']},
+                {'keywords': ['payment', 'charge', 'transaction']}
+            ),
+            'loan_to_payment': (
+                {'keywords': ['loan', 'credit', 'advance']},
+                {'keywords': ['payment', 'repayment', 'installment']}
+            ),
+            'investment_to_return': (
+                {'keywords': ['investment', 'purchase', 'buy']},
+                {'keywords': ['return', 'dividend', 'profit']}
+            )
+        }
+        
+        return filters.get(relationship_type, ({}, {}))
+    
+    def _matches_event_filter(self, event: Dict, filter_dict: Dict) -> bool:
+        """Check if event matches the filter criteria"""
+        if not filter_dict:
+            return True
+        
+        # Check keywords
+        if 'keywords' in filter_dict:
+            event_text = str(event.get('payload', {})).lower()
+            event_text += ' ' + str(event.get('kind', '')).lower()
+            event_text += ' ' + str(event.get('category', '')).lower()
+            
+            keywords = filter_dict['keywords']
+            if not any(keyword.lower() in event_text for keyword in keywords):
+                return False
+        
+        return True
+    
+    def _extract_amount(self, payload: Dict) -> float:
+        """Extract amount from payload"""
+        try:
+            amount_fields = ['amount', 'total', 'value', 'sum', 'payment_amount', 'charge_amount']
+            for field in amount_fields:
+                if field in payload:
+                    value = payload[field]
+                    if isinstance(value, (int, float)):
+                        return float(value)
+                    elif isinstance(value, str):
+                        cleaned = value.replace('$', '').replace(',', '').strip()
+                        return float(cleaned)
+        except:
+            pass
+        return 0.0
+    
+    def _extract_entities(self, payload: Dict) -> List[str]:
+        """Extract entity names from payload"""
+        entities = []
+        try:
+            name_fields = ['employee_name', 'name', 'recipient', 'payee', 'description', 'vendor_name']
+            for field in name_fields:
+                if field in payload:
+                    value = payload[field]
+                    if isinstance(value, str) and value.strip():
+                        entities.append(value.strip())
+        except:
+            pass
+        return entities
+    
+    def _extract_date(self, payload: Dict) -> Optional[datetime]:
+        """Extract date from payload"""
+        try:
+            date_fields = ['date', 'payment_date', 'transaction_date', 'created_at', 'due_date']
+            for field in date_fields:
+                if field in payload:
+                    value = payload[field]
+                    if isinstance(value, str):
+                        return datetime.fromisoformat(value.replace('Z', '+00:00'))
+                    elif isinstance(value, datetime):
+                        return value
+        except:
+            pass
+        return None
+    
+    def _extract_context(self, event: Dict) -> str:
+        """Extract context from event"""
+        context_parts = []
+        
+        # Add kind and category
+        if event.get('kind'):
+            context_parts.append(event['kind'])
+        if event.get('category'):
+            context_parts.append(event['category'])
+        
+        # Add payload description
+        payload = event.get('payload', {})
+        if 'description' in payload:
+            context_parts.append(payload['description'])
+        
+        # Add vendor information
+        if event.get('vendor_standard'):
+            context_parts.append(event['vendor_standard'])
+        
+        return ' '.join(context_parts)
+    
+    def _calculate_text_similarity(self, text1: str, text2: str) -> float:
+        """Calculate text similarity using SequenceMatcher"""
+        from difflib import SequenceMatcher
+        return SequenceMatcher(None, text1.lower(), text2.lower()).ratio()
+    
+    def _check_id_pattern_match(self, id1: str, id2: str, relationship_type: str) -> bool:
+        """Check if IDs match a pattern for the relationship type"""
+        import re
+        # Define patterns for different relationship types
+        patterns = {
+            'invoice_to_payment': [
+                (r'inv_(\w+)', r'pay_\1'),  # invoice_id to payment_id
+                (r'in_(\w+)', r'pi_\1'),    # invoice_id to payment_intent
+            ],
+            'fee_to_transaction': [
+                (r'fee_(\w+)', r'ch_\1'),   # fee_id to charge_id
+                (r'fee_(\w+)', r'txn_\1'),  # fee_id to transaction_id
+            ],
+            'refund_to_original': [
+                (r're_(\w+)', r'ch_\1'),    # refund_id to charge_id
+                (r'rfnd_(\w+)', r'pay_\1'), # refund_id to payment_id
+            ]
+        }
+        
+        pattern_list = patterns.get(relationship_type, [])
+        
+        for pattern1, pattern2 in pattern_list:
+            match1 = re.match(pattern1, id1)
+            match2 = re.match(pattern2, id2)
+            
+            if match1 and match2 and match1.group(1) == match2.group(1):
+                return True
+        
+        return False
+    
+    def _get_context_boost(self, context1: str, context2: str, relationship_type: str) -> float:
+        """Get context boost for expected relationship patterns"""
+        context_combinations = {
+            'invoice_to_payment': [
+                ('invoice', 'payment'),
+                ('bill', 'charge'),
+                ('receivable', 'transaction')
+            ],
+            'fee_to_transaction': [
+                ('fee', 'transaction'),
+                ('commission', 'payment'),
+                ('charge', 'transaction')
+            ],
+            'refund_to_original': [
+                ('refund', 'payment'),
+                ('return', 'charge'),
+                ('reversal', 'transaction')
+            ]
+        }
+        
+        combinations = context_combinations.get(relationship_type, [])
+        context_lower = context1.lower() + ' ' + context2.lower()
+        
+        for combo in combinations:
+            if combo[0] in context_lower and combo[1] in context_lower:
+                return 0.2
+        
+        return 0.0
+    
+    def _create_event_summary(self, events: List[Dict]) -> str:
+        """Create a summary of events for AI analysis"""
+        summary_parts = []
+        
+        for event in events[:10]:  # Limit to first 10 events
+            event_summary = {
+                'id': event.get('id'),
+                'kind': event.get('kind'),
+                'category': event.get('category'),
+                'platform': event.get('source_platform'),
+                'amount': self._extract_amount(event.get('payload', {})),
+                'vendor': event.get('vendor_standard'),
+                'description': event.get('payload', {}).get('description', '')
+            }
+            summary_parts.append(str(event_summary))
+        
+        return '\n'.join(summary_parts)
+    
+    def _create_comprehensive_context(self, events: List[Dict]) -> str:
+        """Create comprehensive context for AI analysis"""
+        context_parts = []
+        
+        # Group events by platform
+        platform_groups = {}
+        for event in events:
+            platform = event.get('source_platform', 'unknown')
+            if platform not in platform_groups:
+                platform_groups[platform] = []
+            platform_groups[platform].append(event)
+        
+        # Create context for each platform
+        for platform, platform_events in platform_groups.items():
+            context_parts.append(f"\nPlatform: {platform}")
+            for event in platform_events[:5]:  # Limit to 5 events per platform
+                context_parts.append(f"- {event.get('kind')}: {event.get('payload', {}).get('description', '')}")
+        
+        return '\n'.join(context_parts)
+    
+    def _parse_relationship_types(self, response_text: str) -> List[str]:
+        """Parse relationship types from AI response"""
+        try:
+            # Try to extract JSON array
+            if '[' in response_text and ']' in response_text:
+                start = response_text.find('[')
+                end = response_text.rfind(']') + 1
+                json_str = response_text[start:end]
+                return json.loads(json_str)
+        except:
+            pass
+        
+        # Fallback to common relationship types
+        return ["invoice_to_payment", "fee_to_transaction", "refund_to_original"]
+    
+    def _parse_ai_relationships(self, response_text: str, events: List[Dict]) -> List[Dict]:
+        """Parse AI-discovered relationships from response"""
+        try:
+            # Try to extract JSON array
+            if '[' in response_text and ']' in response_text:
+                start = response_text.find('[')
+                end = response_text.rfind(']') + 1
+                json_str = response_text[start:end]
+                ai_relationships = json.loads(json_str)
+                
+                # Convert to standard format
+                relationships = []
+                for rel in ai_relationships:
+                    relationship = {
+                        "source_event_id": rel.get('source_event_id'),
+                        "target_event_id": rel.get('target_event_id'),
+                        "relationship_type": rel.get('relationship_type', 'ai_discovered'),
+                        "confidence_score": rel.get('confidence_score', 0.5),
+                        "detection_method": "ai_discovered"
+                    }
+                    relationships.append(relationship)
+                
+                return relationships
+        except:
+            pass
+        
+        return []
+    
+    async def _validate_relationships(self, relationships: List[Dict]) -> List[Dict]:
+        """Validate and filter relationships"""
+        validated = []
+        
+        for relationship in relationships:
+            # Check if events exist
+            source_exists = await self._event_exists(relationship['source_event_id'])
+            target_exists = await self._event_exists(relationship['target_event_id'])
+            
+            if source_exists and target_exists:
+                # Add additional validation
+                relationship['validated'] = True
+                relationship['validation_score'] = relationship.get('confidence_score', 0.0)
+                validated.append(relationship)
+        
+        return validated
+    
+    async def _event_exists(self, event_id: str) -> bool:
+        """Check if event exists in database"""
+        try:
+            result = self.supabase.table('raw_events').select('id').eq('id', event_id).execute()
+            return len(result.data) > 0
+        except:
+            return False
+    
+    async def _store_relationships(self, relationships: List[Dict], user_id: str):
+        """Store relationships in database"""
+        for relationship in relationships:
+            try:
+                # Store in relationships table (if exists)
+                await self.supabase.table('relationships').insert({
+                    'user_id': user_id,
+                    'source_event_id': relationship['source_event_id'],
+                    'target_event_id': relationship['target_event_id'],
+                    'relationship_type': relationship['relationship_type'],
+                    'confidence_score': relationship['confidence_score'],
+                    'detection_method': relationship.get('detection_method', 'ai'),
+                    'metadata': {
+                        'amount_match': relationship.get('amount_match', False),
+                        'date_match': relationship.get('date_match', False),
+                        'entity_match': relationship.get('entity_match', False),
+                        'id_match': relationship.get('id_match', False),
+                        'context_match': relationship.get('context_match', False)
+                    }
+                }).execute()
+            except Exception as e:
+                logger.error(f"Failed to store relationship: {e}")
 
 class DynamicPlatformDetector:
     """AI-powered dynamic platform detection that learns from ANY financial data"""
@@ -6490,7 +6292,7 @@ class DynamicPlatformDetector:
             
             # Use AI to analyze and detect platform
             try:
-                ai_response = self.openai.chat.completions.create(
+                ai_response = await self.openai.chat.completions.create(
                     model="gpt-4o-mini",
                     messages=[{
                         "role": "system",
@@ -6519,7 +6321,7 @@ class DynamicPlatformDetector:
                     "key_indicators": platform_analysis['key_indicators'],
                     "detection_method": "ai_dynamic",
                     "learned_patterns": len(self.learned_patterns),
-                    "platform_info": ensure_json_serializable(platform_info)
+                    "platform_info": platform_info
                 }
                 
             except Exception as ai_error:
@@ -6581,7 +6383,7 @@ class DynamicPlatformDetector:
             context = self._create_discovery_context(events.data)
             
             try:
-                ai_response = self.openai.chat.completions.create(
+                ai_response = await self.openai.chat.completions.create(
                     model="gpt-4o-mini",
                     messages=[{
                         "role": "system",
@@ -6613,6 +6415,19 @@ class DynamicPlatformDetector:
                     "error": str(ai_error),
                     "new_platforms": []
                 }
+            
+            # Parse AI discoveries
+            response_text = ai_response.choices[0].message.content
+            new_platforms = self._parse_new_platforms(response_text)
+            
+            # Store new platform discoveries
+            await self._store_new_platforms(new_platforms, user_id)
+            
+            return {
+                "message": "Platform discovery completed",
+                "new_platforms": new_platforms,
+                "total_platforms": len(new_platforms)
+            }
             
         except Exception as e:
             logger.error(f"Platform discovery failed: {e}")
@@ -6663,7 +6478,7 @@ class DynamicPlatformDetector:
         context_parts.append(f"Sample data: {sample_data}")
         
         # Data type analysis
-        dtypes = {col: str(dtype) for col, dtype in df.dtypes.to_dict().items()}
+        dtypes = df.dtypes.to_dict()
         context_parts.append(f"Data types: {dtypes}")
         
         # Value analysis
@@ -6765,7 +6580,7 @@ class DynamicPlatformDetector:
         # Learn column patterns
         column_patterns = {
             'columns': list(df.columns),
-            'data_types': {col: str(dtype) for col, dtype in df.dtypes.to_dict().items()},
+            'data_types': df.dtypes.to_dict(),
             'unique_values': {}
         }
         
@@ -6777,7 +6592,7 @@ class DynamicPlatformDetector:
         
         self.learned_patterns[platform]['column_patterns'] = column_patterns
         self.learned_patterns[platform]['detection_count'] = self.learned_patterns[platform].get('detection_count', 0) + 1
-        self.learned_patterns[platform]['last_detected'] = utc_now().isoformat()
+        self.learned_patterns[platform]['last_detected'] = datetime.utcnow().isoformat()
     
     async def _extract_platform_patterns(self, events: List[Dict], platform: str) -> Dict[str, Any]:
         """Extract patterns from platform events"""
@@ -6848,12 +6663,11 @@ class DynamicPlatformDetector:
         """Get information about a platform"""
         platform_info = {
             'name': platform,
-            'learned_patterns': ensure_json_serializable(self.learned_patterns.get(platform, {})),
+            'learned_patterns': self.learned_patterns.get(platform, {}),
             'detection_confidence': self._calculate_platform_confidence(platform),
             'is_custom': platform not in ['stripe', 'razorpay', 'quickbooks', 'gusto', 'paypal', 'square'],
             'last_detected': self.learned_patterns.get(platform, {}).get('last_detected'),
-            'detection_count': self.learned_patterns.get(platform, {}).get('detection_count', 0),
-            'total_patterns': len(self.learned_patterns.get(platform, {}))
+            'detection_count': self.learned_patterns.get(platform, {}).get('detection_count', 0)
         }
         
         return platform_info
@@ -6934,78 +6748,6 @@ class DynamicPlatformDetector:
                 'amount_patterns': patterns.get('amount_patterns', {}),
                 'terminology_patterns': patterns.get('terminology_patterns', {})
             }
-            
-            # For unknown platforms, add some default characteristics
-            if platform not in default_characteristics:
-                characteristics.update({
-                    'column_patterns': {
-                        'columns': ['transaction_id', 'amount', 'description', 'date', 'status'],
-                        'data_types': {'amount': 'float64', 'date': 'datetime64'},
-                        'unique_values': {'status': ['completed', 'pending', 'failed']}
-                    },
-                    'event_types': {'transaction': 100},
-                    'amount_patterns': {'min': 0.01, 'max': 100000.0, 'avg': 100.0},
-                    'terminology_patterns': {
-                        'payment_terms': ['payment', 'transaction'],
-                        'id_terms': ['transaction_id', 'reference_id'],
-                        'status_terms': ['completed', 'pending', 'failed']
-                    }
-                })
-            else:
-                # For known platforms, ensure we have the platform field
-                characteristics['platform'] = platform
-        
-        # Ensure all required fields are present with defaults
-        if not characteristics.get('column_patterns'):
-            characteristics['column_patterns'] = {}
-        if not characteristics.get('event_types'):
-            characteristics['event_types'] = {}
-        if not characteristics.get('amount_patterns'):
-            characteristics['amount_patterns'] = {}
-        if not characteristics.get('terminology_patterns'):
-            characteristics['terminology_patterns'] = {}
-        
-        # Ensure platform field is always present
-        if 'platform' not in characteristics:
-            characteristics['platform'] = platform
-        
-        # Ensure we have at least some basic characteristics for all platforms
-        if not characteristics.get('column_patterns', {}).get('columns'):
-            characteristics['column_patterns']['columns'] = ['transaction_id', 'amount', 'description']
-        if not characteristics.get('event_types'):
-            characteristics['event_types'] = {'transaction': 100}
-        if not characteristics.get('amount_patterns'):
-            characteristics['amount_patterns'] = {'min': 0.01, 'max': 100000.0, 'avg': 100.0}
-        if not characteristics.get('terminology_patterns'):
-            characteristics['terminology_patterns'] = {
-                'payment_terms': ['payment', 'transaction'],
-                'id_terms': ['transaction_id', 'reference_id'],
-                'status_terms': ['completed', 'pending', 'failed']
-            }
-        
-        # Ensure all nested dictionaries exist
-        if 'column_patterns' not in characteristics:
-            characteristics['column_patterns'] = {}
-        if 'event_types' not in characteristics:
-            characteristics['event_types'] = {}
-        if 'amount_patterns' not in characteristics:
-            characteristics['amount_patterns'] = {}
-        if 'terminology_patterns' not in characteristics:
-            characteristics['terminology_patterns'] = {}
-        
-        # Ensure we have at least some basic characteristics for all platforms
-        if not characteristics.get('column_patterns', {}).get('columns'):
-            characteristics['column_patterns']['columns'] = ['transaction_id', 'amount', 'description']
-        if not characteristics.get('event_types'):
-            characteristics['event_types'] = {'transaction': 100}
-        if not characteristics.get('amount_patterns'):
-            characteristics['amount_patterns'] = {'min': 0.01, 'max': 100000.0, 'avg': 100.0}
-        if not characteristics.get('terminology_patterns'):
-            characteristics['terminology_patterns'] = {
-                'payment_terms': ['payment', 'transaction'],
-                'id_terms': ['transaction_id', 'reference_id'],
-                'status_terms': ['completed', 'pending', 'failed']
-            }
         
         return characteristics
     
@@ -7020,45 +6762,36 @@ class DynamicPlatformDetector:
             result = query.execute()
             
             if not result.data:
-                return {'total_events': 0, 'unique_users': 0, 'last_used': None}
+                return {'total_events': 0, 'unique_users': 0}
             
             total_events = len(result.data)
-            unique_users = len(set(event.get('user_id') for event in result.data if event.get('user_id')))
-            
-            # Safely get the latest created_at
-            created_ats = [event.get('created_at', '') for event in result.data if event.get('created_at')]
-            last_used = max(created_ats) if created_ats else None
+            unique_users = len(set(event.get('user_id') for event in result.data))
             
             return {
                 'total_events': total_events,
                 'unique_users': unique_users,
-                'last_used': last_used
+                'last_used': max(event.get('created_at', '') for event in result.data) if result.data else None
             }
             
         except Exception as e:
             logger.error(f"Failed to get platform usage stats: {e}")
-            return {'total_events': 0, 'unique_users': 0, 'last_used': None}
+            return {'total_events': 0, 'unique_users': 0}
     
     async def _get_custom_indicators(self, platform: str) -> List[str]:
         """Get custom indicators for a platform"""
         patterns = self.learned_patterns.get(platform, {})
         indicators = []
         
-        # Add basic platform indicator
-        indicators.append(f"Platform: {platform}")
-        
         # Column-based indicators
         column_patterns = patterns.get('column_patterns', {})
         if column_patterns:
             columns = column_patterns.get('columns', [])
-            if columns and len(columns) > 0:
-                indicators.extend([f"Column: {col}" for col in columns[:5]])
+            indicators.extend([f"Column: {col}" for col in columns[:5]])
         
         # Terminology-based indicators
         terminology = patterns.get('terminology_patterns', {})
         for category, terms in terminology.items():
-            if terms and len(terms) > 0:
-                indicators.extend([f"{category}: {', '.join(terms[:3])}"])
+            indicators.extend([f"{category}: {', '.join(terms[:3])}"])
         
         # Platform-specific indicators
         platform_indicators = {
@@ -7091,18 +6824,6 @@ class DynamicPlatformDetector:
         # Add platform-specific indicators
         if platform in platform_indicators:
             indicators.extend(platform_indicators[platform])
-        else:
-            # Default indicators for unknown platforms
-            indicators.extend([
-                f'Custom platform: {platform}',
-                'Generic financial data patterns',
-                'Standard transaction fields',
-                'Platform-specific terminology'
-            ])
-        
-        # Ensure we always return at least one indicator
-        if not indicators:
-            indicators.append(f"Basic platform: {platform}")
         
         return indicators[:10]  # Limit to 10 indicators
     
@@ -7114,8 +6835,8 @@ class DynamicPlatformDetector:
                     'user_id': user_id,
                     'platform': platform,
                     'patterns': platform_patterns,
-                    'created_at': utc_now().isoformat(),
-                    'updated_at': utc_now().isoformat()
+                    'created_at': datetime.utcnow().isoformat(),
+                    'updated_at': datetime.utcnow().isoformat()
                 }).execute()
         except Exception as e:
             logger.error(f"Failed to store learned patterns: {e}")
@@ -7129,7 +6850,7 @@ class DynamicPlatformDetector:
                     'platform_name': platform_info.get('name', 'unknown'),
                     'discovery_reason': platform_info.get('reason', ''),
                     'confidence_score': platform_info.get('confidence', 0.5),
-                    'discovered_at': utc_now().isoformat()
+                    'discovered_at': datetime.utcnow().isoformat()
                 }).execute()
         except Exception as e:
             logger.error(f"Failed to store new platforms: {e}")
@@ -7180,33 +6901,33 @@ async def test_ai_relationship_detection(user_id: str):
         if not supabase_url or not supabase_key:
             return {
                 "message": "Supabase credentials not configured",
-                "timestamp": utc_now().isoformat()
+                "timestamp": datetime.utcnow().isoformat()
             }
         
         supabase = create_client(supabase_url, supabase_key)
         
-        # Use the EnhancedRelationshipDetector class for better results
-        enhanced_detector = EnhancedRelationshipDetector(openai_client, supabase)
+        # Initialize AI Relationship Detector
+        ai_detector = AIRelationshipDetector(openai_client, supabase)
         
-        # Detect relationships with enhanced processing
-        result = await enhanced_detector.detect_all_relationships(user_id)
+        # Detect all relationships
+        result = await ai_detector.detect_all_relationships(user_id)
         
         return {
             "message": "AI Relationship Detection Test Completed",
             "result": result,
-            "timestamp": utc_now().isoformat()
+            "timestamp": datetime.utcnow().isoformat()
         }
         
     except Exception as e:
         return {
             "message": "AI Relationship Detection Test Failed",
             "error": str(e),
-            "timestamp": utc_now().isoformat()
+            "timestamp": datetime.utcnow().isoformat()
         }
 
 @app.get("/test-relationship-discovery/{user_id}")
 async def test_relationship_discovery(user_id: str):
-    """Test AI-powered relationship type discovery - Updated to use Enhanced Detector"""
+    """Test AI-powered relationship type discovery"""
     try:
         # Initialize OpenAI and Supabase clients
         openai_client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
@@ -7216,7 +6937,7 @@ async def test_relationship_discovery(user_id: str):
         if not supabase_url or not supabase_key:
             return {
                 "message": "Supabase credentials not configured",
-                "timestamp": utc_now().isoformat()
+                "timestamp": datetime.utcnow().isoformat()
             }
         
         supabase = create_client(supabase_url, supabase_key)
@@ -7228,31 +6949,27 @@ async def test_relationship_discovery(user_id: str):
             return {
                 "message": "No data found for relationship discovery",
                 "discovered_types": [],
-                "timestamp": utc_now().isoformat()
+                "timestamp": datetime.utcnow().isoformat()
             }
         
-        # Initialize Enhanced Relationship Detector for better discovery
-        enhanced_detector = EnhancedRelationshipDetector(openai_client, supabase)
+        # Initialize AI Relationship Detector
+        ai_detector = AIRelationshipDetector(openai_client, supabase)
         
-        # Detect relationships to discover types
-        result = await enhanced_detector.detect_all_relationships(user_id)
-        
-        # Extract unique relationship types from results
-        relationship_types = list(set([r.get('relationship_type', 'unknown') for r in result.get('relationships', [])]))
+        # Discover relationship types
+        relationship_types = await ai_detector._discover_relationship_types(events.data)
         
         return {
-            "message": "Relationship Type Discovery Test Completed (Enhanced)",
+            "message": "Relationship Type Discovery Test Completed",
             "discovered_types": relationship_types,
             "total_events": len(events.data),
-            "total_relationships": len(result.get('relationships', [])),
-            "timestamp": utc_now().isoformat()
+            "timestamp": datetime.utcnow().isoformat()
         }
         
     except Exception as e:
         return {
             "message": "Relationship Discovery Test Failed",
             "error": str(e),
-            "timestamp": utc_now().isoformat()
+            "timestamp": datetime.utcnow().isoformat()
         }
 
 @app.get("/test-ai-relationship-scoring/{user_id}")
@@ -7267,7 +6984,7 @@ async def test_ai_relationship_scoring(user_id: str):
         if not supabase_url or not supabase_key:
             return {
                 "message": "Supabase credentials not configured",
-                "timestamp": utc_now().isoformat()
+                "timestamp": datetime.utcnow().isoformat()
             }
         
         supabase = create_client(supabase_url, supabase_key)
@@ -7279,7 +6996,7 @@ async def test_ai_relationship_scoring(user_id: str):
             return {
                 "message": "Insufficient data for relationship scoring test",
                 "scoring_results": [],
-                "timestamp": utc_now().isoformat()
+                "timestamp": datetime.utcnow().isoformat()
             }
         
         # Initialize AI Relationship Detector
@@ -7315,14 +7032,14 @@ async def test_ai_relationship_scoring(user_id: str):
         return {
             "message": "AI Relationship Scoring Test Completed",
             "scoring_results": scoring_results,
-            "timestamp": utc_now().isoformat()
+            "timestamp": datetime.utcnow().isoformat()
         }
         
     except Exception as e:
         return {
             "message": "AI Relationship Scoring Test Failed",
             "error": str(e),
-            "timestamp": utc_now().isoformat()
+            "timestamp": datetime.utcnow().isoformat()
         }
 
 @app.get("/test-relationship-validation/{user_id}")
@@ -7337,7 +7054,7 @@ async def test_relationship_validation(user_id: str):
         if not supabase_url or not supabase_key:
             return {
                 "message": "Supabase credentials not configured",
-                "timestamp": utc_now().isoformat()
+                "timestamp": datetime.utcnow().isoformat()
             }
         
         supabase = create_client(supabase_url, supabase_key)
@@ -7352,7 +7069,7 @@ async def test_relationship_validation(user_id: str):
             return {
                 "message": "No data found for relationship validation",
                 "validation_results": [],
-                "timestamp": utc_now().isoformat()
+                "timestamp": datetime.utcnow().isoformat()
             }
         
         # Create sample relationships for testing
@@ -7375,28 +7092,15 @@ async def test_relationship_validation(user_id: str):
             "total_relationships": len(sample_relationships),
             "validated_relationships": len(validated_relationships),
             "validation_results": validated_relationships,
-            "timestamp": utc_now().isoformat()
+            "timestamp": datetime.utcnow().isoformat()
         }
         
     except Exception as e:
         return {
             "message": "Relationship Validation Test Failed",
             "error": str(e),
-            "timestamp": utc_now().isoformat()
+            "timestamp": datetime.utcnow().isoformat()
         }
-
-def ensure_json_serializable(obj):
-    """Ensure an object is JSON serializable by converting problematic types"""
-    if isinstance(obj, dict):
-        return {k: ensure_json_serializable(v) for k, v in obj.items()}
-    elif isinstance(obj, list):
-        return [ensure_json_serializable(item) for item in obj]
-    elif hasattr(obj, 'dtype'):  # numpy/pandas types
-        return str(obj)
-    elif hasattr(obj, '__dict__'):
-        return str(obj)
-    else:
-        return obj
 
 @app.get("/test-dynamic-platform-detection")
 async def test_dynamic_platform_detection():
@@ -7410,7 +7114,7 @@ async def test_dynamic_platform_detection():
         if not supabase_url or not supabase_key:
             return {
                 "message": "Supabase credentials not configured",
-                "timestamp": utc_now().isoformat()
+                "timestamp": datetime.utcnow().isoformat()
             }
         
         supabase = create_client(supabase_url, supabase_key)
@@ -7451,19 +7155,19 @@ async def test_dynamic_platform_detection():
         results = {}
         for platform_name, df in sample_data.items():
             result = await dynamic_detector.detect_platform_dynamically(df, f"{platform_name}.csv")
-            results[platform_name] = ensure_json_serializable(result)
+            results[platform_name] = result
         
         return {
             "message": "Dynamic Platform Detection Test Completed",
             "results": results,
-            "timestamp": utc_now().isoformat()
+            "timestamp": datetime.utcnow().isoformat()
         }
         
     except Exception as e:
         return {
             "message": "Dynamic Platform Detection Test Failed",
             "error": str(e),
-            "timestamp": utc_now().isoformat()
+            "timestamp": datetime.utcnow().isoformat()
         }
 
 @app.get("/test-platform-learning/{user_id}")
@@ -7478,7 +7182,7 @@ async def test_platform_learning(user_id: str):
         if not supabase_url or not supabase_key:
             return {
                 "message": "Supabase credentials not configured",
-                "timestamp": utc_now().isoformat()
+                "timestamp": datetime.utcnow().isoformat()
             }
         
         supabase = create_client(supabase_url, supabase_key)
@@ -7492,14 +7196,14 @@ async def test_platform_learning(user_id: str):
         return {
             "message": "Platform Learning Test Completed",
             "result": result,
-            "timestamp": utc_now().isoformat()
+            "timestamp": datetime.utcnow().isoformat()
         }
         
     except Exception as e:
         return {
             "message": "Platform Learning Test Failed",
             "error": str(e),
-            "timestamp": utc_now().isoformat()
+            "timestamp": datetime.utcnow().isoformat()
         }
 
 @app.get("/test-platform-discovery/{user_id}")
@@ -7514,7 +7218,7 @@ async def test_platform_discovery(user_id: str):
         if not supabase_url or not supabase_key:
             return {
                 "message": "Supabase credentials not configured",
-                "timestamp": utc_now().isoformat()
+                "timestamp": datetime.utcnow().isoformat()
             }
         
         supabase = create_client(supabase_url, supabase_key)
@@ -7528,14 +7232,14 @@ async def test_platform_discovery(user_id: str):
         return {
             "message": "Platform Discovery Test Completed",
             "result": result,
-            "timestamp": utc_now().isoformat()
+            "timestamp": datetime.utcnow().isoformat()
         }
         
     except Exception as e:
         return {
             "message": "Platform Discovery Test Failed",
             "error": str(e),
-            "timestamp": utc_now().isoformat()
+            "timestamp": datetime.utcnow().isoformat()
         }
 
 @app.get("/test-platform-insights/{platform}")
@@ -7550,7 +7254,7 @@ async def test_platform_insights(platform: str, user_id: str = None):
         if not supabase_url or not supabase_key:
             return {
                 "message": "Supabase credentials not configured",
-                "timestamp": utc_now().isoformat()
+                "timestamp": datetime.utcnow().isoformat()
             }
         
         supabase = create_client(supabase_url, supabase_key)
@@ -7564,1529 +7268,14 @@ async def test_platform_insights(platform: str, user_id: str = None):
         return {
             "message": "Platform Insights Test Completed",
             "insights": insights,
-            "timestamp": utc_now().isoformat()
+            "timestamp": datetime.utcnow().isoformat()
         }
         
     except Exception as e:
         return {
             "message": "Platform Insights Test Failed",
             "error": str(e),
-            "timestamp": utc_now().isoformat()
-        }
-
-class FlexibleRelationshipEngine:
-    """
-    AI-powered flexible relationship detection engine that can discover ANY type of financial relationship
-    across different platforms and data sources.
-    """
-    
-    def __init__(self, openai_client, supabase_client: Client):
-        self.openai = openai_client
-        self.supabase = supabase_client
-        self.learned_relationship_patterns = {}
-        self.relationship_cache = {}
-        
-    async def discover_all_relationships(self, user_id: str) -> Dict[str, Any]:
-        """Discover ALL possible relationships in user's financial data"""
-        try:
-            # Get all events for the user
-            events = self.supabase.table('raw_events').select('*').eq('user_id', user_id).execute()
-            
-            if not events.data:
-                return {
-                    "message": "No data found for relationship discovery",
-                    "relationships": [],
-                    "patterns_learned": 0
-                }
-            
-            # Step 1: Discover relationship types using AI
-            relationship_types = await self._discover_relationship_types(events.data)
-            
-            # Step 2: Detect relationships by each type
-            all_relationships = []
-            for rel_type in relationship_types:
-                relationships = await self._detect_relationships_by_type(events.data, rel_type)
-                all_relationships.extend(relationships)
-            
-            # Step 3: Learn new relationship patterns
-            await self._learn_relationship_patterns(all_relationships, user_id)
-            
-            # Step 4: Cross-platform relationship mapping
-            cross_platform_relationships = await self._map_cross_platform_relationships(all_relationships)
-            
-            return {
-                "message": "Relationship discovery completed",
-                "total_relationships": len(all_relationships),
-                "relationship_types": relationship_types,
-                "relationships": all_relationships,
-                "cross_platform_relationships": cross_platform_relationships,
-                "patterns_learned": len(self.learned_relationship_patterns)
-            }
-            
-        except Exception as e:
-            logger.error(f"Relationship discovery failed: {e}")
-            return {"message": "Relationship discovery failed", "error": str(e)}
-    
-    async def _discover_relationship_types(self, events: List[Dict]) -> List[str]:
-        """Use AI to discover what types of relationships might exist"""
-        try:
-            # Create context from events
-            event_summary = self._create_relationship_context(events)
-            
-            ai_response = self.openai.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[{
-                    "role": "system",
-                    "content": """You are a financial data analyst specializing in relationship detection. 
-                    Analyze the financial events and identify what types of relationships might exist between them.
-                    Consider relationships like: invoice-to-payment, payroll-to-bank-transfer, expense-to-reimbursement,
-                    subscription-to-billing, refund-to-original-payment, fee-to-transaction, etc.
-                    Return only the relationship types as a JSON array of strings."""
-                }, {
-                    "role": "user",
-                    "content": f"Analyze these financial events and identify relationship types: {event_summary}"
-                }],
-                temperature=0.1
-            )
-            
-            response_text = ai_response.choices[0].message.content
-            return self._parse_relationship_types(response_text)
-            
-        except Exception as e:
-            logger.error(f"AI relationship type discovery failed: {e}")
-            # Fallback to common relationship types
-            return [
-                "invoice_to_payment",
-                "payroll_to_bank_transfer", 
-                "expense_to_reimbursement",
-                "subscription_to_billing",
-                "refund_to_original_payment",
-                "fee_to_transaction",
-                "tax_to_payment",
-                "commission_to_sale"
-            ]
-    
-    async def _detect_relationships_by_type(self, events: List[Dict], relationship_type: str) -> List[Dict]:
-        """Detect relationships of a specific type using AI and pattern matching"""
-        try:
-            # Use AI to detect relationships
-            ai_relationships = await self._ai_detect_relationships(events, relationship_type)
-            
-            # Apply learned patterns
-            pattern_relationships = await self._apply_learned_patterns(events, relationship_type)
-            
-            # Combine and validate
-            all_relationships = ai_relationships + pattern_relationships
-            validated_relationships = await self._validate_relationships(all_relationships)
-            
-            return validated_relationships
-            
-        except Exception as e:
-            logger.error(f"Relationship detection failed for {relationship_type}: {e}")
-            return []
-    
-    async def _ai_detect_relationships(self, events: List[Dict], relationship_type: str) -> List[Dict]:
-        """Use AI to detect relationships of a specific type"""
-        try:
-            context = self._create_comprehensive_context(events, relationship_type)
-            
-            ai_response = self.openai.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[{
-                    "role": "system",
-                    "content": f"""You are a financial data analyst. Analyze the financial events and identify 
-                    {relationship_type} relationships between them. Return the relationships as a JSON array with 
-                    source_event_id, target_event_id, relationship_type, confidence_score, and reasoning."""
-                }, {
-                    "role": "user",
-                    "content": f"Analyze these financial events and identify {relationship_type} relationships: {context}"
-                }],
-                temperature=0.2
-            )
-            
-            response_text = ai_response.choices[0].message.content
-            return self._parse_ai_relationships(response_text, events)
-            
-        except Exception as e:
-            logger.error(f"AI relationship detection failed: {e}")
-            return []
-    
-    async def _apply_learned_patterns(self, events: List[Dict], relationship_type: str) -> List[Dict]:
-        """Apply learned patterns to detect relationships"""
-        patterns = self.learned_relationship_patterns.get(relationship_type, [])
-        relationships = []
-        
-        for pattern in patterns:
-            pattern_relationships = self._apply_single_pattern(events, pattern)
-            relationships.extend(pattern_relationships)
-        
-        return relationships
-    
-    def _apply_single_pattern(self, events: List[Dict], pattern: Dict) -> List[Dict]:
-        """Apply a single learned pattern to detect relationships"""
-        relationships = []
-        
-        # Extract pattern criteria
-        amount_match = pattern.get('amount_match', False)
-        date_window = pattern.get('date_window', 1)  # days
-        entity_match = pattern.get('entity_match', False)
-        id_pattern = pattern.get('id_pattern', None)
-        
-        # Find matching events
-        for i, event1 in enumerate(events):
-            for j, event2 in enumerate(events):
-                if i == j:
-                    continue
-                
-                # Check if events match the pattern
-                if self._events_match_pattern(event1, event2, pattern):
-                    relationship = {
-                        "source_event_id": event1.get('id'),
-                        "target_event_id": event2.get('id'),
-                        "relationship_type": pattern.get('relationship_type'),
-                        "confidence_score": self._calculate_pattern_confidence(event1, event2, pattern),
-                        "detection_method": "learned_pattern",
-                        "pattern_id": pattern.get('id'),
-                        "reasoning": f"Matched learned pattern: {pattern.get('description', '')}"
-                    }
-                    relationships.append(relationship)
-        
-        return relationships
-    
-    def _events_match_pattern(self, event1: Dict, event2: Dict, pattern: Dict) -> bool:
-        """Check if two events match a learned pattern"""
-        # Amount matching
-        if pattern.get('amount_match'):
-            amount1 = self._extract_amount(event1.get('payload', {}))
-            amount2 = self._extract_amount(event2.get('payload', {}))
-            if abs(amount1 - amount2) > 0.01:  # Allow small differences
-                return False
-        
-        # Date matching
-        if pattern.get('date_window'):
-            date1 = self._extract_date(event1.get('payload', {}))
-            date2 = self._extract_date(event2.get('payload', {}))
-            if date1 and date2:
-                date_diff = abs((date1 - date2).days)
-                if date_diff > pattern.get('date_window', 1):
-                    return False
-        
-        # Entity matching
-        if pattern.get('entity_match'):
-            entities1 = self._extract_entities(event1.get('payload', {}))
-            entities2 = self._extract_entities(event2.get('payload', {}))
-            if not self._entities_overlap(entities1, entities2):
-                return False
-        
-        # ID pattern matching
-        if pattern.get('id_pattern'):
-            id1 = self._extract_id(event1.get('payload', {}))
-            id2 = self._extract_id(event2.get('payload', {}))
-            if not self._ids_match_pattern(id1, id2, pattern.get('id_pattern')):
-                return False
-        
-        return True
-    
-    async def _learn_relationship_patterns(self, relationships: List[Dict], user_id: str):
-        """Learn new relationship patterns from detected relationships"""
-        try:
-            # Group relationships by type
-            by_type = {}
-            for rel in relationships:
-                rel_type = rel.get('relationship_type')
-                if rel_type not in by_type:
-                    by_type[rel_type] = []
-                by_type[rel_type].append(rel)
-            
-            # Learn patterns for each relationship type
-            for rel_type, rels in by_type.items():
-                if len(rels) >= 2:  # Need at least 2 relationships to learn a pattern
-                    pattern = await self._extract_relationship_pattern(rels, rel_type)
-                    if pattern:
-                        await self._store_relationship_pattern(pattern, user_id)
-                        self.learned_relationship_patterns[rel_type] = self.learned_relationship_patterns.get(rel_type, []) + [pattern]
-            
-        except Exception as e:
-            logger.error(f"Failed to learn relationship patterns: {e}")
-    
-    async def _extract_relationship_pattern(self, relationships: List[Dict], relationship_type: str) -> Dict:
-        """Extract a pattern from a set of relationships"""
-        try:
-            # Analyze common characteristics
-            amount_matches = []
-            date_windows = []
-            entity_matches = []
-            id_patterns = []
-            
-            for rel in relationships:
-                # Get the actual events
-                source_event = await self._get_event_by_id(rel.get('source_event_id'))
-                target_event = await self._get_event_by_id(rel.get('target_event_id'))
-                
-                if source_event and target_event:
-                    # Amount analysis
-                    amount1 = self._extract_amount(source_event.get('payload', {}))
-                    amount2 = self._extract_amount(target_event.get('payload', {}))
-                    if abs(amount1 - amount2) < 0.01:
-                        amount_matches.append(True)
-                    
-                    # Date analysis
-                    date1 = self._extract_date(source_event.get('payload', {}))
-                    date2 = self._extract_date(target_event.get('payload', {}))
-                    if date1 and date2:
-                        date_diff = abs((date1 - date2).days)
-                        date_windows.append(date_diff)
-                    
-                    # Entity analysis
-                    entities1 = self._extract_entities(source_event.get('payload', {}))
-                    entities2 = self._extract_entities(target_event.get('payload', {}))
-                    if self._entities_overlap(entities1, entities2):
-                        entity_matches.append(True)
-                    
-                    # ID pattern analysis
-                    id1 = self._extract_id(source_event.get('payload', {}))
-                    id2 = self._extract_id(target_event.get('payload', {}))
-                    if id1 and id2:
-                        pattern = self._extract_id_pattern(id1, id2)
-                        if pattern:
-                            id_patterns.append(pattern)
-            
-            # Create pattern based on common characteristics
-            pattern = {
-                "relationship_type": relationship_type,
-                "amount_match": len(amount_matches) / len(relationships) > 0.7,
-                "date_window": max(date_windows) if date_windows else 1,
-                "entity_match": len(entity_matches) / len(relationships) > 0.5,
-                "id_pattern": max(set(id_patterns), key=id_patterns.count) if id_patterns else None,
-                "confidence_threshold": 0.7,
-                "description": f"Learned pattern for {relationship_type} relationships"
-            }
-            
-            return pattern
-            
-        except Exception as e:
-            logger.error(f"Failed to extract relationship pattern: {e}")
-            return None
-    
-    async def _map_cross_platform_relationships(self, relationships: List[Dict]) -> List[Dict]:
-        """Map relationships across different platforms"""
-        try:
-            cross_platform = []
-            
-            for rel in relationships:
-                source_event = await self._get_event_by_id(rel.get('source_event_id'))
-                target_event = await self._get_event_by_id(rel.get('target_event_id'))
-                
-                if source_event and target_event:
-                    source_platform = source_event.get('source_platform')
-                    target_platform = target_event.get('source_platform')
-                    
-                    if source_platform != target_platform:
-                        cross_platform_rel = {
-                            **rel,
-                            "cross_platform": True,
-                            "source_platform": source_platform,
-                            "target_platform": target_platform,
-                            "platform_compatibility": self._assess_platform_compatibility(source_platform, target_platform)
-                        }
-                        cross_platform.append(cross_platform_rel)
-            
-            return cross_platform
-            
-        except Exception as e:
-            logger.error(f"Cross-platform mapping failed: {e}")
-            return []
-    
-    def _assess_platform_compatibility(self, platform1: str, platform2: str) -> str:
-        """Assess compatibility between two platforms"""
-        # Known platform pairs
-        compatible_pairs = [
-            ('stripe', 'quickbooks'),
-            ('razorpay', 'quickbooks'),
-            ('paypal', 'quickbooks'),
-            ('stripe', 'xero'),
-            ('razorpay', 'xero')
-        ]
-        
-        pair = tuple(sorted([platform1, platform2]))
-        if pair in compatible_pairs:
-            return "high"
-        elif platform1 == platform2:
-            return "same_platform"
-        else:
-            return "low"
-    
-    async def _get_event_by_id(self, event_id: str) -> Dict:
-        """Get event by ID from cache or database"""
-        if event_id in self.relationship_cache:
-            return self.relationship_cache[event_id]
-        
-        try:
-            result = self.supabase.table('raw_events').select('*').eq('id', event_id).execute()
-            if result.data:
-                event = result.data[0]
-                self.relationship_cache[event_id] = event
-                return event
-        except Exception as e:
-            logger.error(f"Failed to get event {event_id}: {e}")
-        
-        return None
-    
-    async def _store_relationship_pattern(self, pattern: Dict, user_id: str):
-        """Store learned relationship pattern in database"""
-        try:
-            pattern_data = {
-                "user_id": user_id,
-                "relationship_type": pattern.get('relationship_type'),
-                "pattern_data": pattern,
-                "created_at": utc_now().isoformat()
-            }
-            
-            # Use upsert to handle duplicate key constraints
-            self.supabase.table('relationship_patterns').upsert(pattern_data).execute()
-            
-        except Exception as e:
-            logger.error(f"Failed to store relationship pattern: {e}")
-    
-    def _create_relationship_context(self, events: List[Dict]) -> str:
-        """Create context for relationship discovery"""
-        context_parts = []
-        
-        # Group by platform
-        platform_groups = {}
-        for event in events:
-            platform = event.get('source_platform', 'unknown')
-            if platform not in platform_groups:
-                platform_groups[platform] = []
-            platform_groups[platform].append(event)
-        
-        for platform, platform_events in platform_groups.items():
-            context_parts.append(f"\nPlatform: {platform}")
-            context_parts.append(f"Event count: {len(platform_events)}")
-            
-            # Sample events
-            for event in platform_events[:3]:
-                payload = event.get('payload', {})
-                context_parts.append(f"- {event.get('kind')}: {payload.get('description', '')} (Amount: {payload.get('amount', 'N/A')})")
-        
-        return '\n'.join(context_parts)
-    
-    def _create_comprehensive_context(self, events: List[Dict], relationship_type: str) -> str:
-        """Create comprehensive context for relationship detection"""
-        context_parts = [f"Looking for {relationship_type} relationships:"]
-        
-        for event in events[:10]:  # Limit to first 10 events
-            payload = event.get('payload', {})
-            context_parts.append(f"Event {event.get('id')}: {event.get('kind')} - {payload.get('description', '')} - Amount: {payload.get('amount', 'N/A')} - Date: {payload.get('date', 'N/A')}")
-        
-        return '\n'.join(context_parts)
-    
-        try:
-            # Try to extract JSON array
-            if '[' in response_text and ']' in response_text:
-                start = response_text.find('[')
-                end = response_text.rfind(']') + 1
-                json_str = response_text[start:end]
-                relationships = json.loads(json_str)
-                
-                # Validate and enhance relationships
-                validated = []
-                for rel in relationships:
-                    if self._validate_relationship_structure(rel, events):
-                        rel['detection_method'] = 'ai_analysis'
-                        validated.append(rel)
-                
-                return validated
-        except:
-            pass
-        
-        return []
-    
-    def _validate_relationship_structure(self, rel: Dict, events: List[Dict]) -> bool:
-        """Validate relationship structure"""
-        required_fields = ['source_event_id', 'target_event_id', 'relationship_type']
-        return all(field in rel for field in required_fields)
-    
-    async def _validate_relationships(self, relationships: List[Dict]) -> List[Dict]:
-        """Validate and filter relationships"""
-        validated = []
-        
-        for rel in relationships:
-            # Check if events exist
-            source_exists = await self._event_exists(rel.get('source_event_id'))
-            target_exists = await self._event_exists(rel.get('target_event_id'))
-            
-            if source_exists and target_exists:
-                # Add confidence if missing
-                if 'confidence_score' not in rel:
-                    rel['confidence_score'] = 0.7
-                
-                # Add detection method if missing
-                if 'detection_method' not in rel:
-                    rel['detection_method'] = 'pattern_matching'
-                
-                validated.append(rel)
-        
-        return validated
-    
-    async def _event_exists(self, event_id: str) -> bool:
-        """Check if event exists in database"""
-        try:
-            result = self.supabase.table('raw_events').select('id').eq('id', event_id).execute()
-            return len(result.data) > 0
-        except:
-            return False
-    
-    def _extract_amount(self, payload: Dict) -> float:
-        """Extract amount from payload"""
-        amount = payload.get('amount')
-        if isinstance(amount, (int, float)):
-            return float(amount)
-        return 0.0
-    
-    def _extract_date(self, payload: Dict) -> Optional[datetime]:
-        """Extract date from payload"""
-        date_str = payload.get('date') or payload.get('created_at') or payload.get('created')
-        if date_str:
-            try:
-                return datetime.fromisoformat(date_str.replace('Z', '+00:00'))
-            except:
-                pass
-        return None
-    
-    def _extract_entities(self, payload: Dict) -> List[str]:
-        """Extract entities from payload"""
-        entities = []
-        
-        # Extract from description
-        description = payload.get('description', '')
-        if description:
-            entities.extend(description.split())
-        
-        # Extract from vendor
-        vendor = payload.get('vendor_standard') or payload.get('vendor_raw')
-        if vendor:
-            entities.append(vendor)
-        
-        return list(set(entities))
-    
-    def _extract_id(self, payload: Dict) -> str:
-        """Extract ID from payload"""
-        return (payload.get('transaction_id') or 
-                payload.get('charge_id') or 
-                payload.get('payment_id') or 
-                payload.get('invoice_id') or 
-                '')
-    
-    def _entities_overlap(self, entities1: List[str], entities2: List[str]) -> bool:
-        """Check if two entity lists overlap"""
-        if not entities1 or not entities2:
-            return False
-        
-        set1 = set(entity.lower() for entity in entities1)
-        set2 = set(entity.lower() for entity in entities2)
-        
-        return len(set1.intersection(set2)) > 0
-    
-    def _ids_match_pattern(self, id1: str, id2: str, pattern: str) -> bool:
-        """Check if IDs match a pattern"""
-        if not id1 or not id2 or not pattern:
-            return False
-        
-        # Simple pattern matching
-        if pattern == 'same_prefix':
-            return id1.split('_')[0] == id2.split('_')[0]
-        elif pattern == 'same_suffix':
-            return id1.split('_')[-1] == id2.split('_')[-1]
-        
-        return False
-    
-    def _extract_id_pattern(self, id1: str, id2: str) -> str:
-        """Extract pattern between two IDs"""
-        if not id1 or not id2:
-            return None
-        
-        if id1.split('_')[0] == id2.split('_')[0]:
-            return 'same_prefix'
-        elif id1.split('_')[-1] == id2.split('_')[-1]:
-            return 'same_suffix'
-        
-        return None
-    
-    def _calculate_pattern_confidence(self, event1: Dict, event2: Dict, pattern: Dict) -> float:
-        """Calculate confidence score for pattern-based relationship"""
-        confidence = 0.5  # Base confidence
-        
-        # Amount match bonus
-        if pattern.get('amount_match'):
-            amount1 = self._extract_amount(event1.get('payload', {}))
-            amount2 = self._extract_amount(event2.get('payload', {}))
-            if abs(amount1 - amount2) < 0.01:
-                confidence += 0.3
-        
-        # Date match bonus
-        if pattern.get('date_window'):
-            date1 = self._extract_date(event1.get('payload', {}))
-            date2 = self._extract_date(event2.get('payload', {}))
-            if date1 and date2:
-                date_diff = abs((date1 - date2).days)
-                if date_diff <= pattern.get('date_window', 1):
-                    confidence += 0.2
-        
-        # Entity match bonus
-        if pattern.get('entity_match'):
-            entities1 = self._extract_entities(event1.get('payload', {}))
-            entities2 = self._extract_entities(event2.get('payload', {}))
-            if self._entities_overlap(entities1, entities2):
-                confidence += 0.2
-        
-        return min(confidence, 1.0)
-
-@app.get("/test-flexible-relationship-discovery/{user_id}")
-async def test_flexible_relationship_discovery(user_id: str):
-    """Test the flexible relationship discovery engine"""
-    try:
-        # Initialize OpenAI and Supabase clients
-        openai_client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
-        supabase_url = os.getenv('SUPABASE_URL')
-        supabase_key = os.getenv('SUPABASE_KEY')
-        
-        if not supabase_url or not supabase_key:
-            return {
-                "message": "Supabase credentials not configured",
-                "timestamp": utc_now().isoformat()
-            }
-        
-        supabase = create_client(supabase_url, supabase_key)
-        
-        # Initialize Flexible Relationship Engine
-        relationship_engine = FlexibleRelationshipEngine(openai_client, supabase)
-        
-        # Discover all relationships
-        result = await relationship_engine.discover_all_relationships(user_id)
-        
-        return {
-            "message": "Flexible Relationship Discovery Test Completed",
-            "result": ensure_json_serializable(result),
-            "timestamp": utc_now().isoformat()
-        }
-        
-    except Exception as e:
-        return {
-            "message": "Flexible Relationship Discovery Test Failed",
-            "error": str(e),
-            "timestamp": utc_now().isoformat()
-        }
-
-@app.get("/test-relationship-pattern-learning/{user_id}")
-async def test_relationship_pattern_learning(user_id: str):
-    """Test relationship pattern learning capabilities"""
-    try:
-        # Initialize OpenAI and Supabase clients
-        openai_client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
-        supabase_url = os.getenv('SUPABASE_URL')
-        supabase_key = os.getenv('SUPABASE_KEY')
-        
-        if not supabase_url or not supabase_key:
-            return {
-                "message": "Supabase credentials not configured",
-                "timestamp": utc_now().isoformat()
-            }
-        
-        supabase = create_client(supabase_url, supabase_key)
-        
-        # Initialize Flexible Relationship Engine
-        relationship_engine = FlexibleRelationshipEngine(openai_client, supabase)
-        
-        # Get all events for the user
-        events = supabase.table('raw_events').select('*').eq('user_id', user_id).execute()
-        
-        if not events.data:
-            return {
-                "message": "No data found for pattern learning",
-                "timestamp": utc_now().isoformat()
-            }
-        
-        # Discover relationship types
-        relationship_types = await relationship_engine._discover_relationship_types(events.data)
-        
-        # Learn patterns for each type
-        learned_patterns = {}
-        for rel_type in relationship_types[:3]:  # Test with first 3 types
-            relationships = await relationship_engine._detect_relationships_by_type(events.data, rel_type)
-            if relationships:
-                await relationship_engine._learn_relationship_patterns(relationships, user_id)
-                learned_patterns[rel_type] = len(relationships)
-        
-        return {
-            "message": "Relationship Pattern Learning Test Completed",
-            "relationship_types_discovered": relationship_types,
-            "learned_patterns": learned_patterns,
-            "total_patterns_learned": len(relationship_engine.learned_relationship_patterns),
-            "timestamp": utc_now().isoformat()
-        }
-        
-    except Exception as e:
-        return {
-            "message": "Relationship Pattern Learning Test Failed",
-            "error": str(e),
-            "timestamp": utc_now().isoformat()
-        }
-
-@app.get("/test-cross-platform-relationship-mapping/{user_id}")
-async def test_cross_platform_relationship_mapping(user_id: str):
-    """Test cross-platform relationship mapping"""
-    try:
-        # Initialize OpenAI and Supabase clients
-        openai_client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
-        supabase_url = os.getenv('SUPABASE_URL')
-        supabase_key = os.getenv('SUPABASE_KEY')
-        
-        if not supabase_url or not supabase_key:
-            return {
-                "message": "Supabase credentials not configured",
-                "timestamp": utc_now().isoformat()
-            }
-        
-        supabase = create_client(supabase_url, supabase_key)
-        
-        # Initialize Flexible Relationship Engine
-        relationship_engine = FlexibleRelationshipEngine(openai_client, supabase)
-        
-        # Get all events for the user
-        events = supabase.table('raw_events').select('*').eq('user_id', user_id).execute()
-        
-        if not events.data:
-            return {
-                "message": "No data found for cross-platform mapping",
-                "timestamp": utc_now().isoformat()
-            }
-        
-        # Create sample relationships for testing
-        sample_relationships = []
-        platforms = list(set(event.get('source_platform', 'unknown') for event in events.data))
-        
-        # Create cross-platform relationships
-        for i, platform1 in enumerate(platforms):
-            for platform2 in platforms[i+1:]:
-                # Find events from different platforms
-                platform1_events = [e for e in events.data if e.get('source_platform') == platform1]
-                platform2_events = [e for e in events.data if e.get('source_platform') == platform2]
-                
-                if platform1_events and platform2_events:
-                    sample_relationships.append({
-                        "source_event_id": platform1_events[0].get('id'),
-                        "target_event_id": platform2_events[0].get('id'),
-                        "relationship_type": "cross_platform_transfer",
-                        "confidence_score": 0.8,
-                        "detection_method": "manual_test"
-                    })
-        
-        # Map cross-platform relationships
-        cross_platform_relationships = await relationship_engine._map_cross_platform_relationships(sample_relationships)
-        
-        return {
-            "message": "Cross-Platform Relationship Mapping Test Completed",
-            "total_relationships": len(sample_relationships),
-            "cross_platform_relationships": ensure_json_serializable(cross_platform_relationships),
-            "platforms_analyzed": platforms,
-            "timestamp": utc_now().isoformat()
-        }
-        
-    except Exception as e:
-        return {
-            "message": "Cross-Platform Relationship Mapping Test Failed",
-            "error": str(e),
-            "timestamp": utc_now().isoformat()
-        }
-
-@app.get("/test-relationship-patterns/{user_id}")
-async def test_relationship_patterns(user_id: str):
-    """Test relationship pattern storage and retrieval"""
-    try:
-        # Initialize Supabase client
-        supabase_url = os.getenv('SUPABASE_URL')
-        supabase_key = os.getenv('SUPABASE_KEY')
-        
-        if not supabase_url or not supabase_key:
-            return {
-                "message": "Supabase credentials not configured",
-                "timestamp": utc_now().isoformat()
-            }
-        
-        supabase = create_client(supabase_url, supabase_key)
-        
-        # Get stored relationship patterns
-        patterns = supabase.table('relationship_patterns').select('*').eq('user_id', user_id).execute()
-        
-        # Analyze patterns
-        pattern_analysis = {}
-        for pattern in patterns.data:
-            rel_type = pattern.get('relationship_type')
-            if rel_type not in pattern_analysis:
-                pattern_analysis[rel_type] = 0
-            pattern_analysis[rel_type] += 1
-        
-        return {
-            "message": "Relationship Patterns Test Completed",
-            "total_patterns": len(patterns.data),
-            "patterns_by_type": pattern_analysis,
-            "stored_patterns": ensure_json_serializable(patterns.data),
-            "timestamp": utc_now().isoformat()
-        }
-        
-    except Exception as e:
-        return {
-            "message": "Relationship Patterns Test Failed",
-            "error": str(e),
-            "timestamp": utc_now().isoformat()
-        }
-
-# Enhanced Relationship Detector - FIXES CORE ISSUES
-class EnhancedRelationshipDetector:
-    """Enhanced relationship detector that actually finds relationships between events"""
-    
-    def __init__(self, openai_client, supabase_client: Client):
-        self.openai = openai_client
-        self.supabase = supabase_client
-        self.relationship_cache = {}
-        
-    async def detect_all_relationships(self, user_id: str) -> Dict[str, Any]:
-        """Detect actual relationships between financial events"""
-        try:
-            # Get all events for the user
-            events = self.supabase.table('raw_events').select('*').eq('user_id', user_id).execute()
-            
-            if not events.data:
-                return {"relationships": [], "message": "No data found for relationship analysis"}
-            
-            logger.info(f"Processing {len(events.data)} events for enhanced relationship detection")
-            
-            # Group events by file type for cross-file analysis
-            events_by_file = self._group_events_by_file(events.data)
-            
-            # Detect cross-file relationships
-            cross_file_relationships = await self._detect_cross_file_relationships(events_by_file)
-            
-            # Detect within-file relationships
-            within_file_relationships = await self._detect_within_file_relationships(events.data)
-            
-            # Combine all relationships
-            all_relationships = cross_file_relationships + within_file_relationships
-            
-            # Remove duplicates and validate
-            unique_relationships = self._remove_duplicate_relationships(all_relationships)
-            validated_relationships = await self._validate_relationships(unique_relationships)
-            
-            logger.info(f"Enhanced relationship detection completed: {len(validated_relationships)} relationships found")
-            
-            return {
-                "relationships": validated_relationships,
-                "total_relationships": len(validated_relationships),
-                "cross_file_relationships": len(cross_file_relationships),
-                "within_file_relationships": len(within_file_relationships),
-                "processing_stats": {
-                    "total_events": len(events.data),
-                    "files_analyzed": len(events_by_file),
-                    "relationship_types_found": list(set([r.get('relationship_type', 'unknown') for r in validated_relationships]))
-                },
-                "message": "Enhanced relationship detection completed successfully"
-            }
-            
-        except Exception as e:
-            logger.error(f"Enhanced relationship detection failed: {e}")
-            return {"relationships": [], "error": str(e)}
-    
-    def _group_events_by_file(self, events: List[Dict]) -> Dict[str, List[Dict]]:
-        """Group events by source filename"""
-        events_by_file = {}
-        for event in events:
-            filename = event.get('source_filename', 'unknown')
-            if filename not in events_by_file:
-                events_by_file[filename] = []
-            events_by_file[filename].append(event)
-        return events_by_file
-    
-    async def _detect_cross_file_relationships(self, events_by_file: Dict[str, List[Dict]]) -> List[Dict]:
-        """Detect relationships between different files"""
-        relationships = []
-        
-        # Define cross-file relationship patterns
-        cross_file_patterns = [
-            {
-                'source_files': ['company_invoices.csv', 'comprehensive_vendor_payments.csv'],
-                'relationship_type': 'invoice_to_payment',
-                'description': 'Invoice payments'
-            },
-            {
-                'source_files': ['company_revenue.csv', 'comprehensive_cash_flow.csv'],
-                'relationship_type': 'revenue_to_cashflow',
-                'description': 'Revenue cash flow'
-            },
-            {
-                'source_files': ['company_expenses.csv', 'company_bank_statements.csv'],
-                'relationship_type': 'expense_to_bank',
-                'description': 'Expense bank transactions'
-            },
-            {
-                'source_files': ['comprehensive_payroll_data.csv', 'company_bank_statements.csv'],
-                'relationship_type': 'payroll_to_bank',
-                'description': 'Payroll bank transactions'
-            },
-            {
-                'source_files': ['company_invoices.csv', 'company_accounts_receivable.csv'],
-                'relationship_type': 'invoice_to_receivable',
-                'description': 'Invoice receivables'
-            }
-        ]
-        
-        for pattern in cross_file_patterns:
-            source_file = pattern['source_files'][0]
-            target_file = pattern['source_files'][1]
-            
-            if source_file in events_by_file and target_file in events_by_file:
-                source_events = events_by_file[source_file]
-                target_events = events_by_file[target_file]
-                
-                file_relationships = await self._find_file_relationships(
-                    source_events, target_events, pattern['relationship_type']
-                )
-                relationships.extend(file_relationships)
-        
-        return relationships
-    
-    async def _detect_within_file_relationships(self, events: List[Dict]) -> List[Dict]:
-        """Detect relationships within the same file"""
-        relationships = []
-        
-        # Group events by file
-        events_by_file = self._group_events_by_file(events)
-        
-        for filename, file_events in events_by_file.items():
-            if len(file_events) < 2:
-                continue
-                
-            # Detect relationships within this file
-            file_relationships = await self._find_within_file_relationships(file_events, filename)
-            relationships.extend(file_relationships)
-        
-        return relationships
-    
-    async def _find_file_relationships(self, source_events: List[Dict], target_events: List[Dict], relationship_type: str) -> List[Dict]:
-        """Find relationships between two sets of events"""
-        relationships = []
-        
-        for source_event in source_events[:10]:  # Limit for performance
-            for target_event in target_events[:10]:  # Limit for performance
-                score = await self._calculate_relationship_score(source_event, target_event, relationship_type)
-                
-                if score > 0.8:  # Only include high-confidence relationships (increased threshold)
-                    # Validate business logic
-                    if self._validate_business_logic(source_event, target_event, relationship_type):
-                        relationship = {
-                            'source_event_id': source_event.get('id'),
-                            'target_event_id': target_event.get('id'),
-                            'relationship_type': relationship_type,
-                            'confidence_score': score,
-                            'source_file': source_event.get('source_filename'),
-                            'target_file': target_event.get('source_filename'),
-                            'detection_method': 'cross_file_analysis',
-                            'reasoning': await self._generate_detailed_reasoning(source_event, target_event, relationship_type, score)
-                        }
-                        relationships.append(relationship)
-        
-        return relationships
-    
-    async def _find_within_file_relationships(self, events: List[Dict], filename: str) -> List[Dict]:
-        """Find relationships within a single file"""
-        relationships = []
-        
-        # Sort events by date if possible
-        sorted_events = self._sort_events_by_date(events)
-        
-        for i, event1 in enumerate(sorted_events):
-            for j, event2 in enumerate(sorted_events[i+1:i+6]):  # Look at next 5 events
-                relationship_type = self._determine_relationship_type(event1, event2)
-                score = await self._calculate_relationship_score(event1, event2, relationship_type)
-                
-                if score > 0.7:  # Higher threshold for within-file relationships (increased from 0.5)
-                    # Validate business logic
-                    if self._validate_business_logic(event1, event2, relationship_type):
-                        relationship = {
-                            'source_event_id': event1.get('id'),
-                            'target_event_id': event2.get('id'),
-                            'relationship_type': relationship_type,
-                            'confidence_score': score,
-                            'source_file': filename,
-                            'target_file': filename,
-                            'detection_method': 'within_file_analysis',
-                            'reasoning': await self._generate_detailed_reasoning(event1, event2, relationship_type, score)
-                        }
-                        relationships.append(relationship)
-        
-        return relationships
-    
-    def _sort_events_by_date(self, events: List[Dict]) -> List[Dict]:
-        """Sort events by date if available"""
-        try:
-            return sorted(events, key=lambda x: self._extract_date(x) or datetime.min)
-        except:
-            return events
-    
-    def _determine_relationship_type(self, event1: Dict, event2: Dict) -> str:
-        """Determine the type of relationship between two events"""
-        payload1 = event1.get('payload', {})
-        payload2 = event2.get('payload', {})
-        
-        # Check for common relationship patterns
-        if self._is_invoice_event(payload1) and self._is_payment_event(payload2):
-            return 'invoice_to_payment'
-        elif self._is_payment_event(payload1) and self._is_invoice_event(payload2):
-            return 'payment_to_invoice'
-        elif self._is_revenue_event(payload1) and self._is_cashflow_event(payload2):
-            return 'revenue_to_cashflow'
-        elif self._is_expense_event(payload1) and self._is_bank_event(payload2):
-            return 'expense_to_bank'
-        elif self._is_payroll_event(payload1) and self._is_bank_event(payload2):
-            return 'payroll_to_bank'
-        else:
-            return 'related_transaction'
-    
-    def _is_invoice_event(self, payload: Dict) -> bool:
-        """Check if event is an invoice"""
-        text = str(payload).lower()
-        return any(word in text for word in ['invoice', 'bill', 'receivable'])
-    
-    def _is_payment_event(self, payload: Dict) -> bool:
-        """Check if event is a payment"""
-        text = str(payload).lower()
-        return any(word in text for word in ['payment', 'charge', 'transaction', 'debit'])
-    
-    def _is_revenue_event(self, payload: Dict) -> bool:
-        """Check if event is revenue"""
-        text = str(payload).lower()
-        return any(word in text for word in ['revenue', 'income', 'sales'])
-    
-    def _is_cashflow_event(self, payload: Dict) -> bool:
-        """Check if event is cash flow"""
-        text = str(payload).lower()
-        return any(word in text for word in ['cash', 'flow', 'bank'])
-    
-    def _is_expense_event(self, payload: Dict) -> bool:
-        """Check if event is an expense"""
-        text = str(payload).lower()
-        return any(word in text for word in ['expense', 'cost', 'payment'])
-    
-    def _is_payroll_event(self, payload: Dict) -> bool:
-        """Check if event is payroll"""
-        text = str(payload).lower()
-        return any(word in text for word in ['payroll', 'salary', 'wage', 'employee'])
-    
-    def _is_bank_event(self, payload: Dict) -> bool:
-        """Check if event is a bank transaction"""
-        text = str(payload).lower()
-        return any(word in text for word in ['bank', 'account', 'transaction'])
-    
-    async def _calculate_relationship_score(self, source: Dict, target: Dict, relationship_type: str) -> float:
-        """Calculate comprehensive relationship score"""
-        try:
-            # Extract data from events
-            source_payload = source.get('payload', {})
-            target_payload = target.get('payload', {})
-            
-            # Calculate individual scores
-            amount_score = self._calculate_amount_score(source_payload, target_payload)
-            date_score = self._calculate_date_score(source, target)
-            entity_score = self._calculate_entity_score(source_payload, target_payload)
-            id_score = self._calculate_id_score(source_payload, target_payload)
-            context_score = self._calculate_context_score(source_payload, target_payload)
-            
-            # Weight scores based on relationship type
-            weights = self._get_relationship_weights(relationship_type)
-            
-            # Calculate weighted score
-            total_score = (
-                amount_score * weights['amount'] +
-                date_score * weights['date'] +
-                entity_score * weights['entity'] +
-                id_score * weights['id'] +
-                context_score * weights['context']
-            )
-            
-            return min(total_score, 1.0)  # Cap at 1.0
-            
-        except Exception as e:
-            logger.error(f"Error calculating relationship score: {e}")
-            return 0.0
-    
-    def _calculate_amount_score(self, source_payload: Dict, target_payload: Dict) -> float:
-        """Calculate amount similarity score"""
-        try:
-            source_amount = self._extract_amount(source_payload)
-            target_amount = self._extract_amount(target_payload)
-            
-            if source_amount == 0 or target_amount == 0:
-                return 0.0
-            
-            # Calculate ratio
-            ratio = min(source_amount, target_amount) / max(source_amount, target_amount)
-            return ratio
-            
-        except:
-            return 0.0
-    
-    def _calculate_date_score(self, source: Dict, target: Dict) -> float:
-        """Calculate date similarity score"""
-        try:
-            source_date = self._extract_date(source)
-            target_date = self._extract_date(target)
-            
-            if not source_date or not target_date:
-                return 0.0
-            
-            # Calculate days difference
-            date_diff = abs((source_date - target_date).days)
-            
-            # Score based on proximity
-            if date_diff == 0:
-                return 1.0
-            elif date_diff <= 1:
-                return 0.9
-            elif date_diff <= 7:
-                return 0.7
-            elif date_diff <= 30:
-                return 0.5
-            else:
-                return 0.2
-                
-        except:
-            return 0.0
-    
-    def _calculate_entity_score(self, source_payload: Dict, target_payload: Dict) -> float:
-        """Calculate entity similarity score"""
-        try:
-            source_entities = self._extract_entities(source_payload)
-            target_entities = self._extract_entities(target_payload)
-            
-            if not source_entities or not target_entities:
-                return 0.0
-            
-            # Find common entities
-            common_entities = set(source_entities) & set(target_entities)
-            total_entities = set(source_entities) | set(target_entities)
-            
-            if not total_entities:
-                return 0.0
-            
-            return len(common_entities) / len(total_entities)
-            
-        except:
-            return 0.0
-    
-    def _calculate_id_score(self, source_payload: Dict, target_payload: Dict) -> float:
-        """Calculate ID similarity score"""
-        try:
-            source_ids = self._extract_ids(source_payload)
-            target_ids = self._extract_ids(target_payload)
-            
-            if not source_ids or not target_ids:
-                return 0.0
-            
-            # Check for exact ID matches
-            common_ids = set(source_ids) & set(target_ids)
-            if common_ids:
-                return 1.0
-            
-            # Check for partial matches
-            partial_matches = 0
-            for source_id in source_ids:
-                for target_id in target_ids:
-                    if source_id in target_id or target_id in source_id:
-                        partial_matches += 1
-            
-            if partial_matches > 0:
-                return 0.5
-            
-            return 0.0
-            
-        except:
-            return 0.0
-    
-    def _calculate_context_score(self, source_payload: Dict, target_payload: Dict) -> float:
-        """Calculate context similarity score"""
-        try:
-            source_text = str(source_payload).lower()
-            target_text = str(target_payload).lower()
-            
-            # Simple text similarity
-            source_words = set(source_text.split())
-            target_words = set(target_text.split())
-            
-            if not source_words or not target_words:
-                return 0.0
-            
-            common_words = source_words & target_words
-            total_words = source_words | target_words
-            
-            return len(common_words) / len(total_words)
-            
-        except:
-            return 0.0
-    
-    def _get_relationship_weights(self, relationship_type: str) -> Dict[str, float]:
-        """Get weights for different relationship types"""
-        weights = {
-            'amount': 0.3,
-            'date': 0.2,
-            'entity': 0.2,
-            'id': 0.2,
-            'context': 0.1
-        }
-        
-        # Adjust weights based on relationship type
-        if relationship_type in ['invoice_to_payment', 'payment_to_invoice']:
-            weights['amount'] = 0.4
-            weights['id'] = 0.3
-        elif relationship_type in ['revenue_to_cashflow', 'expense_to_bank']:
-            weights['date'] = 0.3
-            weights['amount'] = 0.3
-        elif relationship_type in ['payroll_to_bank']:
-            weights['entity'] = 0.3
-            weights['date'] = 0.3
-        
-        return weights
-    
-    def _extract_amount(self, payload: Dict) -> float:
-        """Extract amount from payload"""
-        try:
-            # Try different amount fields
-            amount_fields = ['amount', 'amount_usd', 'total', 'value', 'payment_amount']
-            for field in amount_fields:
-                if field in payload and payload[field]:
-                    return float(payload[field])
-            
-            # Try to extract from text
-            text = str(payload)
-            import re
-            matches = re.findall(r'[\d,]+\.?\d*', text)
-            if matches:
-                return float(matches[0].replace(',', ''))
-            
-            return 0.0
-        except:
-            return 0.0
-    
-    def _extract_date(self, event: Dict) -> Optional[datetime]:
-        """Extract date from event"""
-        try:
-            # Try different date fields
-            date_fields = ['created_at', 'date', 'timestamp', 'processed_at']
-            for field in date_fields:
-                if field in event and event[field]:
-                    return datetime.fromisoformat(event[field].replace('Z', '+00:00'))
-            
-            return None
-        except:
-            return None
-    
-    def _extract_entities(self, payload: Dict) -> List[str]:
-        """Extract entities from payload - Enhanced for real-world data"""
-        entities = []
-        try:
-            # Extract from entities field
-            if 'entities' in payload:
-                entity_data = payload['entities']
-                if isinstance(entity_data, dict):
-                    for entity_type, entity_list in entity_data.items():
-                        if isinstance(entity_list, list):
-                            entities.extend(entity_list)
-            
-            # Direct field extraction
-            name_fields = ['employee_name', 'name', 'recipient', 'payee', 'description', 'vendor_name', 'vendor', 'company', 'business', 'client', 'customer']
-            for field in name_fields:
-                if field in payload:
-                    value = payload[field]
-                    if isinstance(value, str) and value.strip():
-                        entities.append(value.strip())
-            
-            # Extract from description field if it contains entity-like information
-            if 'description' in payload:
-                desc = payload['description']
-                if isinstance(desc, str):
-                    # Look for patterns like "Payment to [Company]" or "Invoice from [Vendor]"
-                    import re
-                    patterns = [
-                        r'to\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)',  # "to Company Name"
-                        r'from\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)',  # "from Vendor Name"
-                        r'for\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)',  # "for Client Name"
-                    ]
-                    for pattern in patterns:
-                        matches = re.findall(pattern, desc)
-                        entities.extend(matches)
-            
-            # Extract from any field that might contain entity information
-            for key, value in payload.items():
-                if isinstance(value, str) and len(value) > 3 and len(value) < 100:
-                    # Check if it looks like a company/vendor name
-                    if any(word in key.lower() for word in ['name', 'vendor', 'company', 'business', 'client', 'customer']):
-                        if value.strip() and not value.isdigit():
-                            entities.append(value.strip())
-            
-            return list(set(entities))  # Remove duplicates
-        except Exception as e:
-            logger.error(f"Error extracting entities: {e}")
-            return []
-    
-    def _extract_ids(self, payload: Dict) -> List[str]:
-        """Extract IDs from payload - Enhanced for real-world data"""
-        ids = []
-        try:
-            # Try different ID fields
-            id_fields = ['id', 'transaction_id', 'payment_id', 'invoice_id', 'reference', 'reference_id', 'order_id', 'receipt_id', 'check_number', 'confirmation_number']
-            for field in id_fields:
-                if field in payload and payload[field]:
-                    value = payload[field]
-                    if isinstance(value, (str, int, float)):
-                        ids.append(str(value).strip())
-            
-            # Extract IDs from text using regex
-            text = str(payload)
-            import re
-            # Look for common ID patterns
-            id_patterns = [
-                r'ID[:\s]*([A-Z0-9\-_]+)',  # "ID: ABC123"
-                r'Ref[:\s]*([A-Z0-9\-_]+)',  # "Ref: XYZ789"
-                r'Order[:\s]*([A-Z0-9\-_]+)',  # "Order: ORD456"
-                r'Invoice[:\s]*([A-Z0-9\-_]+)',  # "Invoice: INV789"
-                r'Payment[:\s]*([A-Z0-9\-_]+)',  # "Payment: PAY123"
-            ]
-            for pattern in id_patterns:
-                matches = re.findall(pattern, text, re.IGNORECASE)
-                ids.extend(matches)
-            
-            return list(set(ids))  # Remove duplicates
-        except Exception as e:
-            logger.error(f"Error extracting IDs: {e}")
-            return []
-    
-    def _remove_duplicate_relationships(self, relationships: List[Dict]) -> List[Dict]:
-        """Remove duplicate relationships"""
-        seen = set()
-        unique_relationships = []
-        
-        for rel in relationships:
-            # Create unique key
-            key = f"{rel.get('source_event_id')}_{rel.get('target_event_id')}_{rel.get('relationship_type')}"
-            
-            if key not in seen:
-                seen.add(key)
-                unique_relationships.append(rel)
-        
-        return unique_relationships
-    
-    async def _validate_relationships(self, relationships: List[Dict]) -> List[Dict]:
-        """Validate relationships"""
-        validated = []
-        
-        for rel in relationships:
-            if self._validate_relationship_structure(rel):
-                validated.append(rel)
-        
-        return validated
-    
-    def _validate_relationship_structure(self, rel: Dict) -> bool:
-        """Validate relationship structure"""
-        required_fields = ['source_event_id', 'target_event_id', 'relationship_type', 'confidence_score']
-        
-        for field in required_fields:
-            if field not in rel or rel[field] is None:
-                return False
-        
-        # Check confidence score range
-        if not (0.0 <= rel['confidence_score'] <= 1.0):
-            return False
-        
-        return True
-    
-    async def _generate_detailed_reasoning(self, source_event: Dict, target_event: Dict, relationship_type: str, score: float) -> str:
-        """Generate detailed reasoning for relationship"""
-        try:
-            source_payload = source_event.get('payload', {})
-            target_payload = target_event.get('payload', {})
-            
-            # Extract key information
-            source_amount = self._extract_amount(source_payload)
-            target_amount = self._extract_amount(target_payload)
-            source_date = self._extract_date(source_event)
-            target_date = self._extract_date(target_event)
-            source_entities = self._extract_entities(source_payload)
-            target_entities = self._extract_entities(target_payload)
-            
-            # Build detailed reasoning
-            reasoning_parts = []
-            
-            # Amount correlation
-            if source_amount > 0 and target_amount > 0:
-                amount_ratio = min(source_amount, target_amount) / max(source_amount, target_amount)
-                if amount_ratio > 0.95:
-                    reasoning_parts.append(f"Exact amount match: ${source_amount:,.2f}")
-                elif amount_ratio > 0.8:
-                    reasoning_parts.append(f"High amount correlation: ${source_amount:,.2f} vs ${target_amount:,.2f}")
-                elif amount_ratio > 0.6:
-                    reasoning_parts.append(f"Moderate amount correlation: ${source_amount:,.2f} vs ${target_amount:,.2f}")
-            
-            # Date proximity
-            if source_date and target_date:
-                date_diff = abs((source_date - target_date).days)
-                if date_diff == 0:
-                    reasoning_parts.append("Same date")
-                elif date_diff <= 1:
-                    reasoning_parts.append(f"Dates within 1 day ({date_diff} days apart)")
-                elif date_diff <= 7:
-                    reasoning_parts.append(f"Dates within 1 week ({date_diff} days apart)")
-                elif date_diff <= 30:
-                    reasoning_parts.append(f"Dates within 1 month ({date_diff} days apart)")
-            
-            # Entity matching
-            if source_entities and target_entities:
-                common_entities = set(source_entities) & set(target_entities)
-                if common_entities:
-                    reasoning_parts.append(f"Common entities: {', '.join(list(common_entities)[:3])}")
-            
-            # Relationship type context
-            if relationship_type == 'invoice_to_payment':
-                reasoning_parts.append("Invoice payment relationship")
-            elif relationship_type == 'revenue_to_cashflow':
-                reasoning_parts.append("Revenue to cash flow relationship")
-            elif relationship_type == 'expense_to_bank':
-                reasoning_parts.append("Expense to bank transaction relationship")
-            elif relationship_type == 'payroll_to_bank':
-                reasoning_parts.append("Payroll to bank transaction relationship")
-            
-            # Confidence level
-            if score >= 0.9:
-                reasoning_parts.append("Very high confidence")
-            elif score >= 0.8:
-                reasoning_parts.append("High confidence")
-            elif score >= 0.7:
-                reasoning_parts.append("Moderate confidence")
-            
-            return "; ".join(reasoning_parts) if reasoning_parts else f"{relationship_type} relationship detected"
-            
-        except Exception as e:
-            return f"{relationship_type} relationship (error generating details: {str(e)})"
-    
-    def _validate_business_logic(self, source_event: Dict, target_event: Dict, relationship_type: str) -> bool:
-        """Validate business logic of relationship - Enhanced for accuracy"""
-        try:
-            source_payload = source_event.get('payload', {})
-            target_payload = target_event.get('payload', {})
-            
-            # Extract key data
-            source_amount = self._extract_amount(source_payload)
-            target_amount = self._extract_amount(target_payload)
-            source_date = self._extract_date(source_event)
-            target_date = self._extract_date(target_event)
-            source_entities = self._extract_entities(source_payload)
-            target_entities = self._extract_entities(target_payload)
-            
-            # Amount validation
-            if relationship_type in ['invoice_to_payment', 'payment_to_invoice']:
-                # For invoice-payment relationships, amounts should be related
-                if source_amount > 0 and target_amount > 0:
-                    # Check if amounts are similar (within 10% or exact match)
-                    if abs(source_amount - target_amount) / max(source_amount, target_amount) > 0.1:
-                        return False
-                elif source_amount < 0 and target_amount < 0:
-                    # Both negative amounts might indicate bank transactions
-                    pass
-                else:
-                    # One positive, one negative is expected for invoice-payment
-                    pass
-            
-            # Date validation - more sophisticated
-            if source_date and target_date:
-                date_diff = abs((source_date - target_date).days)
-                
-                # Different relationship types have different date tolerance
-                if relationship_type in ['invoice_to_payment', 'payment_to_invoice']:
-                    # Invoice and payment should be within 30 days
-                    if date_diff > 30:
-                        return False
-                elif relationship_type in ['revenue_to_cashflow', 'expense_to_bank']:
-                    # Revenue and cash flow should be within 7 days
-                    if date_diff > 7:
-                        return False
-                elif relationship_type in ['payroll_to_bank']:
-                    # Payroll and bank transactions should be within 3 days
-                    if date_diff > 3:
-                        return False
-                else:
-                    # General relationships should be within 14 days
-                    if date_diff > 14:
-                        return False
-            
-            # Entity validation
-            if source_entities and target_entities:
-                common_entities = set(source_entities) & set(target_entities)
-                # For certain relationship types, we expect some entity overlap
-                if relationship_type in ['invoice_to_payment', 'payment_to_invoice']:
-                    if not common_entities and len(source_entities) > 0 and len(target_entities) > 0:
-                        # No common entities might indicate unrelated transactions
-                        return False
-            
-            # Amount range validation
-            if source_amount != 0 and target_amount != 0:
-                # Check for reasonable amount relationships
-                if relationship_type in ['invoice_to_payment', 'payment_to_invoice']:
-                    # Amounts should be similar
-                    amount_ratio = min(abs(source_amount), abs(target_amount)) / max(abs(source_amount), abs(target_amount))
-                    if amount_ratio < 0.8:  # Less than 80% match
-                        return False
-            
-            return True
-            
-        except Exception as e:
-            logger.error(f"Business logic validation error: {e}")
-            return True  # Default to valid if validation fails
-
-# Add new test endpoint for enhanced relationship detection
-@app.get("/test-enhanced-relationship-detection/{user_id}")
-async def test_enhanced_relationship_detection(user_id: str):
-    """Test the enhanced relationship detection system"""
-    try:
-        # Initialize OpenAI client
-        openai_client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
-        
-        # Initialize Supabase client
-        supabase_url = os.getenv('SUPABASE_URL')
-        supabase_key = os.getenv('SUPABASE_KEY')
-        
-        if not supabase_url or not supabase_key:
-            return {
-                "message": "Supabase credentials not configured",
-                "timestamp": utc_now().isoformat()
-            }
-        
-        supabase = create_client(supabase_url, supabase_key)
-        
-        # Initialize Enhanced Relationship Detector
-        enhanced_detector = EnhancedRelationshipDetector(openai_client, supabase)
-        
-        # Detect relationships
-        result = await enhanced_detector.detect_all_relationships(user_id)
-        
-        return {
-            "message": "Enhanced Relationship Detection Test Completed",
-            "result": ensure_json_serializable(result),
-            "timestamp": utc_now().isoformat()
-        }
-        
-    except Exception as e:
-        return {
-            "message": "Enhanced Relationship Detection Test Failed",
-            "error": str(e),
-            "timestamp": utc_now().isoformat()
+            "timestamp": datetime.utcnow().isoformat()
         }
 
 if __name__ == "__main__":
