@@ -1,0 +1,32 @@
+# Don't exclude any source files - we need them all for the build
+# Only exclude build artifacts and temporary files
+
+# Build artifacts
+dist/
+build/
+*.pyc
+__pycache__/
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.env
+
+# Development files
+.vscode/
+.cursor/
+.git/
+*.log
+*.tmp
+*.temp
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Node modules (will be installed fresh)
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
