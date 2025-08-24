@@ -9,6 +9,9 @@ import pandas as pd
 import numpy as np
 from fastapi import FastAPI, HTTPException, BackgroundTasks, WebSocket, WebSocketDisconnect, UploadFile, Form, File
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from supabase import create_client, Client
 import openai
@@ -57,6 +60,82 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Mount static files for React frontend
+try:
+    app.mount("/static", StaticFiles(directory="dist/static"), name="static")
+    app.mount("/assets", StaticFiles(directory="dist/assets"), name="assets")
+except Exception as e:
+    logger.warning(f"Static files directory not found: {e}")
+
+# Root endpoint to serve React frontend
+@app.get("/", response_class=HTMLResponse)
+async def serve_frontend():
+    """Serve the React frontend application"""
+    try:
+        # Try to serve the built React app
+        return FileResponse("dist/index.html")
+    except Exception as e:
+        logger.warning(f"Frontend not built yet: {e}")
+        # Fallback to a simple HTML page with links to API endpoints
+        return HTMLResponse("""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>Finley AI - Financial Analysis Platform</title>
+            <style>
+                body { font-family: Arial, sans-serif; margin: 40px; background: #1a1a1a; color: #fff; }
+                .container { max-width: 800px; margin: 0 auto; }
+                .header { text-align: center; margin-bottom: 40px; }
+                .logo { font-size: 2.5em; color: #00ff88; margin-bottom: 10px; }
+                .subtitle { color: #888; font-size: 1.2em; }
+                .endpoints { background: #2a2a2a; padding: 20px; border-radius: 10px; margin: 20px 0; }
+                .endpoint { margin: 10px 0; padding: 10px; background: #3a3a3a; border-radius: 5px; }
+                .method { color: #00ff88; font-weight: bold; }
+                .url { color: #ffaa00; font-family: monospace; }
+                .status { color: #00ff88; }
+                .warning { background: #ff6600; color: white; padding: 15px; border-radius: 5px; margin: 20px 0; }
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <div class="header">
+                    <div class="logo">🚀</div>
+                    <h1>Finley AI</h1>
+                    <div class="subtitle">Intelligent Financial Analysis Platform</div>
+                </div>
+                
+                <div class="warning">
+                    <strong>⚠️ Frontend Not Built Yet</strong><br>
+                    The React frontend is not currently built. This is a temporary page.
+                </div>
+                
+                <div class="endpoints">
+                    <h2>🔄 Available API Endpoints</h2>
+                    <div class="endpoint">
+                        <span class="method">POST</span> 
+                        <span class="url">/process-excel</span> 
+                        <span class="status">✅ Working</span>
+                    </div>
+                    <div class="endpoint">
+                        <span class="method">GET</span> 
+                        <span class="url">/docs</span> 
+                        <span class="status">✅ API Documentation</span>
+                    </div>
+                    <div class="endpoint">
+                        <span class="method">WebSocket</span> 
+                        <span class="url">/ws/{job_id}</span> 
+                        <span class="status">✅ Real-time Updates</span>
+                    </div>
+                </div>
+                
+                <div style="text-align: center; margin-top: 40px; color: #888;">
+                    <p>🎯 <strong>Next Step:</strong> Build and deploy the React frontend to see the full interface!</p>
+                </div>
+            </div>
+        </body>
+        </html>
+        """)
 
 # Initialize OpenAI client
 openai = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
@@ -3228,40 +3307,40 @@ class ExcelProcessor:
             else:
                 raise HTTPException(status_code=500, detail="Failed to create raw record")
             
-                    # Step 4: Create ingestion_jobs entry with transaction ID
-        # Create the job entry - this must exist before processing rows
-        job_data = {
-            'id': job_id,
-            'user_id': user_id,
-            'record_id': file_id,
-            'transaction_id': transaction_id,  # Link to transaction
-            'job_type': 'classification',
-            'status': 'running',
-            'progress': 0,
-            'started_at': utc_now().isoformat()
-        }
-        
-        # Validate job data
-        if not job_id or not user_id or not file_id:
-            raise HTTPException(status_code=400, detail="Missing required job metadata")
-        
-        try:
-            job_result = supabase.table('ingestion_jobs').insert(job_data).execute()
-            if not job_result.data:
-                raise HTTPException(status_code=500, detail="Failed to create ingestion job")
-        except Exception as e:
-            # If job already exists, update it
-            logger.info(f"Job {job_id} already exists, updating...")
-            update_result = supabase.table('ingestion_jobs').update({
+            # Step 4: Create ingestion_jobs entry with transaction ID
+            # Create the job entry - this must exist before processing rows
+            job_data = {
+                'id': job_id,
+                'user_id': user_id,
                 'record_id': file_id,
                 'transaction_id': transaction_id,  # Link to transaction
+                'job_type': 'classification',
                 'status': 'running',
                 'progress': 0,
                 'started_at': utc_now().isoformat()
-            }).eq('id', job_id).execute()
+            }
+            
+            # Validate job data
+            if not job_id or not user_id or not file_id:
+                raise HTTPException(status_code=400, detail="Missing required job metadata")
+            
+            try:
+                job_result = supabase.table('ingestion_jobs').insert(job_data).execute()
+                if not job_result.data:
+                    raise HTTPException(status_code=500, detail="Failed to create ingestion job")
+            except Exception as e:
+                # If job already exists, update it
+                logger.info(f"Job {job_id} already exists, updating...")
+                update_result = supabase.table('ingestion_jobs').update({
+                    'record_id': file_id,
+                    'transaction_id': transaction_id,  # Link to transaction
+                    'status': 'running',
+                    'progress': 0,
+                    'started_at': utc_now().isoformat()
+                }).eq('id', job_id).execute()
 
-            if not update_result.data:
-                raise HTTPException(status_code=500, detail="Failed to update ingestion job")
+                if not update_result.data:
+                    raise HTTPException(status_code=500, detail="Failed to update ingestion job")
 
         # Now we can safely process rows since the job exists
         # Step 5: Process each sheet with optimized batch processing
