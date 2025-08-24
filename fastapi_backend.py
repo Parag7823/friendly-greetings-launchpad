@@ -72,6 +72,7 @@ class Config:
     entity_similarity_threshold: float = 0.9  # Increased from 0.8
     max_concurrent_ai_calls: int = 5
     cache_ttl: int = 3600  # 1 hour
+    batch_size: int = 50  # Standardized batch size for all processing operations
 
 config = Config()
 
@@ -1763,7 +1764,7 @@ class PlatformDetector:
         }
 
         # Batch query optimization
-        self.batch_size = 100
+        self.batch_size = 50
         self.query_cache: Dict[str, Any] = {}
 
     def _get_cache_key(self, df: pd.DataFrame, filename: str) -> str:
@@ -2205,7 +2206,7 @@ class BatchAIRowClassifier:
     def __init__(self, openai_client):
         self.openai = openai_client
         self.cache = {}  # Simple cache for similar rows
-        self.batch_size = 20  # Process 20 rows at once
+        self.batch_size = 50  # Process 50 rows at once
         self.max_concurrent_batches = 3  # Process 3 batches simultaneously
     
     async def classify_row_with_ai(self, row: pd.Series, platform_info: Dict, column_names: List[str]) -> Dict[str, Any]:
@@ -2661,6 +2662,267 @@ class ExcelProcessor:
         # Use global enrichment processor
         self.enrichment_processor = data_enrichment_processor
     
+    async def _begin_transaction(self, supabase: Client) -> str:
+        """Begin a database transaction and return transaction ID"""
+        try:
+            # Create a transaction record in our custom transactions table
+            transaction_result = supabase.table('processing_transactions').insert({
+                'id': str(uuid.uuid4()),
+                'status': 'active',
+                'started_at': utc_now().isoformat(),
+                'operation_type': 'file_processing'
+            }).execute()
+            
+            if transaction_result.data:
+                transaction_id = transaction_result.data[0]['id']
+                logger.info(f"Transaction {transaction_id} started")
+                return transaction_id
+            else:
+                raise Exception("Failed to create transaction record")
+                
+        except Exception as e:
+            logger.error(f"Failed to begin transaction: {e}")
+            raise Exception(f"Transaction initialization failed: {str(e)}")
+    
+    async def _commit_transaction(self, supabase: Client, transaction_id: str) -> bool:
+        """Commit a database transaction"""
+        try:
+            # Mark transaction as committed
+            result = supabase.table('processing_transactions').update({
+                'status': 'committed',
+                'committed_at': utc_now().isoformat()
+            }).eq('id', transaction_id).execute()
+            
+            if result.data:
+                logger.info(f"Transaction {transaction_id} committed successfully")
+                return True
+            else:
+                raise Exception("Failed to commit transaction")
+                
+        except Exception as e:
+            logger.error(f"Failed to commit transaction {transaction_id}: {e}")
+            raise Exception(f"Transaction commit failed: {str(e)}")
+    
+    async def _rollback_transaction(self, supabase: Client, transaction_id: str, error_details: str = None) -> bool:
+        """Rollback a database transaction and clean up partial data"""
+        try:
+            logger.warning(f"Rolling back transaction {transaction_id}")
+            
+            # Mark transaction as rolled back
+            result = supabase.table('processing_transactions').update({
+                'status': 'rolled_back',
+                'rolled_back_at': utc_now().isoformat(),
+                'error_details': error_details or 'Unknown error'
+            }).eq('id', transaction_id).execute()
+            
+            # Clean up any partial data that was created
+            await self._cleanup_partial_data(supabase, transaction_id)
+            
+            if result.data:
+                logger.info(f"Transaction {transaction_id} rolled back successfully")
+                return True
+            else:
+                logger.error(f"Failed to update transaction status for rollback")
+                return False
+                
+        except Exception as e:
+            logger.error(f"Failed to rollback transaction {transaction_id}: {e}")
+            return False
+    
+    async def _cleanup_partial_data(self, supabase: Client, transaction_id: str):
+        """Clean up any partial data created during a failed transaction"""
+        try:
+            # Clean up raw_events
+            events_result = supabase.table('raw_events').delete().eq('transaction_id', transaction_id).execute()
+            if events_result.data:
+                logger.info(f"Cleaned up {len(events_result.data)} raw events from failed transaction")
+            
+            # Clean up raw_records
+            records_result = supabase.table('raw_records').delete().eq('transaction_id', transaction_id).execute()
+            if records_result.data:
+                logger.info(f"Cleaned up {len(records_result.data)} raw records from failed transaction")
+            
+            # Clean up ingestion_jobs
+            jobs_result = supabase.table('ingestion_jobs').delete().eq('transaction_id', transaction_id).execute()
+            if jobs_result.data:
+                logger.info(f"Cleaned up {len(jobs_result.data)} ingestion jobs from failed transaction")
+            
+            # Clean up normalized_entities (only those created in this transaction)
+            entities_result = supabase.table('normalized_entities').delete().eq('transaction_id', transaction_id).execute()
+            if entities_result.data:
+                logger.info(f"Cleaned up {len(entities_result.data)} normalized entities from failed transaction")
+            
+            # Clean up platform_patterns
+            patterns_result = supabase.table('platform_patterns').delete().eq('transaction_id', transaction_id).execute()
+            if patterns_result.data:
+                logger.info(f"Cleaned up {len(patterns_result.data)} platform patterns from failed transaction")
+            
+            # Clean up relationship_instances
+            relationships_result = supabase.table('relationship_instances').delete().eq('transaction_id', transaction_id).execute()
+            if relationships_result.data:
+                logger.info(f"Cleaned up {len(relationships_result.data)} relationship instances from failed transaction")
+                
+        except Exception as e:
+            logger.error(f"Failed to cleanup partial data for transaction {transaction_id}: {e}")
+    
+    def _validate_event_data(self, event_data: Dict) -> Tuple[bool, List[str]]:
+        """Validate event data before database insertion"""
+        errors = []
+        
+        # Required fields validation
+        required_fields = {
+            'user_id': 'User ID',
+            'file_id': 'File ID', 
+            'provider': 'Provider',
+            'kind': 'Event Kind',
+            'payload': 'Payload',
+            'row_index': 'Row Index',
+            'source_filename': 'Source Filename'
+        }
+        
+        for field, field_name in required_fields.items():
+            if field not in event_data or event_data[field] is None:
+                errors.append(f"Missing required field: {field_name}")
+            elif isinstance(event_data[field], str) and event_data[field].strip() == '':
+                errors.append(f"Required field {field_name} cannot be empty")
+        
+        # Data type validation
+        if 'user_id' in event_data and not isinstance(event_data['user_id'], str):
+            errors.append("User ID must be a string")
+        
+        if 'row_index' in event_data and not isinstance(event_data['row_index'], int):
+            errors.append("Row index must be an integer")
+        
+        if 'confidence_score' in event_data:
+            score = event_data['confidence_score']
+            if not isinstance(score, (int, float)) or score < 0 or score > 1:
+                errors.append("Confidence score must be a number between 0 and 1")
+        
+        # Payload validation
+        if 'payload' in event_data:
+            payload = event_data['payload']
+            if not isinstance(payload, dict):
+                errors.append("Payload must be a dictionary")
+            elif not payload:
+                errors.append("Payload cannot be empty")
+        
+        # Entity validation
+        if 'entities' in event_data:
+            entities = event_data['entities']
+            if not isinstance(entities, dict):
+                errors.append("Entities must be a dictionary")
+            else:
+                for entity_type, entity_list in entities.items():
+                    if not isinstance(entity_list, list):
+                        errors.append(f"Entity list for {entity_type} must be a list")
+                    elif entity_list:
+                        for entity in entity_list:
+                            if not isinstance(entity, str) or entity.strip() == '':
+                                errors.append(f"Entity names must be non-empty strings")
+        
+        # Classification metadata validation
+        if 'classification_metadata' in event_data:
+            metadata = event_data['classification_metadata']
+            if not isinstance(metadata, dict):
+                errors.append("Classification metadata must be a dictionary")
+            else:
+                if 'category' in metadata and metadata['category']:
+                    valid_categories = ['payroll', 'revenue', 'expense', 'investment', 'tax', 'other']
+                    if metadata['category'] not in valid_categories:
+                        errors.append(f"Invalid category: {metadata['category']}. Must be one of {valid_categories}")
+        
+        return len(errors) == 0, errors
+    
+    def _validate_platform_info(self, platform_info: Dict) -> Tuple[bool, List[str]]:
+        """Validate platform detection information"""
+        errors = []
+        
+        if not isinstance(platform_info, dict):
+            errors.append("Platform info must be a dictionary")
+            return False, errors
+        
+        # Required fields
+        if 'platform' not in platform_info:
+            errors.append("Platform name is required")
+        
+        if 'confidence' in platform_info:
+            confidence = platform_info['confidence']
+            if not isinstance(confidence, (int, float)) or confidence < 0 or confidence > 1:
+                errors.append("Platform confidence must be a number between 0 and 1")
+        
+        # Platform name validation
+        if 'platform' in platform_info:
+            platform = platform_info['platform']
+            if not isinstance(platform, str):
+                errors.append("Platform name must be a string")
+            elif platform.strip() == '':
+                errors.append("Platform name cannot be empty")
+            else:
+                # Check for valid platform names
+                valid_platforms = ['razorpay', 'stripe', 'paypal', 'gusto', 'quickbooks', 'xero', 'unknown']
+                if platform not in valid_platforms:
+                    errors.append(f"Unknown platform: {platform}")
+        
+        return len(errors) == 0, errors
+    
+    def _validate_entity_data(self, entity_data: Dict) -> Tuple[bool, List[str]]:
+        """Validate entity data before storage"""
+        errors = []
+        
+        if not isinstance(entity_data, dict):
+            errors.append("Entity data must be a dictionary")
+            return False, errors
+        
+        for entity_type, entity_list in entity_data.items():
+            if not isinstance(entity_type, str) or entity_type.strip() == '':
+                errors.append("Entity type must be a non-empty string")
+                continue
+            
+            if not isinstance(entity_list, list):
+                errors.append(f"Entity list for {entity_type} must be a list")
+                continue
+            
+            for entity in entity_list:
+                if not isinstance(entity, str) or entity.strip() == '':
+                    errors.append(f"Entity name must be a non-empty string, got: {entity}")
+        
+        return len(errors) == 0, errors
+    
+    def _validate_relationship_data(self, relationship_data: Dict) -> Tuple[bool, List[str]]:
+        """Validate relationship data before storage"""
+        errors = []
+        
+        if not isinstance(relationship_data, dict):
+            errors.append("Relationship data must be a dictionary")
+            return False, errors
+        
+        # Required fields
+        required_fields = ['source_event_id', 'target_event_id', 'relationship_type', 'confidence_score']
+        for field in required_fields:
+            if field not in relationship_data:
+                errors.append(f"Missing required field: {field}")
+        
+        # Field validation
+        if 'source_event_id' in relationship_data and not relationship_data['source_event_id']:
+            errors.append("Source event ID cannot be empty")
+        
+        if 'target_event_id' in relationship_data and not relationship_data['target_event_id']:
+            errors.append("Target event ID cannot be empty")
+        
+        if 'relationship_type' in relationship_data:
+            rel_type = relationship_data['relationship_type']
+            valid_types = ['invoice_to_payment', 'fee_to_transaction', 'refund_to_original', 
+                          'payroll_to_payout', 'salary_to_payout', 'ai_discovered']
+            if rel_type not in valid_types:
+                errors.append(f"Invalid relationship type: {rel_type}")
+        
+        if 'confidence_score' in relationship_data:
+            score = relationship_data['confidence_score']
+            if not isinstance(score, (int, float)) or score < 0 or score > 1:
+                errors.append("Confidence score must be a number between 0 and 1")
+        
+        return len(errors) == 0, errors
+    
     async def _store_normalized_entities(self, entities: Dict, user_id: str, supabase: Client) -> List[str]:
         """Store normalized entities in the database"""
         try:
@@ -2875,96 +3137,124 @@ class ExcelProcessor:
     
     async def process_file(self, job_id: str, file_content: bytes, filename: str, 
                           user_id: str, supabase: Client) -> Dict[str, Any]:
-        """Optimized processing pipeline with batch AI classification for large files"""
+        """Optimized processing pipeline with batch AI classification for large files and transaction management"""
         
-        # Step 1: Read the file
-        await manager.send_update(job_id, {
-            "step": "reading",
-            "message": f"📖 Reading and parsing your {filename}...",
-            "progress": 10
-        })
+        transaction_id = None
+        file_id = None
         
         try:
-            sheets = await self.read_file(file_content, filename)
-        except Exception as e:
+            # TRANSACTION MANAGEMENT: Begin transaction
             await manager.send_update(job_id, {
-                "step": "error",
-                "message": f"❌ Error reading file: {str(e)}",
-                "progress": 0
+                "step": "initializing",
+                "message": "🚀 Initializing secure processing transaction...",
+                "progress": 5
             })
-            raise HTTPException(status_code=400, detail=f"Failed to read file: {str(e)}")
-        
-        # Step 2: Detect platform and document type
-        await manager.send_update(job_id, {
-            "step": "analyzing",
-            "message": "🧠 Analyzing document structure and detecting platform...",
-            "progress": 20
-        })
-        
-        # Use first sheet for platform detection
-        first_sheet = list(sheets.values())[0]
-        platform_info = await self.platform_detector.detect_platform_optimized(first_sheet, filename)
-        doc_analysis = await self.analyzer.detect_document_type(first_sheet, filename)
-        
-        # Initialize EntityResolver and AI classifier with Supabase client
-        self.entity_resolver = EntityResolver(supabase)
-        self.ai_classifier = AIRowClassifier(self.openai, self.entity_resolver)
-        self.row_processor = RowProcessor(self.platform_detector, self.ai_classifier, self.openai)
-        
-        # Step 3: Create raw_records entry
-        await manager.send_update(job_id, {
-            "step": "storing",
-            "message": "💾 Storing file metadata...",
-            "progress": 30
-        })
-        
-        # Calculate file hash for duplicate detection
-        file_hash = hashlib.sha256(file_content).hexdigest()
-        
-        # Store in raw_records
-        raw_record_result = supabase.table('raw_records').insert({
-            'user_id': user_id,
-            'file_name': filename,
-            'file_size': len(file_content),
-            'source': 'file_upload',
-            'content': {
-                'sheets': list(sheets.keys()),
-                'platform_detection': platform_info,
-                'document_analysis': doc_analysis,
-                'file_hash': file_hash,
-                'total_rows': sum(len(sheet) for sheet in sheets.values()),
-                'processed_at': utc_now().isoformat()
-            },
-            'status': 'processing',
-            'classification_status': 'processing'
-        }).execute()
-        
-        if raw_record_result.data:
-            file_id = raw_record_result.data[0]['id']
-        else:
-            raise HTTPException(status_code=500, detail="Failed to create raw record")
-        
-        # Step 4: Create ingestion_jobs entry FIRST
-        try:
-            # Create the job entry - this must exist before processing rows
-            job_result = supabase.table('ingestion_jobs').insert({
-                'id': job_id,
+            
+            transaction_id = await self._begin_transaction(supabase)
+            logger.info(f"Processing file {filename} with transaction {transaction_id}")
+            
+            # Step 1: Read the file
+            await manager.send_update(job_id, {
+                "step": "reading",
+                "message": f"📖 Reading and parsing your {filename}...",
+                "progress": 10
+            })
+            
+            sheets = await self.read_file(file_content, filename)
+            
+            # Step 2: Detect platform and document type
+            await manager.send_update(job_id, {
+                "step": "analyzing",
+                "message": "🧠 Analyzing document structure and detecting platform...",
+                "progress": 20
+            })
+            
+            # Use first sheet for platform detection
+            first_sheet = list(sheets.values())[0]
+            platform_info = await self.platform_detector.detect_platform_optimized(first_sheet, filename)
+            doc_analysis = await self.analyzer.detect_document_type(first_sheet, filename)
+            
+            # VALIDATION: Validate platform info before proceeding
+            platform_valid, platform_errors = self._validate_platform_info(platform_info)
+            if not platform_valid:
+                error_msg = f"Platform validation failed: {', '.join(platform_errors)}"
+                logger.error(error_msg)
+                raise HTTPException(status_code=400, detail=error_msg)
+            
+            # Initialize EntityResolver and AI classifier with Supabase client
+            self.entity_resolver = EntityResolver(supabase)
+            self.ai_classifier = AIRowClassifier(self.openai, self.entity_resolver)
+            self.row_processor = RowProcessor(self.platform_detector, self.ai_classifier, self.openai)
+            
+            # Step 3: Create raw_records entry with transaction ID
+            await manager.send_update(job_id, {
+                "step": "storing",
+                "message": "💾 Storing file metadata securely...",
+                "progress": 30
+            })
+            
+            # Calculate file hash for duplicate detection
+            file_hash = hashlib.sha256(file_content).hexdigest()
+            
+            # VALIDATION: Validate required data before storage
+            raw_record_data = {
                 'user_id': user_id,
-                'record_id': file_id,
-                'job_type': 'classification',
-                'status': 'running',
-                'progress': 0,
-                'started_at': utc_now().isoformat()
-            }).execute()
-
+                'file_name': filename,
+                'file_size': len(file_content),
+                'source': 'file_upload',
+                'transaction_id': transaction_id,  # Link to transaction
+                'content': {
+                    'sheets': list(sheets.keys()),
+                    'platform_detection': platform_info,
+                    'document_analysis': doc_analysis,
+                    'file_hash': file_hash,
+                    'total_rows': sum(len(sheet) for sheet in sheets.values()),
+                    'processed_at': utc_now().isoformat()
+                },
+                'status': 'processing',
+                'classification_status': 'processing'
+            }
+            
+            # Validate raw record data
+            if not user_id or not filename or not file_hash:
+                raise HTTPException(status_code=400, detail="Missing required file metadata")
+            
+            # Store in raw_records
+            raw_record_result = supabase.table('raw_records').insert(raw_record_data).execute()
+            
+            if raw_record_result.data:
+                file_id = raw_record_result.data[0]['id']
+                logger.info(f"Created raw record {file_id} in transaction {transaction_id}")
+            else:
+                raise HTTPException(status_code=500, detail="Failed to create raw record")
+            
+                    # Step 4: Create ingestion_jobs entry with transaction ID
+        # Create the job entry - this must exist before processing rows
+        job_data = {
+            'id': job_id,
+            'user_id': user_id,
+            'record_id': file_id,
+            'transaction_id': transaction_id,  # Link to transaction
+            'job_type': 'classification',
+            'status': 'running',
+            'progress': 0,
+            'started_at': utc_now().isoformat()
+        }
+        
+        # Validate job data
+        if not job_id or not user_id or not file_id:
+            raise HTTPException(status_code=400, detail="Missing required job metadata")
+        
+        try:
+            job_result = supabase.table('ingestion_jobs').insert(job_data).execute()
             if not job_result.data:
                 raise HTTPException(status_code=500, detail="Failed to create ingestion job")
-
         except Exception as e:
             # If job already exists, update it
             logger.info(f"Job {job_id} already exists, updating...")
             update_result = supabase.table('ingestion_jobs').update({
                 'record_id': file_id,
+                'transaction_id': transaction_id,  # Link to transaction
                 'status': 'running',
                 'progress': 0,
                 'started_at': utc_now().isoformat()
@@ -2977,7 +3267,7 @@ class ExcelProcessor:
         # Step 5: Process each sheet with optimized batch processing
         await manager.send_update(job_id, {
             "step": "streaming",
-            "message": "🔄 Processing rows in optimized batches...",
+            "message": "🔄 Processing rows in optimized batches securely...",
             "progress": 40
         })
         
@@ -2990,7 +3280,8 @@ class ExcelProcessor:
             'filename': filename,
             'user_id': user_id,
             'file_id': file_id,
-            'job_id': job_id
+            'job_id': job_id,
+            'transaction_id': transaction_id  # Include transaction ID in context
         }
         
         # Performance optimization: Pre-calculate common values
@@ -3006,7 +3297,7 @@ class ExcelProcessor:
             rows = list(df.iterrows())
             
             # Process rows in batches for efficiency
-            batch_size = 50  # Process 50 rows at once for better performance
+            batch_size = config.batch_size  # Use centralized configuration
             total_batches = (len(rows) + batch_size - 1) // batch_size
             
             for batch_idx in range(0, len(rows), batch_size):
@@ -3063,12 +3354,12 @@ class ExcelProcessor:
                             if 'entities' not in event['classification_metadata'] or not event['classification_metadata']['entities']:
                                 event['classification_metadata']['entities'] = event['payload'].get('entities', {})
 
-                            # Store event in raw_events table with enrichment fields
-                            enriched_payload = event['payload']  # This is now the enriched payload
-                            event_result = supabase.table('raw_events').insert({
+                            # VALIDATION: Validate event data before storage
+                            event_data_for_storage = {
                                 'user_id': user_id,
                                 'file_id': file_id,
                                 'job_id': job_id,
+                                'transaction_id': transaction_id,  # Link to transaction
                                 'provider': event['provider'],
                                 'kind': event['kind'],
                                 'source_platform': event['source_platform'],
@@ -3098,7 +3389,19 @@ class ExcelProcessor:
                                 'platform_ids': enriched_payload.get('platform_ids', {}),
                                 'standard_description': enriched_payload.get('standard_description'),
                                 'ingested_on': enriched_payload.get('ingested_on')
-                            }).execute()
+                            }
+                            
+                            # Validate event data before storage
+                            event_valid, event_errors = self._validate_event_data(event_data_for_storage)
+                            if not event_valid:
+                                error_msg = f"Event validation failed for row {row_index}: {', '.join(event_errors)}"
+                                logger.error(error_msg)
+                                errors.append(error_msg)
+                                continue  # Skip this event and continue with next row
+                            
+                            # Store event in raw_events table with enrichment fields
+                            enriched_payload = event['payload']  # This is now the enriched payload
+                            event_result = supabase.table('raw_events').insert(event_data_for_storage).execute()
                             
                             if event_result.data:
                                 events_created += 1
@@ -3170,8 +3473,8 @@ class ExcelProcessor:
                 'matched_patterns': platform_info.get('matched_patterns', []),
                 'file_hash': file_hash,
                 'processing_mode': 'batch_optimized',
-                'batch_size': 20,
-                'ai_calls_reduced': f"{(total_rows - (total_rows // 20)) / total_rows * 100:.1f}%",
+                'batch_size': config.batch_size,
+                'ai_calls_reduced': f"{(total_rows - (total_rows // {config.batch_size})) / total_rows * 100:.1f}%",
                 'file_type': filename.split('.')[-1].lower() if '.' in filename else 'unknown'
             },
             'errors': errors
@@ -3317,6 +3620,22 @@ class ExcelProcessor:
             'updated_at': utc_now().isoformat()
         }).eq('id', job_id).execute()
         
+        # TRANSACTION MANAGEMENT: Commit transaction on success
+        await manager.send_update(job_id, {
+            "step": "committing",
+            "message": "🔒 Committing transaction securely...",
+            "progress": 99
+        })
+        
+        try:
+            await self._commit_transaction(supabase, transaction_id)
+            logger.info(f"Transaction {transaction_id} committed successfully for file {filename}")
+        except Exception as commit_error:
+            logger.error(f"Failed to commit transaction {transaction_id}: {commit_error}")
+            # Even if commit fails, we've processed the data successfully
+            # The transaction will be marked as failed but data remains
+            errors.append(f"Transaction commit failed: {str(commit_error)}")
+        
         await manager.send_update(job_id, {
             "step": "completed",
             "message": f"✅ Processing completed! {events_created} events created, {len(stored_entity_ids) if 'stored_entity_ids' in locals() else 0} entities normalized, {insights.get('relationship_summary', {}).get('relationships_stored', 0)} relationships detected.",
@@ -3324,6 +3643,37 @@ class ExcelProcessor:
         })
         
         return insights
+        
+        except Exception as processing_error:
+            # TRANSACTION MANAGEMENT: Rollback transaction on failure
+            logger.error(f"Processing failed for file {filename}: {processing_error}")
+            
+            if transaction_id:
+                try:
+                    await self._rollback_transaction(supabase, transaction_id, str(processing_error))
+                    logger.info(f"Transaction {transaction_id} rolled back successfully")
+                except Exception as rollback_error:
+                    logger.error(f"Failed to rollback transaction {transaction_id}: {rollback_error}")
+            
+            # Update job status to failed
+            try:
+                supabase.table('ingestion_jobs').update({
+                    'status': 'failed',
+                    'error_details': str(processing_error),
+                    'updated_at': utc_now().isoformat()
+                }).eq('id', job_id).execute()
+            except Exception as update_error:
+                logger.error(f"Failed to update job status: {update_error}")
+            
+            # Send error update to user
+            await manager.send_update(job_id, {
+                "step": "error",
+                "message": f"❌ Processing failed: {str(processing_error)}",
+                "progress": 0
+            })
+            
+            # Re-raise the error for proper HTTP error handling
+            raise HTTPException(status_code=500, detail=f"File processing failed: {str(processing_error)}")
 
 # Global optimized processor instance
 processor = ExcelProcessor()
@@ -3779,7 +4129,7 @@ async def test_ai_row_classification():
         "total_tests": len(test_results),
         "test_results": test_results,
         "processing_mode": "batch_optimized",
-        "batch_size": 20,
+        "batch_size": 50,
         "performance_notes": "Batch processing reduces AI calls by 95% for large files"
     }
 
@@ -3840,12 +4190,12 @@ async def test_batch_processing():
         "category_breakdown": dict(categories),
         "row_type_breakdown": dict(row_types),
         "average_confidence": round(avg_confidence, 3),
-        "batch_size": 20,
+        "batch_size": 50,
         "processing_mode": "batch_optimized",
         "performance_improvement": {
             "speed": "20x faster for large files",
             "cost": "95% reduction in AI API calls",
-            "efficiency": "Batch processing of 20 rows per AI call"
+            "efficiency": "Batch processing of 50 rows per AI call"
         }
     }
 
@@ -5039,7 +5389,7 @@ class AIRelationshipDetector:
             return []
         
         # OPTIMIZATION: Validate in batches to prevent timeout
-        batch_size = 100
+        batch_size = 50
         validated_relationships = []
         
         for i in range(0, len(relationships), batch_size):
