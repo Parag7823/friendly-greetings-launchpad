@@ -23,7 +23,7 @@ from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from difflib import SequenceMatcher
 import aiohttp
-from duplicate_detection_service import DuplicateDetectionService
+# DuplicateDetectionService is defined below in this file
 import requests
 
 # Configure logging
