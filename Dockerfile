@@ -8,9 +8,12 @@ WORKDIR /app/frontend
 COPY package*.json ./
 COPY src/ ./src/
 COPY public/ ./public/
+COPY index.html ./
 COPY tailwind.config.ts ./
 COPY tsconfig*.json ./
 COPY vite.config.ts ./
+COPY postcss.config.js ./
+COPY components.json ./
 
 # Install dependencies and build
 RUN npm ci
