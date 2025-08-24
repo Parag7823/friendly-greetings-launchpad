@@ -4,19 +4,9 @@ services:
     env: docker
     plan: free
     buildCommand: |
-      # Install Node.js and npm
-      curl -fsSL https://deb.nodesource.com/setup_18.x | bash -
-      apt-get update && apt-get install -y nodejs
-      
-      # Build frontend
-      npm install
-      npm run build
-      
-      # Copy built frontend to backend directory
-      cp -r dist/* ./
-      
-      # Install Python dependencies
-      pip install -r requirements.txt
+      # Frontend and backend will be built by Dockerfile
+      # No additional build steps needed
+      echo "Build handled by Dockerfile"
     startCommand: python fastapi_backend.py
     envVars:
       - key: PYTHON_VERSION

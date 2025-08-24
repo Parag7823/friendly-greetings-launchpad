@@ -9,6 +9,7 @@ import pandas as pd
 import numpy as np
 from fastapi import FastAPI, HTTPException, BackgroundTasks, WebSocket, WebSocketDisconnect, UploadFile, Form, File
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from supabase import create_client, Client
 import openai
@@ -41,6 +42,14 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Mount static files (frontend)
+try:
+    app.mount("/", StaticFiles(directory="dist", html=True), name="static")
+    logger.info("Frontend static files mounted successfully")
+except Exception as e:
+    logger.warning(f"Could not mount frontend files: {e}")
+    logger.info("Running in backend-only mode")
 
 # Initialize OpenAI client
 openai = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
