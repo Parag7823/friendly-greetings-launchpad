@@ -7572,10 +7572,26 @@ async def delete_chat(delete_request: ChatDeleteRequest):
 
 # Mount static files (frontend) - MUST be after all API routes
 try:
-    app.mount("/", StaticFiles(directory="dist", html=True), name="static")
-    logger.info("Frontend static files mounted successfully")
+    import os
+    dist_path = "dist"
+    if os.path.exists(dist_path):
+        logger.info(f"Dist directory exists: {dist_path}")
+        files = os.listdir(dist_path)
+        logger.info(f"Files in dist: {files}")
+        app.mount("/", StaticFiles(directory=dist_path, html=True), name="static")
+        logger.info("Frontend static files mounted successfully")
+    else:
+        logger.error(f"Dist directory not found: {dist_path}")
+        # Create a simple fallback
+        @app.get("/")
+        async def fallback():
+            return {"error": "Frontend not built", "message": "Please build the frontend first"}
 except Exception as e:
-    logger.warning(f"Could not mount frontend files: {e}")
+    logger.error(f"Could not mount frontend files: {e}")
+    # Create a simple fallback
+    @app.get("/")
+    async def fallback():
+        return {"error": "Static file mounting failed", "message": str(e)}
 
 if __name__ == "__main__":
     import uvicorn

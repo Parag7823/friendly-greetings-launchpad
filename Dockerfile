@@ -45,7 +45,3 @@ COPY --from=frontend-builder /app/frontend/dist ./dist
 EXPOSE 8000
 
 CMD ["python", "fastapi_backend.py"]
-
-EXPOSE 8000
-
-CMD ["python", "fastapi_backend.py"]
