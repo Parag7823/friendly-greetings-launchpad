@@ -7287,6 +7287,161 @@ async def test_platform_insights(platform: str, user_id: str = None):
             "timestamp": datetime.utcnow().isoformat()
         }
 
+class ChatMessage(BaseModel):
+    message: str
+    user_id: str
+    chat_id: str = None
+
+class ChatResponse(BaseModel):
+    response: str
+    chat_id: str
+    timestamp: str
+
+@app.post("/chat", response_model=ChatResponse)
+async def chat_with_finley(chat_message: ChatMessage):
+    """Chat endpoint for Finley AI financial assistant"""
+    try:
+        # Initialize OpenAI client
+        openai_client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
+        
+        if not openai_client:
+            raise HTTPException(status_code=500, detail="OpenAI client not configured")
+        
+        # Generate chat ID if not provided
+        chat_id = chat_message.chat_id or f"chat-{datetime.utcnow().timestamp()}"
+        
+        # Create context-aware prompt for financial assistance
+        system_prompt = """You are Finley AI, an intelligent financial analyst assistant. You help users understand their financial data, provide insights, and answer questions about:
+
+- Financial document analysis
+- Budget planning and forecasting
+- Investment strategies
+- Tax optimization
+- Business financial health
+- Cash flow management
+- Financial reporting
+- Risk assessment
+
+Always provide practical, actionable advice based on financial best practices. If you don't have specific data about the user's finances, ask clarifying questions to provide better assistance.
+
+Keep responses concise but comprehensive, and always prioritize accuracy in financial matters."""
+
+        # Get AI response
+        response = openai_client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": chat_message.message}
+            ],
+            temperature=0.7,
+            max_tokens=1000
+        )
+        
+        ai_response = response.choices[0].message.content
+        
+        # Store chat in database if Supabase is available
+        try:
+            supabase_url = os.getenv('SUPABASE_URL')
+            supabase_key = os.getenv('SUPABASE_SERVICE_KEY')
+            
+            if supabase_url and supabase_key:
+                supabase = create_client(supabase_url, supabase_key)
+                
+                # Store user message
+                supabase.table('chat_messages').insert({
+                    'chat_id': chat_id,
+                    'user_id': chat_message.user_id,
+                    'message': chat_message.message,
+                    'is_user': True,
+                    'created_at': datetime.utcnow().isoformat()
+                }).execute()
+                
+                # Store AI response
+                supabase.table('chat_messages').insert({
+                    'chat_id': chat_id,
+                    'user_id': chat_message.user_id,
+                    'message': ai_response,
+                    'is_user': False,
+                    'created_at': datetime.utcnow().isoformat()
+                }).execute()
+                
+        except Exception as db_error:
+            logger.warning(f"Failed to store chat in database: {db_error}")
+        
+        return ChatResponse(
+            response=ai_response,
+            chat_id=chat_id,
+            timestamp=datetime.utcnow().isoformat()
+        )
+        
+    except Exception as e:
+        logger.error(f"Chat error: {e}")
+        raise HTTPException(status_code=500, detail=f"Chat processing failed: {str(e)}")
+
+@app.get("/chat-history/{user_id}")
+async def get_chat_history(user_id: str, chat_id: str = None):
+    """Get chat history for a user"""
+    try:
+        supabase_url = os.getenv('SUPABASE_URL')
+        supabase_key = os.getenv('SUPABASE_SERVICE_KEY')
+        
+        if not supabase_url or not supabase_key:
+            return {
+                "message": "Chat history not available",
+                "chats": [],
+                "error": "Database not configured"
+            }
+        
+        supabase = create_client(supabase_url, supabase_key)
+        
+        # Get all chats for user
+        query = supabase.table('chat_messages').select('*').eq('user_id', user_id)
+        
+        if chat_id:
+            query = query.eq('chat_id', chat_id)
+        
+        result = query.order('created_at', desc=True).execute()
+        
+        # Group messages by chat_id
+        chats = {}
+        for message in result.data:
+            chat_id = message['chat_id']
+            if chat_id not in chats:
+                chats[chat_id] = {
+                    'chat_id': chat_id,
+                    'messages': [],
+                    'created_at': message['created_at'],
+                    'updated_at': message['created_at']
+                }
+            
+            chats[chat_id]['messages'].append({
+                'message': message['message'],
+                'is_user': message['is_user'],
+                'timestamp': message['created_at']
+            })
+            
+            # Update latest timestamp
+            if message['created_at'] > chats[chat_id]['updated_at']:
+                chats[chat_id]['updated_at'] = message['created_at']
+        
+        # Convert to list and sort by updated_at
+        chat_list = list(chats.values())
+        chat_list.sort(key=lambda x: x['updated_at'], reverse=True)
+        
+        return {
+            "message": "Chat history retrieved successfully",
+            "chats": chat_list,
+            "total_chats": len(chat_list)
+        }
+        
+    except Exception as e:
+        logger.error(f"Chat history error: {e}")
+        return {
+            "message": "Failed to retrieve chat history",
+            "chats": [],
+            "error": str(e)
+        }
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", 8000)))

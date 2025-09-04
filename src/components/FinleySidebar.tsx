@@ -1,72 +1,175 @@
 import { useEffect, useState } from 'react';
-import { FileSpreadsheet, Settings } from 'lucide-react';
-import { NavLink } from 'react-router-dom';
-import { EnhancedExcelUpload } from './EnhancedExcelUpload';
-export const FinleySidebar = () => {
-  const [isIntegrationsOpen, setIsIntegrationsOpen] = useState(false);
+import { 
+  MessageSquarePlus, 
+  Plug, 
+  Upload, 
+  MessageSquare, 
+  X 
+} from 'lucide-react';
+import { Button } from './ui/button';
 
-  // Open Excel upload flow on demand
+interface ChatHistory {
+  id: string;
+  title: string;
+  timestamp: Date;
+  messages: any[];
+}
+
+interface FinleySidebarProps {
+  onClose?: () => void;
+  onNavigate?: (view: string) => void;
+  currentView?: string;
+}
+
+export const FinleySidebar = ({ onClose, onNavigate, currentView = 'chat' }: FinleySidebarProps) => {
+  const [chatHistory, setChatHistory] = useState<ChatHistory[]>([]);
+
+  // Load chat history from localStorage on mount
   useEffect(() => {
-    const handler = () => setIsIntegrationsOpen(true);
-    window.addEventListener('open-excel-upload', handler);
-    return () => window.removeEventListener('open-excel-upload', handler);
+    const savedHistory = localStorage.getItem('finley-chat-history');
+    if (savedHistory) {
+      try {
+        const parsed = JSON.parse(savedHistory);
+        setChatHistory(parsed.map((chat: any) => ({
+          ...chat,
+          timestamp: new Date(chat.timestamp)
+        })));
+      } catch (error) {
+        console.error('Failed to load chat history:', error);
+      }
+    }
   }, []);
 
-  return <div className="finley-sidebar flex flex-col h-full p-6 overflow-y-auto">
+  // Save chat history to localStorage whenever it changes
+  useEffect(() => {
+    localStorage.setItem('finley-chat-history', JSON.stringify(chatHistory));
+  }, [chatHistory]);
+
+  const handleNewChat = () => {
+    const newChat: ChatHistory = {
+      id: `chat-${Date.now()}`,
+      title: 'New Chat',
+      timestamp: new Date(),
+      messages: []
+    };
+    setChatHistory(prev => [newChat, ...prev]);
+    onNavigate?.('chat');
+    onClose?.();
+  };
+
+  const handleUploadFile = () => {
+    onNavigate?.('upload');
+    onClose?.();
+  };
+
+  const handleConnectorMarketplace = () => {
+    onNavigate?.('marketplace');
+    onClose?.();
+  };
+
+  const handleChatSelect = (chatId: string) => {
+    onNavigate?.('chat');
+    onClose?.();
+    // TODO: Load the selected chat
+  };
+
+  const truncateTitle = (title: string, maxLength: number = 20) => {
+    return title.length > maxLength ? title.substring(0, maxLength) + '...' : title;
+  };
+
+  return (
+    <div className="finley-sidebar flex flex-col h-full p-6 overflow-y-auto bg-muted/30">
       {/* Header */}
       <div className="mb-8">
-        <h1 className="text-2xl font-bold text-foreground tracking-tight">
-          Finley AI
-        </h1>
-        <p className="text-sm text-muted-foreground mt-1">
-          Intelligent Financial Analyst
-        </p>
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-2xl font-bold text-foreground tracking-tight">
+              Finley AI
+            </h1>
+            <p className="text-sm text-muted-foreground mt-1">
+              Intelligent Financial Analyst
+            </p>
+          </div>
+          {/* Close button for mobile */}
+          <Button
+            variant="ghost"
+            size="icon"
+            className="lg:hidden"
+            onClick={onClose}
+          >
+            <X className="h-4 w-4" />
+          </Button>
+        </div>
       </div>
       
-      {/* Integrations Section */}
-      <div className="flex-1">
-        <div className="space-y-2">
-          {/* Integrations menu navigates to dedicated page */}
-          <NavLink
-            to="/integrations"
-            className={({ isActive }) => `w-full flex items-center justify-between p-3 rounded-lg transition-colors ${isActive ? 'bg-muted/50' : 'hover:bg-muted/50'}`}
-          >
-            <div className="flex items-center gap-2">
-              <Settings className="w-5 h-5 text-muted-foreground" />
-              <span className="font-medium text-foreground">Integrations</span>
+      {/* Navigation Items */}
+      <div className="flex-1 space-y-2">
+        {/* New Chat */}
+        <Button
+          variant={currentView === 'chat' ? 'secondary' : 'ghost'}
+          className="w-full justify-start h-12 px-3 rounded-2xl"
+          onClick={handleNewChat}
+        >
+          <MessageSquarePlus className="w-5 h-5 mr-3" />
+          <span className="font-medium">New Chat</span>
+        </Button>
+
+        {/* Connector Marketplace */}
+        <Button
+          variant={currentView === 'marketplace' ? 'secondary' : 'ghost'}
+          className="w-full justify-start h-12 px-3 rounded-2xl"
+          onClick={handleConnectorMarketplace}
+        >
+          <Plug className="w-5 h-5 mr-3" />
+          <span className="font-medium">Connector Marketplace</span>
+        </Button>
+
+        {/* Upload File */}
+        <Button
+          variant={currentView === 'upload' ? 'secondary' : 'ghost'}
+          className="w-full justify-start h-12 px-3 rounded-2xl"
+          onClick={handleUploadFile}
+        >
+          <Upload className="w-5 h-5 mr-3" />
+          <span className="font-medium">Upload File</span>
+        </Button>
+
+        {/* Chat History Section */}
+        {chatHistory.length > 0 && (
+          <div className="mt-8">
+            <h3 className="text-sm font-medium text-muted-foreground mb-3 px-3">
+              Chat History
+            </h3>
+            <div className="space-y-1">
+              {chatHistory.map((chat) => (
+                <Button
+                  key={chat.id}
+                  variant="ghost"
+                  className="w-full justify-start h-10 px-3 rounded-xl text-left"
+                  onClick={() => handleChatSelect(chat.id)}
+                >
+                  <MessageSquare className="w-4 h-4 mr-3 flex-shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-medium truncate">
+                      {truncateTitle(chat.title)}
+                    </div>
+                    <div className="text-xs text-muted-foreground">
+                      {chat.timestamp.toLocaleDateString()}
+                    </div>
+                  </div>
+                </Button>
+              ))}
             </div>
-          </NavLink>
-          
-          {/* Excel Integration - Only show when open */}
-          {isIntegrationsOpen && <div className="">
-              <div className="finley-card p-4 hover-lift hover-glow">
-                <div className="flex items-center gap-3 mb-3">
-                  <div className="w-8 h-8 bg-green-600 rounded-lg flex items-center justify-center">
-                    <FileSpreadsheet className="w-4 h-4 text-white" />
-                  </div>
-                  <div>
-                    <h3 className="font-medium text-foreground">Excel</h3>
-                    <p className="text-xs text-muted-foreground">
-                      Upload spreadsheets
-                    </p>
-                  </div>
-                </div>
-                
-                {/* Upload Component */}
-                <EnhancedExcelUpload />
-                
-                {/* Inspirational Tagline */}
-                <p className="text-xs text-muted-foreground mt-3 italic leading-relaxed">
-                  "Excel is where data begins — Finley turns it into intelligence."
-                </p>
-              </div>
-            </div>}
-        </div>
+          </div>
+        )}
       </div>
       
       {/* Footer */}
       <div className="mt-auto pt-6 border-t border-border">
-        
+        <p className="text-xs text-muted-foreground text-center">
+          Powered by Finley AI
+        </p>
       </div>
-    </div>;
+    </div>
+  );
 };
