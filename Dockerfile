@@ -4,8 +4,13 @@ FROM node:18-alpine AS frontend-builder
 
 WORKDIR /app/frontend
 
-# Copy package files
+# Copy package files first for better caching
 COPY package*.json ./
+
+# Install dependencies
+RUN npm ci --production=false
+
+# Copy source files
 COPY src/ ./src/
 COPY public/ ./public/
 COPY index.html ./
@@ -16,9 +21,12 @@ COPY postcss.config.js ./
 COPY components.json ./
 COPY eslint.config.js ./
 
-# Install dependencies and build
-RUN npm ci --production=false
+# Build frontend
 RUN npm run build
+
+# Verify build output
+RUN ls -la dist/
+RUN ls -la dist/assets/
 
 # Backend stage
 FROM python:3.11-slim
@@ -41,10 +49,6 @@ COPY fastapi_backend.py .
 
 # Copy built frontend from frontend stage
 COPY --from=frontend-builder /app/frontend/dist ./dist
-
-EXPOSE 8000
-
-CMD ["python", "fastapi_backend.py"]
 
 EXPOSE 8000
 

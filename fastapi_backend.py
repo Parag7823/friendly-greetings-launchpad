@@ -45,10 +45,20 @@ app.add_middleware(
 
 # Mount static files (frontend)
 try:
+    import os
+    if os.path.exists("dist"):
+        logger.info(f"Dist directory exists. Contents: {os.listdir('dist')}")
+        if os.path.exists("dist/index.html"):
+            logger.info("index.html found in dist directory")
+        else:
+            logger.warning("index.html not found in dist directory")
+    else:
+        logger.warning("Dist directory does not exist")
+    
     app.mount("/", StaticFiles(directory="dist", html=True), name="static")
     logger.info("Frontend static files mounted successfully")
 except Exception as e:
-    logger.warning(f"Could not mount frontend files: {e}")
+    logger.error(f"Could not mount frontend files: {e}")
     logger.info("Running in backend-only mode")
 
 # Initialize OpenAI client
@@ -3224,12 +3234,21 @@ async def health_check():
             issues.append("SUPABASE_SERVICE_ROLE_KEY not configured")
             status = "degraded"
         
+        # Check frontend files
+        dist_exists = os.path.exists("dist")
+        index_exists = os.path.exists("dist/index.html") if dist_exists else False
+        
         return {
             "status": status,
             "service": "Finley AI Backend",
             "timestamp": datetime.utcnow().isoformat(),
             "issues": issues,
-            "environment_configured": len(issues) == 0
+            "environment_configured": len(issues) == 0,
+            "frontend": {
+                "dist_exists": dist_exists,
+                "index_exists": index_exists,
+                "dist_contents": os.listdir("dist") if dist_exists else []
+            }
         }
     except Exception as e:
         return {
