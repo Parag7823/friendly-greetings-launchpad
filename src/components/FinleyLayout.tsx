@@ -60,22 +60,6 @@ export const FinleyLayout = () => {
 
   return (
     <div className="h-screen w-full bg-background flex overflow-hidden relative">
-      {/* Sidebar Toggle Button */}
-      <Button
-        variant="ghost"
-        size="icon"
-        className="fixed top-4 left-4 z-50"
-        onClick={() => {
-          if (window.innerWidth < 1024) {
-            setIsSidebarOpen(!isSidebarOpen);
-          } else {
-            setIsSidebarCollapsed(!isSidebarCollapsed);
-          }
-        }}
-      >
-        <Menu className="h-5 w-5" />
-      </Button>
-
       {/* Mobile Overlay */}
       <AnimatePresence>
         {isSidebarOpen && (
