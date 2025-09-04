@@ -239,9 +239,7 @@ export const FinleySidebar = ({
             {!isCollapsed && <div>
         <h1 className="text-2xl font-bold text-foreground tracking-tight">
             </h1>
-        <p className="text-sm text-muted-foreground mt-1">
-          Intelligent Financial Analyst
-        </p>
+        
       </div>}
             {isCollapsed && <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center">
                 <span className="text-primary-foreground font-bold text-sm">F</span>
