@@ -3156,9 +3156,11 @@ async def process_excel(request: ProcessRequest, background_tasks: BackgroundTas
         
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/")
-async def root():
-    return {"message": "Finley AI Backend - Intelligent Financial Analysis with Row-by-Row Processing"}
+# Root endpoint removed - static files will be served at root
+
+@app.get("/health")
+async def health_check():
+    return {"message": "Finley AI Backend - Intelligent Financial Analysis with Row-by-Row Processing", "status": "healthy"}
 
 @app.get("/test-raw-events/{user_id}")
 async def test_raw_events(user_id: str):
