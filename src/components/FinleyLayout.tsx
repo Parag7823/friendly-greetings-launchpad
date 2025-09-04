@@ -9,6 +9,7 @@ import { Button } from './ui/button';
 export const FinleyLayout = () => {
   const { user, loading, signInAnonymously } = useAuth();
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(true);
   const [currentView, setCurrentView] = useState('chat');
 
   if (loading) {
@@ -37,10 +38,16 @@ export const FinleyLayout = () => {
       <Button
         variant="ghost"
         size="icon"
-        className="fixed top-4 left-4 z-50 lg:hidden"
-        onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+        className="fixed top-4 left-4 z-50"
+        onClick={() => {
+          if (window.innerWidth < 1024) {
+            setIsSidebarOpen(!isSidebarOpen);
+          } else {
+            setIsSidebarCollapsed(!isSidebarCollapsed);
+          }
+        }}
       >
-        {isSidebarOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
+        <Menu className="h-5 w-5" />
       </Button>
 
       {/* Mobile Overlay */}
@@ -75,13 +82,18 @@ export const FinleyLayout = () => {
         )}
       </AnimatePresence>
 
-      {/* Desktop Sidebar - Always visible on large screens */}
-      <div className="hidden lg:block w-80 flex-shrink-0 bg-muted/30 border-r border-border">
+      {/* Desktop Sidebar - Collapsible on large screens */}
+      <motion.div 
+        className="hidden lg:block bg-muted/30 border-r border-border flex-shrink-0"
+        animate={{ width: isSidebarCollapsed ? "80px" : "320px" }}
+        transition={{ type: "spring", damping: 20, stiffness: 300 }}
+      >
         <FinleySidebar 
           onNavigate={setCurrentView}
           currentView={currentView}
+          isCollapsed={isSidebarCollapsed}
         />
-      </div>
+      </motion.div>
       
       {/* Main Content */}
       <div className="flex-1 flex flex-col">
