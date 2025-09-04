@@ -3171,9 +3171,54 @@ async def process_excel(request: ProcessRequest, background_tasks: BackgroundTas
         
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/")
-async def root():
-    return {"message": "Finley AI Backend - Intelligent Financial Analysis with Row-by-Row Processing"}
+# Root route removed - static files handle the frontend
+
+@app.get("/api/health")
+async def health_check():
+    """Health check endpoint for the API"""
+    try:
+        # Check if OpenAI API key is configured
+        openai_key = os.environ.get("OPENAI_API_KEY")
+        supabase_url = os.environ.get("SUPABASE_URL")
+        supabase_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
+        
+        status = "healthy"
+        issues = []
+        
+        if not openai_key:
+            issues.append("OPENAI_API_KEY not configured")
+            status = "degraded"
+        
+        if not supabase_url:
+            issues.append("SUPABASE_URL not configured")
+            status = "degraded"
+        
+        if not supabase_key:
+            issues.append("SUPABASE_SERVICE_ROLE_KEY not configured")
+            status = "degraded"
+        
+        # Check if frontend files exist
+        dist_exists = os.path.exists("dist")
+        index_exists = os.path.exists("dist/index.html") if dist_exists else False
+        
+        return {
+            "status": status,
+            "timestamp": datetime.now().isoformat(),
+            "version": "1.0.0",
+            "issues": issues,
+            "frontend": {
+                "dist_exists": dist_exists,
+                "index_exists": index_exists,
+                "dist_contents": os.listdir("dist") if dist_exists else []
+            }
+        }
+    except Exception as e:
+        logger.error(f"Health check error: {e}")
+        return {
+            "status": "unhealthy",
+            "timestamp": datetime.now().isoformat(),
+            "error": str(e)
+        }
 
 @app.get("/test-raw-events/{user_id}")
 async def test_raw_events(user_id: str):
@@ -3210,53 +3255,7 @@ async def test_raw_events(user_id: str):
         logger.error(f"Error in test_raw_events: {e}")
         return {"error": str(e)}
 
-@app.get("/health")
-async def health_check():
-    """Basic health check that doesn't require external dependencies"""
-    try:
-        # Check if OpenAI API key is configured
-        openai_key = os.environ.get("OPENAI_API_KEY")
-        supabase_url = os.environ.get("SUPABASE_URL")
-        supabase_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
-        
-        status = "healthy"
-        issues = []
-        
-        if not openai_key:
-            issues.append("OPENAI_API_KEY not configured")
-            status = "degraded"
-        
-        if not supabase_url:
-            issues.append("SUPABASE_URL not configured")
-            status = "degraded"
-            
-        if not supabase_key:
-            issues.append("SUPABASE_SERVICE_ROLE_KEY not configured")
-            status = "degraded"
-        
-        # Check frontend files
-        dist_exists = os.path.exists("dist")
-        index_exists = os.path.exists("dist/index.html") if dist_exists else False
-        
-        return {
-            "status": status,
-            "service": "Finley AI Backend",
-            "timestamp": datetime.utcnow().isoformat(),
-            "issues": issues,
-            "environment_configured": len(issues) == 0,
-            "frontend": {
-                "dist_exists": dist_exists,
-                "index_exists": index_exists,
-                "dist_contents": os.listdir("dist") if dist_exists else []
-            }
-        }
-    except Exception as e:
-        return {
-            "status": "unhealthy",
-            "service": "Finley AI Backend",
-            "error": str(e),
-            "timestamp": datetime.utcnow().isoformat()
-        }
+# Duplicate health endpoint removed - using /api/health instead
 
 @app.post("/upload-and-process")
 async def upload_and_process(
