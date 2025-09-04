@@ -43,12 +43,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Mount static files (frontend)
-try:
-    app.mount("/", StaticFiles(directory="dist", html=True), name="static")
-    logger.info("Frontend static files mounted successfully")
-except Exception as e:
-    logger.warning(f"Could not mount frontend files: {e}")
+# Static file mounting will be done after all API routes are defined
     logger.info("Running in backend-only mode")
 
 # Initialize OpenAI client
@@ -7572,6 +7567,13 @@ async def delete_chat(delete_request: ChatDeleteRequest):
     except Exception as e:
         logger.error(f"Chat delete error: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to delete chat: {str(e)}")
+
+# Mount static files (frontend) - MUST be after all API routes
+try:
+    app.mount("/", StaticFiles(directory="dist", html=True), name="static")
+    logger.info("Frontend static files mounted successfully")
+except Exception as e:
+    logger.warning(f"Could not mount frontend files: {e}")
 
 if __name__ == "__main__":
     import uvicorn

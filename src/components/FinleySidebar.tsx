@@ -1,16 +1,26 @@
 import { useEffect, useState } from 'react';
-import { MessageSquarePlus, Plug, Upload, MessageSquare, X, Check, X as XIcon } from 'lucide-react';
+import { 
+  MessageSquarePlus, 
+  Plug, 
+  Upload, 
+  MessageSquare, 
+  X,
+  Check,
+  X as XIcon
+} from 'lucide-react';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from './ui/tooltip';
 import { ChatContextMenu } from './ChatContextMenu';
 import { ShareModal } from './ShareModal';
+
 interface ChatHistory {
   id: string;
   title: string;
   timestamp: Date;
   messages: any[];
 }
+
 interface FinleySidebarProps {
   onClose?: () => void;
   onNavigate?: (view: string) => void;
@@ -18,21 +28,12 @@ interface FinleySidebarProps {
   isCollapsed?: boolean;
   currentChatId?: string | null;
 }
-export const FinleySidebar = ({
-  onClose,
-  onNavigate,
-  currentView = 'chat',
-  isCollapsed = false,
-  currentChatId = null
-}: FinleySidebarProps) => {
+
+export const FinleySidebar = ({ onClose, onNavigate, currentView = 'chat', isCollapsed = false, currentChatId = null }: FinleySidebarProps) => {
   const [chatHistory, setChatHistory] = useState<ChatHistory[]>([]);
   const [editingChatId, setEditingChatId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState<string>('');
-  const [shareModal, setShareModal] = useState<{
-    isOpen: boolean;
-    chatId: string;
-    title: string;
-  }>({
+  const [shareModal, setShareModal] = useState<{ isOpen: boolean; chatId: string; title: string }>({
     isOpen: false,
     chatId: '',
     title: ''
@@ -54,7 +55,7 @@ export const FinleySidebar = ({
           console.error('Failed to load chat history from localStorage:', error);
         }
       }
-
+      
       // Also try to load from database (for persistence across devices)
       try {
         const response = await fetch('/chat-history/current-user-id');
@@ -67,7 +68,7 @@ export const FinleySidebar = ({
               timestamp: new Date(chat.updated_at || chat.created_at),
               messages: chat.messages || []
             }));
-
+            
             // Merge with localStorage data, prioritizing database
             setChatHistory(prev => {
               const merged = [...dbHistory];
@@ -85,6 +86,7 @@ export const FinleySidebar = ({
         console.error('Failed to load chat history from database:', error);
       }
     };
+
     loadChatHistory();
   }, []);
 
@@ -96,11 +98,7 @@ export const FinleySidebar = ({
   // Listen for new chat creation events
   useEffect(() => {
     const handleNewChatCreated = (event: CustomEvent) => {
-      const {
-        chatId,
-        title,
-        timestamp
-      } = event.detail;
+      const { chatId, title, timestamp } = event.detail;
       const newChat: ChatHistory = {
         id: chatId,
         title: title,
@@ -109,33 +107,37 @@ export const FinleySidebar = ({
       };
       setChatHistory(prev => [newChat, ...prev]);
     };
+
     window.addEventListener('new-chat-created', handleNewChatCreated as EventListener);
     return () => window.removeEventListener('new-chat-created', handleNewChatCreated as EventListener);
   }, []);
+
   const handleNewChat = () => {
     // Reset the chat interface without creating a new sidebar entry
     window.dispatchEvent(new CustomEvent('new-chat-requested'));
     onNavigate?.('chat');
     onClose?.();
   };
+
   const handleUploadFile = () => {
     onNavigate?.('upload');
     onClose?.();
   };
+
   const handleConnectorMarketplace = () => {
     onNavigate?.('marketplace');
     onClose?.();
   };
+
   const handleChatSelect = (chatId: string) => {
     // Load the selected chat
     window.dispatchEvent(new CustomEvent('chat-selected', {
-      detail: {
-        chatId
-      }
+      detail: { chatId }
     }));
     onNavigate?.('chat');
     onClose?.();
   };
+
   const handleRename = (chatId: string) => {
     const chat = chatHistory.find(c => c.id === chatId);
     if (chat) {
@@ -143,14 +145,17 @@ export const FinleySidebar = ({
       setEditingTitle(chat.title);
     }
   };
+
   const handleRenameSave = async () => {
     if (!editingChatId || !editingTitle.trim()) return;
+
     const newTitle = editingTitle.trim();
+    
     try {
       const response = await fetch('/chat/rename', {
         method: 'PUT',
         headers: {
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/json',
         },
         body: JSON.stringify({
           chat_id: editingChatId,
@@ -158,18 +163,23 @@ export const FinleySidebar = ({
           user_id: 'current-user-id' // Replace with actual user ID
         })
       });
+
       if (response.ok) {
         // Update the chat history in state
-        const updatedHistory = chatHistory.map(chat => chat.id === editingChatId ? {
-          ...chat,
-          title: newTitle
-        } : chat);
+        const updatedHistory = chatHistory.map(chat => 
+          chat.id === editingChatId 
+            ? { ...chat, title: newTitle }
+            : chat
+        );
+        
         setChatHistory(updatedHistory);
-
+        
         // Update localStorage
         localStorage.setItem('finley-chat-history', JSON.stringify(updatedHistory));
+        
         setEditingChatId(null);
         setEditingTitle('');
+        
         console.log('Chat renamed successfully:', newTitle);
       } else {
         const errorData = await response.json();
@@ -181,34 +191,38 @@ export const FinleySidebar = ({
       setEditingTitle(chatHistory.find(c => c.id === editingChatId)?.title || '');
     }
   };
+
   const handleRenameCancel = () => {
     setEditingChatId(null);
     setEditingTitle('');
   };
+
   const handleDelete = async (chatId: string) => {
     try {
       const response = await fetch('/chat/delete', {
         method: 'DELETE',
         headers: {
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/json',
         },
         body: JSON.stringify({
           chat_id: chatId,
           user_id: 'current-user-id' // Replace with actual user ID
         })
       });
+
       if (response.ok) {
         // Update the chat history in state
         const updatedHistory = chatHistory.filter(chat => chat.id !== chatId);
         setChatHistory(updatedHistory);
-
+        
         // Update localStorage
         localStorage.setItem('finley-chat-history', JSON.stringify(updatedHistory));
-
+        
         // If the deleted chat was the current one, reset the current chat
         if (currentChatId === chatId) {
           window.dispatchEvent(new CustomEvent('new-chat-requested'));
         }
+        
         console.log('Chat deleted successfully:', chatId);
       } else {
         const errorData = await response.json();
@@ -218,6 +232,7 @@ export const FinleySidebar = ({
       console.error('Delete error:', error);
     }
   };
+
   const handleShare = (chatId: string) => {
     const chat = chatHistory.find(c => c.id === chatId);
     if (chat) {
@@ -228,24 +243,39 @@ export const FinleySidebar = ({
       });
     }
   };
+
   const truncateTitle = (title: string, maxLength: number = 20) => {
     return title.length > maxLength ? title.substring(0, maxLength) + '...' : title;
   };
-  return <TooltipProvider>
+
+  return (
+    <TooltipProvider>
       <div className="finley-sidebar flex flex-col h-full overflow-y-auto bg-muted/30">
       {/* Header */}
         <div className={`mb-8 ${isCollapsed ? 'p-4' : 'p-6'}`}>
           <div className="flex items-center justify-between">
-            {!isCollapsed && <div>
+            {!isCollapsed && (
+              <div>
         <h1 className="text-2xl font-bold text-foreground tracking-tight">
-            </h1>
-        
-      </div>}
-            {isCollapsed && <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center">
+          Finley AI
+        </h1>
+        <p className="text-sm text-muted-foreground mt-1">
+          Intelligent Financial Analyst
+        </p>
+      </div>
+            )}
+            {isCollapsed && (
+              <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center">
                 <span className="text-primary-foreground font-bold text-sm">F</span>
-              </div>}
+              </div>
+            )}
             {/* Close button for mobile */}
-            <Button variant="ghost" size="icon" className="lg:hidden" onClick={onClose}>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="lg:hidden"
+              onClick={onClose}
+            >
               <X className="h-4 w-4" />
             </Button>
                   </div>
@@ -256,7 +286,11 @@ export const FinleySidebar = ({
         {/* New Chat */}
         <Tooltip>
           <TooltipTrigger asChild>
-            <Button variant={currentView === 'chat' ? 'secondary' : 'ghost'} className={`w-full h-12 rounded-2xl ${isCollapsed ? 'justify-center px-0' : 'justify-start px-3'}`} onClick={handleNewChat}>
+            <Button
+              variant={currentView === 'chat' ? 'secondary' : 'ghost'}
+              className={`w-full h-12 rounded-2xl ${isCollapsed ? 'justify-center px-0' : 'justify-start px-3'}`}
+              onClick={handleNewChat}
+            >
               <MessageSquarePlus className="w-5 h-5" />
               {!isCollapsed && <span className="font-medium ml-3">New Chat</span>}
             </Button>
@@ -267,7 +301,11 @@ export const FinleySidebar = ({
         {/* Connector Marketplace */}
         <Tooltip>
           <TooltipTrigger asChild>
-            <Button variant={currentView === 'marketplace' ? 'secondary' : 'ghost'} className={`w-full h-12 rounded-2xl ${isCollapsed ? 'justify-center px-0' : 'justify-start px-3'}`} onClick={handleConnectorMarketplace}>
+            <Button
+              variant={currentView === 'marketplace' ? 'secondary' : 'ghost'}
+              className={`w-full h-12 rounded-2xl ${isCollapsed ? 'justify-center px-0' : 'justify-start px-3'}`}
+              onClick={handleConnectorMarketplace}
+            >
               <Plug className="w-5 h-5" />
               {!isCollapsed && <span className="font-medium ml-3">Connector Marketplace</span>}
             </Button>
@@ -278,7 +316,11 @@ export const FinleySidebar = ({
         {/* Upload File */}
         <Tooltip>
           <TooltipTrigger asChild>
-            <Button variant={currentView === 'upload' ? 'secondary' : 'ghost'} className={`w-full h-12 rounded-2xl ${isCollapsed ? 'justify-center px-0' : 'justify-start px-3'}`} onClick={handleUploadFile}>
+            <Button
+              variant={currentView === 'upload' ? 'secondary' : 'ghost'}
+              className={`w-full h-12 rounded-2xl ${isCollapsed ? 'justify-center px-0' : 'justify-start px-3'}`}
+              onClick={handleUploadFile}
+            >
               <Upload className="w-5 h-5" />
               {!isCollapsed && <span className="font-medium ml-3">Upload File</span>}
             </Button>
@@ -287,72 +329,117 @@ export const FinleySidebar = ({
         </Tooltip>
 
         {/* Chat History Section */}
-        {chatHistory.length > 0 && <div className="mt-8">
-            {!isCollapsed && <h3 className="text-sm font-medium text-muted-foreground mb-3 px-3">
+        {chatHistory.length > 0 && (
+          <div className="mt-8">
+            {!isCollapsed && (
+              <h3 className="text-sm font-medium text-muted-foreground mb-3 px-3">
                 Chat History
-              </h3>}
+              </h3>
+            )}
             <div className="space-y-1">
-              {chatHistory.map(chat => <div key={chat.id} className="group relative">
-                  {editingChatId === chat.id ?
-              // Inline editing mode
-              <div className="flex items-center space-x-2 p-2">
-                      <Input value={editingTitle} onChange={e => setEditingTitle(e.target.value)} onKeyDown={e => {
-                  if (e.key === 'Enter') {
-                    handleRenameSave();
-                  } else if (e.key === 'Escape') {
-                    handleRenameCancel();
-                  }
-                }} onBlur={handleRenameSave} className="flex-1 h-8 text-sm" autoFocus />
-                      <Button size="icon" variant="ghost" className="h-6 w-6" onClick={handleRenameSave}>
+              {chatHistory.map((chat) => (
+                <div key={chat.id} className="group relative">
+                  {editingChatId === chat.id ? (
+                    // Inline editing mode
+                    <div className="flex items-center space-x-2 p-2">
+                      <Input
+                        value={editingTitle}
+                        onChange={(e) => setEditingTitle(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            handleRenameSave();
+                          } else if (e.key === 'Escape') {
+                            handleRenameCancel();
+                          }
+                        }}
+                        onBlur={handleRenameSave}
+                        className="flex-1 h-8 text-sm"
+                        autoFocus
+                      />
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        className="h-6 w-6"
+                        onClick={handleRenameSave}
+                      >
                         <Check className="h-3 w-3" />
                       </Button>
-                      <Button size="icon" variant="ghost" className="h-6 w-6" onClick={handleRenameCancel}>
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        className="h-6 w-6"
+                        onClick={handleRenameCancel}
+                      >
                         <XIcon className="h-3 w-3" />
                       </Button>
-                    </div> :
-              // Normal display mode
-              <Tooltip>
+                    </div>
+                  ) : (
+                    // Normal display mode
+                    <Tooltip>
                       <TooltipTrigger asChild>
-                        <Button variant={currentChatId === chat.id ? "secondary" : "ghost"} className={`w-full h-10 rounded-xl text-left group ${isCollapsed ? 'justify-center px-0' : 'justify-start px-3'}`} onClick={() => handleChatSelect(chat.id)}>
+                        <Button
+                          variant={currentChatId === chat.id ? "secondary" : "ghost"}
+                          className={`w-full h-10 rounded-xl text-left group ${isCollapsed ? 'justify-center px-0' : 'justify-start px-3'}`}
+                          onClick={() => handleChatSelect(chat.id)}
+                        >
                           <MessageSquare className="w-4 h-4 flex-shrink-0" />
-                          {!isCollapsed && <div className="flex-1 min-w-0 ml-3">
+                          {!isCollapsed && (
+                            <div className="flex-1 min-w-0 ml-3">
                               <div className="text-sm font-medium truncate">
                                 {truncateTitle(chat.title)}
                               </div>
                               <div className="text-xs text-muted-foreground">
                                 {chat.timestamp.toLocaleDateString()}
                               </div>
-                            </div>}
-                          {!isCollapsed && <ChatContextMenu chatId={chat.id} onRename={handleRename} onDelete={handleDelete} onShare={handleShare} isCollapsed={isCollapsed} />}
+                            </div>
+                          )}
+                          {!isCollapsed && (
+                            <ChatContextMenu
+                              chatId={chat.id}
+                              onRename={handleRename}
+                              onDelete={handleDelete}
+                              onShare={handleShare}
+                              isCollapsed={isCollapsed}
+                            />
+                          )}
                         </Button>
                       </TooltipTrigger>
-                      {isCollapsed && <TooltipContent side="right">
+                      {isCollapsed && (
+                        <TooltipContent side="right">
                           <div>
                             <p className="font-medium">{chat.title}</p>
                             <p className="text-xs text-muted-foreground">
                               {chat.timestamp.toLocaleDateString()}
-                            </p>
-                          </div>
-                        </TooltipContent>}
-                    </Tooltip>}
-                </div>)}
-            </div>
-        </div>}
+                </p>
+              </div>
+                        </TooltipContent>
+                      )}
+                    </Tooltip>
+                  )}
+                </div>
+              ))}
+        </div>
+        </div>
+        )}
       </div>
       
       {/* Footer */}
       <div className={`mt-auto pt-6 border-t border-border ${isCollapsed ? 'px-2' : 'px-6'}`}>
-        {!isCollapsed && <p className="text-xs text-muted-foreground text-center">
+        {!isCollapsed && (
+          <p className="text-xs text-muted-foreground text-center">
             Powered by Finley AI
-          </p>}
+          </p>
+        )}
       </div>
       
       {/* Share Modal */}
-      <ShareModal isOpen={shareModal.isOpen} onClose={() => setShareModal({
-        isOpen: false,
-        chatId: '',
-        title: ''
-      })} chatId={shareModal.chatId} chatTitle={shareModal.title} />
-    </div>
-    </TooltipProvider>;
+      <ShareModal
+        isOpen={shareModal.isOpen}
+        onClose={() => setShareModal({ isOpen: false, chatId: '', title: '' })}
+        chatId={shareModal.chatId}
+        chatTitle={shareModal.title}
+      />
+      </div>
+    </TooltipProvider>
+  );
 };
