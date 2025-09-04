@@ -45,20 +45,10 @@ app.add_middleware(
 
 # Mount static files (frontend)
 try:
-    import os
-    if os.path.exists("dist"):
-        logger.info(f"Dist directory exists. Contents: {os.listdir('dist')}")
-        if os.path.exists("dist/index.html"):
-            logger.info("index.html found in dist directory")
-        else:
-            logger.warning("index.html not found in dist directory")
-    else:
-        logger.warning("Dist directory does not exist")
-    
     app.mount("/", StaticFiles(directory="dist", html=True), name="static")
     logger.info("Frontend static files mounted successfully")
 except Exception as e:
-    logger.error(f"Could not mount frontend files: {e}")
+    logger.warning(f"Could not mount frontend files: {e}")
     logger.info("Running in backend-only mode")
 
 # Initialize OpenAI client
@@ -3171,54 +3161,9 @@ async def process_excel(request: ProcessRequest, background_tasks: BackgroundTas
         
         raise HTTPException(status_code=500, detail=str(e))
 
-# Root route removed - static files handle the frontend
-
-@app.get("/api/health")
-async def health_check():
-    """Health check endpoint for the API"""
-    try:
-        # Check if OpenAI API key is configured
-        openai_key = os.environ.get("OPENAI_API_KEY")
-        supabase_url = os.environ.get("SUPABASE_URL")
-        supabase_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
-        
-        status = "healthy"
-        issues = []
-        
-        if not openai_key:
-            issues.append("OPENAI_API_KEY not configured")
-            status = "degraded"
-        
-        if not supabase_url:
-            issues.append("SUPABASE_URL not configured")
-            status = "degraded"
-        
-        if not supabase_key:
-            issues.append("SUPABASE_SERVICE_ROLE_KEY not configured")
-            status = "degraded"
-        
-        # Check if frontend files exist
-        dist_exists = os.path.exists("dist")
-        index_exists = os.path.exists("dist/index.html") if dist_exists else False
-        
-        return {
-            "status": status,
-            "timestamp": datetime.now().isoformat(),
-            "version": "1.0.0",
-            "issues": issues,
-            "frontend": {
-                "dist_exists": dist_exists,
-                "index_exists": index_exists,
-                "dist_contents": os.listdir("dist") if dist_exists else []
-            }
-        }
-    except Exception as e:
-        logger.error(f"Health check error: {e}")
-        return {
-            "status": "unhealthy",
-            "timestamp": datetime.now().isoformat(),
-            "error": str(e)
-        }
+@app.get("/")
+async def root():
+    return {"message": "Finley AI Backend - Intelligent Financial Analysis with Row-by-Row Processing"}
 
 @app.get("/test-raw-events/{user_id}")
 async def test_raw_events(user_id: str):
@@ -3255,7 +3200,44 @@ async def test_raw_events(user_id: str):
         logger.error(f"Error in test_raw_events: {e}")
         return {"error": str(e)}
 
-# Duplicate health endpoint removed - using /api/health instead
+@app.get("/health")
+async def health_check():
+    """Basic health check that doesn't require external dependencies"""
+    try:
+        # Check if OpenAI API key is configured
+        openai_key = os.environ.get("OPENAI_API_KEY")
+        supabase_url = os.environ.get("SUPABASE_URL")
+        supabase_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
+        
+        status = "healthy"
+        issues = []
+        
+        if not openai_key:
+            issues.append("OPENAI_API_KEY not configured")
+            status = "degraded"
+        
+        if not supabase_url:
+            issues.append("SUPABASE_URL not configured")
+            status = "degraded"
+            
+        if not supabase_key:
+            issues.append("SUPABASE_SERVICE_ROLE_KEY not configured")
+            status = "degraded"
+        
+        return {
+            "status": status,
+            "service": "Finley AI Backend",
+            "timestamp": datetime.utcnow().isoformat(),
+            "issues": issues,
+            "environment_configured": len(issues) == 0
+        }
+    except Exception as e:
+        return {
+            "status": "unhealthy",
+            "service": "Finley AI Backend",
+            "error": str(e),
+            "timestamp": datetime.utcnow().isoformat()
+        }
 
 @app.post("/upload-and-process")
 async def upload_and_process(
@@ -7323,15 +7305,6 @@ class ChatTitleResponse(BaseModel):
     title: str
     chat_id: str
 
-class ChatRenameRequest(BaseModel):
-    chat_id: str
-    new_title: str
-    user_id: str
-
-class ChatDeleteRequest(BaseModel):
-    chat_id: str
-    user_id: str
-
 @app.post("/chat", response_model=ChatResponse)
 async def chat_with_finley(chat_message: ChatMessage):
     """Chat endpoint for Finley AI financial assistant"""
@@ -7533,61 +7506,6 @@ async def generate_chat_title(title_request: ChatTitleRequest):
             title=title,
             chat_id=f"chat-{datetime.utcnow().timestamp()}"
         )
-
-@app.post("/chat/rename")
-async def rename_chat(rename_request: ChatRenameRequest):
-    """Rename a chat conversation"""
-    try:
-        supabase_url = os.getenv('SUPABASE_URL')
-        supabase_key = os.getenv('SUPABASE_SERVICE_KEY')
-        
-        if not supabase_url or not supabase_key:
-            raise HTTPException(status_code=500, detail="Database not configured")
-        
-        supabase = create_client(supabase_url, supabase_key)
-        
-        # Update chat title in database
-        result = supabase.table('chat_messages').update({
-            'chat_title': rename_request.new_title
-        }).eq('chat_id', rename_request.chat_id).eq('user_id', rename_request.user_id).execute()
-        
-        if result.data:
-            return {
-                "message": "Chat renamed successfully",
-                "chat_id": rename_request.chat_id,
-                "new_title": rename_request.new_title
-            }
-        else:
-            raise HTTPException(status_code=404, detail="Chat not found")
-        
-    except Exception as e:
-        logger.error(f"Chat rename error: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to rename chat: {str(e)}")
-
-@app.delete("/chat/{chat_id}")
-async def delete_chat(chat_id: str, user_id: str):
-    """Delete a chat conversation and all its messages"""
-    try:
-        supabase_url = os.getenv('SUPABASE_URL')
-        supabase_key = os.getenv('SUPABASE_SERVICE_KEY')
-        
-        if not supabase_url or not supabase_key:
-            raise HTTPException(status_code=500, detail="Database not configured")
-        
-        supabase = create_client(supabase_url, supabase_key)
-        
-        # Delete all messages for this chat
-        result = supabase.table('chat_messages').delete().eq('chat_id', chat_id).eq('user_id', user_id).execute()
-        
-        return {
-            "message": "Chat deleted successfully",
-            "chat_id": chat_id,
-            "deleted_messages": len(result.data) if result.data else 0
-        }
-        
-    except Exception as e:
-        logger.error(f"Chat delete error: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to delete chat: {str(e)}")
 
 if __name__ == "__main__":
     import uvicorn

@@ -175,16 +175,16 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
       
       case 'chat':
       default:
-        return (
-          <div className="finley-chat flex flex-col h-full">
-            {/* Chat Messages Area */}
+  return (
+    <div className="finley-chat flex flex-col h-full">
+      {/* Chat Messages Area */}
             <div className="flex-1 overflow-y-auto p-8">
               {messages.length === 0 ? (
                 <div className="h-full flex items-center justify-center">
-                  <div className="text-center">
+        <div className="text-center">
                     <h1 className="text-3xl font-bold text-foreground tracking-tight mb-4">
                       Finance Meets Intelligence
-                    </h1>
+          </h1>
                     <p className="text-muted-foreground text-lg">
                       Ask me anything about your financial data
                     </p>
@@ -208,38 +208,38 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
                         <p className="text-xs opacity-70 mt-1">
                           {msg.timestamp.toLocaleTimeString()}
                         </p>
-                      </div>
+        </div>
                     </div>
                   ))}
                 </div>
               )}
-            </div>
-            
-            {/* Chat Input Area - Fixed at bottom */}
-            <div className="border-t border-border p-6 bg-background">
-              <div className="max-w-3xl mx-auto">
-                <div className="relative">
-                  <input
-                    type="text"
-                    value={message}
-                    onChange={(e) => setMessage(e.target.value)}
-                    onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
+      </div>
+      
+      {/* Chat Input Area - Fixed at bottom */}
+      <div className="border-t border-border p-6 bg-background">
+        <div className="max-w-3xl mx-auto">
+          <div className="relative">
+            <input
+              type="text"
+              value={message}
+              onChange={(e) => setMessage(e.target.value)}
+              onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
                     placeholder="Ask anything about your financial data..."
                     className="w-full bg-card border border-border rounded-2xl px-4 py-3 pr-12 text-foreground placeholder-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring transition-all duration-200"
-                  />
-                  
-                  <button
-                    onClick={handleSendMessage}
-                    disabled={!message.trim()}
+            />
+            
+            <button
+              onClick={handleSendMessage}
+              disabled={!message.trim()}
                     className="absolute right-2 top-1/2 -translate-y-1/2 w-8 h-8 bg-primary text-primary-foreground rounded-xl flex items-center justify-center transition-all duration-200 hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    <Send className="w-4 h-4" />
-                  </button>
-                </div>
-              </div>
-            </div>
+            >
+              <Send className="w-4 h-4" />
+            </button>
           </div>
-        );
+        </div>
+      </div>
+    </div>
+  );
     }
   };
 

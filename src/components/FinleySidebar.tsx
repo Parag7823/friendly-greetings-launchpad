@@ -8,8 +8,6 @@ import {
 } from 'lucide-react';
 import { Button } from './ui/button';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from './ui/tooltip';
-import { ChatContextMenu } from './ChatContextMenu';
-import { useToast } from '@/hooks/use-toast';
 
 interface ChatHistory {
   id: string;
@@ -28,7 +26,6 @@ interface FinleySidebarProps {
 
 export const FinleySidebar = ({ onClose, onNavigate, currentView = 'chat', isCollapsed = false, currentChatId = null }: FinleySidebarProps) => {
   const [chatHistory, setChatHistory] = useState<ChatHistory[]>([]);
-  const { toast } = useToast();
 
   // Load chat history from localStorage on mount
   useEffect(() => {
@@ -98,85 +95,6 @@ export const FinleySidebar = ({ onClose, onNavigate, currentView = 'chat', isCol
     return title.length > maxLength ? title.substring(0, maxLength) + '...' : title;
   };
 
-  const handleRename = async (chatId: string, newTitle: string) => {
-    try {
-      const response = await fetch('/chat/rename', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          chat_id: chatId,
-          new_title: newTitle,
-          user_id: 'current-user-id' // Replace with actual user ID
-        })
-      });
-
-      if (response.ok) {
-        // Update local state
-        setChatHistory(prev => 
-          prev.map(chat => 
-            chat.id === chatId ? { ...chat, title: newTitle } : chat
-          )
-        );
-        
-        toast({
-          title: "Chat Renamed",
-          description: "Chat title updated successfully",
-        });
-      } else {
-        throw new Error('Failed to rename chat');
-      }
-    } catch (error) {
-      console.error('Rename error:', error);
-      toast({
-        title: "Error",
-        description: "Failed to rename chat. Please try again.",
-        variant: "destructive"
-      });
-    }
-  };
-
-  const handleDelete = async (chatId: string) => {
-    try {
-      const response = await fetch(`/chat/${chatId}?user_id=current-user-id`, {
-        method: 'DELETE',
-      });
-
-      if (response.ok) {
-        // Remove from local state
-        setChatHistory(prev => prev.filter(chat => chat.id !== chatId));
-        
-        // If this was the current chat, reset the chat interface
-        if (currentChatId === chatId) {
-          window.dispatchEvent(new CustomEvent('new-chat-requested'));
-        }
-        
-        toast({
-          title: "Chat Deleted",
-          description: "Chat has been permanently deleted",
-        });
-      } else {
-        throw new Error('Failed to delete chat');
-      }
-    } catch (error) {
-      console.error('Delete error:', error);
-      toast({
-        title: "Error",
-        description: "Failed to delete chat. Please try again.",
-        variant: "destructive"
-      });
-    }
-  };
-
-  const handleShare = (chatId: string) => {
-    // Placeholder for share functionality
-    toast({
-      title: "Share Feature",
-      description: "Share functionality coming soon!",
-    });
-  };
-
   return (
     <TooltipProvider>
       <div className="finley-sidebar flex flex-col h-full overflow-y-auto bg-muted/30">
@@ -191,7 +109,7 @@ export const FinleySidebar = ({ onClose, onNavigate, currentView = 'chat', isCol
         <p className="text-sm text-muted-foreground mt-1">
           Intelligent Financial Analyst
         </p>
-              </div>
+      </div>
             )}
             {isCollapsed && (
               <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center">
@@ -207,9 +125,9 @@ export const FinleySidebar = ({ onClose, onNavigate, currentView = 'chat', isCol
             >
               <X className="h-4 w-4" />
             </Button>
-          </div>
-      </div>
-      
+                  </div>
+                </div>
+                
       {/* Navigation Items */}
       <div className={`flex-1 space-y-2 ${isCollapsed ? 'px-2' : 'px-6'}`}>
         {/* New Chat */}
@@ -277,18 +195,13 @@ export const FinleySidebar = ({ onClose, onNavigate, currentView = 'chat', isCol
                       <MessageSquare className="w-4 h-4 flex-shrink-0" />
                       {!isCollapsed && (
                         <div className="flex-1 min-w-0 ml-3">
-                          <ChatContextMenu
-                            chatId={chat.id}
-                            currentTitle={chat.title}
-                            onRename={handleRename}
-                            onDelete={handleDelete}
-                            onShare={handleShare}
-                            isCollapsed={isCollapsed}
-                          />
+                          <div className="text-sm font-medium truncate">
+                            {truncateTitle(chat.title)}
+                  </div>
                           <div className="text-xs text-muted-foreground">
                             {chat.timestamp.toLocaleDateString()}
-                          </div>
-                        </div>
+                  </div>
+                </div>
                       )}
                     </Button>
                   </TooltipTrigger>
@@ -298,13 +211,13 @@ export const FinleySidebar = ({ onClose, onNavigate, currentView = 'chat', isCol
                         <p className="font-medium">{chat.title}</p>
                         <p className="text-xs text-muted-foreground">
                           {chat.timestamp.toLocaleDateString()}
-                        </p>
-                      </div>
+                </p>
+              </div>
                     </TooltipContent>
                   )}
                 </Tooltip>
               ))}
-            </div>
+        </div>
         </div>
         )}
       </div>
@@ -317,7 +230,7 @@ export const FinleySidebar = ({ onClose, onNavigate, currentView = 'chat', isCol
           </p>
         )}
       </div>
-    </div>
+      </div>
     </TooltipProvider>
   );
 };
