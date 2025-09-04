@@ -4,10 +4,15 @@ import {
   Plug, 
   Upload, 
   MessageSquare, 
-  X 
+  X,
+  Check,
+  X as XIcon
 } from 'lucide-react';
 import { Button } from './ui/button';
+import { Input } from './ui/input';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from './ui/tooltip';
+import { ChatContextMenu } from './ChatContextMenu';
+import { ShareModal } from './ShareModal';
 
 interface ChatHistory {
   id: string;
@@ -26,6 +31,13 @@ interface FinleySidebarProps {
 
 export const FinleySidebar = ({ onClose, onNavigate, currentView = 'chat', isCollapsed = false, currentChatId = null }: FinleySidebarProps) => {
   const [chatHistory, setChatHistory] = useState<ChatHistory[]>([]);
+  const [editingChatId, setEditingChatId] = useState<string | null>(null);
+  const [editingTitle, setEditingTitle] = useState<string>('');
+  const [shareModal, setShareModal] = useState<{ isOpen: boolean; chatId: string; title: string }>({
+    isOpen: false,
+    chatId: '',
+    title: ''
+  });
 
   // Load chat history from localStorage on mount
   useEffect(() => {
@@ -89,6 +101,94 @@ export const FinleySidebar = ({ onClose, onNavigate, currentView = 'chat', isCol
     }));
     onNavigate?.('chat');
     onClose?.();
+  };
+
+  const handleRename = (chatId: string) => {
+    const chat = chatHistory.find(c => c.id === chatId);
+    if (chat) {
+      setEditingChatId(chatId);
+      setEditingTitle(chat.title);
+    }
+  };
+
+  const handleRenameSave = async () => {
+    if (!editingChatId || !editingTitle.trim()) return;
+
+    try {
+      const response = await fetch('/chat/rename', {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          chat_id: editingChatId,
+          new_title: editingTitle.trim(),
+          user_id: 'current-user-id' // Replace with actual user ID
+        })
+      });
+
+      if (response.ok) {
+        setChatHistory(prev => 
+          prev.map(chat => 
+            chat.id === editingChatId 
+              ? { ...chat, title: editingTitle.trim() }
+              : chat
+          )
+        );
+        setEditingChatId(null);
+        setEditingTitle('');
+      } else {
+        throw new Error('Failed to rename chat');
+      }
+    } catch (error) {
+      console.error('Rename error:', error);
+      // Revert the title change
+      setEditingTitle(chatHistory.find(c => c.id === editingChatId)?.title || '');
+    }
+  };
+
+  const handleRenameCancel = () => {
+    setEditingChatId(null);
+    setEditingTitle('');
+  };
+
+  const handleDelete = async (chatId: string) => {
+    try {
+      const response = await fetch('/chat/delete', {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          chat_id: chatId,
+          user_id: 'current-user-id' // Replace with actual user ID
+        })
+      });
+
+      if (response.ok) {
+        setChatHistory(prev => prev.filter(chat => chat.id !== chatId));
+        
+        // If the deleted chat was the current one, reset the current chat
+        if (currentChatId === chatId) {
+          window.dispatchEvent(new CustomEvent('new-chat-requested'));
+        }
+      } else {
+        throw new Error('Failed to delete chat');
+      }
+    } catch (error) {
+      console.error('Delete error:', error);
+    }
+  };
+
+  const handleShare = (chatId: string) => {
+    const chat = chatHistory.find(c => c.id === chatId);
+    if (chat) {
+      setShareModal({
+        isOpen: true,
+        chatId: chatId,
+        title: chat.title
+      });
+    }
   };
 
   const truncateTitle = (title: string, maxLength: number = 20) => {
@@ -185,39 +285,87 @@ export const FinleySidebar = ({ onClose, onNavigate, currentView = 'chat', isCol
             )}
             <div className="space-y-1">
               {chatHistory.map((chat) => (
-                <Tooltip key={chat.id}>
-                  <TooltipTrigger asChild>
-                    <Button
-                      variant={currentChatId === chat.id ? "secondary" : "ghost"}
-                      className={`w-full h-10 rounded-xl text-left ${isCollapsed ? 'justify-center px-0' : 'justify-start px-3'}`}
-                      onClick={() => handleChatSelect(chat.id)}
-                    >
-                      <MessageSquare className="w-4 h-4 flex-shrink-0" />
-                      {!isCollapsed && (
-                        <div className="flex-1 min-w-0 ml-3">
-                          <div className="text-sm font-medium truncate">
-                            {truncateTitle(chat.title)}
-                  </div>
-                          <div className="text-xs text-muted-foreground">
-                            {chat.timestamp.toLocaleDateString()}
-                  </div>
-                </div>
+                <div key={chat.id} className="group relative">
+                  {editingChatId === chat.id ? (
+                    // Inline editing mode
+                    <div className="flex items-center space-x-2 p-2">
+                      <Input
+                        value={editingTitle}
+                        onChange={(e) => setEditingTitle(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            handleRenameSave();
+                          } else if (e.key === 'Escape') {
+                            handleRenameCancel();
+                          }
+                        }}
+                        onBlur={handleRenameSave}
+                        className="flex-1 h-8 text-sm"
+                        autoFocus
+                      />
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        className="h-6 w-6"
+                        onClick={handleRenameSave}
+                      >
+                        <Check className="h-3 w-3" />
+                      </Button>
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        className="h-6 w-6"
+                        onClick={handleRenameCancel}
+                      >
+                        <XIcon className="h-3 w-3" />
+                      </Button>
+                    </div>
+                  ) : (
+                    // Normal display mode
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          variant={currentChatId === chat.id ? "secondary" : "ghost"}
+                          className={`w-full h-10 rounded-xl text-left group ${isCollapsed ? 'justify-center px-0' : 'justify-start px-3'}`}
+                          onClick={() => handleChatSelect(chat.id)}
+                        >
+                          <MessageSquare className="w-4 h-4 flex-shrink-0" />
+                          {!isCollapsed && (
+                            <div className="flex-1 min-w-0 ml-3">
+                              <div className="text-sm font-medium truncate">
+                                {truncateTitle(chat.title)}
+                              </div>
+                              <div className="text-xs text-muted-foreground">
+                                {chat.timestamp.toLocaleDateString()}
+                              </div>
+                            </div>
+                          )}
+                          {!isCollapsed && (
+                            <ChatContextMenu
+                              chatId={chat.id}
+                              onRename={handleRename}
+                              onDelete={handleDelete}
+                              onShare={handleShare}
+                              isCollapsed={isCollapsed}
+                            />
+                          )}
+                        </Button>
+                      </TooltipTrigger>
+                      {isCollapsed && (
+                        <TooltipContent side="right">
+                          <div>
+                            <p className="font-medium">{chat.title}</p>
+                            <p className="text-xs text-muted-foreground">
+                              {chat.timestamp.toLocaleDateString()}
+                            </p>
+                          </div>
+                        </TooltipContent>
                       )}
-                    </Button>
-                  </TooltipTrigger>
-                  {isCollapsed && (
-                    <TooltipContent side="right">
-                      <div>
-                        <p className="font-medium">{chat.title}</p>
-                        <p className="text-xs text-muted-foreground">
-                          {chat.timestamp.toLocaleDateString()}
-                </p>
-              </div>
-                    </TooltipContent>
+                    </Tooltip>
                   )}
-                </Tooltip>
+                </div>
               ))}
-        </div>
+            </div>
         </div>
         )}
       </div>
@@ -230,7 +378,15 @@ export const FinleySidebar = ({ onClose, onNavigate, currentView = 'chat', isCol
           </p>
         )}
       </div>
-      </div>
+      
+      {/* Share Modal */}
+      <ShareModal
+        isOpen={shareModal.isOpen}
+        onClose={() => setShareModal({ isOpen: false, chatId: '', title: '' })}
+        chatId={shareModal.chatId}
+        chatTitle={shareModal.title}
+      />
+    </div>
     </TooltipProvider>
   );
 };

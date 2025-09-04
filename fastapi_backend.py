@@ -7305,6 +7305,15 @@ class ChatTitleResponse(BaseModel):
     title: str
     chat_id: str
 
+class ChatRenameRequest(BaseModel):
+    chat_id: str
+    new_title: str
+    user_id: str
+
+class ChatDeleteRequest(BaseModel):
+    chat_id: str
+    user_id: str
+
 @app.post("/chat", response_model=ChatResponse)
 async def chat_with_finley(chat_message: ChatMessage):
     """Chat endpoint for Finley AI financial assistant"""
@@ -7506,6 +7515,62 @@ async def generate_chat_title(title_request: ChatTitleRequest):
             title=title,
             chat_id=f"chat-{datetime.utcnow().timestamp()}"
         )
+
+@app.put("/chat/rename")
+async def rename_chat(rename_request: ChatRenameRequest):
+    """Rename a chat conversation"""
+    try:
+        supabase_url = os.getenv('SUPABASE_URL')
+        supabase_key = os.getenv('SUPABASE_SERVICE_KEY')
+        
+        if not supabase_url or not supabase_key:
+            raise HTTPException(status_code=500, detail="Database not configured")
+        
+        supabase = create_client(supabase_url, supabase_key)
+        
+        # Update the chat title in the database
+        result = supabase.table('chat_messages').update({
+            'chat_title': rename_request.new_title,
+            'updated_at': datetime.utcnow().isoformat()
+        }).eq('chat_id', rename_request.chat_id).eq('user_id', rename_request.user_id).execute()
+        
+        if result.data:
+            return {
+                "message": "Chat renamed successfully",
+                "chat_id": rename_request.chat_id,
+                "new_title": rename_request.new_title
+            }
+        else:
+            raise HTTPException(status_code=404, detail="Chat not found")
+        
+    except Exception as e:
+        logger.error(f"Chat rename error: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to rename chat: {str(e)}")
+
+@app.delete("/chat/delete")
+async def delete_chat(delete_request: ChatDeleteRequest):
+    """Delete a chat conversation and all its messages"""
+    try:
+        supabase_url = os.getenv('SUPABASE_URL')
+        supabase_key = os.getenv('SUPABASE_SERVICE_KEY')
+        
+        if not supabase_url or not supabase_key:
+            raise HTTPException(status_code=500, detail="Database not configured")
+        
+        supabase = create_client(supabase_url, supabase_key)
+        
+        # Delete all messages for this chat
+        result = supabase.table('chat_messages').delete().eq('chat_id', delete_request.chat_id).eq('user_id', delete_request.user_id).execute()
+        
+        return {
+            "message": "Chat deleted successfully",
+            "chat_id": delete_request.chat_id,
+            "deleted_messages": len(result.data) if result.data else 0
+        }
+        
+    except Exception as e:
+        logger.error(f"Chat delete error: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to delete chat: {str(e)}")
 
 if __name__ == "__main__":
     import uvicorn
