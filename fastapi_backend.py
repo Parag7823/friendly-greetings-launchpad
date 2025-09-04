@@ -44,7 +44,7 @@ app.add_middleware(
 )
 
 # Static file mounting will be done after all API routes are defined
-    logger.info("Running in backend-only mode")
+logger.info("Running in backend-only mode")
 
 # Initialize OpenAI client
 openai = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
