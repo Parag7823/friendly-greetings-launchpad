@@ -41,18 +41,53 @@ export const FinleySidebar = ({ onClose, onNavigate, currentView = 'chat', isCol
 
   // Load chat history from localStorage on mount
   useEffect(() => {
-    const savedHistory = localStorage.getItem('finley-chat-history');
-    if (savedHistory) {
-      try {
-        const parsed = JSON.parse(savedHistory);
-        setChatHistory(parsed.map((chat: any) => ({
-          ...chat,
-          timestamp: new Date(chat.timestamp)
-        })));
-      } catch (error) {
-        console.error('Failed to load chat history:', error);
+    const loadChatHistory = async () => {
+      // First try to load from localStorage
+      const savedHistory = localStorage.getItem('finley-chat-history');
+      if (savedHistory) {
+        try {
+          const parsed = JSON.parse(savedHistory);
+          setChatHistory(parsed.map((chat: any) => ({
+            ...chat,
+            timestamp: new Date(chat.timestamp)
+          })));
+        } catch (error) {
+          console.error('Failed to load chat history from localStorage:', error);
+        }
       }
-    }
+      
+      // Also try to load from database (for persistence across devices)
+      try {
+        const response = await fetch('/chat-history/current-user-id');
+        if (response.ok) {
+          const data = await response.json();
+          if (data.chats && data.chats.length > 0) {
+            const dbHistory = data.chats.map((chat: any) => ({
+              id: chat.chat_id,
+              title: chat.title || 'New Chat',
+              timestamp: new Date(chat.updated_at || chat.created_at),
+              messages: chat.messages || []
+            }));
+            
+            // Merge with localStorage data, prioritizing database
+            setChatHistory(prev => {
+              const merged = [...dbHistory];
+              // Add any localStorage chats not in database
+              prev.forEach(localChat => {
+                if (!merged.find(dbChat => dbChat.id === localChat.id)) {
+                  merged.push(localChat);
+                }
+              });
+              return merged.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
+            });
+          }
+        }
+      } catch (error) {
+        console.error('Failed to load chat history from database:', error);
+      }
+    };
+
+    loadChatHistory();
   }, []);
 
   // Save chat history to localStorage whenever it changes
@@ -114,6 +149,8 @@ export const FinleySidebar = ({ onClose, onNavigate, currentView = 'chat', isCol
   const handleRenameSave = async () => {
     if (!editingChatId || !editingTitle.trim()) return;
 
+    const newTitle = editingTitle.trim();
+    
     try {
       const response = await fetch('/chat/rename', {
         method: 'PUT',
@@ -122,23 +159,31 @@ export const FinleySidebar = ({ onClose, onNavigate, currentView = 'chat', isCol
         },
         body: JSON.stringify({
           chat_id: editingChatId,
-          new_title: editingTitle.trim(),
+          new_title: newTitle,
           user_id: 'current-user-id' // Replace with actual user ID
         })
       });
 
       if (response.ok) {
-        setChatHistory(prev => 
-          prev.map(chat => 
-            chat.id === editingChatId 
-              ? { ...chat, title: editingTitle.trim() }
-              : chat
-          )
+        // Update the chat history in state
+        const updatedHistory = chatHistory.map(chat => 
+          chat.id === editingChatId 
+            ? { ...chat, title: newTitle }
+            : chat
         );
+        
+        setChatHistory(updatedHistory);
+        
+        // Update localStorage
+        localStorage.setItem('finley-chat-history', JSON.stringify(updatedHistory));
+        
         setEditingChatId(null);
         setEditingTitle('');
+        
+        console.log('Chat renamed successfully:', newTitle);
       } else {
-        throw new Error('Failed to rename chat');
+        const errorData = await response.json();
+        throw new Error(errorData.detail || 'Failed to rename chat');
       }
     } catch (error) {
       console.error('Rename error:', error);
@@ -166,14 +211,22 @@ export const FinleySidebar = ({ onClose, onNavigate, currentView = 'chat', isCol
       });
 
       if (response.ok) {
-        setChatHistory(prev => prev.filter(chat => chat.id !== chatId));
+        // Update the chat history in state
+        const updatedHistory = chatHistory.filter(chat => chat.id !== chatId);
+        setChatHistory(updatedHistory);
+        
+        // Update localStorage
+        localStorage.setItem('finley-chat-history', JSON.stringify(updatedHistory));
         
         // If the deleted chat was the current one, reset the current chat
         if (currentChatId === chatId) {
           window.dispatchEvent(new CustomEvent('new-chat-requested'));
         }
+        
+        console.log('Chat deleted successfully:', chatId);
       } else {
-        throw new Error('Failed to delete chat');
+        const errorData = await response.json();
+        throw new Error(errorData.detail || 'Failed to delete chat');
       }
     } catch (error) {
       console.error('Delete error:', error);
