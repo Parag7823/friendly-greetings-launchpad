@@ -11,6 +11,25 @@ interface ChatInterfaceProps {
 export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfaceProps) => {
   const [message, setMessage] = useState('');
   const [messages, setMessages] = useState<Array<{ id: string; text: string; isUser: boolean; timestamp: Date }>>([]);
+  const [currentChatId, setCurrentChatId] = useState<string | null>(null);
+  const [isNewChat, setIsNewChat] = useState(true);
+
+  // Function to reset chat for new conversation
+  const resetChat = () => {
+    setMessages([]);
+    setCurrentChatId(null);
+    setIsNewChat(true);
+  };
+
+  // Listen for new chat events
+  useEffect(() => {
+    const handleNewChat = () => {
+      resetChat();
+    };
+
+    window.addEventListener('new-chat-requested', handleNewChat);
+    return () => window.removeEventListener('new-chat-requested', handleNewChat);
+  }, []);
 
   const handleSendMessage = async () => {
     if (message.trim()) {
@@ -26,6 +45,49 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
       setMessage('');
       
       try {
+        let chatId = currentChatId;
+        
+        // If this is a new chat, generate a title and create chat entry
+        if (isNewChat) {
+          try {
+            const titleResponse = await fetch('/generate-chat-title', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                message: currentMessage,
+                user_id: 'current-user-id' // Replace with actual user ID
+              })
+            });
+            
+            if (titleResponse.ok) {
+              const titleData = await titleResponse.json();
+              chatId = titleData.chat_id;
+              setCurrentChatId(chatId);
+              setIsNewChat(false);
+              
+              // Notify parent component about new chat
+              if (onNavigate) {
+                // Trigger a custom event to update sidebar
+                window.dispatchEvent(new CustomEvent('new-chat-created', {
+                  detail: {
+                    chatId: chatId,
+                    title: titleData.title,
+                    timestamp: new Date()
+                  }
+                }));
+              }
+            }
+          } catch (titleError) {
+            console.error('Title generation error:', titleError);
+            // Continue with chat even if title generation fails
+            chatId = `chat-${Date.now()}`;
+            setCurrentChatId(chatId);
+            setIsNewChat(false);
+          }
+        }
+        
         // Send message to backend
         const response = await fetch('/chat', {
           method: 'POST',
@@ -35,7 +97,7 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
           body: JSON.stringify({
             message: currentMessage,
             user_id: 'current-user-id', // Replace with actual user ID
-            chat_id: 'current-chat-id' // Replace with actual chat ID
+            chat_id: chatId
           })
         });
         

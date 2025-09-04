@@ -8,6 +8,8 @@ import {
 } from 'lucide-react';
 import { Button } from './ui/button';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from './ui/tooltip';
+import { ChatContextMenu } from './ChatContextMenu';
+import { useToast } from '@/hooks/use-toast';
 
 interface ChatHistory {
   id: string;
@@ -21,10 +23,12 @@ interface FinleySidebarProps {
   onNavigate?: (view: string) => void;
   currentView?: string;
   isCollapsed?: boolean;
+  currentChatId?: string | null;
 }
 
-export const FinleySidebar = ({ onClose, onNavigate, currentView = 'chat', isCollapsed = false }: FinleySidebarProps) => {
+export const FinleySidebar = ({ onClose, onNavigate, currentView = 'chat', isCollapsed = false, currentChatId = null }: FinleySidebarProps) => {
   const [chatHistory, setChatHistory] = useState<ChatHistory[]>([]);
+  const { toast } = useToast();
 
   // Load chat history from localStorage on mount
   useEffect(() => {
@@ -47,14 +51,26 @@ export const FinleySidebar = ({ onClose, onNavigate, currentView = 'chat', isCol
     localStorage.setItem('finley-chat-history', JSON.stringify(chatHistory));
   }, [chatHistory]);
 
-  const handleNewChat = () => {
-    const newChat: ChatHistory = {
-      id: `chat-${Date.now()}`,
-      title: 'New Chat',
-      timestamp: new Date(),
-      messages: []
+  // Listen for new chat creation events
+  useEffect(() => {
+    const handleNewChatCreated = (event: CustomEvent) => {
+      const { chatId, title, timestamp } = event.detail;
+      const newChat: ChatHistory = {
+        id: chatId,
+        title: title,
+        timestamp: timestamp,
+        messages: []
+      };
+      setChatHistory(prev => [newChat, ...prev]);
     };
-    setChatHistory(prev => [newChat, ...prev]);
+
+    window.addEventListener('new-chat-created', handleNewChatCreated as EventListener);
+    return () => window.removeEventListener('new-chat-created', handleNewChatCreated as EventListener);
+  }, []);
+
+  const handleNewChat = () => {
+    // Reset the chat interface without creating a new sidebar entry
+    window.dispatchEvent(new CustomEvent('new-chat-requested'));
     onNavigate?.('chat');
     onClose?.();
   };
@@ -70,29 +86,111 @@ export const FinleySidebar = ({ onClose, onNavigate, currentView = 'chat', isCol
   };
 
   const handleChatSelect = (chatId: string) => {
+    // Load the selected chat
+    window.dispatchEvent(new CustomEvent('chat-selected', {
+      detail: { chatId }
+    }));
     onNavigate?.('chat');
     onClose?.();
-    // TODO: Load the selected chat
   };
 
   const truncateTitle = (title: string, maxLength: number = 20) => {
     return title.length > maxLength ? title.substring(0, maxLength) + '...' : title;
   };
 
+  const handleRename = async (chatId: string, newTitle: string) => {
+    try {
+      const response = await fetch('/chat/rename', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          chat_id: chatId,
+          new_title: newTitle,
+          user_id: 'current-user-id' // Replace with actual user ID
+        })
+      });
+
+      if (response.ok) {
+        // Update local state
+        setChatHistory(prev => 
+          prev.map(chat => 
+            chat.id === chatId ? { ...chat, title: newTitle } : chat
+          )
+        );
+        
+        toast({
+          title: "Chat Renamed",
+          description: "Chat title updated successfully",
+        });
+      } else {
+        throw new Error('Failed to rename chat');
+      }
+    } catch (error) {
+      console.error('Rename error:', error);
+      toast({
+        title: "Error",
+        description: "Failed to rename chat. Please try again.",
+        variant: "destructive"
+      });
+    }
+  };
+
+  const handleDelete = async (chatId: string) => {
+    try {
+      const response = await fetch(`/chat/${chatId}?user_id=current-user-id`, {
+        method: 'DELETE',
+      });
+
+      if (response.ok) {
+        // Remove from local state
+        setChatHistory(prev => prev.filter(chat => chat.id !== chatId));
+        
+        // If this was the current chat, reset the chat interface
+        if (currentChatId === chatId) {
+          window.dispatchEvent(new CustomEvent('new-chat-requested'));
+        }
+        
+        toast({
+          title: "Chat Deleted",
+          description: "Chat has been permanently deleted",
+        });
+      } else {
+        throw new Error('Failed to delete chat');
+      }
+    } catch (error) {
+      console.error('Delete error:', error);
+      toast({
+        title: "Error",
+        description: "Failed to delete chat. Please try again.",
+        variant: "destructive"
+      });
+    }
+  };
+
+  const handleShare = (chatId: string) => {
+    // Placeholder for share functionality
+    toast({
+      title: "Share Feature",
+      description: "Share functionality coming soon!",
+    });
+  };
+
   return (
     <TooltipProvider>
       <div className="finley-sidebar flex flex-col h-full overflow-y-auto bg-muted/30">
-        {/* Header */}
+      {/* Header */}
         <div className={`mb-8 ${isCollapsed ? 'p-4' : 'p-6'}`}>
           <div className="flex items-center justify-between">
             {!isCollapsed && (
               <div>
-                <h1 className="text-2xl font-bold text-foreground tracking-tight">
-                  Finley AI
-                </h1>
-                <p className="text-sm text-muted-foreground mt-1">
-                  Intelligent Financial Analyst
-                </p>
+        <h1 className="text-2xl font-bold text-foreground tracking-tight">
+          Finley AI
+        </h1>
+        <p className="text-sm text-muted-foreground mt-1">
+          Intelligent Financial Analyst
+        </p>
               </div>
             )}
             {isCollapsed && (
@@ -110,7 +208,7 @@ export const FinleySidebar = ({ onClose, onNavigate, currentView = 'chat', isCol
               <X className="h-4 w-4" />
             </Button>
           </div>
-        </div>
+      </div>
       
       {/* Navigation Items */}
       <div className={`flex-1 space-y-2 ${isCollapsed ? 'px-2' : 'px-6'}`}>
@@ -172,16 +270,21 @@ export const FinleySidebar = ({ onClose, onNavigate, currentView = 'chat', isCol
                 <Tooltip key={chat.id}>
                   <TooltipTrigger asChild>
                     <Button
-                      variant="ghost"
+                      variant={currentChatId === chat.id ? "secondary" : "ghost"}
                       className={`w-full h-10 rounded-xl text-left ${isCollapsed ? 'justify-center px-0' : 'justify-start px-3'}`}
                       onClick={() => handleChatSelect(chat.id)}
                     >
                       <MessageSquare className="w-4 h-4 flex-shrink-0" />
                       {!isCollapsed && (
                         <div className="flex-1 min-w-0 ml-3">
-                          <div className="text-sm font-medium truncate">
-                            {truncateTitle(chat.title)}
-                          </div>
+                          <ChatContextMenu
+                            chatId={chat.id}
+                            currentTitle={chat.title}
+                            onRename={handleRename}
+                            onDelete={handleDelete}
+                            onShare={handleShare}
+                            isCollapsed={isCollapsed}
+                          />
                           <div className="text-xs text-muted-foreground">
                             {chat.timestamp.toLocaleDateString()}
                           </div>
@@ -202,7 +305,7 @@ export const FinleySidebar = ({ onClose, onNavigate, currentView = 'chat', isCol
                 </Tooltip>
               ))}
             </div>
-          </div>
+        </div>
         )}
       </div>
       

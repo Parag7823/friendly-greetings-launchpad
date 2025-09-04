@@ -7297,6 +7297,23 @@ class ChatResponse(BaseModel):
     chat_id: str
     timestamp: str
 
+class ChatTitleRequest(BaseModel):
+    message: str
+    user_id: str
+
+class ChatTitleResponse(BaseModel):
+    title: str
+    chat_id: str
+
+class ChatRenameRequest(BaseModel):
+    chat_id: str
+    new_title: str
+    user_id: str
+
+class ChatDeleteRequest(BaseModel):
+    chat_id: str
+    user_id: str
+
 @app.post("/chat", response_model=ChatResponse)
 async def chat_with_finley(chat_message: ChatMessage):
     """Chat endpoint for Finley AI financial assistant"""
@@ -7441,6 +7458,118 @@ async def get_chat_history(user_id: str, chat_id: str = None):
             "chats": [],
             "error": str(e)
         }
+
+@app.post("/generate-chat-title", response_model=ChatTitleResponse)
+async def generate_chat_title(title_request: ChatTitleRequest):
+    """Generate a chat title from the first message"""
+    try:
+        # Initialize OpenAI client
+        openai_client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
+        
+        if not openai_client:
+            raise HTTPException(status_code=500, detail="OpenAI client not configured")
+        
+        # Generate chat ID
+        chat_id = f"chat-{datetime.utcnow().timestamp()}"
+        
+        # Create a simple title from the first message
+        message_words = title_request.message.strip().split()
+        
+        # If message is short enough, use it directly
+        if len(message_words) <= 8:
+            title = title_request.message.strip()
+        else:
+            # Use AI to generate a concise title
+            try:
+                response = openai_client.chat.completions.create(
+                    model="gpt-4o-mini",
+                    messages=[
+                        {"role": "system", "content": "Generate a short, descriptive title (max 6 words) for a financial chat conversation based on the user's first message. Focus on the main topic or question."},
+                        {"role": "user", "content": title_request.message}
+                    ],
+                    temperature=0.3,
+                    max_tokens=20
+                )
+                title = response.choices[0].message.content.strip()
+            except Exception as ai_error:
+                # Fallback to first 6 words if AI fails
+                title = " ".join(message_words[:6])
+        
+        # Clean up the title
+        title = title.replace('"', '').replace("'", "").strip()
+        if not title:
+            title = "New Chat"
+        
+        return ChatTitleResponse(
+            title=title,
+            chat_id=chat_id
+        )
+        
+    except Exception as e:
+        logger.error(f"Chat title generation error: {e}")
+        # Fallback to simple title
+        message_words = title_request.message.strip().split()
+        title = " ".join(message_words[:6]) if message_words else "New Chat"
+        
+        return ChatTitleResponse(
+            title=title,
+            chat_id=f"chat-{datetime.utcnow().timestamp()}"
+        )
+
+@app.post("/chat/rename")
+async def rename_chat(rename_request: ChatRenameRequest):
+    """Rename a chat conversation"""
+    try:
+        supabase_url = os.getenv('SUPABASE_URL')
+        supabase_key = os.getenv('SUPABASE_SERVICE_KEY')
+        
+        if not supabase_url or not supabase_key:
+            raise HTTPException(status_code=500, detail="Database not configured")
+        
+        supabase = create_client(supabase_url, supabase_key)
+        
+        # Update chat title in database
+        result = supabase.table('chat_messages').update({
+            'chat_title': rename_request.new_title
+        }).eq('chat_id', rename_request.chat_id).eq('user_id', rename_request.user_id).execute()
+        
+        if result.data:
+            return {
+                "message": "Chat renamed successfully",
+                "chat_id": rename_request.chat_id,
+                "new_title": rename_request.new_title
+            }
+        else:
+            raise HTTPException(status_code=404, detail="Chat not found")
+        
+    except Exception as e:
+        logger.error(f"Chat rename error: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to rename chat: {str(e)}")
+
+@app.delete("/chat/{chat_id}")
+async def delete_chat(chat_id: str, user_id: str):
+    """Delete a chat conversation and all its messages"""
+    try:
+        supabase_url = os.getenv('SUPABASE_URL')
+        supabase_key = os.getenv('SUPABASE_SERVICE_KEY')
+        
+        if not supabase_url or not supabase_key:
+            raise HTTPException(status_code=500, detail="Database not configured")
+        
+        supabase = create_client(supabase_url, supabase_key)
+        
+        # Delete all messages for this chat
+        result = supabase.table('chat_messages').delete().eq('chat_id', chat_id).eq('user_id', user_id).execute()
+        
+        return {
+            "message": "Chat deleted successfully",
+            "chat_id": chat_id,
+            "deleted_messages": len(result.data) if result.data else 0
+        }
+        
+    except Exception as e:
+        logger.error(f"Chat delete error: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to delete chat: {str(e)}")
 
 if __name__ == "__main__":
     import uvicorn

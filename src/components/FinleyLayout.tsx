@@ -11,6 +11,32 @@ export const FinleyLayout = () => {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(true);
   const [currentView, setCurrentView] = useState('chat');
+  const [currentChatId, setCurrentChatId] = useState<string | null>(null);
+
+  // Listen for chat events
+  useEffect(() => {
+    const handleNewChatCreated = (event: CustomEvent) => {
+      setCurrentChatId(event.detail.chatId);
+    };
+
+    const handleChatSelected = (event: CustomEvent) => {
+      setCurrentChatId(event.detail.chatId);
+    };
+
+    const handleNewChatRequested = () => {
+      setCurrentChatId(null);
+    };
+
+    window.addEventListener('new-chat-created', handleNewChatCreated as EventListener);
+    window.addEventListener('chat-selected', handleChatSelected as EventListener);
+    window.addEventListener('new-chat-requested', handleNewChatRequested);
+
+    return () => {
+      window.removeEventListener('new-chat-created', handleNewChatCreated as EventListener);
+      window.removeEventListener('chat-selected', handleChatSelected as EventListener);
+      window.removeEventListener('new-chat-requested', handleNewChatRequested);
+    };
+  }, []);
 
   if (loading) {
     return (
@@ -77,6 +103,7 @@ export const FinleyLayout = () => {
               onClose={() => setIsSidebarOpen(false)} 
               onNavigate={setCurrentView}
               currentView={currentView}
+              currentChatId={currentChatId}
             />
           </motion.div>
         )}
@@ -92,6 +119,7 @@ export const FinleyLayout = () => {
           onNavigate={setCurrentView}
           currentView={currentView}
           isCollapsed={isSidebarCollapsed}
+          currentChatId={currentChatId}
         />
       </motion.div>
       
