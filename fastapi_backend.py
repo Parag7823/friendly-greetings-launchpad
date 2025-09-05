@@ -2662,13 +2662,37 @@ class ExcelProcessor:
 
         # Initialize duplicate detection service
         duplicate_service = DuplicateDetectionService(supabase)
+        
+        # Create processing transaction for rollback capability
+        transaction_id = str(uuid.uuid4())
+        transaction_data = {
+            'id': transaction_id,
+            'user_id': user_id,
+            'status': 'active',
+            'operation_type': 'file_processing',
+            'started_at': datetime.utcnow().isoformat(),
+            'metadata': {
+                'job_id': job_id,
+                'filename': filename,
+                'file_size': len(file_content)
+            }
+        }
+        
+        try:
+            # Create transaction record
+            supabase.table('processing_transactions').insert(transaction_data).execute()
+            logger.info(f"Created processing transaction: {transaction_id}")
+        except Exception as e:
+            logger.warning(f"Failed to create processing transaction: {e}")
+            transaction_id = None
 
-        # Step 1: Read the file
-        await manager.send_update(job_id, {
-            "step": "reading",
-            "message": f"📖 Reading and parsing your {filename}...",
-            "progress": 5
-        })
+        try:
+            # Step 1: Read the file
+            await manager.send_update(job_id, {
+                "step": "reading",
+                "message": f"📖 Reading and parsing your {filename}...",
+                "progress": 5
+            })
 
         try:
             sheets = await self.read_file(file_content, filename)
@@ -3028,11 +3052,73 @@ class ExcelProcessor:
                 }
             }
         
-        # Step 8: Detect relationships automatically
+        # Step 8: Entity Resolution and Normalization
+        await manager.send_update(job_id, {
+            "step": "entity_resolution",
+            "message": "🔍 Resolving and normalizing entities...",
+            "progress": 85
+        })
+        
+        try:
+            # Extract entities from processed events
+            entities = await self._extract_entities_from_events(user_id, file_id, supabase)
+            entity_matches = await self._resolve_entities(entities, user_id, filename, supabase)
+            
+            # Store normalized entities and matches
+            await self._store_normalized_entities(entities, user_id, transaction_id, supabase)
+            await self._store_entity_matches(entity_matches, user_id, transaction_id, supabase)
+            
+            insights['entity_resolution'] = {
+                'entities_found': len(entities),
+                'matches_created': len(entity_matches)
+            }
+            
+            await manager.send_update(job_id, {
+                "step": "entity_resolution_completed",
+                "message": f"✅ Resolved {len(entities)} entities with {len(entity_matches)} matches",
+                "progress": 90
+            })
+            
+        except Exception as e:
+            logger.warning(f"Entity resolution failed: {e}")
+            insights['entity_resolution'] = {'error': str(e)}
+
+        # Step 9: Platform Pattern Learning
+        await manager.send_update(job_id, {
+            "step": "platform_learning",
+            "message": "🧠 Learning platform patterns...",
+            "progress": 92
+        })
+        
+        try:
+            # Learn platform patterns from the data
+            platform_patterns = await self._learn_platform_patterns(platform_info, user_id, filename, supabase)
+            discovered_platforms = await self._discover_new_platforms(user_id, filename, supabase)
+            
+            # Store platform patterns and discoveries
+            await self._store_platform_patterns(platform_patterns, user_id, transaction_id, supabase)
+            await self._store_discovered_platforms(discovered_platforms, user_id, transaction_id, supabase)
+            
+            insights['platform_learning'] = {
+                'patterns_learned': len(platform_patterns),
+                'platforms_discovered': len(discovered_platforms)
+            }
+            
+            await manager.send_update(job_id, {
+                "step": "platform_learning_completed",
+                "message": f"✅ Learned {len(platform_patterns)} patterns, discovered {len(discovered_platforms)} platforms",
+                "progress": 95
+            })
+            
+        except Exception as e:
+            logger.warning(f"Platform learning failed: {e}")
+            insights['platform_learning'] = {'error': str(e)}
+
+        # Step 10: Relationship Detection
         await manager.send_update(job_id, {
             "step": "relationships",
             "message": "🔗 Detecting relationships between financial events...",
-            "progress": 98
+            "progress": 97
         })
         
         try:
@@ -3046,13 +3132,17 @@ class ExcelProcessor:
             # Detect all relationships
             relationship_results = await relationship_detector.detect_all_relationships(user_id)
             
+            # Store relationship instances
+            if relationship_results.get('relationships'):
+                await self._store_relationship_instances(relationship_results['relationships'], user_id, transaction_id, supabase)
+            
             # Add relationship results to insights
             insights['relationship_analysis'] = relationship_results
             
             await manager.send_update(job_id, {
                 "step": "relationships_completed",
                 "message": f"✅ Found {relationship_results.get('total_relationships', 0)} relationships between events",
-                "progress": 99
+                "progress": 98
             })
             
         except Exception as e:
@@ -3061,11 +3151,60 @@ class ExcelProcessor:
                 'error': str(e),
                 'message': 'Relationship detection failed but processing completed'
             }
+
+        # Step 11: Compute and Store Metrics
+        await manager.send_update(job_id, {
+            "step": "metrics",
+            "message": "📊 Computing processing metrics...",
+            "progress": 99
+        })
         
-        # Step 9: Update ingestion_jobs with completion
+        try:
+            # Compute comprehensive metrics
+            metrics = {
+                'metric_type': 'file_processing_summary',
+                'metric_value': events_created,
+                'metric_data': {
+                    'total_rows_processed': processed_rows,
+                    'events_created': events_created,
+                    'errors_count': len(errors),
+                    'platform_detected': platform_info.get('platform', 'unknown'),
+                    'platform_confidence': platform_info.get('confidence', 0.0),
+                    'entities_resolved': len(entities) if 'entities' in locals() else 0,
+                    'relationships_found': relationship_results.get('total_relationships', 0) if 'relationship_results' in locals() else 0,
+                    'processing_time_seconds': (datetime.utcnow() - datetime.fromisoformat(transaction_data['started_at'])).total_seconds() if transaction_id else 0
+                }
+            }
+            
+            await self._store_computed_metrics(metrics, user_id, transaction_id, supabase)
+            insights['processing_metrics'] = metrics
+            
+        except Exception as e:
+            logger.warning(f"Metrics computation failed: {e}")
+            insights['processing_metrics'] = {'error': str(e)}
+        
+        # Step 12: Complete Transaction
+        if transaction_id:
+            try:
+                supabase.table('processing_transactions').update({
+                    'status': 'committed',
+                    'committed_at': datetime.utcnow().isoformat(),
+                    'metadata': {
+                        **transaction_data['metadata'],
+                        'events_created': events_created,
+                        'entities_resolved': len(entities) if 'entities' in locals() else 0,
+                        'relationships_found': relationship_results.get('total_relationships', 0) if 'relationship_results' in locals() else 0
+                    }
+                }).eq('id', transaction_id).execute()
+                logger.info(f"Committed processing transaction: {transaction_id}")
+            except Exception as e:
+                logger.warning(f"Failed to commit transaction: {e}")
+
+        # Step 13: Update ingestion_jobs with completion
         supabase.table('ingestion_jobs').update({
             'status': 'completed',
-            'updated_at': datetime.utcnow().isoformat()
+            'updated_at': datetime.utcnow().isoformat(),
+            'transaction_id': transaction_id
         }).eq('id', job_id).execute()
         
         await manager.send_update(job_id, {
@@ -3075,6 +3214,325 @@ class ExcelProcessor:
         })
         
         return insights
+        
+        except Exception as e:
+            # Rollback transaction on error
+            if transaction_id:
+                try:
+                    supabase.table('processing_transactions').update({
+                        'status': 'rolled_back',
+                        'rolled_back_at': datetime.utcnow().isoformat(),
+                        'error_details': str(e)
+                    }).eq('id', transaction_id).execute()
+                    logger.info(f"Rolled back processing transaction: {transaction_id}")
+                except Exception as rollback_error:
+                    logger.error(f"Failed to rollback transaction: {rollback_error}")
+            
+            # Send error update
+            await manager.send_update(job_id, {
+                "step": "error",
+                "message": f"❌ Processing failed: {str(e)}",
+                "progress": 0
+            })
+            
+            # Re-raise the exception
+            raise e
+
+    async def _store_normalized_entities(self, entities: List[Dict], user_id: str, transaction_id: str, supabase: Client):
+        """Store normalized entities in the database"""
+        try:
+            if not entities:
+                return
+            
+            logger.info(f"Storing {len(entities)} normalized entities")
+            
+            for entity in entities:
+                entity_data = {
+                    'user_id': user_id,
+                    'entity_type': entity.get('entity_type', 'vendor'),
+                    'canonical_name': entity.get('canonical_name', ''),
+                    'aliases': entity.get('aliases', []),
+                    'email': entity.get('email'),
+                    'phone': entity.get('phone'),
+                    'bank_account': entity.get('bank_account'),
+                    'tax_id': entity.get('tax_id'),
+                    'platform_sources': entity.get('platform_sources', []),
+                    'source_files': entity.get('source_files', []),
+                    'confidence_score': entity.get('confidence_score', 0.5),
+                    'transaction_id': transaction_id
+                }
+                
+                result = supabase.table('normalized_entities').insert(entity_data).execute()
+                if result.data:
+                    logger.debug(f"Stored normalized entity: {entity_data['canonical_name']}")
+                else:
+                    logger.warning(f"Failed to store normalized entity: {entity_data['canonical_name']}")
+                    
+        except Exception as e:
+            logger.error(f"Error storing normalized entities: {e}")
+
+    async def _store_entity_matches(self, matches: List[Dict], user_id: str, transaction_id: str, supabase: Client):
+        """Store entity matches in the database"""
+        try:
+            if not matches:
+                return
+                
+            logger.info(f"Storing {len(matches)} entity matches")
+            
+            for match in matches:
+                match_data = {
+                    'user_id': user_id,
+                    'source_entity_name': match.get('source_entity_name', ''),
+                    'source_entity_type': match.get('source_entity_type', 'vendor'),
+                    'source_platform': match.get('source_platform', 'unknown'),
+                    'source_file': match.get('source_file', ''),
+                    'source_row_id': match.get('source_row_id'),
+                    'normalized_entity_id': match.get('normalized_entity_id'),
+                    'match_confidence': match.get('match_confidence', 0.5),
+                    'match_reason': match.get('match_reason', 'unknown'),
+                    'similarity_score': match.get('similarity_score'),
+                    'matched_fields': match.get('matched_fields', []),
+                    'transaction_id': transaction_id
+                }
+                
+                result = supabase.table('entity_matches').insert(match_data).execute()
+                if result.data:
+                    logger.debug(f"Stored entity match: {match_data['source_entity_name']}")
+                else:
+                    logger.warning(f"Failed to store entity match: {match_data['source_entity_name']}")
+                    
+        except Exception as e:
+            logger.error(f"Error storing entity matches: {e}")
+
+    async def _store_platform_patterns(self, patterns: List[Dict], user_id: str, transaction_id: str, supabase: Client):
+        """Store platform patterns in the database"""
+        try:
+            if not patterns:
+                return
+                
+            logger.info(f"Storing {len(patterns)} platform patterns")
+            
+            for pattern in patterns:
+                pattern_data = {
+                    'user_id': user_id,
+                    'platform': pattern.get('platform', 'unknown'),
+                    'pattern_type': pattern.get('pattern_type', 'column'),
+                    'pattern_data': pattern.get('pattern_data', {}),
+                    'confidence_score': pattern.get('confidence_score', 0.5),
+                    'detection_method': pattern.get('detection_method', 'ai'),
+                    'transaction_id': transaction_id
+                }
+                
+                result = supabase.table('platform_patterns').insert(pattern_data).execute()
+                if result.data:
+                    logger.debug(f"Stored platform pattern: {pattern_data['platform']}")
+                else:
+                    logger.warning(f"Failed to store platform pattern: {pattern_data['platform']}")
+                    
+        except Exception as e:
+            logger.error(f"Error storing platform patterns: {e}")
+
+    async def _store_relationship_instances(self, relationships: List[Dict], user_id: str, transaction_id: str, supabase: Client):
+        """Store relationship instances in the database"""
+        try:
+            if not relationships:
+                return
+                
+            logger.info(f"Storing {len(relationships)} relationship instances")
+            
+            for relationship in relationships:
+                rel_data = {
+                    'user_id': user_id,
+                    'source_event_id': relationship.get('source_event_id'),
+                    'target_event_id': relationship.get('target_event_id'),
+                    'relationship_type': relationship.get('relationship_type', 'unknown'),
+                    'confidence_score': relationship.get('confidence_score', 0.5),
+                    'detection_method': relationship.get('detection_method', 'ai'),
+                    'pattern_id': relationship.get('pattern_id'),
+                    'reasoning': relationship.get('reasoning', ''),
+                    'transaction_id': transaction_id
+                }
+                
+                result = supabase.table('relationship_instances').insert(rel_data).execute()
+                if result.data:
+                    logger.debug(f"Stored relationship: {rel_data['relationship_type']}")
+                else:
+                    logger.warning(f"Failed to store relationship: {rel_data['relationship_type']}")
+                    
+        except Exception as e:
+            logger.error(f"Error storing relationship instances: {e}")
+
+    async def _store_discovered_platforms(self, platforms: List[Dict], user_id: str, transaction_id: str, supabase: Client):
+        """Store discovered platforms in the database"""
+        try:
+            if not platforms:
+                return
+                
+            logger.info(f"Storing {len(platforms)} discovered platforms")
+            
+            for platform in platforms:
+                platform_data = {
+                    'user_id': user_id,
+                    'platform_name': platform.get('platform_name', ''),
+                    'platform_type': platform.get('platform_type', 'unknown'),
+                    'detection_confidence': platform.get('detection_confidence', 0.5),
+                    'detection_method': platform.get('detection_method', 'ai'),
+                    'characteristics': platform.get('characteristics', {}),
+                    'source_files': platform.get('source_files', []),
+                    'transaction_id': transaction_id
+                }
+                
+                result = supabase.table('discovered_platforms').insert(platform_data).execute()
+                if result.data:
+                    logger.debug(f"Stored discovered platform: {platform_data['platform_name']}")
+                else:
+                    logger.warning(f"Failed to store discovered platform: {platform_data['platform_name']}")
+                    
+        except Exception as e:
+            logger.error(f"Error storing discovered platforms: {e}")
+
+    async def _store_computed_metrics(self, metrics: Dict, user_id: str, transaction_id: str, supabase: Client):
+        """Store computed metrics in the database"""
+        try:
+            if not metrics:
+                return
+                
+            logger.info("Storing computed metrics")
+            
+            metrics_data = {
+                'user_id': user_id,
+                'metric_type': metrics.get('metric_type', 'processing_summary'),
+                'metric_value': metrics.get('metric_value', 0),
+                'metric_data': metrics.get('metric_data', {}),
+                'computed_at': datetime.utcnow().isoformat(),
+                'transaction_id': transaction_id
+            }
+            
+            result = supabase.table('metrics').insert(metrics_data).execute()
+            if result.data:
+                logger.debug("Stored computed metrics")
+            else:
+                logger.warning("Failed to store computed metrics")
+                
+        except Exception as e:
+            logger.error(f"Error storing computed metrics: {e}")
+
+    async def _extract_entities_from_events(self, user_id: str, file_id: str, supabase: Client) -> List[Dict]:
+        """Extract entities from processed events for normalization"""
+        try:
+            # Get events for this file
+            events = supabase.table('raw_events').select('*').eq('user_id', user_id).eq('file_id', file_id).execute()
+            
+            entities = []
+            entity_map = {}
+            
+            for event in events.data:
+                # Extract vendor/entity information from payload
+                payload = event.get('payload', {})
+                vendor_raw = payload.get('vendor_raw') or payload.get('vendor') or payload.get('merchant')
+                
+                if vendor_raw and vendor_raw not in entity_map:
+                    entity = {
+                        'entity_type': 'vendor',
+                        'canonical_name': vendor_raw,
+                        'aliases': [vendor_raw],
+                        'email': payload.get('email'),
+                        'phone': payload.get('phone'),
+                        'bank_account': payload.get('bank_account'),
+                        'platform_sources': [event.get('source_platform', 'unknown')],
+                        'source_files': [event.get('source_filename', '')],
+                        'confidence_score': 0.8
+                    }
+                    entities.append(entity)
+                    entity_map[vendor_raw] = entity
+            
+            logger.info(f"Extracted {len(entities)} entities from events")
+            return entities
+            
+        except Exception as e:
+            logger.error(f"Error extracting entities: {e}")
+            return []
+
+    async def _resolve_entities(self, entities: List[Dict], user_id: str, filename: str, supabase: Client) -> List[Dict]:
+        """Resolve entities using the database function"""
+        try:
+            matches = []
+            
+            for entity in entities:
+                # Use the database function to find or create entity
+                result = supabase.rpc('find_or_create_entity', {
+                    'p_user_id': user_id,
+                    'p_entity_name': entity['canonical_name'],
+                    'p_entity_type': entity['entity_type'],
+                    'p_platform': entity['platform_sources'][0] if entity['platform_sources'] else 'unknown',
+                    'p_email': entity.get('email'),
+                    'p_bank_account': entity.get('bank_account'),
+                    'p_phone': entity.get('phone'),
+                    'p_source_file': filename
+                }).execute()
+                
+                if result.data:
+                    entity_id = result.data[0] if isinstance(result.data, list) else result.data
+                    match = {
+                        'source_entity_name': entity['canonical_name'],
+                        'source_entity_type': entity['entity_type'],
+                        'source_platform': entity['platform_sources'][0] if entity['platform_sources'] else 'unknown',
+                        'source_file': filename,
+                        'normalized_entity_id': entity_id,
+                        'match_confidence': entity['confidence_score'],
+                        'match_reason': 'exact_match',
+                        'similarity_score': 1.0,
+                        'matched_fields': ['name']
+                    }
+                    matches.append(match)
+            
+            logger.info(f"Resolved {len(matches)} entity matches")
+            return matches
+            
+        except Exception as e:
+            logger.error(f"Error resolving entities: {e}")
+            return []
+
+    async def _learn_platform_patterns(self, platform_info: Dict, user_id: str, filename: str, supabase: Client) -> List[Dict]:
+        """Learn platform patterns from the detected platform"""
+        try:
+            patterns = []
+            
+            if platform_info.get('platform') != 'unknown':
+                pattern = {
+                    'platform': platform_info['platform'],
+                    'pattern_type': 'column_structure',
+                    'pattern_data': {
+                        'matched_columns': platform_info.get('matched_columns', []),
+                        'matched_patterns': platform_info.get('matched_patterns', []),
+                        'confidence': platform_info.get('confidence', 0.0),
+                        'reasoning': platform_info.get('reasoning', '')
+                    },
+                    'confidence_score': platform_info.get('confidence', 0.0),
+                    'detection_method': 'ai_analysis'
+                }
+                patterns.append(pattern)
+            
+            logger.info(f"Learned {len(patterns)} platform patterns")
+            return patterns
+            
+        except Exception as e:
+            logger.error(f"Error learning platform patterns: {e}")
+            return []
+
+    async def _discover_new_platforms(self, user_id: str, filename: str, supabase: Client) -> List[Dict]:
+        """Discover new platforms from the data"""
+        try:
+            # For now, return empty list - this would be implemented with AI analysis
+            # of the data to discover custom platforms
+            platforms = []
+            
+            logger.info(f"Discovered {len(platforms)} new platforms")
+            return platforms
+            
+        except Exception as e:
+            logger.error(f"Error discovering platforms: {e}")
+            return []
 
 processor = ExcelProcessor()
 
