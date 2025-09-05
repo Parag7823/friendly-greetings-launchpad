@@ -177,6 +177,6 @@
   }
   
   .hover-glow:hover {
-    box-shadow: 0 0 20px hsl(var(--finley-accent) / 0.3);
+    box-shadow: 0 0 20px rgba(160, 160, 160, 0.3);
   }
 }

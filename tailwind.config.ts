@@ -95,18 +95,10 @@ export default {
 			addUtilities({
 				'.scrollbar-thin': {
 					'scrollbar-width': 'thin',
+					'scrollbar-color': 'rgba(160, 160, 160, 0.2) transparent',
 				},
-				'.scrollbar-thumb-finley-accent/20': {
-					'scrollbar-color': 'hsl(var(--finley-accent) / 0.2) transparent',
-				},
-				'.scrollbar-thumb-finley-accent/30': {
-					'scrollbar-color': 'hsl(var(--finley-accent) / 0.3) transparent',
-				},
-				'.scrollbar-track-transparent': {
-					'scrollbar-color': 'transparent transparent',
-				},
-				'.hover\\:scrollbar-thumb-finley-accent\\/30:hover': {
-					'scrollbar-color': 'hsl(var(--finley-accent) / 0.3) transparent',
+				'.scrollbar-thin:hover': {
+					'scrollbar-color': 'rgba(160, 160, 160, 0.3) transparent',
 				},
 				// Webkit scrollbar styles for better cross-browser support
 				'.scrollbar-thin::-webkit-scrollbar': {
@@ -116,11 +108,11 @@ export default {
 					'background': 'transparent',
 				},
 				'.scrollbar-thin::-webkit-scrollbar-thumb': {
-					'background-color': 'hsl(var(--finley-accent) / 0.2)',
+					'background-color': 'rgba(160, 160, 160, 0.2)',
 					'border-radius': '3px',
 				},
 				'.scrollbar-thin::-webkit-scrollbar-thumb:hover': {
-					'background-color': 'hsl(var(--finley-accent) / 0.3)',
+					'background-color': 'rgba(160, 160, 160, 0.3)',
 				},
 			})
 		}
