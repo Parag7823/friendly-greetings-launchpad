@@ -165,6 +165,9 @@ export const FinleySidebar = ({ onClose, onNavigate, currentView = 'chat', isCol
       });
 
       if (response.ok) {
+        const result = await response.json();
+        console.log('Rename response:', result);
+        
         // Update the chat history in state
         const updatedHistory = chatHistory.map(chat => 
           chat.id === editingChatId 
@@ -183,12 +186,15 @@ export const FinleySidebar = ({ onClose, onNavigate, currentView = 'chat', isCol
         console.log('Chat renamed successfully:', newTitle);
       } else {
         const errorData = await response.json();
+        console.error('Rename failed:', errorData);
         throw new Error(errorData.detail || 'Failed to rename chat');
       }
     } catch (error) {
       console.error('Rename error:', error);
       // Revert the title change
       setEditingTitle(chatHistory.find(c => c.id === editingChatId)?.title || '');
+      // Show error to user
+      alert('Failed to rename chat. Please try again.');
     }
   };
 
@@ -211,6 +217,9 @@ export const FinleySidebar = ({ onClose, onNavigate, currentView = 'chat', isCol
       });
 
       if (response.ok) {
+        const result = await response.json();
+        console.log('Delete response:', result);
+        
         // Update the chat history in state
         const updatedHistory = chatHistory.filter(chat => chat.id !== chatId);
         setChatHistory(updatedHistory);
@@ -226,10 +235,13 @@ export const FinleySidebar = ({ onClose, onNavigate, currentView = 'chat', isCol
         console.log('Chat deleted successfully:', chatId);
       } else {
         const errorData = await response.json();
+        console.error('Delete failed:', errorData);
         throw new Error(errorData.detail || 'Failed to delete chat');
       }
     } catch (error) {
       console.error('Delete error:', error);
+      // Show error to user
+      alert('Failed to delete chat. Please try again.');
     }
   };
 

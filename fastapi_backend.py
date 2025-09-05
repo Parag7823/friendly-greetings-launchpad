@@ -7525,14 +7525,23 @@ async def rename_chat(rename_request: ChatRenameRequest):
         
         supabase = create_client(supabase_url, supabase_key)
         
-        # For now, we'll just return success since the frontend handles the title
-        # In a production app, you'd want to store chat metadata in a separate table
-        # or add a chat_title field to the chat_messages table
+        # Validate input
+        if not rename_request.new_title.strip():
+            raise HTTPException(status_code=400, detail="Chat title cannot be empty")
         
         # Check if the chat exists
         chat_exists = supabase.table('chat_messages').select('chat_id').eq('chat_id', rename_request.chat_id).eq('user_id', rename_request.user_id).limit(1).execute()
         
-        if chat_exists.data:
+        if not chat_exists.data:
+            raise HTTPException(status_code=404, detail="Chat not found")
+        
+        # Update the chat title in the database
+        # We'll update the first message of the chat to store the title
+        update_result = supabase.table('chat_messages').update({
+            'chat_title': rename_request.new_title.strip()
+        }).eq('chat_id', rename_request.chat_id).eq('user_id', rename_request.user_id).execute()
+        
+        if update_result.data:
             return {
                 "message": "Chat renamed successfully",
                 "chat_id": rename_request.chat_id,
