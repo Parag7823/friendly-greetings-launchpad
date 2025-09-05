@@ -89,5 +89,40 @@ export default {
 			}
 		}
 	},
-	plugins: [require("tailwindcss-animate")],
+	plugins: [
+		require("tailwindcss-animate"),
+		function({ addUtilities }) {
+			addUtilities({
+				'.scrollbar-thin': {
+					'scrollbar-width': 'thin',
+				},
+				'.scrollbar-thumb-finley-accent/20': {
+					'scrollbar-color': 'hsl(var(--finley-accent) / 0.2) transparent',
+				},
+				'.scrollbar-thumb-finley-accent/30': {
+					'scrollbar-color': 'hsl(var(--finley-accent) / 0.3) transparent',
+				},
+				'.scrollbar-track-transparent': {
+					'scrollbar-color': 'transparent transparent',
+				},
+				'.hover\\:scrollbar-thumb-finley-accent\\/30:hover': {
+					'scrollbar-color': 'hsl(var(--finley-accent) / 0.3) transparent',
+				},
+				// Webkit scrollbar styles for better cross-browser support
+				'.scrollbar-thin::-webkit-scrollbar': {
+					'width': '6px',
+				},
+				'.scrollbar-thin::-webkit-scrollbar-track': {
+					'background': 'transparent',
+				},
+				'.scrollbar-thin::-webkit-scrollbar-thumb': {
+					'background-color': 'hsl(var(--finley-accent) / 0.2)',
+					'border-radius': '3px',
+				},
+				'.scrollbar-thin::-webkit-scrollbar-thumb:hover': {
+					'background-color': 'hsl(var(--finley-accent) / 0.3)',
+				},
+			})
+		}
+	],
 } satisfies Config;

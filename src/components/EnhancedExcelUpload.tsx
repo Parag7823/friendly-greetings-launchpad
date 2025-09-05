@@ -400,29 +400,35 @@ const handleMultipleFileUpload = useCallback(async (files: FileList, customPromp
           </TabsList>
 
           <TabsContent value="files" className="space-y-4">
-            <div className="grid gap-4">
-              {uploadState.uploadedFiles.map(file => <Card key={file.id} className={`cursor-pointer transition-colors ${selectedFile === file.id ? 'ring-2 ring-finley-accent bg-finley-accent/5' : 'hover:bg-muted/50'}`} onClick={() => setSelectedFile(selectedFile === file.id ? null : file.id)}>
-                  <CardContent className="p-4">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-3">
-                        <FileSpreadsheet className="w-6 h-6 text-finley-accent" />
-                        <div>
-                          <div className="font-medium">{file.name}</div>
-                          <div className="text-sm text-muted-foreground">
-                            Uploaded {file.uploadedAt.toLocaleString()}
-                            {file.sheets && ` • ${file.sheets.length} sheets detected`}
+            <div className="relative">
+              <div className="max-h-96 overflow-y-auto pr-2 space-y-3 scrollbar-thin scrollbar-thumb-finley-accent/20 scrollbar-track-transparent hover:scrollbar-thumb-finley-accent/30 scroll-smooth">
+                {uploadState.uploadedFiles.map(file => <Card key={file.id} className={`cursor-pointer transition-colors ${selectedFile === file.id ? 'ring-2 ring-finley-accent bg-finley-accent/5' : 'hover:bg-muted/50'}`} onClick={() => setSelectedFile(selectedFile === file.id ? null : file.id)}>
+                    <CardContent className="p-4">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          <FileSpreadsheet className="w-6 h-6 text-finley-accent" />
+                          <div>
+                            <div className="font-medium">{file.name}</div>
+                            <div className="text-sm text-muted-foreground">
+                              Uploaded {file.uploadedAt.toLocaleString()}
+                              {file.sheets && ` • ${file.sheets.length} sheets detected`}
+                            </div>
                           </div>
                         </div>
+                        <div className="flex items-center gap-2">
+                          {file.analysisResults && <Badge variant="secondary">
+                              {file.analysisResults.documentType || 'Analyzed'}
+                            </Badge>}
+                          <CheckCircle className="w-5 h-5 text-green-500" />
+                        </div>
                       </div>
-                      <div className="flex items-center gap-2">
-                        {file.analysisResults && <Badge variant="secondary">
-                            {file.analysisResults.documentType || 'Analyzed'}
-                          </Badge>}
-                        <CheckCircle className="w-5 h-5 text-green-500" />
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>)}
+                    </CardContent>
+                  </Card>)}
+              </div>
+              {/* Scroll indicator - only show if there are more than 4 files */}
+              {uploadState.uploadedFiles.length > 4 && (
+                <div className="absolute bottom-0 left-0 right-0 h-8 bg-gradient-to-t from-background to-transparent pointer-events-none" />
+              )}
             </div>
           </TabsContent>
 
