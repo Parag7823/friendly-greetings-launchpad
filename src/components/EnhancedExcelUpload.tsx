@@ -3,8 +3,6 @@ import { Upload, CheckCircle, AlertCircle, Loader2, Settings, X, FileSpreadsheet
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 import { FastAPIProcessor, useFastAPIProcessor } from './FastAPIProcessor';
-import { SheetPreview } from './SheetPreview';
-import { CustomPromptInterface } from './CustomPromptInterface';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
@@ -289,24 +287,6 @@ const handleMultipleFileUpload = useCallback(async (files: FileList, customPromp
     event.preventDefault();
     event.stopPropagation();
   }, []);
-  const handleCustomPromptSubmit = (prompt: string) => {
-    if (uploadState.files.length > 0) {
-      toast({
-        title: "Custom Analysis Started",
-        description: `Reprocessing ${uploadState.files.length} file(s) with your custom prompt`
-      });
-      // Re-process current files with custom prompt
-      const fileList = new DataTransfer();
-      uploadState.files.forEach(f => fileList.items.add(f.file));
-      handleMultipleFileUpload(fileList.files, prompt);
-    } else {
-      toast({
-        variant: "destructive",
-        title: "No Files to Analyze",
-        description: "Please upload files first, then apply custom prompts"
-      });
-    }
-  };
   const getStatusIcon = (status: string) => {
     switch (status) {
       case 'processing':
@@ -393,10 +373,8 @@ const handleMultipleFileUpload = useCallback(async (files: FileList, customPromp
 
       {/* Results and Analysis Interface */}
       {uploadState.uploadedFiles.length > 0 && <Tabs defaultValue="files" className="space-y-4">
-          <TabsList className="grid grid-cols-3 w-full">
+          <TabsList className="grid grid-cols-1 w-full">
             <TabsTrigger value="files">Uploaded Files ({uploadState.uploadedFiles.length})</TabsTrigger>
-            <TabsTrigger value="analysis">Sheet Analysis</TabsTrigger>
-            <TabsTrigger value="prompts">Custom Prompts</TabsTrigger>
           </TabsList>
 
           <TabsContent value="files" className="space-y-4">
@@ -407,18 +385,41 @@ const handleMultipleFileUpload = useCallback(async (files: FileList, customPromp
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-3">
                           <FileSpreadsheet className="w-6 h-6 text-finley-accent" />
-                          <div>
+                          <div className="flex-1">
                             <div className="font-medium">{file.name}</div>
                             <div className="text-sm text-muted-foreground">
                               Uploaded {file.uploadedAt.toLocaleString()}
                               {file.sheets && ` • ${file.sheets.length} sheets detected`}
                             </div>
+                            {/* Show processing results inline */}
+                            {file.analysisResults && (
+                              <div className="mt-2 space-y-1">
+                                <div className="flex items-center gap-2 text-xs">
+                                  <Badge variant="outline" className="text-xs">
+                                    {file.analysisResults.documentType || 'Financial Data'}
+                                  </Badge>
+                                  {file.analysisResults.processing_stats && (
+                                    <span className="text-muted-foreground">
+                                      {file.analysisResults.processing_stats.events_created || 0} events processed
+                                    </span>
+                                  )}
+                                </div>
+                                {file.analysisResults.relationship_analysis && (
+                                  <div className="text-xs text-muted-foreground">
+                                    {file.analysisResults.relationship_analysis.total_relationships || 0} relationships found
+                                  </div>
+                                )}
+                                {file.analysisResults.platform_details && (
+                                  <div className="text-xs text-muted-foreground">
+                                    Platform: {file.analysisResults.platform_details.name} 
+                                    ({Math.round(file.analysisResults.platform_details.detection_confidence * 100)}% confidence)
+                                  </div>
+                                )}
+                              </div>
+                            )}
                           </div>
                         </div>
                         <div className="flex items-center gap-2">
-                          {file.analysisResults && <Badge variant="secondary">
-                              {file.analysisResults.documentType || 'Analyzed'}
-                            </Badge>}
                           <CheckCircle className="w-5 h-5 text-green-500" />
                         </div>
                       </div>
@@ -432,30 +433,6 @@ const handleMultipleFileUpload = useCallback(async (files: FileList, customPromp
             </div>
           </TabsContent>
 
-          <TabsContent value="analysis">
-            {selectedFileData?.sheets ? <SheetPreview sheets={selectedFileData.sheets} onSheetSelect={sheetName => {
-          toast({
-            title: "Sheet Selected",
-            description: `Focus analysis on ${sheetName}`
-          });
-        }} onPromptSuggestion={prompt => {
-          toast({
-            title: "Prompt Applied",
-            description: prompt
-          });
-        }} /> : <Card>
-                <CardContent className="p-8 text-center">
-                  <FileSpreadsheet className="w-12 h-12 mx-auto mb-4 text-muted-foreground/50" />
-                  <p className="text-muted-foreground">
-                    Select a file from the "Uploaded Files" tab to view detailed sheet analysis
-                  </p>
-                </CardContent>
-              </Card>}
-          </TabsContent>
-
-          <TabsContent value="prompts">
-            <CustomPromptInterface onSubmit={handleCustomPromptSubmit} isProcessing={uploadState.files.length > 0} documentType={selectedFileData?.analysisResults?.documentType} suggestedPrompts={selectedFileData?.analysisResults?.customPromptSuggestions || []} detectedSheets={selectedFileData?.sheets?.map(s => s.name) || []} />
-          </TabsContent>
         </Tabs>}
 
       {/* Empty State */}

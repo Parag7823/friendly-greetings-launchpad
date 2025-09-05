@@ -3028,7 +3028,41 @@ class ExcelProcessor:
                 }
             }
         
-        # Step 8: Update ingestion_jobs with completion
+        # Step 8: Detect relationships automatically
+        await manager.send_update(job_id, {
+            "step": "relationships",
+            "message": "🔗 Detecting relationships between financial events...",
+            "progress": 98
+        })
+        
+        try:
+            from enhanced_relationship_detector import EnhancedRelationshipDetector
+            from openai import AsyncOpenAI
+            
+            # Initialize relationship detector
+            openai_client = AsyncOpenAI(api_key=os.getenv('OPENAI_API_KEY'))
+            relationship_detector = EnhancedRelationshipDetector(openai_client, supabase)
+            
+            # Detect all relationships
+            relationship_results = await relationship_detector.detect_all_relationships(user_id)
+            
+            # Add relationship results to insights
+            insights['relationship_analysis'] = relationship_results
+            
+            await manager.send_update(job_id, {
+                "step": "relationships_completed",
+                "message": f"✅ Found {relationship_results.get('total_relationships', 0)} relationships between events",
+                "progress": 99
+            })
+            
+        except Exception as e:
+            logger.warning(f"Relationship detection failed: {e}")
+            insights['relationship_analysis'] = {
+                'error': str(e),
+                'message': 'Relationship detection failed but processing completed'
+            }
+        
+        # Step 9: Update ingestion_jobs with completion
         supabase.table('ingestion_jobs').update({
             'status': 'completed',
             'updated_at': datetime.utcnow().isoformat()
