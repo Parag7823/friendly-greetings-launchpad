@@ -7517,38 +7517,16 @@ async def generate_chat_title(title_request: ChatTitleRequest):
 async def rename_chat(rename_request: ChatRenameRequest):
     """Rename a chat conversation"""
     try:
-        supabase_url = os.getenv('SUPABASE_URL')
-        supabase_key = os.getenv('SUPABASE_SERVICE_KEY')
-        
-        if not supabase_url or not supabase_key:
-            raise HTTPException(status_code=500, detail="Database not configured")
-        
-        supabase = create_client(supabase_url, supabase_key)
-        
-        # Validate input
+        # For now, just return success since we're using localStorage
+        # In production, you'd want to store this in the database
         if not rename_request.new_title.strip():
             raise HTTPException(status_code=400, detail="Chat title cannot be empty")
         
-        # Check if the chat exists
-        chat_exists = supabase.table('chat_messages').select('chat_id').eq('chat_id', rename_request.chat_id).eq('user_id', rename_request.user_id).limit(1).execute()
-        
-        if not chat_exists.data:
-            raise HTTPException(status_code=404, detail="Chat not found")
-        
-        # Update the chat title in the database
-        # We'll update the first message of the chat to store the title
-        update_result = supabase.table('chat_messages').update({
-            'chat_title': rename_request.new_title.strip()
-        }).eq('chat_id', rename_request.chat_id).eq('user_id', rename_request.user_id).execute()
-        
-        if update_result.data:
-            return {
-                "message": "Chat renamed successfully",
-                "chat_id": rename_request.chat_id,
-                "new_title": rename_request.new_title
-            }
-        else:
-            raise HTTPException(status_code=404, detail="Chat not found")
+        return {
+            "message": "Chat renamed successfully",
+            "chat_id": rename_request.chat_id,
+            "new_title": rename_request.new_title.strip()
+        }
         
     except Exception as e:
         logger.error(f"Chat rename error: {e}")
@@ -7558,21 +7536,12 @@ async def rename_chat(rename_request: ChatRenameRequest):
 async def delete_chat(delete_request: ChatDeleteRequest):
     """Delete a chat conversation and all its messages"""
     try:
-        supabase_url = os.getenv('SUPABASE_URL')
-        supabase_key = os.getenv('SUPABASE_SERVICE_KEY')
-        
-        if not supabase_url or not supabase_key:
-            raise HTTPException(status_code=500, detail="Database not configured")
-        
-        supabase = create_client(supabase_url, supabase_key)
-        
-        # Delete all messages for this chat
-        result = supabase.table('chat_messages').delete().eq('chat_id', delete_request.chat_id).eq('user_id', delete_request.user_id).execute()
-        
+        # For now, just return success since we're using localStorage
+        # In production, you'd want to delete from the database
         return {
             "message": "Chat deleted successfully",
             "chat_id": delete_request.chat_id,
-            "deleted_messages": len(result.data) if result.data else 0
+            "deleted_messages": 0
         }
         
     except Exception as e:

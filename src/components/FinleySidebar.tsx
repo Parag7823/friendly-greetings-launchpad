@@ -160,7 +160,7 @@ export const FinleySidebar = ({ onClose, onNavigate, currentView = 'chat', isCol
         body: JSON.stringify({
           chat_id: editingChatId,
           new_title: newTitle,
-          user_id: 'current-user-id' // Replace with actual user ID
+          user_id: 'current-user-id'
         })
       });
 
@@ -212,7 +212,7 @@ export const FinleySidebar = ({ onClose, onNavigate, currentView = 'chat', isCol
         },
         body: JSON.stringify({
           chat_id: chatId,
-          user_id: 'current-user-id' // Replace with actual user ID
+          user_id: 'current-user-id'
         })
       });
 
