@@ -3079,8 +3079,14 @@ class ExcelProcessor:
             })
             
         except Exception as e:
-            logger.warning(f"Entity resolution failed: {e}")
+            logger.error(f"Entity resolution failed: {e}")
             insights['entity_resolution'] = {'error': str(e)}
+            # Send error to frontend
+            await manager.send_update(job_id, {
+                "step": "entity_resolution_failed",
+                "message": f"❌ Entity resolution failed: {str(e)}",
+                "progress": 90
+            })
 
         # Step 9: Platform Pattern Learning
         await manager.send_update(job_id, {
@@ -3110,8 +3116,14 @@ class ExcelProcessor:
             })
             
         except Exception as e:
-            logger.warning(f"Platform learning failed: {e}")
+            logger.error(f"Platform learning failed: {e}")
             insights['platform_learning'] = {'error': str(e)}
+            # Send error to frontend
+            await manager.send_update(job_id, {
+                "step": "platform_learning_failed",
+                "message": f"❌ Platform learning failed: {str(e)}",
+                "progress": 95
+            })
 
         # Step 10: Relationship Detection
         await manager.send_update(job_id, {
@@ -3145,11 +3157,17 @@ class ExcelProcessor:
             })
             
         except Exception as e:
-            logger.warning(f"Relationship detection failed: {e}")
+            logger.error(f"Relationship detection failed: {e}")
             insights['relationship_analysis'] = {
                 'error': str(e),
                 'message': 'Relationship detection failed but processing completed'
             }
+            # Send error to frontend
+            await manager.send_update(job_id, {
+                "step": "relationship_detection_failed",
+                "message": f"❌ Relationship detection failed: {str(e)}",
+                "progress": 98
+            })
 
         # Step 11: Compute and Store Metrics
         await manager.send_update(job_id, {
@@ -3179,8 +3197,14 @@ class ExcelProcessor:
             insights['processing_metrics'] = metrics
             
         except Exception as e:
-            logger.warning(f"Metrics computation failed: {e}")
+            logger.error(f"Metrics computation failed: {e}")
             insights['processing_metrics'] = {'error': str(e)}
+            # Send error to frontend
+            await manager.send_update(job_id, {
+                "step": "metrics_computation_failed",
+                "message": f"❌ Metrics computation failed: {str(e)}",
+                "progress": 99
+            })
         
         # Step 12: Complete Transaction
         if transaction_id:
@@ -3399,12 +3423,22 @@ class ExcelProcessor:
             # Get events for this file
             events = supabase.table('raw_events').select('*').eq('user_id', user_id).eq('file_id', file_id).execute()
             
+            logger.info(f"Found {len(events.data)} events for entity extraction")
+            
             entities = []
             entity_map = {}
+            vendor_fields_found = []
             
             for event in events.data:
                 # Extract vendor/entity information from payload
                 payload = event.get('payload', {})
+                
+                # Check what vendor fields are available
+                vendor_fields = ['vendor_raw', 'vendor', 'merchant', 'payee', 'description']
+                for field in vendor_fields:
+                    if field in payload and payload[field]:
+                        vendor_fields_found.append(f"{field}: {payload[field]}")
+                
                 vendor_raw = payload.get('vendor_raw') or payload.get('vendor') or payload.get('merchant')
                 
                 if vendor_raw and vendor_raw not in entity_map:
@@ -3422,7 +3456,12 @@ class ExcelProcessor:
                     entities.append(entity)
                     entity_map[vendor_raw] = entity
             
-            logger.info(f"Extracted {len(entities)} entities from events")
+            logger.info(f"Extracted {len(entities)} entities from {len(events.data)} events")
+            if vendor_fields_found:
+                logger.info(f"Found vendor fields: {vendor_fields_found[:5]}")  # Show first 5
+            else:
+                logger.warning("No vendor/merchant fields found in any events - this is why entity extraction returns 0")
+            
             return entities
             
         except Exception as e:
