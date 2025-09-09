@@ -1030,22 +1030,44 @@ class PlatformIDExtractor:
             }
 
 class DataEnrichmentProcessor:
-    """Orchestrates all data enrichment processes"""
+    """Orchestrates all data enrichment processes with universal field detection"""
     
     def __init__(self, openai_client):
         self.currency_normalizer = CurrencyNormalizer()
         self.vendor_standardizer = VendorStandardizer(openai_client)
         self.platform_id_extractor = PlatformIDExtractor()
+        self.universal_extractors = UniversalExtractors()
+        self.universal_platform_detector = UniversalPlatformDetector(openai_client)
+        self.universal_document_classifier = UniversalDocumentClassifier(openai_client)
     
     async def enrich_row_data(self, row_data: Dict, platform_info: Dict, column_names: List[str], 
                             ai_classification: Dict, file_context: Dict) -> Dict[str, Any]:
         """Enrich row data with currency, vendor, and platform information"""
         try:
-            # Extract basic information
-            amount = self._extract_amount(row_data)
-            description = self._extract_description(row_data)
-            platform = platform_info.get('platform', 'unknown')
-            date = self._extract_date(row_data)
+            # Extract basic information using universal field detection
+            amount = self.universal_extractors.extract_amount_universal(row_data)
+            description = self.universal_extractors.extract_description_universal(row_data)
+            date = self.universal_extractors.extract_date_universal(row_data)
+            
+            # Universal platform detection
+            platform_result = await self.universal_platform_detector.detect_platform_universal(
+                row_data, file_context.get('filename', '')
+            )
+            platform = platform_result.get('platform', platform_info.get('platform', 'unknown'))
+            
+            # Universal document classification
+            document_result = await self.universal_document_classifier.classify_document_universal(
+                row_data, file_context.get('filename', '')
+            )
+            document_type = document_result.get('document_type', 'unknown')
+            
+            # Fallback to old methods if universal extraction fails
+            if amount is None:
+                amount = self._extract_amount(row_data)
+            if description is None:
+                description = self._extract_description(row_data)
+            if date is None:
+                date = self._extract_date(row_data)
             
             # 1. Currency normalization
             currency_info = await self.currency_normalizer.normalize_currency(
@@ -1056,8 +1078,10 @@ class DataEnrichmentProcessor:
                 date=date
             )
             
-            # 2. Vendor standardization
-            vendor_name = self._extract_vendor_name(row_data, column_names)
+            # 2. Vendor standardization using universal extraction
+            vendor_name = self.universal_extractors.extract_vendor_universal(row_data)
+            if vendor_name is None:
+                vendor_name = self._extract_vendor_name(row_data, column_names)
             vendor_info = await self.vendor_standardizer.standardize_vendor(
                 vendor_name=vendor_name,
                 platform=platform
@@ -1076,6 +1100,18 @@ class DataEnrichmentProcessor:
                 "kind": ai_classification.get('row_type', 'transaction'),
                 "category": ai_classification.get('category', 'other'),
                 "subcategory": ai_classification.get('subcategory', 'general'),
+                
+                # Universal platform detection
+                "platform": platform,
+                "platform_confidence": platform_result.get('confidence', 0.0),
+                "platform_detection_method": platform_result.get('detection_method', 'unknown'),
+                "platform_indicators": platform_result.get('indicators', []),
+                
+                # Universal document classification
+                "document_type": document_type,
+                "document_confidence": document_result.get('confidence', 0.0),
+                "document_classification_method": document_result.get('classification_method', 'unknown'),
+                "document_indicators": document_result.get('indicators', []),
                 
                 # Currency information
                 "currency": currency_info.get('currency', 'USD'),
@@ -2792,17 +2828,39 @@ class ExcelProcessor:
                 "progress": 20
             })
         
-        # Step 2: Detect platform and document type
+        # Step 2: Universal Platform Detection and Document Classification
         await manager.send_update(job_id, {
             "step": "analyzing",
-            "message": "🧠 Analyzing document structure and detecting platform...",
+            "message": "🧠 Universal platform detection and document classification...",
             "progress": 20
         })
         
-        # Use first sheet for platform detection
+        # Use first sheet for universal detection
         first_sheet = list(sheets.values())[0]
-        platform_info = self.platform_detector.detect_platform(first_sheet, filename)
-        doc_analysis = await self.analyzer.detect_document_type(first_sheet, filename)
+        
+        # Universal platform detection
+        universal_platform_detector = UniversalPlatformDetector(self.openai)
+        platform_result = await universal_platform_detector.detect_platform_universal(
+            first_sheet, filename
+        )
+        platform_info = {
+            'platform': platform_result.get('platform', 'unknown'),
+            'confidence': platform_result.get('confidence', 0.0),
+            'detection_method': platform_result.get('detection_method', 'unknown'),
+            'indicators': platform_result.get('indicators', [])
+        }
+        
+        # Universal document classification
+        universal_document_classifier = UniversalDocumentClassifier(self.openai)
+        document_result = await universal_document_classifier.classify_document_universal(
+            first_sheet, filename
+        )
+        doc_analysis = {
+            'document_type': document_result.get('document_type', 'unknown'),
+            'confidence': document_result.get('confidence', 0.0),
+            'classification_method': document_result.get('classification_method', 'unknown'),
+            'indicators': document_result.get('indicators', [])
+        }
         
         # Initialize EntityResolver and AI classifier with Supabase client
         self.entity_resolver = EntityResolver(supabase)
@@ -3548,6 +3606,696 @@ class ExcelProcessor:
         except Exception as e:
             logger.error(f"Error discovering platforms: {e}")
             return []
+
+class UniversalFieldDetector:
+    """Universal field detection that works with ANY field names using AI and pattern recognition"""
+    
+    def __init__(self):
+        self.field_patterns = {
+            'vendor_fields': [
+                'vendor', 'merchant', 'payee', 'client', 'customer', 'company', 'business', 'entity',
+                'recipient', 'beneficiary', 'party', 'supplier', 'name', 'organization', 'corp', 'inc',
+                'ltd', 'llc', 'to', 'from', 'contact', 'person', 'individual', 'firm', 'enterprise'
+            ],
+            'amount_fields': [
+                'amount', 'total', 'value', 'sum', 'payment', 'price', 'cost', 'fee', 'charge',
+                'revenue', 'income', 'expense', 'debit', 'credit', 'balance', 'gross', 'net',
+                'subtotal', 'tax', 'discount', 'refund', 'deposit', 'withdrawal', 'transfer',
+                'salary', 'wage', 'bonus', 'commission', 'allowance', 'benefit', 'deduction'
+            ],
+            'date_fields': [
+                'date', 'time', 'created', 'updated', 'processed', 'issued', 'due', 'paid',
+                'timestamp', 'when', 'period', 'month', 'year', 'quarter', 'fiscal',
+                'transaction_date', 'payment_date', 'issue_date', 'due_date', 'created_at',
+                'updated_at', 'processed_at', 'paid_at', 'received_at', 'sent_at'
+            ],
+            'currency_fields': [
+                'currency', 'curr', 'ccy', 'money_type', 'denomination', 'unit', 'symbol',
+                'currency_code', 'iso_currency', 'base_currency', 'quote_currency'
+            ],
+            'description_fields': [
+                'description', 'memo', 'notes', 'comment', 'details', 'summary', 'purpose',
+                'reason', 'explanation', 'narrative', 'text', 'content', 'info', 'information',
+                'remark', 'annotation', 'label', 'title', 'subject', 'topic', 'category'
+            ],
+            'id_fields': [
+                'id', 'identifier', 'number', 'code', 'reference', 'ref', 'key', 'primary_key',
+                'transaction_id', 'payment_id', 'order_id', 'invoice_id', 'receipt_id',
+                'account_id', 'customer_id', 'vendor_id', 'employee_id', 'project_id'
+            ]
+        }
+    
+    def detect_field_types(self, payload: Dict) -> Dict[str, List[str]]:
+        """Detect what type of data each field contains"""
+        field_types = {
+            'vendor_fields': [],
+            'amount_fields': [],
+            'date_fields': [],
+            'currency_fields': [],
+            'description_fields': [],
+            'id_fields': []
+        }
+        
+        for field_name, field_value in payload.items():
+            if not isinstance(field_value, str):
+                continue
+                
+            field_lower = field_name.lower()
+            value_lower = str(field_value).lower().strip()
+            
+            # Skip empty values
+            if not value_lower:
+                continue
+            
+            # Detect field type by name patterns
+            for field_type, patterns in self.field_patterns.items():
+                if any(pattern in field_lower for pattern in patterns):
+                    field_types[field_type].append(field_name)
+                    break
+            
+            # Detect field type by value patterns
+            if not any(field_name in fields for fields in field_types.values()):
+                detected_type = self._detect_by_value_pattern(field_value)
+                if detected_type:
+                    field_types[detected_type].append(field_name)
+        
+        return field_types
+    
+    def _detect_by_value_pattern(self, value: str) -> Optional[str]:
+        """Detect field type by analyzing the value content"""
+        if not isinstance(value, str):
+            return None
+        
+        value = value.strip()
+        
+        # Amount detection
+        if self._looks_like_amount(value):
+            return 'amount_fields'
+        
+        # Date detection
+        if self._looks_like_date(value):
+            return 'date_fields'
+        
+        # Currency detection
+        if self._looks_like_currency(value):
+            return 'currency_fields'
+        
+        # ID detection
+        if self._looks_like_id(value):
+            return 'id_fields'
+        
+        # Description detection (longer text)
+        if len(value) > 10 and not self._looks_like_amount(value):
+            return 'description_fields'
+        
+        # Vendor detection (looks like company/person name)
+        if self._looks_like_entity_name(value):
+            return 'vendor_fields'
+        
+        return None
+    
+    def _looks_like_amount(self, value: str) -> bool:
+        """Check if value looks like a monetary amount"""
+        import re
+        
+        # Remove common currency symbols and spaces
+        cleaned = re.sub(r'[$₹€£¥,\s]', '', value)
+        
+        # Check if it's a number (including decimals)
+        if re.match(r'^\d+\.?\d*$', cleaned):
+            try:
+                amount = float(cleaned)
+                # Reasonable amount range
+                return 0 <= amount <= 10000000
+            except:
+                pass
+        
+        return False
+    
+    def _looks_like_date(self, value: str) -> bool:
+        """Check if value looks like a date"""
+        import re
+        from datetime import datetime
+        
+        # Common date patterns
+        date_patterns = [
+            r'^\d{4}-\d{2}-\d{2}$',  # YYYY-MM-DD
+            r'^\d{2}/\d{2}/\d{4}$',  # MM/DD/YYYY
+            r'^\d{2}-\d{2}-\d{4}$',  # MM-DD-YYYY
+            r'^\d{4}/\d{2}/\d{2}$',  # YYYY/MM/DD
+            r'^\d{1,2}/\d{1,2}/\d{4}$',  # M/D/YYYY
+            r'^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}',  # YYYY-MM-DD HH:MM:SS
+        ]
+        
+        for pattern in date_patterns:
+            if re.match(pattern, value):
+                return True
+        
+        # Try to parse as date
+        try:
+            datetime.fromisoformat(value.replace('Z', '+00:00'))
+            return True
+        except:
+            pass
+        
+        return False
+    
+    def _looks_like_currency(self, value: str) -> bool:
+        """Check if value looks like a currency code"""
+        currency_codes = ['usd', 'eur', 'inr', 'gbp', 'jpy', 'cad', 'aud', 'chf', 'cny', 'sek', 'nok', 'dkk']
+        return value.lower().strip() in currency_codes
+    
+    def _looks_like_id(self, value: str) -> bool:
+        """Check if value looks like an ID"""
+        import re
+        
+        # UUID pattern
+        if re.match(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$', value, re.IGNORECASE):
+            return True
+        
+        # Long alphanumeric strings
+        if re.match(r'^[a-zA-Z0-9_-]{8,}$', value):
+            return True
+        
+        # Numeric IDs
+        if re.match(r'^\d{6,}$', value):
+            return True
+        
+        return False
+    
+    def _looks_like_entity_name(self, value: str) -> bool:
+        """Check if value looks like an entity/company name"""
+        if not value or len(value) < 2 or len(value) > 200:
+            return False
+        
+        # Should contain letters
+        if not any(c.isalpha() for c in value):
+            return False
+        
+        # Shouldn't be just numbers, dates, or special characters
+        import re
+        if re.match(r'^\d+$', value) or re.match(r'^\d{4}-\d{2}-\d{2}', value):
+            return False
+        
+        # Company name indicators
+        company_indicators = ['corp', 'inc', 'ltd', 'llc', 'co', 'company', 'group', 'solutions', 'services', 'systems']
+        if any(indicator in value.lower() for indicator in company_indicators):
+            return True
+        
+        # Multiple words (companies usually have 2+ words)
+        if len(value.split()) >= 2:
+            return True
+        
+        return False
+
+class UniversalPlatformDetector:
+    """Universal platform detection using AI and pattern recognition"""
+    
+    def __init__(self, openai_client=None):
+        self.openai_client = openai_client
+        self.platform_patterns = {
+            'payment_gateways': [
+                'stripe', 'razorpay', 'paypal', 'square', 'stripe.com', 'razorpay.com',
+                'paypal.com', 'squareup.com', 'stripe_', 'rzp_', 'pp_', 'sq_'
+            ],
+            'banking': [
+                'bank', 'chase', 'wells fargo', 'bank of america', 'citibank', 'hsbc',
+                'jpmorgan', 'goldman sachs', 'morgan stanley', 'deutsche bank'
+            ],
+            'accounting': [
+                'quickbooks', 'xero', 'freshbooks', 'wave', 'zoho books', 'sage',
+                'intuit', 'quickbooks.com', 'xero.com', 'freshbooks.com'
+            ],
+            'crm': [
+                'salesforce', 'hubspot', 'pipedrive', 'zoho crm', 'monday.com',
+                'salesforce.com', 'hubspot.com', 'pipedrive.com'
+            ],
+            'ecommerce': [
+                'shopify', 'woocommerce', 'magento', 'bigcommerce', 'amazon',
+                'shopify.com', 'woocommerce.com', 'magento.com'
+            ],
+            'cloud_services': [
+                'aws', 'azure', 'google cloud', 'digitalocean', 'linode', 'heroku',
+                'amazon web services', 'microsoft azure', 'gcp'
+            ]
+        }
+    
+    async def detect_platform_universal(self, payload: Dict, filename: str = None) -> Dict[str, Any]:
+        """Detect platform using universal AI-powered analysis"""
+        try:
+            # Strategy 1: AI-powered platform detection
+            if self.openai_client:
+                ai_result = await self._detect_platform_with_ai(payload, filename)
+                if ai_result and ai_result.get('confidence', 0) > 0.7:
+                    return ai_result
+            
+            # Strategy 2: Pattern-based detection
+            pattern_result = self._detect_platform_with_patterns(payload, filename)
+            if pattern_result:
+                return pattern_result
+            
+            # Strategy 3: Field-based detection
+            field_result = self._detect_platform_from_fields(payload)
+            if field_result:
+                return field_result
+            
+            # Default fallback
+            return {
+                'platform': 'unknown',
+                'confidence': 0.1,
+                'detection_method': 'fallback',
+                'indicators': []
+            }
+            
+        except Exception as e:
+            logger.error(f"Platform detection failed: {e}")
+            return {
+                'platform': 'unknown',
+                'confidence': 0.0,
+                'detection_method': 'error',
+                'error': str(e)
+            }
+    
+    async def _detect_platform_with_ai(self, payload: Dict, filename: str = None) -> Optional[Dict[str, Any]]:
+        """Use AI to detect platform from data content"""
+        try:
+            # Prepare context for AI
+            context_parts = []
+            
+            # Add filename if available
+            if filename:
+                context_parts.append(f"Filename: {filename}")
+            
+            # Add key fields that might indicate platform
+            key_fields = ['description', 'memo', 'notes', 'platform', 'source', 'reference', 'id']
+            for field in key_fields:
+                if field in payload and payload[field]:
+                    context_parts.append(f"{field}: {payload[field]}")
+            
+            # Add all field names as context
+            field_names = list(payload.keys())
+            context_parts.append(f"Field names: {', '.join(field_names)}")
+            
+            context = "\n".join(context_parts)
+            
+            # AI prompt for platform detection
+            prompt = f"""
+            Analyze this financial data to detect the platform or service it came from:
+            
+            {context}
+            
+            Common platforms include:
+            - Payment gateways: Stripe, Razorpay, PayPal, Square
+            - Banking: Chase, Wells Fargo, Bank of America, etc.
+            - Accounting: QuickBooks, Xero, FreshBooks, etc.
+            - CRM: Salesforce, HubSpot, Pipedrive, etc.
+            - E-commerce: Shopify, WooCommerce, Amazon, etc.
+            - Cloud services: AWS, Azure, Google Cloud, etc.
+            
+            Respond with JSON format:
+            {{
+                "platform": "detected_platform_name",
+                "confidence": 0.0-1.0,
+                "indicators": ["list", "of", "indicators"],
+                "reasoning": "explanation"
+            }}
+            """
+            
+            response = await self.openai_client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.1,
+                max_tokens=200
+            )
+            
+            result_text = response.choices[0].message.content.strip()
+            
+            # Parse JSON response
+            import json
+            result = json.loads(result_text)
+            
+            return {
+                'platform': result.get('platform', 'unknown'),
+                'confidence': float(result.get('confidence', 0.0)),
+                'detection_method': 'ai',
+                'indicators': result.get('indicators', []),
+                'reasoning': result.get('reasoning', '')
+            }
+            
+        except Exception as e:
+            logger.error(f"AI platform detection failed: {e}")
+            return None
+    
+    def _detect_platform_with_patterns(self, payload: Dict, filename: str = None) -> Optional[Dict[str, Any]]:
+        """Detect platform using pattern matching"""
+        try:
+            # Combine all text for pattern matching
+            text_parts = []
+            
+            # Add filename
+            if filename:
+                text_parts.append(filename.lower())
+            
+            # Add all string values
+            for value in payload.values():
+                if isinstance(value, str):
+                    text_parts.append(value.lower())
+            
+            combined_text = " ".join(text_parts)
+            
+            # Check against platform patterns
+            for platform_type, patterns in self.platform_patterns.items():
+                for pattern in patterns:
+                    if pattern.lower() in combined_text:
+                        return {
+                            'platform': pattern,
+                            'confidence': 0.8,
+                            'detection_method': 'pattern',
+                            'indicators': [pattern],
+                            'platform_type': platform_type
+                        }
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"Pattern platform detection failed: {e}")
+            return None
+    
+    def _detect_platform_from_fields(self, payload: Dict) -> Optional[Dict[str, Any]]:
+        """Detect platform from field names and structure"""
+        try:
+            field_names = [key.lower() for key in payload.keys()]
+            
+            # Check for platform-specific field patterns
+            platform_indicators = {
+                'stripe': ['stripe', 'stripe_id', 'charge_id', 'customer_id', 'payment_intent'],
+                'razorpay': ['razorpay', 'rzp', 'payment_id', 'order_id', 'refund_id'],
+                'paypal': ['paypal', 'pp', 'transaction_id', 'payer_id', 'payment_id'],
+                'quickbooks': ['quickbooks', 'qb', 'customer_id', 'invoice_id', 'payment_id'],
+                'xero': ['xero', 'contact_id', 'invoice_id', 'payment_id'],
+                'salesforce': ['salesforce', 'sf', 'lead_id', 'opportunity_id', 'account_id']
+            }
+            
+            for platform, indicators in platform_indicators.items():
+                matches = [indicator for indicator in indicators if any(indicator in field for field in field_names)]
+                if matches:
+                    return {
+                        'platform': platform,
+                        'confidence': 0.6,
+                        'detection_method': 'field_analysis',
+                        'indicators': matches
+                    }
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"Field-based platform detection failed: {e}")
+            return None
+
+class UniversalDocumentClassifier:
+    """Universal document type classification using AI"""
+    
+    def __init__(self, openai_client=None):
+        self.openai_client = openai_client
+        self.document_types = {
+            'invoice': ['invoice', 'bill', 'receipt', 'statement'],
+            'payment': ['payment', 'transaction', 'transfer', 'deposit', 'withdrawal'],
+            'expense': ['expense', 'cost', 'charge', 'fee', 'purchase'],
+            'revenue': ['revenue', 'income', 'sale', 'earning', 'profit'],
+            'payroll': ['payroll', 'salary', 'wage', 'employee', 'staff'],
+            'tax': ['tax', 'vat', 'gst', 'withholding', 'deduction'],
+            'bank_statement': ['bank', 'statement', 'account', 'balance'],
+            'credit_card': ['credit', 'card', 'visa', 'mastercard', 'amex']
+        }
+    
+    async def classify_document_universal(self, payload: Dict, filename: str = None) -> Dict[str, Any]:
+        """Classify document type using universal AI-powered analysis"""
+        try:
+            # Strategy 1: AI-powered classification
+            if self.openai_client:
+                ai_result = await self._classify_with_ai(payload, filename)
+                if ai_result and ai_result.get('confidence', 0) > 0.7:
+                    return ai_result
+            
+            # Strategy 2: Pattern-based classification
+            pattern_result = self._classify_with_patterns(payload, filename)
+            if pattern_result:
+                return pattern_result
+            
+            # Strategy 3: Field-based classification
+            field_result = self._classify_from_fields(payload)
+            if field_result:
+                return field_result
+            
+            # Default fallback
+            return {
+                'document_type': 'unknown',
+                'confidence': 0.1,
+                'classification_method': 'fallback',
+                'indicators': []
+            }
+            
+        except Exception as e:
+            logger.error(f"Document classification failed: {e}")
+            return {
+                'document_type': 'unknown',
+                'confidence': 0.0,
+                'classification_method': 'error',
+                'error': str(e)
+            }
+    
+    async def _classify_with_ai(self, payload: Dict, filename: str = None) -> Optional[Dict[str, Any]]:
+        """Use AI to classify document type"""
+        try:
+            # Prepare context for AI
+            context_parts = []
+            
+            # Add filename if available
+            if filename:
+                context_parts.append(f"Filename: {filename}")
+            
+            # Add key fields
+            key_fields = ['description', 'memo', 'notes', 'type', 'category', 'kind']
+            for field in key_fields:
+                if field in payload and payload[field]:
+                    context_parts.append(f"{field}: {payload[field]}")
+            
+            # Add field names
+            field_names = list(payload.keys())
+            context_parts.append(f"Field names: {', '.join(field_names)}")
+            
+            context = "\n".join(context_parts)
+            
+            # AI prompt for document classification
+            prompt = f"""
+            Classify this financial document data into one of these types:
+            
+            {context}
+            
+            Document types:
+            - invoice: Bills, invoices, receipts, statements
+            - payment: Payments, transactions, transfers, deposits
+            - expense: Expenses, costs, charges, fees, purchases
+            - revenue: Revenue, income, sales, earnings
+            - payroll: Payroll, salaries, wages, employee payments
+            - tax: Tax documents, VAT, GST, withholding
+            - bank_statement: Bank statements, account balances
+            - credit_card: Credit card statements, card payments
+            
+            Respond with JSON format:
+            {{
+                "document_type": "detected_type",
+                "confidence": 0.0-1.0,
+                "indicators": ["list", "of", "indicators"],
+                "reasoning": "explanation"
+            }}
+            """
+            
+            response = await self.openai_client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.1,
+                max_tokens=200
+            )
+            
+            result_text = response.choices[0].message.content.strip()
+            
+            # Parse JSON response
+            import json
+            result = json.loads(result_text)
+            
+            return {
+                'document_type': result.get('document_type', 'unknown'),
+                'confidence': float(result.get('confidence', 0.0)),
+                'classification_method': 'ai',
+                'indicators': result.get('indicators', []),
+                'reasoning': result.get('reasoning', '')
+            }
+            
+        except Exception as e:
+            logger.error(f"AI document classification failed: {e}")
+            return None
+    
+    def _classify_with_patterns(self, payload: Dict, filename: str = None) -> Optional[Dict[str, Any]]:
+        """Classify document using pattern matching"""
+        try:
+            # Combine all text for pattern matching
+            text_parts = []
+            
+            # Add filename
+            if filename:
+                text_parts.append(filename.lower())
+            
+            # Add all string values
+            for value in payload.values():
+                if isinstance(value, str):
+                    text_parts.append(value.lower())
+            
+            combined_text = " ".join(text_parts)
+            
+            # Check against document type patterns
+            for doc_type, patterns in self.document_types.items():
+                for pattern in patterns:
+                    if pattern.lower() in combined_text:
+                        return {
+                            'document_type': doc_type,
+                            'confidence': 0.8,
+                            'classification_method': 'pattern',
+                            'indicators': [pattern]
+                        }
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"Pattern document classification failed: {e}")
+            return None
+    
+    def _classify_from_fields(self, payload: Dict) -> Optional[Dict[str, Any]]:
+        """Classify document from field names and structure"""
+        try:
+            field_names = [key.lower() for key in payload.keys()]
+            
+            # Check for document-specific field patterns
+            doc_indicators = {
+                'invoice': ['invoice', 'bill', 'receipt', 'invoice_id', 'bill_id'],
+                'payment': ['payment', 'transaction', 'transfer', 'payment_id', 'txn_id'],
+                'expense': ['expense', 'cost', 'charge', 'fee', 'expense_id'],
+                'revenue': ['revenue', 'income', 'sale', 'revenue_id', 'sale_id'],
+                'payroll': ['payroll', 'salary', 'wage', 'employee', 'payroll_id'],
+                'tax': ['tax', 'vat', 'gst', 'tax_id', 'withholding'],
+                'bank_statement': ['bank', 'statement', 'account', 'balance', 'account_id'],
+                'credit_card': ['credit', 'card', 'visa', 'mastercard', 'card_id']
+            }
+            
+            for doc_type, indicators in doc_indicators.items():
+                matches = [indicator for indicator in indicators if any(indicator in field for field in field_names)]
+                if matches:
+                    return {
+                        'document_type': doc_type,
+                        'confidence': 0.6,
+                        'classification_method': 'field_analysis',
+                        'indicators': matches
+                    }
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"Field-based document classification failed: {e}")
+            return None
+
+class UniversalExtractors:
+    """Universal data extractors that work with any field names"""
+    
+    def __init__(self):
+        self.field_detector = UniversalFieldDetector()
+    
+    def extract_vendor_universal(self, payload: Dict) -> Optional[str]:
+        """Extract vendor name using universal field detection"""
+        field_types = self.field_detector.detect_field_types(payload)
+        vendor_fields = field_types.get('vendor_fields', [])
+        
+        for field in vendor_fields:
+            value = payload.get(field)
+            if value and isinstance(value, str) and value.strip():
+                return str(value).strip()
+        
+        return None
+    
+    def extract_amount_universal(self, payload: Dict) -> Optional[float]:
+        """Extract amount using universal field detection"""
+        field_types = self.field_detector.detect_field_types(payload)
+        amount_fields = field_types.get('amount_fields', [])
+        
+        for field in amount_fields:
+            value = payload.get(field)
+            if value and self.field_detector._looks_like_amount(str(value)):
+                try:
+                    import re
+                    cleaned = re.sub(r'[$₹€£¥,\s]', '', str(value))
+                    return float(cleaned)
+                except:
+                    continue
+        
+        return None
+    
+    def extract_date_universal(self, payload: Dict) -> Optional[datetime]:
+        """Extract date using universal field detection"""
+        field_types = self.field_detector.detect_field_types(payload)
+        date_fields = field_types.get('date_fields', [])
+        
+        for field in date_fields:
+            value = payload.get(field)
+            if value and self.field_detector._looks_like_date(str(value)):
+                try:
+                    return datetime.fromisoformat(str(value).replace('Z', '+00:00'))
+                except:
+                    try:
+                        # Try common date formats
+                        for fmt in ['%Y-%m-%d', '%m/%d/%Y', '%d/%m/%Y', '%Y-%m-%d %H:%M:%S']:
+                            try:
+                                return datetime.strptime(str(value), fmt)
+                            except:
+                                continue
+                    except:
+                        continue
+        
+        return None
+    
+    def extract_currency_universal(self, payload: Dict) -> Optional[str]:
+        """Extract currency using universal field detection"""
+        field_types = self.field_detector.detect_field_types(payload)
+        currency_fields = field_types.get('currency_fields', [])
+        
+        for field in currency_fields:
+            value = payload.get(field)
+            if value and self.field_detector._looks_like_currency(str(value)):
+                return str(value).strip().upper()
+        
+        return None
+    
+    def extract_description_universal(self, payload: Dict) -> Optional[str]:
+        """Extract description using universal field detection"""
+        field_types = self.field_detector.detect_field_types(payload)
+        description_fields = field_types.get('description_fields', [])
+        
+        for field in description_fields:
+            value = payload.get(field)
+            if value and isinstance(value, str) and len(value.strip()) > 5:
+                return str(value).strip()
+        
+        return None
+    
+    def extract_id_universal(self, payload: Dict) -> Optional[str]:
+        """Extract ID using universal field detection"""
+        field_types = self.field_detector.detect_field_types(payload)
+        id_fields = field_types.get('id_fields', [])
+        
+        for field in id_fields:
+            value = payload.get(field)
+            if value and self.field_detector._looks_like_id(str(value)):
+                return str(value).strip()
+        
+        return None
 
 processor = ExcelProcessor()
 
@@ -4984,9 +5732,15 @@ class CrossFileRelationshipDetector:
         return relationships
     
     def _extract_amount(self, payload: Dict) -> float:
-        """Extract amount from payload"""
+        """Extract amount from payload using universal field detection"""
         try:
-            # Look for amount fields
+            # Use universal extraction first
+            universal_extractors = UniversalExtractors()
+            amount = universal_extractors.extract_amount_universal(payload)
+            if amount is not None:
+                return amount
+            
+            # Fallback to old method
             amount_fields = ['amount', 'total', 'value', 'sum', 'payment_amount']
             for field in amount_fields:
                 if field in payload:
@@ -5002,10 +5756,16 @@ class CrossFileRelationshipDetector:
         return 0.0
     
     def _extract_entities(self, payload: Dict) -> List[str]:
-        """Extract entity names from payload"""
+        """Extract entity names from payload using universal field detection"""
         entities = []
         try:
-            # Look for name fields
+            # Use universal extraction first
+            universal_extractors = UniversalExtractors()
+            vendor_name = universal_extractors.extract_vendor_universal(payload)
+            if vendor_name:
+                entities.append(vendor_name)
+            
+            # Fallback to old method
             name_fields = ['employee_name', 'name', 'recipient', 'payee', 'description']
             for field in name_fields:
                 if field in payload:
@@ -5017,9 +5777,15 @@ class CrossFileRelationshipDetector:
         return entities
     
     def _extract_date(self, payload: Dict) -> Optional[datetime]:
-        """Extract date from payload"""
+        """Extract date from payload using universal field detection"""
         try:
-            # Look for date fields
+            # Use universal extraction first
+            universal_extractors = UniversalExtractors()
+            date = universal_extractors.extract_date_universal(payload)
+            if date is not None:
+                return date
+            
+            # Fallback to old method
             date_fields = ['date', 'payment_date', 'transaction_date', 'created_at']
             for field in date_fields:
                 if field in payload:

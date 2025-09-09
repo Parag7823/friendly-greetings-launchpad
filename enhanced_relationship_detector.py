@@ -543,9 +543,18 @@ class EnhancedRelationshipDetector:
         return weights
     
     def _extract_amount(self, payload: Dict) -> float:
-        """Extract amount from payload"""
+        """Extract amount from payload using universal field detection"""
         try:
-            # Try different amount fields
+            # Import universal extractors
+            from fastapi_backend import UniversalExtractors
+            universal_extractors = UniversalExtractors()
+            
+            # Use universal extraction first
+            amount = universal_extractors.extract_amount_universal(payload)
+            if amount is not None:
+                return amount
+            
+            # Fallback to old method
             amount_fields = ['amount', 'amount_usd', 'total', 'value', 'payment_amount']
             for field in amount_fields:
                 if field in payload and payload[field]:
@@ -562,9 +571,18 @@ class EnhancedRelationshipDetector:
             return 0.0
     
     def _extract_date(self, event: Dict) -> Optional[datetime]:
-        """Extract date from event"""
+        """Extract date from event using universal field detection"""
         try:
-            # Try different date fields
+            # Import universal extractors
+            from fastapi_backend import UniversalExtractors
+            universal_extractors = UniversalExtractors()
+            
+            # Use universal extraction first
+            date = universal_extractors.extract_date_universal(event)
+            if date is not None:
+                return date
+            
+            # Fallback to old method
             date_fields = ['created_at', 'date', 'timestamp', 'processed_at']
             for field in date_fields:
                 if field in event and event[field]:
@@ -575,9 +593,18 @@ class EnhancedRelationshipDetector:
             return None
     
     def _extract_entities(self, payload: Dict) -> List[str]:
-        """Extract entities from payload"""
+        """Extract entities from payload using universal field detection"""
         entities = []
         try:
+            # Import universal extractors
+            from fastapi_backend import UniversalExtractors
+            universal_extractors = UniversalExtractors()
+            
+            # Use universal extraction first
+            vendor_name = universal_extractors.extract_vendor_universal(payload)
+            if vendor_name:
+                entities.append(vendor_name)
+            
             # Extract from entities field
             if 'entities' in payload:
                 entity_data = payload['entities']
