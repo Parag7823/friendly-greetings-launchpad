@@ -264,21 +264,21 @@ export const FinleySidebar = ({ onClose, onNavigate, currentView = 'chat', isCol
     <TooltipProvider>
       <div className="finley-sidebar flex flex-col h-full overflow-y-auto bg-muted/30">
       {/* Header */}
-        <div className={`mb-8 ${isCollapsed ? 'p-4' : 'p-6'}`}>
+        <div className={`mb-4 ${isCollapsed ? 'p-3' : 'p-4'}`}>
           <div className="flex items-center justify-between">
             {!isCollapsed && (
               <div>
-        <h1 className="text-2xl font-bold text-foreground tracking-tight">
+        <h1 className="text-xl font-semibold text-foreground tracking-tight">
           Finley AI
         </h1>
-        <p className="text-sm text-muted-foreground mt-1">
+        <p className="text-xs text-muted-foreground mt-0.5">
           Intelligent Financial Analyst
         </p>
       </div>
             )}
             {isCollapsed && (
-              <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center">
-                <span className="text-primary-foreground font-bold text-sm">F</span>
+              <div className="w-7 h-7 bg-primary rounded-md flex items-center justify-center">
+                <span className="text-primary-foreground font-bold text-xs">F</span>
               </div>
             )}
             {/* Close button for mobile */}
@@ -288,23 +288,23 @@ export const FinleySidebar = ({ onClose, onNavigate, currentView = 'chat', isCol
               className="lg:hidden"
               onClick={onClose}
             >
-              <X className="h-4 w-4" />
+              <X className="h-3.5 w-3.5" />
             </Button>
                   </div>
                 </div>
                 
       {/* Navigation Items */}
-      <div className={`flex-1 space-y-2 ${isCollapsed ? 'px-2' : 'px-6'}`}>
+      <div className={`flex-1 space-y-1.5 ${isCollapsed ? 'px-1.5' : 'px-4'}`}>
         {/* New Chat */}
         <Tooltip>
           <TooltipTrigger asChild>
             <Button
               variant={currentView === 'chat' ? 'secondary' : 'ghost'}
-              className={`w-full h-12 rounded-2xl ${isCollapsed ? 'justify-center px-0' : 'justify-start px-3'}`}
+              className={`w-full h-9 rounded-lg ${isCollapsed ? 'justify-center px-0' : 'justify-start px-2'}`}
               onClick={handleNewChat}
             >
-              <MessageSquarePlus className="w-5 h-5" />
-              {!isCollapsed && <span className="font-medium ml-3">New Chat</span>}
+              <MessageSquarePlus className="w-4 h-4" />
+              {!isCollapsed && <span className="font-medium text-sm ml-2">New Chat</span>}
             </Button>
           </TooltipTrigger>
           {isCollapsed && <TooltipContent side="right"><p>New Chat</p></TooltipContent>}
@@ -315,11 +315,11 @@ export const FinleySidebar = ({ onClose, onNavigate, currentView = 'chat', isCol
           <TooltipTrigger asChild>
             <Button
               variant={currentView === 'marketplace' ? 'secondary' : 'ghost'}
-              className={`w-full h-12 rounded-2xl ${isCollapsed ? 'justify-center px-0' : 'justify-start px-3'}`}
+              className={`w-full h-9 rounded-lg ${isCollapsed ? 'justify-center px-0' : 'justify-start px-2'}`}
               onClick={handleConnectorMarketplace}
             >
-              <Plug className="w-5 h-5" />
-              {!isCollapsed && <span className="font-medium ml-3">Connector Marketplace</span>}
+              <Plug className="w-4 h-4" />
+              {!isCollapsed && <span className="font-medium text-sm ml-2">Connector Marketplace</span>}
             </Button>
           </TooltipTrigger>
           {isCollapsed && <TooltipContent side="right"><p>Connector Marketplace</p></TooltipContent>}
@@ -330,11 +330,11 @@ export const FinleySidebar = ({ onClose, onNavigate, currentView = 'chat', isCol
           <TooltipTrigger asChild>
             <Button
               variant={currentView === 'upload' ? 'secondary' : 'ghost'}
-              className={`w-full h-12 rounded-2xl ${isCollapsed ? 'justify-center px-0' : 'justify-start px-3'}`}
+              className={`w-full h-9 rounded-lg ${isCollapsed ? 'justify-center px-0' : 'justify-start px-2'}`}
               onClick={handleUploadFile}
             >
-              <Upload className="w-5 h-5" />
-              {!isCollapsed && <span className="font-medium ml-3">Upload File</span>}
+              <Upload className="w-4 h-4" />
+              {!isCollapsed && <span className="font-medium text-sm ml-2">Upload File</span>}
             </Button>
           </TooltipTrigger>
           {isCollapsed && <TooltipContent side="right"><p>Upload File</p></TooltipContent>}
@@ -342,9 +342,9 @@ export const FinleySidebar = ({ onClose, onNavigate, currentView = 'chat', isCol
 
         {/* Chat History Section */}
         {chatHistory.length > 0 && (
-          <div className="mt-8">
+          <div className="mt-4">
             {!isCollapsed && (
-              <h3 className="text-sm font-medium text-muted-foreground mb-3 px-3">
+              <h3 className="text-xs font-medium text-muted-foreground mb-2 px-2">
                 Chat History
               </h3>
             )}
@@ -353,7 +353,7 @@ export const FinleySidebar = ({ onClose, onNavigate, currentView = 'chat', isCol
                 <div key={chat.id} className="group relative">
                   {editingChatId === chat.id ? (
                     // Inline editing mode
-                    <div className="flex items-center space-x-2 p-2">
+                    <div className="flex items-center space-x-2 p-1.5">
                       <Input
                         value={editingTitle}
                         onChange={(e) => setEditingTitle(e.target.value)}
@@ -365,13 +365,13 @@ export const FinleySidebar = ({ onClose, onNavigate, currentView = 'chat', isCol
                           }
                         }}
                         onBlur={handleRenameSave}
-                        className="flex-1 h-8 text-sm"
+                        className="flex-1 h-7 text-xs"
                         autoFocus
                       />
                       <Button
                         size="icon"
                         variant="ghost"
-                        className="h-6 w-6"
+                        className="h-5 w-5"
                         onClick={handleRenameSave}
                       >
                         <Check className="h-3 w-3" />
@@ -379,7 +379,7 @@ export const FinleySidebar = ({ onClose, onNavigate, currentView = 'chat', isCol
                       <Button
                         size="icon"
                         variant="ghost"
-                        className="h-6 w-6"
+                        className="h-5 w-5"
                         onClick={handleRenameCancel}
                       >
                         <XIcon className="h-3 w-3" />
@@ -391,16 +391,16 @@ export const FinleySidebar = ({ onClose, onNavigate, currentView = 'chat', isCol
                       <TooltipTrigger asChild>
                         <Button
                           variant={currentChatId === chat.id ? "secondary" : "ghost"}
-                          className={`w-full h-10 rounded-xl text-left group ${isCollapsed ? 'justify-center px-0' : 'justify-start px-3'}`}
+                          className={`w-full h-8 rounded-lg text-left group ${isCollapsed ? 'justify-center px-0' : 'justify-start px-2'}`}
                           onClick={() => handleChatSelect(chat.id)}
                         >
-                          <MessageSquare className="w-4 h-4 flex-shrink-0" />
+                          <MessageSquare className="w-3.5 h-3.5 flex-shrink-0" />
                           {!isCollapsed && (
                             <div className="flex-1 min-w-0 ml-3">
-                              <div className="text-sm font-medium truncate">
+                              <div className="text-xs font-medium truncate">
                                 {truncateTitle(chat.title)}
                               </div>
-                              <div className="text-xs text-muted-foreground">
+                              <div className="text-[10px] text-muted-foreground">
                                 {chat.timestamp.toLocaleDateString()}
                               </div>
                             </div>

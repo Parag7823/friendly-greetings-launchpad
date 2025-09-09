@@ -135,10 +135,10 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
       case 'upload':
         return (
           <div className="h-full overflow-y-auto">
-            <div className="p-6">
-              <div className="mb-6">
-                <h1 className="text-2xl font-bold text-foreground mb-2">Upload Financial Documents</h1>
-                <p className="text-muted-foreground">Upload your Excel, CSV, or other financial files for AI analysis</p>
+            <div className="p-4">
+              <div className="mb-4">
+                <h1 className="text-xl font-semibold text-foreground mb-1">Upload Financial Documents</h1>
+                <p className="text-sm text-muted-foreground">Upload your Excel, CSV, or other financial files for AI analysis</p>
               </div>
               <EnhancedExcelUpload />
             </div>
@@ -147,22 +147,22 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
       
       case 'marketplace':
         return (
-          <div className="h-full flex items-center justify-center p-8">
+          <div className="h-full flex items-center justify-center p-6">
             <Card className="max-w-md w-full">
               <CardHeader className="text-center">
-                <div className="mx-auto w-12 h-12 bg-primary/10 rounded-full flex items-center justify-center mb-4">
-                  <Plug className="w-6 h-6 text-primary" />
+                <div className="mx-auto w-10 h-10 bg-primary/10 rounded-full flex items-center justify-center mb-3">
+                  <Plug className="w-5 h-5 text-primary" />
                 </div>
-                <CardTitle>Connector Marketplace</CardTitle>
-                <CardDescription>
+                <CardTitle className="text-base">Connector Marketplace</CardTitle>
+                <CardDescription className="text-xs">
                   Connect with your favorite financial platforms and services
                 </CardDescription>
               </CardHeader>
               <CardContent className="text-center">
-                <p className="text-muted-foreground mb-4">
+                <p className="text-xs text-muted-foreground mb-3">
                   Coming Soon! We're working on integrations with popular financial platforms.
                 </p>
-                <div className="space-y-2 text-sm text-muted-foreground">
+                <div className="space-y-1 text-xs text-muted-foreground">
                   <p>• QuickBooks Integration</p>
                   <p>• Stripe Payment Processing</p>
                   <p>• Bank API Connections</p>
@@ -178,34 +178,34 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
   return (
     <div className="finley-chat flex flex-col h-full">
       {/* Chat Messages Area */}
-            <div className="flex-1 overflow-y-auto p-8">
+            <div className="flex-1 overflow-y-auto p-4">
               {messages.length === 0 ? (
                 <div className="h-full flex items-center justify-center">
         <div className="text-center">
-                    <h1 className="text-3xl font-bold text-foreground tracking-tight mb-4">
+                    <h1 className="text-2xl font-semibold text-foreground tracking-tight mb-2">
                       Finance Meets Intelligence
           </h1>
-                    <p className="text-muted-foreground text-lg">
+                    <p className="text-muted-foreground text-base">
                       Ask me anything about your financial data
                     </p>
                   </div>
                 </div>
               ) : (
-                <div className="max-w-3xl mx-auto space-y-4">
+                <div className="max-w-5xl mx-auto space-y-3">
                   {messages.map((msg) => (
                     <div
                       key={msg.id}
                       className={`flex ${msg.isUser ? 'justify-end' : 'justify-start'}`}
                     >
                       <div
-                        className={`max-w-[80%] rounded-2xl px-4 py-3 ${
+                        className={`max-w-[80%] rounded-xl px-3 py-2 ${
                           msg.isUser
                             ? 'bg-primary text-primary-foreground'
                             : 'bg-muted text-foreground'
                         }`}
                       >
-                        <p className="text-sm">{msg.text}</p>
-                        <p className="text-xs opacity-70 mt-1">
+                        <p className="text-xs">{msg.text}</p>
+                        <p className="text-[10px] opacity-70 mt-1">
                           {msg.timestamp.toLocaleTimeString()}
                         </p>
         </div>
@@ -216,8 +216,8 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
       </div>
       
       {/* Chat Input Area - Fixed at bottom */}
-      <div className="border-t border-border p-6 bg-background">
-        <div className="max-w-3xl mx-auto">
+      <div className="border-t border-border p-3 bg-background">
+        <div className="w-full">
           <div className="relative">
             <input
               type="text"
@@ -225,15 +225,15 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
               onChange={(e) => setMessage(e.target.value)}
               onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
                     placeholder="Ask anything about your financial data..."
-                    className="w-full bg-card border border-border rounded-2xl px-4 py-3 pr-12 text-foreground placeholder-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring transition-all duration-200"
+                    className="w-full bg-card border border-border rounded-lg px-3 py-2 pr-10 text-sm text-foreground placeholder-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring transition-all duration-200"
             />
             
             <button
               onClick={handleSendMessage}
               disabled={!message.trim()}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 w-8 h-8 bg-primary text-primary-foreground rounded-xl flex items-center justify-center transition-all duration-200 hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="absolute right-2 top-1/2 -translate-y-1/2 w-7 h-7 bg-primary text-primary-foreground rounded-md flex items-center justify-center transition-all duration-200 hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              <Send className="w-4 h-4" />
+              <Send className="w-3.5 h-3.5" />
             </button>
           </div>
         </div>

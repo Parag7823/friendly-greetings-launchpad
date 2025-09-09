@@ -64,7 +64,7 @@ export const FinleyLayout = () => {
       <Button
         variant="ghost"
         size="icon"
-        className="fixed top-4 left-4 z-50"
+        className="fixed top-3 left-3 z-50"
         onClick={() => {
           if (window.innerWidth < 1024) {
             setIsSidebarOpen(!isSidebarOpen);
@@ -73,7 +73,7 @@ export const FinleyLayout = () => {
           }
         }}
       >
-        <Menu className="h-5 w-5" />
+        <Menu className="h-4 w-4" />
       </Button>
 
       {/* Mobile Overlay */}
@@ -112,7 +112,7 @@ export const FinleyLayout = () => {
       {/* Desktop Sidebar - Collapsible on large screens */}
       <motion.div 
         className="hidden lg:block bg-muted/30 border-r border-border flex-shrink-0"
-        animate={{ width: isSidebarCollapsed ? "80px" : "320px" }}
+        animate={{ width: isSidebarCollapsed ? "72px" : "280px" }}
         transition={{ type: "spring", damping: 20, stiffness: 300 }}
       >
         <FinleySidebar 
