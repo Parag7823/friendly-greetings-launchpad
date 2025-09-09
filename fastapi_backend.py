@@ -2686,13 +2686,12 @@ class ExcelProcessor:
             logger.warning(f"Failed to create processing transaction: {e}")
             transaction_id = None
 
-        try:
-            # Step 1: Read the file
-            await manager.send_update(job_id, {
-                "step": "reading",
-                "message": f"📖 Reading and parsing your {filename}...",
-                "progress": 5
-            })
+        # Step 1: Read the file
+        await manager.send_update(job_id, {
+            "step": "reading",
+            "message": f"📖 Reading and parsing your {filename}...",
+            "progress": 5
+        })
 
         try:
             sheets = await self.read_file(file_content, filename)
@@ -3214,29 +3213,6 @@ class ExcelProcessor:
         })
         
         return insights
-        
-        except Exception as e:
-            # Rollback transaction on error
-            if transaction_id:
-                try:
-                    supabase.table('processing_transactions').update({
-                        'status': 'rolled_back',
-                        'rolled_back_at': datetime.utcnow().isoformat(),
-                        'error_details': str(e)
-                    }).eq('id', transaction_id).execute()
-                    logger.info(f"Rolled back processing transaction: {transaction_id}")
-                except Exception as rollback_error:
-                    logger.error(f"Failed to rollback transaction: {rollback_error}")
-            
-            # Send error update
-            await manager.send_update(job_id, {
-                "step": "error",
-                "message": f"❌ Processing failed: {str(e)}",
-                "progress": 0
-            })
-            
-            # Re-raise the exception
-            raise e
 
     async def _store_normalized_entities(self, entities: List[Dict], user_id: str, transaction_id: str, supabase: Client):
         """Store normalized entities in the database"""
