@@ -32,6 +32,156 @@ import requests
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Custom JSON encoder to handle datetime objects
+class DateTimeEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, datetime):
+            return obj.isoformat()
+        elif isinstance(obj, pd.Timestamp):
+            return obj.isoformat()
+        elif hasattr(obj, 'isoformat'):
+            return obj.isoformat()
+        return super().default(obj)
+
+# Utility function to clean JWT tokens
+def clean_jwt_token(token: str) -> str:
+    """Clean JWT token by removing all whitespace and newline characters"""
+    if not token:
+        return token
+    # Remove all whitespace, newlines, and tabs
+    cleaned = token.strip().replace('\n', '').replace('\r', '').replace(' ', '').replace('\t', '')
+    # Ensure it's a valid JWT format (3 parts separated by dots)
+    parts = cleaned.split('.')
+    if len(parts) == 3:
+        return cleaned
+    else:
+        # If not valid JWT format, return original cleaned version
+        return token.strip().replace('\n', '').replace('\r', '')
+
+def safe_json_parse(json_str, fallback=None):
+    """Safely parse JSON with comprehensive error handling"""
+    if not json_str or not isinstance(json_str, str):
+        return fallback
+    
+    try:
+        # Clean the string first
+        cleaned = json_str.strip()
+        
+        # Try to extract JSON from markdown code blocks
+        if '```json' in cleaned:
+            start = cleaned.find('```json') + 7
+            end = cleaned.find('```', start)
+            if end != -1:
+                cleaned = cleaned[start:end].strip()
+        elif '```' in cleaned:
+            start = cleaned.find('```') + 3
+            end = cleaned.find('```', start)
+            if end != -1:
+                cleaned = cleaned[start:end].strip()
+        
+        # Try to find JSON object/array boundaries
+        if cleaned.startswith('{') or cleaned.startswith('['):
+            # Find matching closing brace/bracket
+            if cleaned.startswith('{'):
+                open_char, close_char = '{', '}'
+            else:
+                open_char, close_char = '[', ']'
+            
+            bracket_count = 0
+            end_pos = 0
+            for i, char in enumerate(cleaned):
+                if char == open_char:
+                    bracket_count += 1
+                elif char == close_char:
+                    bracket_count -= 1
+                    if bracket_count == 0:
+                        end_pos = i + 1
+                        break
+            
+            if end_pos > 0:
+                cleaned = cleaned[:end_pos]
+        
+        return json.loads(cleaned)
+        
+    except json.JSONDecodeError as e:
+        logger.error(f"JSON parsing failed: {e}")
+        logger.error(f"Input string: {json_str[:200]}...")
+        return fallback
+    except Exception as e:
+        logger.error(f"Unexpected error in JSON parsing: {e}")
+        return fallback
+
+# Comprehensive datetime serialization helper
+def serialize_datetime_objects(obj):
+    """Recursively convert datetime objects to ISO format strings"""
+    if isinstance(obj, datetime):
+        return obj.isoformat()
+    elif isinstance(obj, pd.Timestamp):
+        return obj.isoformat()
+    elif hasattr(obj, 'isoformat'):
+        return obj.isoformat()
+    elif isinstance(obj, dict):
+        return {key: serialize_datetime_objects(value) for key, value in obj.items()}
+    elif isinstance(obj, list):
+        return [serialize_datetime_objects(item) for item in obj]
+    elif isinstance(obj, tuple):
+        return tuple(serialize_datetime_objects(item) for item in obj)
+    else:
+        return obj
+
+def safe_json_parse(json_str, fallback=None):
+    """Safely parse JSON with comprehensive error handling"""
+    if not json_str or not isinstance(json_str, str):
+        return fallback
+    
+    try:
+        # Clean the string first
+        cleaned = json_str.strip()
+        
+        # Try to extract JSON from markdown code blocks
+        if '```json' in cleaned:
+            start = cleaned.find('```json') + 7
+            end = cleaned.find('```', start)
+            if end != -1:
+                cleaned = cleaned[start:end].strip()
+        elif '```' in cleaned:
+            start = cleaned.find('```') + 3
+            end = cleaned.find('```', start)
+            if end != -1:
+                cleaned = cleaned[start:end].strip()
+        
+        # Try to find JSON object/array boundaries
+        if cleaned.startswith('{') or cleaned.startswith('['):
+            # Find matching closing brace/bracket
+            if cleaned.startswith('{'):
+                open_char, close_char = '{', '}'
+            else:
+                open_char, close_char = '[', ']'
+            
+            bracket_count = 0
+            end_pos = 0
+            for i, char in enumerate(cleaned):
+                if char == open_char:
+                    bracket_count += 1
+                elif char == close_char:
+                    bracket_count -= 1
+                    if bracket_count == 0:
+                        end_pos = i + 1
+                        break
+            
+            if end_pos > 0:
+                cleaned = cleaned[:end_pos]
+        
+        return json.loads(cleaned)
+        
+    except json.JSONDecodeError as e:
+        logger.error(f"JSON parsing failed: {e}")
+        logger.error(f"Input string: {json_str[:200]}...")
+        return fallback
+    except Exception as e:
+        logger.error(f"Unexpected error in JSON parsing: {e}")
+        return fallback
+
 # Initialize FastAPI app
 app = FastAPI(title="Finley AI Backend", version="1.0.0")
 
@@ -1879,7 +2029,7 @@ class PlatformDetector:
                 confidence += 0.2
             
             # 4. Data content analysis (15% weight)
-            sample_data = df.head(3).astype(str).values.flatten()
+            sample_data = df.head(3).astype(str).values.flatten()ten()ten()
             sample_text = ' '.join(sample_data).lower()
             
             for pattern in patterns.get('data_patterns', []):
@@ -2997,6 +3147,10 @@ class ExcelProcessor:
                             
                             # Store event in raw_events table with enrichment fields
                             enriched_payload = event['payload']  # This is now the enriched payload
+                            
+                            # Clean the enriched payload to ensure all datetime objects are converted
+                            cleaned_enriched_payload = serialize_datetime_objects(enriched_payload)
+                            
                             event_result = supabase.table('raw_events').insert({
                                 'user_id': user_id,
                                 'file_id': file_id,
@@ -3006,7 +3160,7 @@ class ExcelProcessor:
                                 'source_platform': event['source_platform'],
                                 'category': event['classification_metadata'].get('category'),
                                 'subcategory': event['classification_metadata'].get('subcategory'),
-                                'payload': event['payload'],
+                                'payload': cleaned_enriched_payload,  # Use cleaned payload
                                 'row_index': event['row_index'],
                                 'sheet_name': event['sheet_name'],
                                 'source_filename': event['source_filename'],
@@ -3018,18 +3172,18 @@ class ExcelProcessor:
                                 'entities': event['classification_metadata'].get('entities', {}),
                                 'relationships': event['classification_metadata'].get('relationships', {}),
                                 # Enrichment fields
-                                'amount_original': enriched_payload.get('amount_original'),
-                                'amount_usd': enriched_payload.get('amount_usd'),
-                                'currency': enriched_payload.get('currency'),
-                                'exchange_rate': enriched_payload.get('exchange_rate'),
-                                'exchange_date': enriched_payload.get('exchange_date'),
-                                'vendor_raw': enriched_payload.get('vendor_raw'),
-                                'vendor_standard': enriched_payload.get('vendor_standard'),
-                                'vendor_confidence': enriched_payload.get('vendor_confidence'),
-                                'vendor_cleaning_method': enriched_payload.get('vendor_cleaning_method'),
-                                'platform_ids': enriched_payload.get('platform_ids', {}),
-                                'standard_description': enriched_payload.get('standard_description'),
-                                'ingested_on': enriched_payload.get('ingested_on')
+                                'amount_original': cleaned_enriched_payload.get('amount_original'),
+                                'amount_usd': cleaned_enriched_payload.get('amount_usd'),
+                                'currency': cleaned_enriched_payload.get('currency'),
+                                'exchange_rate': cleaned_enriched_payload.get('exchange_rate'),
+                                'exchange_date': cleaned_enriched_payload.get('exchange_date'),
+                                'vendor_raw': cleaned_enriched_payload.get('vendor_raw'),
+                                'vendor_standard': cleaned_enriched_payload.get('vendor_standard'),
+                                'vendor_confidence': cleaned_enriched_payload.get('vendor_confidence'),
+                                'vendor_cleaning_method': cleaned_enriched_payload.get('vendor_cleaning_method'),
+                                'platform_ids': cleaned_enriched_payload.get('platform_ids', {}),
+                                'standard_description': cleaned_enriched_payload.get('standard_description'),
+                                'ingested_on': cleaned_enriched_payload.get('ingested_on')
                             }).execute()
                             
                             if event_result.data:
@@ -3954,13 +4108,23 @@ class UniversalPlatformDetector:
             result_text = result_text.strip()
             
             # Parse JSON response with better error handling
-            import json
-            try:
-                result = json.loads(result_text)
-            except json.JSONDecodeError as e:
-                logger.error(f"AI platform detection JSON parsing failed: {e}")
+            result = safe_json_parse(result_text, {
+                'platform': 'unknown',
+                'confidence': 0.0,
+                'indicators': [],
+                'reasoning': 'JSON parsing failed, using fallback'
+            })
+            
+            if not result:
+                logger.error(f"AI platform detection JSON parsing failed")
                 logger.error(f"Raw AI response: {result_text}")
-                return None
+                return {
+                    'platform': 'unknown',
+                    'confidence': 0.0,
+                    'detection_method': 'ai_fallback',
+                    'indicators': [],
+                    'reasoning': 'JSON parsing failed, using fallback'
+                }
             
             return {
                 'platform': result.get('platform', 'unknown'),
@@ -3987,9 +4151,15 @@ class UniversalPlatformDetector:
             # Add all string values (handle DataFrame case)
             if hasattr(payload, 'values'):
                 # DataFrame case
-                for value in payload.values.flat:
-                    if isinstance(value, str):
-                        text_parts.append(value.lower())
+                try:
+                    for value in payload.values.flatten()ten()ten():
+                        if isinstance(value, str):
+                            text_parts.append(value.lower())
+                except AttributeError:
+                    # Fallback for non-numpy arrays
+                    for value in payload.values.ravel():
+                        if isinstance(value, str):
+                            text_parts.append(value.lower())
             else:
                 # Dict case
                 for value in payload.values():
@@ -4196,9 +4366,15 @@ class UniversalDocumentClassifier:
             # Add all string values (handle DataFrame case)
             if hasattr(payload, 'values'):
                 # DataFrame case
-                for value in payload.values.flat:
-                    if isinstance(value, str):
-                        text_parts.append(value.lower())
+                try:
+                    for value in payload.values.flatten()ten()ten():
+                        if isinstance(value, str):
+                            text_parts.append(value.lower())
+                except AttributeError:
+                    # Fallback for non-numpy arrays
+                    for value in payload.values.ravel():
+                        if isinstance(value, str):
+                            text_parts.append(value.lower())
             else:
                 # Dict case
                 for value in payload.values():
@@ -4488,11 +4664,11 @@ async def test_raw_events(user_id: str):
         supabase_url = os.environ.get("SUPABASE_URL")
         supabase_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
         if supabase_key:
-            supabase_key = supabase_key.strip().replace('\n', '').replace('\r', '')
+            supabase_key = clean_jwt_token(supabase_key)
         
         # Clean the JWT token (remove newlines and whitespace)
         if supabase_key:
-            supabase_key = supabase_key.strip().replace('\n', '').replace('\r', '')
+            supabase_key = clean_jwt_token(supabase_key)
         
         if not supabase_url or not supabase_key:
             return {"error": "Supabase credentials not configured"}
@@ -4526,7 +4702,7 @@ async def health_check():
         supabase_url = os.environ.get("SUPABASE_URL")
         supabase_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
         if supabase_key:
-            supabase_key = supabase_key.strip().replace('\n', '').replace('\r', '')
+            supabase_key = clean_jwt_token(supabase_key)
         
         status = "healthy"
         issues = []
@@ -4577,11 +4753,11 @@ async def upload_and_process(
         supabase_url = os.environ.get("SUPABASE_URL")
         supabase_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
         if supabase_key:
-            supabase_key = supabase_key.strip().replace('\n', '').replace('\r', '')
+            supabase_key = clean_jwt_token(supabase_key)
 
         # Clean the JWT token (remove newlines and whitespace)
         if supabase_key:
-            supabase_key = supabase_key.strip().replace('\n', '').replace('\r', '')
+            supabase_key = clean_jwt_token(supabase_key)
 
         if not supabase_url or not supabase_key:
             raise HTTPException(status_code=500, detail="Supabase credentials not configured")
@@ -4629,10 +4805,10 @@ async def handle_duplicate_decision(request: DuplicateDecisionRequest):
         supabase_url = os.environ.get("SUPABASE_URL")
         supabase_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
         if supabase_key:
-            supabase_key = supabase_key.strip().replace('\n', '').replace('\r', '')
+            supabase_key = clean_jwt_token(supabase_key)
 
         if supabase_key:
-            supabase_key = supabase_key.strip().replace('\n', '').replace('\r', '')
+            supabase_key = clean_jwt_token(supabase_key)
 
         if not supabase_url or not supabase_key:
             raise HTTPException(status_code=500, detail="Supabase credentials not configured")
@@ -4687,10 +4863,10 @@ async def submit_version_recommendation_feedback(request: VersionRecommendationF
         supabase_url = os.environ.get("SUPABASE_URL")
         supabase_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
         if supabase_key:
-            supabase_key = supabase_key.strip().replace('\n', '').replace('\r', '')
+            supabase_key = clean_jwt_token(supabase_key)
 
         if supabase_key:
-            supabase_key = supabase_key.strip().replace('\n', '').replace('\r', '')
+            supabase_key = clean_jwt_token(supabase_key)
 
         if not supabase_url or not supabase_key:
             raise HTTPException(status_code=500, detail="Supabase credentials not configured")
@@ -4725,10 +4901,10 @@ async def get_duplicate_analysis(user_id: str):
         supabase_url = os.environ.get("SUPABASE_URL")
         supabase_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
         if supabase_key:
-            supabase_key = supabase_key.strip().replace('\n', '').replace('\r', '')
+            supabase_key = clean_jwt_token(supabase_key)
 
         if supabase_key:
-            supabase_key = supabase_key.strip().replace('\n', '').replace('\r', '')
+            supabase_key = clean_jwt_token(supabase_key)
 
         if not supabase_url or not supabase_key:
             raise HTTPException(status_code=500, detail="Supabase credentials not configured")
@@ -5278,7 +5454,7 @@ async def test_entity_resolution():
         supabase_key = supabase_key.strip()
         
         if supabase_key:
-            supabase_key = supabase_key.strip().replace('\n', '').replace('\r', '')
+            supabase_key = clean_jwt_token(supabase_key)
         supabase = create_client(supabase_url, supabase_key)
         
         # Initialize EntityResolver
@@ -5413,7 +5589,7 @@ async def test_entity_search(user_id: str, search_term: str = "Abhishek", entity
             }
         
         # Clean the JWT token (remove newlines and whitespace)
-        supabase_key = supabase_key.strip().replace('\n', '').replace('\r', '')
+        supabase_key = clean_jwt_token(supabase_key)
         
         supabase = create_client(supabase_url, supabase_key)
         
@@ -5473,7 +5649,7 @@ async def test_entity_stats(user_id: str):
             }
         
         # Clean the JWT token (remove newlines and whitespace)
-        supabase_key = supabase_key.strip().replace('\n', '').replace('\r', '')
+        supabase_key = clean_jwt_token(supabase_key)
         
         supabase = create_client(supabase_url, supabase_key)
         
@@ -5509,7 +5685,7 @@ async def test_cross_file_relationships(user_id: str):
 
         # Clean the JWT token (remove newlines and whitespace)
         if supabase_key:
-            supabase_key = supabase_key.strip().replace('\n', '').replace('\r', '')
+            supabase_key = clean_jwt_token(supabase_key)
 
         supabase = create_client(supabase_url, supabase_key)
 
@@ -5549,7 +5725,7 @@ async def test_enhanced_relationship_detection(user_id: str):
 
         # Clean the JWT token (remove newlines and whitespace)
         if supabase_key:
-            supabase_key = supabase_key.strip().replace('\n', '').replace('\r', '')
+            supabase_key = clean_jwt_token(supabase_key)
 
         supabase = create_client(supabase_url, supabase_key)
 
@@ -5587,7 +5763,7 @@ async def debug_cross_file_data(user_id: str):
 
         # Clean the JWT token (remove newlines and whitespace)
         if supabase_key:
-            supabase_key = supabase_key.strip().replace('\n', '').replace('\r', '')
+            supabase_key = clean_jwt_token(supabase_key)
 
         supabase = create_client(supabase_url, supabase_key)
 
