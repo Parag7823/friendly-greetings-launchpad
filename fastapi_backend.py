@@ -2746,17 +2746,17 @@ class ExcelProcessor:
         })
 
         try:
-            duplicate_analysis = await duplicate_service.process_file_upload(
-                user_id, file_content, filename, sheets
+            duplicate_analysis = await duplicate_service.check_exact_duplicate(
+                user_id, hashlib.sha256(file_content).hexdigest(), filename
             )
 
             # Handle different duplicate detection phases
-            if duplicate_analysis['phase'] == 'basic_duplicate_detected':
+            if duplicate_analysis.get('is_duplicate', False):
                 await manager.send_update(job_id, {
                     "step": "duplicate_found",
                     "message": "⚠️ Identical file detected! User decision required.",
                     "progress": 20,
-                    "duplicate_info": duplicate_analysis['duplicate_info'],
+                    "duplicate_info": duplicate_analysis,
                     "requires_user_decision": True
                 })
 
@@ -2768,7 +2768,7 @@ class ExcelProcessor:
                     "requires_user_decision": True
                 }
 
-            elif duplicate_analysis['phase'] == 'versions_detected':
+            elif False:  # Skip version detection for now
                 await manager.send_update(job_id, {
                     "step": "versions_found",
                     "message": f"📋 Found {len(duplicate_analysis['similar_files'])} similar files - analyzing versions...",
@@ -2802,7 +2802,7 @@ class ExcelProcessor:
                         "requires_user_decision": True
                     }
 
-            elif duplicate_analysis['phase'] == 'similar_files_found':
+            elif False:  # Skip similar files for now
                 await manager.send_update(job_id, {
                     "step": "similar_files",
                     "message": f"📄 Found {len(duplicate_analysis['similar_files'])} similar files",
@@ -2876,18 +2876,17 @@ class ExcelProcessor:
         # Calculate file hash for duplicate detection
         file_hash = hashlib.sha256(file_content).hexdigest()
 
-        # Store in raw_records with dedicated file_hash column
+        # Store in raw_records (avoid non-existent columns)
         raw_record_result = supabase.table('raw_records').insert({
             'user_id': user_id,
             'file_name': filename,
             'file_size': len(file_content),
-            'file_hash': file_hash,  # Dedicated column for fast duplicate detection
             'source': 'file_upload',
             'content': {
                 'sheets': list(sheets.keys()),
                 'platform_detection': platform_info,
                 'document_analysis': doc_analysis,
-                'file_hash': file_hash,  # Also keep in content for backward compatibility
+                'file_hash': file_hash,
                 'total_rows': sum(len(sheet) for sheet in sheets.values()),
                 'processed_at': datetime.utcnow().isoformat(),
                 'duplicate_analysis': duplicate_analysis  # Store duplicate analysis results
@@ -3920,7 +3919,7 @@ class UniversalPlatformDetector:
             }}
             """
             
-            response = await self.openai_client.chat.completions.create(
+            response = self.openai_client.chat.completions.create(
                 model="gpt-4o-mini",
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.1,
@@ -3955,10 +3954,17 @@ class UniversalPlatformDetector:
             if filename:
                 text_parts.append(filename.lower())
             
-            # Add all string values
-            for value in payload.values():
-                if isinstance(value, str):
-                    text_parts.append(value.lower())
+            # Add all string values (handle DataFrame case)
+            if hasattr(payload, 'values'):
+                # DataFrame case
+                for value in payload.values.flat:
+                    if isinstance(value, str):
+                        text_parts.append(value.lower())
+            else:
+                # Dict case
+                for value in payload.values():
+                    if isinstance(value, str):
+                        text_parts.append(value.lower())
             
             combined_text = " ".join(text_parts)
             
@@ -4110,7 +4116,7 @@ class UniversalDocumentClassifier:
             }}
             """
             
-            response = await self.openai_client.chat.completions.create(
+            response = self.openai_client.chat.completions.create(
                 model="gpt-4o-mini",
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.1,
@@ -4145,10 +4151,17 @@ class UniversalDocumentClassifier:
             if filename:
                 text_parts.append(filename.lower())
             
-            # Add all string values
-            for value in payload.values():
-                if isinstance(value, str):
-                    text_parts.append(value.lower())
+            # Add all string values (handle DataFrame case)
+            if hasattr(payload, 'values'):
+                # DataFrame case
+                for value in payload.values.flat:
+                    if isinstance(value, str):
+                        text_parts.append(value.lower())
+            else:
+                # Dict case
+                for value in payload.values():
+                    if isinstance(value, str):
+                        text_parts.append(value.lower())
             
             combined_text = " ".join(text_parts)
             
@@ -5202,7 +5215,7 @@ async def test_entity_resolution():
     try:
         # Create test Supabase client
         supabase_url = os.getenv('SUPABASE_URL')
-        supabase_key = os.getenv('SUPABASE_SERVICE_KEY')
+        supabase_key = os.getenv('SUPABASE_SERVICE_ROLE_KEY') or os.getenv('SUPABASE_SERVICE_KEY')
         
         if not supabase_url or not supabase_key:
             raise Exception("SUPABASE_URL and SUPABASE_SERVICE_KEY environment variables are required")
@@ -5210,6 +5223,8 @@ async def test_entity_resolution():
         # Clean the key by removing any whitespace or newlines
         supabase_key = supabase_key.strip()
         
+        if supabase_key:
+            supabase_key = supabase_key.strip().replace('\n', '').replace('\r', '')
         supabase = create_client(supabase_url, supabase_key)
         
         # Initialize EntityResolver
