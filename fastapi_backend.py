@@ -104,12 +104,18 @@ class DuplicateDetectionService:
     async def check_exact_duplicate(self, user_id: str, file_hash: str, filename: str) -> Dict[str, Any]:
         """Check if an identical file (by hash) already exists for this user"""
         try:
-            # Query for existing files with same hash
+            # Query for existing files with same hash (stored in content JSONB)
             result = self.supabase.table('raw_records').select(
                 'id, file_name, created_at, status, content'
-            ).eq('user_id', user_id).eq('file_hash', file_hash).execute()
+            ).eq('user_id', user_id).execute()
             
-            if not result.data:
+            # Filter by file_hash in content JSONB
+            matching_files = []
+            for record in result.data:
+                if record.get('content', {}).get('file_hash') == file_hash:
+                    matching_files.append(record)
+            
+            if not matching_files:
                 return {
                     'is_duplicate': False,
                     'duplicate_files': [],
@@ -117,7 +123,7 @@ class DuplicateDetectionService:
                 }
             
             duplicate_files = []
-            for record in result.data:
+            for record in matching_files:
                 duplicate_files.append({
                     'id': record['id'],
                     'filename': record['file_name'],
@@ -154,11 +160,22 @@ class DuplicateDetectionService:
         """Handle user's decision about duplicate file"""
         try:
             if decision == 'replace':
-                # Mark old files as replaced
-                self.supabase.table('raw_records').update({
-                    'status': 'replaced',
-                    'updated_at': datetime.utcnow().isoformat()
-                }).eq('user_id', user_id).eq('file_hash', file_hash).execute()
+                # Mark old files as replaced (file_hash is in content JSONB)
+                # First get all records for this user
+                all_records = self.supabase.table('raw_records').select('id, content').eq('user_id', user_id).execute()
+                
+                # Find records with matching file_hash in content
+                records_to_update = []
+                for record in all_records.data:
+                    if record.get('content', {}).get('file_hash') == file_hash:
+                        records_to_update.append(record['id'])
+                
+                # Update matching records
+                if records_to_update:
+                    self.supabase.table('raw_records').update({
+                        'status': 'replaced',
+                        'updated_at': datetime.utcnow().isoformat()
+                    }).in_('id', records_to_update).execute()
                 
                 return {'status': 'replaced_old_files', 'action': 'proceed_with_new'}
                 
@@ -2479,9 +2496,10 @@ class BatchAIRowClassifier:
 class RowProcessor:
     """Processes individual rows and creates events"""
     
-    def __init__(self, platform_detector: PlatformDetector, ai_classifier):
+    def __init__(self, platform_detector: PlatformDetector, ai_classifier, enrichment_processor):
         self.platform_detector = platform_detector
         self.ai_classifier = ai_classifier
+        self.enrichment_processor = enrichment_processor
     
     async def process_row(self, row: pd.Series, row_index: int, sheet_name: str, 
                    platform_info: Dict, file_context: Dict, column_names: List[str]) -> Dict[str, Any]:
@@ -2864,7 +2882,7 @@ class ExcelProcessor:
         # Initialize EntityResolver and AI classifier with Supabase client
         self.entity_resolver = EntityResolver(supabase)
         self.ai_classifier = AIRowClassifier(self.openai, self.entity_resolver)
-        self.row_processor = RowProcessor(self.platform_detector, self.ai_classifier)
+        self.row_processor = RowProcessor(self.platform_detector, self.ai_classifier, self.enrichment_processor)
         
         # Step 3: Create raw_records entry
         await manager.send_update(job_id, {
@@ -3928,9 +3946,21 @@ class UniversalPlatformDetector:
             
             result_text = response.choices[0].message.content.strip()
             
-            # Parse JSON response
+            # Clean up the response text
+            if result_text.startswith('```json'):
+                result_text = result_text[7:]
+            if result_text.endswith('```'):
+                result_text = result_text[:-3]
+            result_text = result_text.strip()
+            
+            # Parse JSON response with better error handling
             import json
-            result = json.loads(result_text)
+            try:
+                result = json.loads(result_text)
+            except json.JSONDecodeError as e:
+                logger.error(f"AI platform detection JSON parsing failed: {e}")
+                logger.error(f"Raw AI response: {result_text}")
+                return None
             
             return {
                 'platform': result.get('platform', 'unknown'),
@@ -4125,9 +4155,21 @@ class UniversalDocumentClassifier:
             
             result_text = response.choices[0].message.content.strip()
             
-            # Parse JSON response
+            # Clean up the response text
+            if result_text.startswith('```json'):
+                result_text = result_text[7:]
+            if result_text.endswith('```'):
+                result_text = result_text[:-3]
+            result_text = result_text.strip()
+            
+            # Parse JSON response with better error handling
             import json
-            result = json.loads(result_text)
+            try:
+                result = json.loads(result_text)
+            except json.JSONDecodeError as e:
+                logger.error(f"AI document classification JSON parsing failed: {e}")
+                logger.error(f"Raw AI response: {result_text}")
+                return None
             
             return {
                 'document_type': result.get('document_type', 'unknown'),
