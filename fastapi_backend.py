@@ -1269,8 +1269,6 @@ class ProcessRequest(BaseModel):
     job_id: str
     storage_path: str
     file_name: str
-    supabase_url: str
-    supabase_key: str
     user_id: str
 
 class DocumentAnalyzer:
@@ -4317,8 +4315,17 @@ async def process_excel(request: ProcessRequest, background_tasks: BackgroundTas
     """Process uploaded Excel file with row-by-row streaming"""
     
     try:
-        # Initialize Supabase client
-        supabase: Client = create_client(request.supabase_url, request.supabase_key)
+        # Initialize Supabase client from environment (do not require client to send secrets)
+        env_url = os.environ.get("SUPABASE_URL")
+        env_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY") or os.environ.get("SUPABASE_SERVICE_KEY")
+        if not env_url or not env_key:
+            logger.error("Missing Supabase credentials in environment")
+            raise HTTPException(status_code=500, detail="Server misconfiguration: SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY not set")
+
+        # Clean possible newlines/whitespace in service key
+        env_key = env_key.strip().replace('\n', '').replace('\r', '')
+
+        supabase: Client = create_client(env_url, env_key)
         
         # Send initial update
         await manager.send_update(request.job_id, {
