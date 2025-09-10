@@ -4487,6 +4487,8 @@ async def test_raw_events(user_id: str):
         # Initialize Supabase client (you'll need to provide credentials)
         supabase_url = os.environ.get("SUPABASE_URL")
         supabase_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
+        if supabase_key:
+            supabase_key = supabase_key.strip().replace('\n', '').replace('\r', '')
         
         # Clean the JWT token (remove newlines and whitespace)
         if supabase_key:
@@ -4523,6 +4525,8 @@ async def health_check():
         openai_key = os.environ.get("OPENAI_API_KEY")
         supabase_url = os.environ.get("SUPABASE_URL")
         supabase_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
+        if supabase_key:
+            supabase_key = supabase_key.strip().replace('\n', '').replace('\r', '')
         
         status = "healthy"
         issues = []
@@ -4572,6 +4576,8 @@ async def upload_and_process(
         # Initialize Supabase client
         supabase_url = os.environ.get("SUPABASE_URL")
         supabase_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
+        if supabase_key:
+            supabase_key = supabase_key.strip().replace('\n', '').replace('\r', '')
 
         # Clean the JWT token (remove newlines and whitespace)
         if supabase_key:
@@ -4622,6 +4628,8 @@ async def handle_duplicate_decision(request: DuplicateDecisionRequest):
         # Initialize Supabase client
         supabase_url = os.environ.get("SUPABASE_URL")
         supabase_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
+        if supabase_key:
+            supabase_key = supabase_key.strip().replace('\n', '').replace('\r', '')
 
         if supabase_key:
             supabase_key = supabase_key.strip().replace('\n', '').replace('\r', '')
@@ -4678,6 +4686,8 @@ async def submit_version_recommendation_feedback(request: VersionRecommendationF
         # Initialize Supabase client
         supabase_url = os.environ.get("SUPABASE_URL")
         supabase_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
+        if supabase_key:
+            supabase_key = supabase_key.strip().replace('\n', '').replace('\r', '')
 
         if supabase_key:
             supabase_key = supabase_key.strip().replace('\n', '').replace('\r', '')
@@ -4714,6 +4724,8 @@ async def get_duplicate_analysis(user_id: str):
         # Initialize Supabase client
         supabase_url = os.environ.get("SUPABASE_URL")
         supabase_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
+        if supabase_key:
+            supabase_key = supabase_key.strip().replace('\n', '').replace('\r', '')
 
         if supabase_key:
             supabase_key = supabase_key.strip().replace('\n', '').replace('\r', '')
