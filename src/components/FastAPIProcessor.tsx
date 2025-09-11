@@ -73,7 +73,7 @@ export class FastAPIProcessor {
       timeoutId = setTimeout(() => {
         ws.close();
         reject(new Error('WebSocket connection timeout'));
-      }, 30000); // 30 second timeout
+      }, 10000); // 10 second timeout
 
       ws.onopen = () => {
         console.log('WebSocket connected for job:', jobId);
@@ -110,7 +110,7 @@ export class FastAPIProcessor {
       ws.onerror = (error) => {
         console.error('WebSocket error:', error);
         clearTimeout(timeoutId);
-        reject(new Error('WebSocket connection failed'));
+        reject(new Error('WebSocket connection failed - will use polling fallback'));
       };
 
       ws.onclose = (event) => {
@@ -121,6 +121,47 @@ export class FastAPIProcessor {
         }
       };
     });
+  }
+
+  private async pollForResults(jobId: string, initialResponse: any): Promise<any> {
+    const maxAttempts = 30; // 5 minutes max (10 seconds * 30)
+    let attempts = 0;
+    
+    while (attempts < maxAttempts) {
+      try {
+        // Check job status
+        const statusResponse = await fetch(`${this.apiUrl}/job-status/${jobId}`);
+        if (statusResponse.ok) {
+          const statusData = await statusResponse.json();
+          
+          if (statusData.status === 'completed') {
+            this.updateProgress('complete', 'Processing completed!', 100);
+            return statusData.result || statusData;
+          } else if (statusData.status === 'failed') {
+            throw new Error(statusData.error || 'Processing failed');
+          } else if (statusData.status === 'cancelled') {
+            throw new Error('Processing was cancelled');
+          }
+          
+          // Update progress if available
+          if (statusData.progress !== undefined) {
+            this.updateProgress('processing', statusData.message || 'Processing...', statusData.progress);
+          }
+        }
+        
+        // Wait 10 seconds before next poll
+        await new Promise(resolve => setTimeout(resolve, 10000));
+        attempts++;
+        
+      } catch (error) {
+        console.error('Polling error:', error);
+        attempts++;
+        await new Promise(resolve => setTimeout(resolve, 5000)); // Wait 5 seconds on error
+      }
+    }
+    
+    // If we get here, polling timed out
+    throw new Error('Processing timeout - please try again');
   }
 
   async processFile(
@@ -213,13 +254,20 @@ export class FastAPIProcessor {
         
         let backendResult: any;
         try {
-          backendResult = await this.setupWebSocketConnection(jobData.id);
+          // Try WebSocket connection with shorter timeout
+          backendResult = await Promise.race([
+            this.setupWebSocketConnection(jobData.id),
+            new Promise((_, reject) => 
+              setTimeout(() => reject(new Error('WebSocket timeout')), 10000) // 10 second timeout
+            )
+          ]);
           console.log('WebSocket processing completed:', backendResult);
         } catch (websocketError) {
-          console.log('WebSocket connection failed, falling back to initial response:', websocketError);
+          console.log('WebSocket connection failed, using polling fallback:', websocketError);
           
-          // Fallback: Get result directly from initial response
-          backendResult = initialResponse;
+          // Fallback: Poll for results instead of WebSocket
+          this.updateProgress('polling', 'Using polling fallback for updates...', 40);
+          backendResult = await this.pollForResults(jobData.id, initialResponse);
         }
         
         // Parse backend results into our format

@@ -4728,6 +4728,47 @@ async def cancel_upload(job_id: str, request: Request):
         logger.error(f"Error cancelling job {job_id}: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to cancel job: {str(e)}")
 
+@app.get("/job-status/{job_id}")
+async def get_job_status(job_id: str):
+    """Get the status of a processing job"""
+    try:
+        # Get Supabase client
+        supabase_url = os.getenv('SUPABASE_URL')
+        supabase_key = os.getenv('SUPABASE_SERVICE_KEY')
+        
+        if not supabase_url or not supabase_key:
+            raise HTTPException(status_code=500, detail="Server misconfiguration: SUPABASE_URL or SUPABASE_SERVICE_KEY not set")
+        
+        # Clean the JWT token (remove newlines and whitespace)
+        if supabase_key:
+            supabase_key = clean_jwt_token(supabase_key)
+        
+        supabase = create_client(supabase_url, supabase_key)
+        
+        # Get job status
+        job_result = supabase.table('ingestion_jobs').select('*').eq('id', job_id).execute()
+        
+        if not job_result.data:
+            raise HTTPException(status_code=404, detail="Job not found")
+        
+        job = job_result.data[0]
+        
+        return {
+            "job_id": job_id,
+            "status": job['status'],
+            "progress": job.get('progress', 0),
+            "message": job.get('error_message', 'Processing...'),
+            "result": job.get('result'),
+            "created_at": job.get('created_at'),
+            "updated_at": job.get('updated_at')
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting job status for {job_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get job status: {str(e)}")
+
 # Root endpoint removed - static files will be served at root
 
 @app.get("/health")
