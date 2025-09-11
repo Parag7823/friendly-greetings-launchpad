@@ -71,9 +71,21 @@ def clean_jwt_token(token: str) -> str:
         # If not valid JWT format, return original cleaned version
         return token.strip().replace('\n', '').replace('\r', '')
 
-# Utility function for OpenAI calls with quota handling
-async def safe_openai_call(client, model: str, messages: list, temperature: float = 0.1, max_tokens: int = 200, fallback_result: dict = None):
-    """Make OpenAI API call with quota error handling"""
+# =============================================================================
+# AI PROVIDER UTILITY FUNCTIONS
+# =============================================================================
+# This section provides a unified interface for multiple AI providers with
+# automatic fallback logic. Currently supports OpenAI and Claude.
+# 
+# To add more providers (e.g., Gemini):
+# 1. Add provider-specific function (e.g., try_gemini_request)
+# 2. Add provider to the fallback chain in unified_ai_call
+# 3. Add environment variable handling
+# 4. Update requirements.txt with new library
+# =============================================================================
+
+async def try_openai_request(client, model: str, messages: list, temperature: float = 0.1, max_tokens: int = 200):
+    """Make OpenAI API call with error handling"""
     try:
         response = client.chat.completions.create(
             model=model,
@@ -81,23 +93,162 @@ async def safe_openai_call(client, model: str, messages: list, temperature: floa
             temperature=temperature,
             max_tokens=max_tokens
         )
-        return response.choices[0].message.content.strip()
+        return {
+            'success': True,
+            'content': response.choices[0].message.content.strip(),
+            'provider': 'openai',
+            'model': model
+        }
     except Exception as e:
-        if "429" in str(e) or "quota" in str(e).lower() or "insufficient_quota" in str(e).lower():
-            logger.warning(f"OpenAI quota exceeded, using fallback: {e}")
-            if fallback_result:
-                return fallback_result
-            else:
-                return {
-                    'platform': 'unknown',
-                    'confidence': 0.0,
-                    'detection_method': 'fallback_due_to_quota',
-                    'indicators': [],
-                    'reasoning': 'AI processing unavailable due to quota limits'
-                }
+        error_msg = str(e).lower()
+        if any(keyword in error_msg for keyword in ['429', 'quota', 'insufficient_quota', 'rate_limit']):
+            logger.warning(f"OpenAI quota/rate limit exceeded: {e}")
+            return {
+                'success': False,
+                'error': 'quota_exceeded',
+                'message': str(e),
+                'provider': 'openai'
+            }
         else:
             logger.error(f"OpenAI API error: {e}")
-            raise e
+            return {
+                'success': False,
+                'error': 'api_error',
+                'message': str(e),
+                'provider': 'openai'
+            }
+
+async def try_claude_request(client, model: str, messages: list, temperature: float = 0.1, max_tokens: int = 200):
+    """Make Claude API call with error handling"""
+    try:
+        # Convert OpenAI format to Claude format
+        claude_messages = []
+        for msg in messages:
+            if msg['role'] == 'user':
+                claude_messages.append({"role": "user", "content": msg['content']})
+            elif msg['role'] == 'assistant':
+                claude_messages.append({"role": "assistant", "content": msg['content']})
+        
+        response = client.messages.create(
+            model=model,
+            messages=claude_messages,
+            temperature=temperature,
+            max_tokens=max_tokens
+        )
+        
+        return {
+            'success': True,
+            'content': response.content[0].text.strip(),
+            'provider': 'claude',
+            'model': model
+        }
+    except Exception as e:
+        error_msg = str(e).lower()
+        if any(keyword in error_msg for keyword in ['429', 'quota', 'insufficient_quota', 'rate_limit']):
+            logger.warning(f"Claude quota/rate limit exceeded: {e}")
+            return {
+                'success': False,
+                'error': 'quota_exceeded',
+                'message': str(e),
+                'provider': 'claude'
+            }
+        else:
+            logger.error(f"Claude API error: {e}")
+            return {
+                'success': False,
+                'error': 'api_error',
+                'message': str(e),
+                'provider': 'claude'
+            }
+
+async def unified_ai_call(openai_client, claude_client, model_preference: str = "openai", 
+                         messages: list = None, temperature: float = 0.1, max_tokens: int = 200,
+                         fallback_result: dict = None):
+    """
+    Unified AI call with automatic fallback between providers
+    
+    Args:
+        openai_client: OpenAI client instance
+        claude_client: Claude client instance  
+        model_preference: "openai" or "claude" (primary choice)
+        messages: List of message dictionaries
+        temperature: Temperature for generation
+        max_tokens: Maximum tokens to generate
+        fallback_result: Fallback result if all providers fail
+    
+    Returns:
+        dict: Response with content and metadata
+    """
+    if not messages:
+        raise ValueError("Messages cannot be empty")
+    
+    # Determine model names based on preference
+    if model_preference.lower() == "openai":
+        primary_model = "gpt-4o-mini"
+        fallback_model = "claude-3-opus-20240229"  # Claude's best reasoning model
+        primary_provider = "openai"
+        fallback_provider = "claude"
+    else:
+        primary_model = "claude-3-opus-20240229"
+        fallback_model = "gpt-4o-mini"
+        primary_provider = "claude"
+        fallback_provider = "openai"
+    
+    # Try primary provider first
+    if primary_provider == "openai":
+        result = await try_openai_request(openai_client, primary_model, messages, temperature, max_tokens)
+    else:
+        result = await try_claude_request(claude_client, primary_model, messages, temperature, max_tokens)
+    
+    if result['success']:
+        logger.info(f"AI request successful using {result['provider']} ({result['model']})")
+        return result['content']
+    
+    # Primary provider failed, try fallback
+    logger.warning(f"Primary provider ({primary_provider}) failed: {result['message']}")
+    logger.info(f"Attempting fallback to {fallback_provider}...")
+    
+    if fallback_provider == "openai":
+        fallback_result = await try_openai_request(openai_client, fallback_model, messages, temperature, max_tokens)
+    else:
+        fallback_result = await try_claude_request(claude_client, fallback_model, messages, temperature, max_tokens)
+    
+    if fallback_result['success']:
+        logger.info(f"Fallback successful using {fallback_result['provider']} ({fallback_result['model']})")
+        return fallback_result['content']
+    
+    # Both providers failed
+    logger.error(f"All AI providers failed. Primary: {result['message']}, Fallback: {fallback_result['message']}")
+    
+    if fallback_result:
+        return fallback_result
+    else:
+        return {
+            'platform': 'unknown',
+            'confidence': 0.0,
+            'detection_method': 'fallback_due_to_provider_failure',
+            'indicators': [],
+            'reasoning': 'All AI providers unavailable due to errors or quota limits'
+        }
+
+# Legacy function for backward compatibility
+async def safe_openai_call(client, model: str, messages: list, temperature: float = 0.1, max_tokens: int = 200, fallback_result: dict = None):
+    """Legacy function - now uses unified AI call with OpenAI preference"""
+    # This maintains backward compatibility while using the new system
+    claude_client = None
+    try:
+        import anthropic
+        claude_api_key = os.getenv('CLAUDE_API_KEY')
+        if claude_api_key:
+            claude_client = anthropic.Anthropic(api_key=claude_api_key)
+    except ImportError:
+        logger.warning("Anthropic library not available, Claude fallback disabled")
+    except Exception as e:
+        logger.warning(f"Failed to initialize Claude client: {e}")
+    
+    return await unified_ai_call(
+        client, claude_client, "openai", messages, temperature, max_tokens, fallback_result
+    )
 
 
 # Add fallback processing when AI is unavailable
@@ -332,6 +483,50 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# =============================================================================
+# GLOBAL AI CLIENT INITIALIZATION
+# =============================================================================
+# Initialize both OpenAI and Claude clients for unified AI operations
+# with automatic fallback between providers
+
+# Initialize OpenAI client
+openai_client = None
+try:
+    openai_api_key = os.getenv('OPENAI_API_KEY')
+    if openai_api_key:
+        openai_client = OpenAI(api_key=openai_api_key)
+        logger.info("OpenAI client initialized successfully")
+    else:
+        logger.warning("OPENAI_API_KEY not found in environment variables")
+except Exception as e:
+    logger.error(f"Failed to initialize OpenAI client: {e}")
+
+# Initialize Claude client
+claude_client = None
+try:
+    import anthropic
+    claude_api_key = os.getenv('CLAUDE_API_KEY')
+    if claude_api_key:
+        claude_client = anthropic.Anthropic(api_key=claude_api_key)
+        logger.info("Claude client initialized successfully")
+    else:
+        logger.warning("CLAUDE_API_KEY not found in environment variables")
+except ImportError:
+    logger.warning("Anthropic library not available, Claude fallback disabled")
+except Exception as e:
+    logger.error(f"Failed to initialize Claude client: {e}")
+
+# Validate that at least one AI provider is available
+if not openai_client and not claude_client:
+    logger.error("No AI providers available! Please configure at least one of OPENAI_API_KEY or CLAUDE_API_KEY")
+else:
+    available_providers = []
+    if openai_client:
+        available_providers.append("OpenAI")
+    if claude_client:
+        available_providers.append("Claude")
+    logger.info(f"AI providers available: {', '.join(available_providers)}")
 
 # Static file mounting will be done after all API routes are defined
 logger.info("Running in backend-only mode")
@@ -4235,9 +4430,10 @@ class UniversalPlatformDetector:
             }}
             """
             
-            result_text = await safe_openai_call(
-                self.openai_client,
-                "gpt-4o-mini",
+            result_text = await unified_ai_call(
+                openai_client,
+                claude_client,
+                "openai",
                 [{"role": "user", "content": prompt}],
                 0.1,
                 200,
@@ -4472,9 +4668,10 @@ class UniversalDocumentClassifier:
             }}
             """
             
-            result_text = await safe_openai_call(
-                self.openai_client,
-                "gpt-4o-mini",
+            result_text = await unified_ai_call(
+                openai_client,
+                claude_client,
+                "openai",
                 [{"role": "user", "content": prompt}],
                 0.1,
                 200,
@@ -9142,18 +9339,21 @@ Always provide practical, actionable advice based on financial best practices. I
 
 Keep responses concise but comprehensive, and always prioritize accuracy in financial matters."""
 
-        # Get AI response
-        response = openai_client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
+        # Get AI response using unified system
+        ai_response = await unified_ai_call(
+            openai_client,
+            claude_client,
+            "openai",
+            [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": chat_message.message}
             ],
-            temperature=0.7,
-            max_tokens=1000
+            0.7,
+            1000,
+            "I'm sorry, I'm currently unable to process your request due to technical issues. Please try again later."
         )
         
-        ai_response = response.choices[0].message.content
+        # ai_response is already the content string from unified_ai_call
         
         # Store chat in database if Supabase is available
         try:
@@ -9280,16 +9480,18 @@ async def generate_chat_title(title_request: ChatTitleRequest):
         else:
             # Use AI to generate a concise title
             try:
-                response = openai_client.chat.completions.create(
-                    model="gpt-4o-mini",
-                    messages=[
+                title = await unified_ai_call(
+                    openai_client,
+                    claude_client,
+                    "openai",
+                    [
                         {"role": "system", "content": "Generate a short, descriptive title (max 6 words) for a financial chat conversation based on the user's first message. Focus on the main topic or question."},
                         {"role": "user", "content": title_request.message}
                     ],
-                    temperature=0.3,
-                    max_tokens=20
+                    0.3,
+                    20,
+                    "Financial Discussion"
                 )
-                title = response.choices[0].message.content.strip()
             except Exception as ai_error:
                 # Fallback to first 6 words if AI fails
                 title = " ".join(message_words[:6])
