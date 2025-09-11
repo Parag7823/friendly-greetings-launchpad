@@ -8,7 +8,7 @@ from typing import Dict, Any, List, Optional, Tuple
 from dataclasses import dataclass
 import pandas as pd
 import numpy as np
-from fastapi import FastAPI, HTTPException, BackgroundTasks, WebSocket, WebSocketDisconnect, UploadFile, Form, File
+from fastapi import FastAPI, HTTPException, BackgroundTasks, WebSocket, WebSocketDisconnect, UploadFile, Form, File, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -31,6 +31,18 @@ import requests
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# Handle missing libGL.so.1 gracefully (common in containerized environments)
+try:
+    import cv2
+    logger.info("OpenCV available for advanced image processing")
+except ImportError:
+    logger.warning("OpenCV not available - advanced image processing features disabled")
+except OSError as e:
+    if "libGL.so.1" in str(e):
+        logger.warning("Advanced file processing features not available: libGL.so.1: cannot open shared object file: No such file or directory")
+    else:
+        logger.warning(f"OpenCV initialization warning: {e}")
 
 # Custom JSON encoder to handle datetime objects
 class DateTimeEncoder(json.JSONEncoder):
