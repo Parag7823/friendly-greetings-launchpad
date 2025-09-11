@@ -3331,14 +3331,14 @@ class ExcelProcessor:
                                 errors.append(f"Failed to store event for row {row_index} in sheet {sheet_name}")
                         
                         except Exception as e:
-            # Handle datetime serialization errors specifically
-            if "datetime" in str(e) and "JSON serializable" in str(e):
-                logger.warning(f"Datetime serialization error for row {row_index}, skipping: {e}")
-                continue
-            else:
-                error_msg = f"Error processing row {row_index} in sheet {sheet_name}: {str(e)}"
-                errors.append(error_msg)
-                logger.error(error_msg)
+                            # Handle datetime serialization errors specifically
+                            if "datetime" in str(e) and "JSON serializable" in str(e):
+                                logger.warning(f"Datetime serialization error for row {row_index}, skipping: {e}")
+                                continue
+                            else:
+                                error_msg = f"Error processing row {row_index} in sheet {sheet_name}: {str(e)}"
+                                errors.append(error_msg)
+                                logger.error(error_msg)
                         
                         processed_rows += 1
                     
