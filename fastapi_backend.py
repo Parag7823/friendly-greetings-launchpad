@@ -71,6 +71,83 @@ def clean_jwt_token(token: str) -> str:
         # If not valid JWT format, return original cleaned version
         return token.strip().replace('\n', '').replace('\r', '')
 
+# Utility function for OpenAI calls with quota handling
+async def safe_openai_call(client, model: str, messages: list, temperature: float = 0.1, max_tokens: int = 200, fallback_result: dict = None):
+    """Make OpenAI API call with quota error handling"""
+    try:
+        response = client.chat.completions.create(
+            model=model,
+            messages=messages,
+            temperature=temperature,
+            max_tokens=max_tokens
+        )
+        return response.choices[0].message.content.strip()
+    except Exception as e:
+        if "429" in str(e) or "quota" in str(e).lower() or "insufficient_quota" in str(e).lower():
+            logger.warning(f"OpenAI quota exceeded, using fallback: {e}")
+            if fallback_result:
+                return fallback_result
+            else:
+                return {
+                    'platform': 'unknown',
+                    'confidence': 0.0,
+                    'detection_method': 'fallback_due_to_quota',
+                    'indicators': [],
+                    'reasoning': 'AI processing unavailable due to quota limits'
+                }
+        else:
+            logger.error(f"OpenAI API error: {e}")
+            raise e
+
+
+# Add fallback processing when AI is unavailable
+def get_fallback_platform_detection(payload: dict, filename: str = None) -> dict:
+    """Fallback platform detection when AI is unavailable"""
+    platform_indicators = {
+        'stripe': ['stripe', 'stripe.com', 'st_'],
+        'razorpay': ['razorpay', 'rzp_'],
+        'paypal': ['paypal', 'pp_'],
+        'quickbooks': ['quickbooks', 'qb_', 'intuit'],
+        'xero': ['xero', 'xero.com'],
+        'shopify': ['shopify', 'shopify.com'],
+        'woocommerce': ['woocommerce', 'wc_'],
+        'salesforce': ['salesforce', 'sf_'],
+        'hubspot': ['hubspot', 'hs_']
+    }
+    
+    # Check filename
+    if filename:
+        filename_lower = filename.lower()
+        for platform, indicators in platform_indicators.items():
+            if any(indicator in filename_lower for indicator in indicators):
+                return {
+                    'platform': platform,
+                    'confidence': 0.7,
+                    'detection_method': 'filename_pattern',
+                    'indicators': [indicator for indicator in indicators if indicator in filename_lower],
+                    'reasoning': f'Detected from filename: {filename}'
+                }
+    
+    # Check payload content
+    content_str = str(payload).lower()
+    for platform, indicators in platform_indicators.items():
+        if any(indicator in content_str for indicator in indicators):
+            return {
+                'platform': platform,
+                'confidence': 0.6,
+                'detection_method': 'content_pattern',
+                'indicators': [indicator for indicator in indicators if indicator in content_str],
+                'reasoning': 'Detected from content patterns'
+            }
+    
+    return {
+        'platform': 'unknown',
+        'confidence': 0.0,
+        'detection_method': 'fallback',
+        'indicators': [],
+        'reasoning': 'No patterns detected'
+    }
+
 def safe_json_parse(json_str, fallback=None):
     """Safely parse JSON with comprehensive error handling"""
     if not json_str or not isinstance(json_str, str):
@@ -141,6 +218,55 @@ def serialize_datetime_objects(obj):
         return tuple(serialize_datetime_objects(item) for item in obj)
     else:
         return obj
+
+
+# Add fallback processing when AI is unavailable
+def get_fallback_platform_detection(payload: dict, filename: str = None) -> dict:
+    """Fallback platform detection when AI is unavailable"""
+    platform_indicators = {
+        'stripe': ['stripe', 'stripe.com', 'st_'],
+        'razorpay': ['razorpay', 'rzp_'],
+        'paypal': ['paypal', 'pp_'],
+        'quickbooks': ['quickbooks', 'qb_', 'intuit'],
+        'xero': ['xero', 'xero.com'],
+        'shopify': ['shopify', 'shopify.com'],
+        'woocommerce': ['woocommerce', 'wc_'],
+        'salesforce': ['salesforce', 'sf_'],
+        'hubspot': ['hubspot', 'hs_']
+    }
+    
+    # Check filename
+    if filename:
+        filename_lower = filename.lower()
+        for platform, indicators in platform_indicators.items():
+            if any(indicator in filename_lower for indicator in indicators):
+                return {
+                    'platform': platform,
+                    'confidence': 0.7,
+                    'detection_method': 'filename_pattern',
+                    'indicators': [indicator for indicator in indicators if indicator in filename_lower],
+                    'reasoning': f'Detected from filename: {filename}'
+                }
+    
+    # Check payload content
+    content_str = str(payload).lower()
+    for platform, indicators in platform_indicators.items():
+        if any(indicator in content_str for indicator in indicators):
+            return {
+                'platform': platform,
+                'confidence': 0.6,
+                'detection_method': 'content_pattern',
+                'indicators': [indicator for indicator in indicators if indicator in content_str],
+                'reasoning': 'Detected from content patterns'
+            }
+    
+    return {
+        'platform': 'unknown',
+        'confidence': 0.0,
+        'detection_method': 'fallback',
+        'indicators': [],
+        'reasoning': 'No patterns detected'
+    }
 
 def safe_json_parse(json_str, fallback=None):
     """Safely parse JSON with comprehensive error handling"""
@@ -3205,9 +3331,14 @@ class ExcelProcessor:
                                 errors.append(f"Failed to store event for row {row_index} in sheet {sheet_name}")
                         
                         except Exception as e:
-                            error_msg = f"Error processing row {row_index} in sheet {sheet_name}: {str(e)}"
-                            errors.append(error_msg)
-                            logger.error(error_msg)
+            # Handle datetime serialization errors specifically
+            if "datetime" in str(e) and "JSON serializable" in str(e):
+                logger.warning(f"Datetime serialization error for row {row_index}, skipping: {e}")
+                continue
+            else:
+                error_msg = f"Error processing row {row_index} in sheet {sheet_name}: {str(e)}"
+                errors.append(error_msg)
+                logger.error(error_msg)
                         
                         processed_rows += 1
                     
@@ -4104,14 +4235,14 @@ class UniversalPlatformDetector:
             }}
             """
             
-            response = self.openai_client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.1,
-                max_tokens=200
+            result_text = await safe_openai_call(
+                self.openai_client,
+                "gpt-4o-mini",
+                [{"role": "user", "content": prompt}],
+                0.1,
+                200,
+                '{"platform": "unknown", "confidence": 0.0, "indicators": [], "reasoning": "AI processing unavailable due to quota limits"}'
             )
-            
-            result_text = response.choices[0].message.content.strip()
             
             # Clean up the response text
             if result_text.startswith('```json'):
@@ -4162,17 +4293,23 @@ class UniversalPlatformDetector:
                 text_parts.append(filename.lower())
             
             # Add all string values (handle DataFrame case)
-            if hasattr(payload, 'values'):
-                # DataFrame case
+            if hasattr(payload, 'values') and hasattr(payload.values, 'flatten'):
+                # DataFrame case - values is a numpy array
                 try:
                     for value in payload.values.flatten():
                         if isinstance(value, str):
                             text_parts.append(value.lower())
                 except AttributeError:
                     # Fallback for non-numpy arrays
-                    for value in payload.values.ravel():
-                        if isinstance(value, str):
-                            text_parts.append(value.lower())
+                    try:
+                        for value in payload.values.ravel():
+                            if isinstance(value, str):
+                                text_parts.append(value.lower())
+                    except AttributeError:
+                        # If neither flatten nor ravel work, iterate directly
+                        for value in payload.values:
+                            if isinstance(value, str):
+                                text_parts.append(value.lower())
             else:
                 # Dict case
                 for value in payload.values():
@@ -4197,7 +4334,13 @@ class UniversalPlatformDetector:
             
         except Exception as e:
             logger.error(f"Pattern platform detection failed: {e}")
-            return None
+            return {
+                'platform': 'unknown',
+                'confidence': 0.0,
+                'detection_method': 'pattern_error',
+                'indicators': [],
+                'reasoning': f'Pattern detection failed: {str(e)}'
+            }
     
     def _detect_platform_from_fields(self, payload: Dict) -> Optional[Dict[str, Any]]:
         """Detect platform from field names and structure"""
@@ -4329,14 +4472,14 @@ class UniversalDocumentClassifier:
             }}
             """
             
-            response = self.openai_client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.1,
-                max_tokens=200
+            result_text = await safe_openai_call(
+                self.openai_client,
+                "gpt-4o-mini",
+                [{"role": "user", "content": prompt}],
+                0.1,
+                200,
+                '{"platform": "unknown", "confidence": 0.0, "indicators": [], "reasoning": "AI processing unavailable due to quota limits"}'
             )
-            
-            result_text = response.choices[0].message.content.strip()
             
             # Clean up the response text
             if result_text.startswith('```json'):
@@ -4363,8 +4506,16 @@ class UniversalDocumentClassifier:
             }
             
         except Exception as e:
-            logger.error(f"AI document classification failed: {e}")
-            return None
+            if "429" in str(e) or "quota" in str(e).lower():
+                logger.warning(f"AI document classification failed due to quota: {e}")
+                return {
+                    'document_type': 'unknown',
+                    'confidence': 0.0,
+                    'reasoning': 'AI processing unavailable due to quota limits'
+                }
+            else:
+                logger.error(f"AI document classification failed: {e}")
+                return None
     
     def _classify_with_patterns(self, payload: Dict, filename: str = None) -> Optional[Dict[str, Any]]:
         """Classify document using pattern matching"""
@@ -4377,17 +4528,23 @@ class UniversalDocumentClassifier:
                 text_parts.append(filename.lower())
             
             # Add all string values (handle DataFrame case)
-            if hasattr(payload, 'values'):
-                # DataFrame case
+            if hasattr(payload, 'values') and hasattr(payload.values, 'flatten'):
+                # DataFrame case - values is a numpy array
                 try:
                     for value in payload.values.flatten():
                         if isinstance(value, str):
                             text_parts.append(value.lower())
                 except AttributeError:
                     # Fallback for non-numpy arrays
-                    for value in payload.values.ravel():
-                        if isinstance(value, str):
-                            text_parts.append(value.lower())
+                    try:
+                        for value in payload.values.ravel():
+                            if isinstance(value, str):
+                                text_parts.append(value.lower())
+                    except AttributeError:
+                        # If neither flatten nor ravel work, iterate directly
+                        for value in payload.values:
+                            if isinstance(value, str):
+                                text_parts.append(value.lower())
             else:
                 # Dict case
                 for value in payload.values():
