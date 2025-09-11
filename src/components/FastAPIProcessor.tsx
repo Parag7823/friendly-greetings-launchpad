@@ -109,8 +109,6 @@ export class FastAPIProcessor {
 
       ws.onerror = (error) => {
         console.error('WebSocket error:', error);
-        console.error('WebSocket URL:', wsUrl);
-        console.error('WebSocket readyState:', ws.readyState);
         clearTimeout(timeoutId);
         reject(new Error('WebSocket connection failed - will use polling fallback'));
       };
@@ -164,40 +162,6 @@ export class FastAPIProcessor {
     
     // If we get here, polling timed out
     throw new Error('Processing timeout - please try again');
-  }
-
-  private async getDirectResults(jobId: string): Promise<any> {
-    // Final fallback: try to get results directly from the backend
-    try {
-      this.updateProgress('direct', 'Retrieving results directly...', 60);
-      
-      // Wait a bit for processing to complete
-      await new Promise(resolve => setTimeout(resolve, 5000));
-      
-      const statusResponse = await fetch(`${this.apiUrl}/job-status/${jobId}`);
-      if (statusResponse.ok) {
-        const statusData = await statusResponse.json();
-        if (statusData.status === 'completed') {
-          this.updateProgress('complete', 'Processing completed!', 100);
-          return statusData.result || statusData;
-        }
-      }
-      
-      // If still not completed, return a basic result
-      this.updateProgress('complete', 'Processing completed with basic results', 100);
-      return {
-        results: {
-          processing_stats: {
-            total_rows_processed: 0,
-            platform_confidence: 0.5
-          },
-          analysis: 'File processing completed. Some features may be limited due to connection issues.'
-        }
-      };
-    } catch (error) {
-      console.error('Direct result retrieval failed:', error);
-      throw new Error('All processing methods failed - please try again');
-    }
   }
 
   async processFile(
@@ -269,34 +233,17 @@ export class FastAPIProcessor {
 
       // Start FastAPI backend processing and connect to WebSocket for real-time updates
       try {
-        // Start the processing job with retry logic
-        let response;
-        let retries = 0;
-        const maxRetries = 3;
-        
-        while (retries < maxRetries) {
-          try {
-            response = await fetch(`${this.apiUrl}/process-excel`, {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-              },
-              body: JSON.stringify(requestBody)
-            });
-            
-            if (response.ok) {
-              break;
-            } else {
-              throw new Error(`Backend processing failed: ${response.statusText}`);
-            }
-          } catch (error) {
-            retries++;
-            if (retries >= maxRetries) {
-              throw error;
-            }
-            console.log(`Processing request failed, retrying (${retries}/${maxRetries}):`, error);
-            await new Promise(resolve => setTimeout(resolve, 2000)); // Wait 2 seconds before retry
-          }
+        // Start the processing job
+        const response = await fetch(`${this.apiUrl}/process-excel`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(requestBody)
+        });
+
+        if (!response.ok) {
+          throw new Error(`Backend processing failed: ${response.statusText}`);
         }
 
         const initialResponse = await response.json();
@@ -311,7 +258,7 @@ export class FastAPIProcessor {
           backendResult = await Promise.race([
             this.setupWebSocketConnection(jobData.id),
             new Promise((_, reject) => 
-              setTimeout(() => reject(new Error('WebSocket timeout')), 8000) // 8 second timeout
+              setTimeout(() => reject(new Error('WebSocket timeout')), 10000) // 10 second timeout
             )
           ]);
           console.log('WebSocket processing completed:', backendResult);
@@ -320,14 +267,7 @@ export class FastAPIProcessor {
           
           // Fallback: Poll for results instead of WebSocket
           this.updateProgress('polling', 'Using polling fallback for updates...', 40);
-          try {
-            backendResult = await this.pollForResults(jobData.id, initialResponse);
-          } catch (pollingError) {
-            console.error('Polling also failed:', pollingError);
-            // Final fallback: try to get results directly
-            this.updateProgress('fallback', 'Using direct result retrieval...', 50);
-            backendResult = await this.getDirectResults(jobData.id);
-          }
+          backendResult = await this.pollForResults(jobData.id, initialResponse);
         }
         
         // Parse backend results into our format
