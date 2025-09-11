@@ -4835,6 +4835,8 @@ async def cancel_upload(job_id: str, request: Request):
         if supabase_key:
             supabase_key = clean_jwt_token(supabase_key)
         
+        # Clean JWT token to prevent header value errors
+        supabase_key = clean_jwt_token(supabase_key)
         supabase = create_client(supabase_url, supabase_key)
         
         # Check if job exists and is still processing
@@ -4900,6 +4902,8 @@ async def get_job_status(job_id: str):
         if supabase_key:
             supabase_key = clean_jwt_token(supabase_key)
         
+        # Clean JWT token to prevent header value errors
+        supabase_key = clean_jwt_token(supabase_key)
         supabase = create_client(supabase_url, supabase_key)
         
         # Get job status
@@ -4949,6 +4953,8 @@ async def test_raw_events(user_id: str):
         if not supabase_url or not supabase_key:
             return {"error": "Supabase credentials not configured"}
         
+        # Clean JWT token to prevent header value errors
+        supabase_key = clean_jwt_token(supabase_key)
         supabase: Client = create_client(supabase_url, supabase_key)
         
         # Get raw_events statistics
@@ -5038,6 +5044,8 @@ async def upload_and_process(
         if not supabase_url or not supabase_key:
             raise HTTPException(status_code=500, detail="Supabase credentials not configured")
 
+        # Clean JWT token to prevent header value errors
+        supabase_key = clean_jwt_token(supabase_key)
         supabase: Client = create_client(supabase_url, supabase_key)
 
         # Create ExcelProcessor instance
@@ -5089,6 +5097,8 @@ async def handle_duplicate_decision(request: DuplicateDecisionRequest):
         if not supabase_url or not supabase_key:
             raise HTTPException(status_code=500, detail="Supabase credentials not configured")
 
+        # Clean JWT token to prevent header value errors
+        supabase_key = clean_jwt_token(supabase_key)
         supabase: Client = create_client(supabase_url, supabase_key)
         duplicate_service = DuplicateDetectionService(supabase)
 
@@ -5147,6 +5157,8 @@ async def submit_version_recommendation_feedback(request: VersionRecommendationF
         if not supabase_url or not supabase_key:
             raise HTTPException(status_code=500, detail="Supabase credentials not configured")
 
+        # Clean JWT token to prevent header value errors
+        supabase_key = clean_jwt_token(supabase_key)
         supabase: Client = create_client(supabase_url, supabase_key)
         duplicate_service = DuplicateDetectionService(supabase)
 
@@ -5185,6 +5197,8 @@ async def get_duplicate_analysis(user_id: str):
         if not supabase_url or not supabase_key:
             raise HTTPException(status_code=500, detail="Supabase credentials not configured")
 
+        # Clean JWT token to prevent header value errors
+        supabase_key = clean_jwt_token(supabase_key)
         supabase: Client = create_client(supabase_url, supabase_key)
 
         # Get file versions for user
@@ -5254,6 +5268,8 @@ async def test_database():
         if not supabase_url or not supabase_key:
             return {"error": "Supabase credentials not configured"}
         
+        # Clean JWT token to prevent header value errors
+        supabase_key = clean_jwt_token(supabase_key)
         supabase: Client = create_client(supabase_url, supabase_key)
         
         # Test basic database operations
@@ -5731,6 +5747,8 @@ async def test_entity_resolution():
         
         if supabase_key:
             supabase_key = clean_jwt_token(supabase_key)
+        # Clean JWT token to prevent header value errors
+        supabase_key = clean_jwt_token(supabase_key)
         supabase = create_client(supabase_url, supabase_key)
         
         # Initialize EntityResolver
@@ -5867,6 +5885,8 @@ async def test_entity_search(user_id: str, search_term: str = "Abhishek", entity
         # Clean the JWT token (remove newlines and whitespace)
         supabase_key = clean_jwt_token(supabase_key)
         
+        # Clean JWT token to prevent header value errors
+        supabase_key = clean_jwt_token(supabase_key)
         supabase = create_client(supabase_url, supabase_key)
         
         # Test entity search with correct parameter name
@@ -5927,6 +5947,8 @@ async def test_entity_stats(user_id: str):
         # Clean the JWT token (remove newlines and whitespace)
         supabase_key = clean_jwt_token(supabase_key)
         
+        # Clean JWT token to prevent header value errors
+        supabase_key = clean_jwt_token(supabase_key)
         supabase = create_client(supabase_url, supabase_key)
         
         # Get entity resolution stats
@@ -5963,6 +5985,8 @@ async def test_cross_file_relationships(user_id: str):
         if supabase_key:
             supabase_key = clean_jwt_token(supabase_key)
 
+        # Clean JWT token to prevent header value errors
+        supabase_key = clean_jwt_token(supabase_key)
         supabase = create_client(supabase_url, supabase_key)
 
         # Initialize relationship detector
@@ -6003,6 +6027,8 @@ async def test_enhanced_relationship_detection(user_id: str):
         if supabase_key:
             supabase_key = clean_jwt_token(supabase_key)
 
+        # Clean JWT token to prevent header value errors
+        supabase_key = clean_jwt_token(supabase_key)
         supabase = create_client(supabase_url, supabase_key)
 
         # Initialize enhanced relationship detector
@@ -6041,6 +6067,8 @@ async def debug_cross_file_data(user_id: str):
         if supabase_key:
             supabase_key = clean_jwt_token(supabase_key)
 
+        # Clean JWT token to prevent header value errors
+        supabase_key = clean_jwt_token(supabase_key)
         supabase = create_client(supabase_url, supabase_key)
 
         # Get all events for the user
@@ -7338,6 +7366,8 @@ async def test_enrichment_stats(user_id: str):
                 "timestamp": datetime.utcnow().isoformat()
             }
         
+        # Clean JWT token to prevent header value errors
+        supabase_key = clean_jwt_token(supabase_key)
         supabase = create_client(supabase_url, supabase_key)
         
         # Call the database function
@@ -7377,6 +7407,8 @@ async def test_vendor_search(user_id: str, vendor_name: str = "Google"):
                 "timestamp": datetime.utcnow().isoformat()
             }
         
+        # Clean JWT token to prevent header value errors
+        supabase_key = clean_jwt_token(supabase_key)
         supabase = create_client(supabase_url, supabase_key)
         
         # Call the database function
@@ -7423,6 +7455,8 @@ async def test_currency_summary(user_id: str):
                 "timestamp": datetime.utcnow().isoformat()
             }
         
+        # Clean JWT token to prevent header value errors
+        supabase_key = clean_jwt_token(supabase_key)
         supabase = create_client(supabase_url, supabase_key)
         
         # Call the database function
@@ -8712,6 +8746,8 @@ async def test_ai_relationship_detection(user_id: str):
                 "timestamp": datetime.utcnow().isoformat()
             }
         
+        # Clean JWT token to prevent header value errors
+        supabase_key = clean_jwt_token(supabase_key)
         supabase = create_client(supabase_url, supabase_key)
         
         # Initialize AI Relationship Detector
@@ -8748,6 +8784,8 @@ async def test_relationship_discovery(user_id: str):
                 "timestamp": datetime.utcnow().isoformat()
             }
         
+        # Clean JWT token to prevent header value errors
+        supabase_key = clean_jwt_token(supabase_key)
         supabase = create_client(supabase_url, supabase_key)
         
         # Get all events for the user
@@ -8795,6 +8833,8 @@ async def test_ai_relationship_scoring(user_id: str):
                 "timestamp": datetime.utcnow().isoformat()
             }
         
+        # Clean JWT token to prevent header value errors
+        supabase_key = clean_jwt_token(supabase_key)
         supabase = create_client(supabase_url, supabase_key)
         
         # Get sample events for testing
@@ -8865,6 +8905,8 @@ async def test_relationship_validation(user_id: str):
                 "timestamp": datetime.utcnow().isoformat()
             }
         
+        # Clean JWT token to prevent header value errors
+        supabase_key = clean_jwt_token(supabase_key)
         supabase = create_client(supabase_url, supabase_key)
         
         # Initialize AI Relationship Detector
@@ -8925,6 +8967,8 @@ async def test_dynamic_platform_detection():
                 "timestamp": datetime.utcnow().isoformat()
             }
         
+        # Clean JWT token to prevent header value errors
+        supabase_key = clean_jwt_token(supabase_key)
         supabase = create_client(supabase_url, supabase_key)
         
         # Initialize Dynamic Platform Detector
@@ -8993,6 +9037,8 @@ async def test_platform_learning(user_id: str):
                 "timestamp": datetime.utcnow().isoformat()
             }
         
+        # Clean JWT token to prevent header value errors
+        supabase_key = clean_jwt_token(supabase_key)
         supabase = create_client(supabase_url, supabase_key)
         
         # Initialize Dynamic Platform Detector
@@ -9029,6 +9075,8 @@ async def test_platform_discovery(user_id: str):
                 "timestamp": datetime.utcnow().isoformat()
             }
         
+        # Clean JWT token to prevent header value errors
+        supabase_key = clean_jwt_token(supabase_key)
         supabase = create_client(supabase_url, supabase_key)
         
         # Initialize Dynamic Platform Detector
@@ -9065,6 +9113,8 @@ async def test_platform_insights(platform: str, user_id: str = None):
                 "timestamp": datetime.utcnow().isoformat()
             }
         
+        # Clean JWT token to prevent header value errors
+        supabase_key = clean_jwt_token(supabase_key)
         supabase = create_client(supabase_url, supabase_key)
         
         # Initialize Dynamic Platform Detector
@@ -9161,6 +9211,8 @@ Keep responses concise but comprehensive, and always prioritize accuracy in fina
             supabase_key = os.getenv('SUPABASE_SERVICE_KEY')
             
             if supabase_url and supabase_key:
+                # Clean JWT token to prevent header value errors
+                supabase_key = clean_jwt_token(supabase_key)
                 supabase = create_client(supabase_url, supabase_key)
                 
                 # Store user message
@@ -9208,6 +9260,10 @@ async def get_chat_history(user_id: str, chat_id: str = None):
                 "error": "Database not configured"
             }
         
+        # Clean JWT token to prevent header value errors
+        supabase_key = clean_jwt_token(supabase_key)
+        # Clean JWT token to prevent header value errors
+        supabase_key = clean_jwt_token(supabase_key)
         supabase = create_client(supabase_url, supabase_key)
         
         # Get all chats for user
