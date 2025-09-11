@@ -1,6 +1,6 @@
 import { MessageCircle, Send, Upload, Plug } from 'lucide-react';
 import { useState, useEffect } from 'react';
-import { EnhancedExcelUpload } from './EnhancedExcelUpload';
+import { EnhancedFileUpload } from './EnhancedFileUpload';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 
 interface ChatInterfaceProps {
@@ -140,7 +140,7 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
                 <h1 className="text-xl font-semibold text-foreground mb-1">Upload Financial Documents</h1>
                 <p className="text-sm text-muted-foreground">Upload your Excel, CSV, or other financial files for AI analysis</p>
               </div>
-              <EnhancedExcelUpload />
+              <EnhancedFileUpload />
             </div>
           </div>
         );

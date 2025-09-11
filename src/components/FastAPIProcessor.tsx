@@ -126,7 +126,8 @@ export class FastAPIProcessor {
   async processFile(
     file: File, 
     customPrompt?: string,
-    userId?: string
+    userId?: string,
+    onJobId?: (jobId: string) => void
   ): Promise<FastAPIProcessingResult> {
     let jobData: any = null;
     
@@ -167,6 +168,11 @@ export class FastAPIProcessor {
       }
 
       jobData = jobResult; // Assign to outer scope variable
+      
+      // Notify about job ID for cancel functionality
+      if (onJobId) {
+        onJobId(jobData.id);
+      }
 
       this.updateProgress('analysis', 'Processing with FastAPI backend...', 30);
 
@@ -864,7 +870,8 @@ export const useFastAPIProcessor = () => {
   const processFileWithFastAPI = useCallback(async (
     file: File,
     customPrompt?: string,
-    onProgress?: (progress: FastAPIProcessingProgress) => void
+    onProgress?: (progress: FastAPIProcessingProgress) => void,
+    onJobId?: (jobId: string) => void
   ) => {
     try {
       if (onProgress) {
@@ -876,7 +883,7 @@ export const useFastAPIProcessor = () => {
         description: "Real-time WebSocket updates enabled"
       });
 
-      const result = await processor.processFile(file, customPrompt);
+      const result = await processor.processFile(file, customPrompt, undefined, onJobId);
       
       toast({
         title: "Analysis Complete",

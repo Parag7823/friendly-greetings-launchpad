@@ -2029,7 +2029,7 @@ class PlatformDetector:
                 confidence += 0.2
             
             # 4. Data content analysis (15% weight)
-            sample_data = df.head(3).astype(str).values.flatten()ten()ten()
+            sample_data = df.head(3).astype(str).values.flatten()
             sample_text = ' '.join(sample_data).lower()
             
             for pattern in patterns.get('data_patterns', []):
@@ -4152,7 +4152,7 @@ class UniversalPlatformDetector:
             if hasattr(payload, 'values'):
                 # DataFrame case
                 try:
-                    for value in payload.values.flatten()ten()ten():
+                    for value in payload.values.flatten():
                         if isinstance(value, str):
                             text_parts.append(value.lower())
                 except AttributeError:
@@ -4367,7 +4367,7 @@ class UniversalDocumentClassifier:
             if hasattr(payload, 'values'):
                 # DataFrame case
                 try:
-                    for value in payload.values.flatten()ten()ten():
+                    for value in payload.values.flatten():
                         if isinstance(value, str):
                             text_parts.append(value.lower())
                 except AttributeError:
@@ -4649,6 +4649,71 @@ async def process_excel(request: ProcessRequest, background_tasks: BackgroundTas
         })
         
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/cancel-upload/{job_id}")
+async def cancel_upload(job_id: str, request: Request):
+    """Cancel an ongoing file upload/processing job"""
+    try:
+        # Get Supabase client
+        supabase_url = os.getenv('SUPABASE_URL')
+        supabase_key = os.getenv('SUPABASE_SERVICE_KEY')
+        
+        if not supabase_url or not supabase_key:
+            raise HTTPException(status_code=500, detail="Server misconfiguration: SUPABASE_URL or SUPABASE_SERVICE_KEY not set")
+        
+        # Clean the JWT token (remove newlines and whitespace)
+        if supabase_key:
+            supabase_key = clean_jwt_token(supabase_key)
+        
+        supabase = create_client(supabase_url, supabase_key)
+        
+        # Check if job exists and is still processing
+        job_result = supabase.table('ingestion_jobs').select('*').eq('id', job_id).execute()
+        
+        if not job_result.data:
+            raise HTTPException(status_code=404, detail="Job not found")
+        
+        job = job_result.data[0]
+        
+        if job['status'] in ['completed', 'failed', 'cancelled']:
+            return {
+                "status": "already_finished",
+                "message": f"Job is already {job['status']}",
+                "job_id": job_id
+            }
+        
+        # Update job status to cancelled
+        update_result = supabase.table('ingestion_jobs').update({
+            'status': 'cancelled',
+            'cancelled_at': datetime.utcnow().isoformat(),
+            'progress': 0
+        }).eq('id', job_id).execute()
+        
+        if not update_result.data:
+            raise HTTPException(status_code=500, detail="Failed to cancel job")
+        
+        # Send cancellation update via WebSocket
+        await manager.send_update(job_id, {
+            "step": "cancelled",
+            "message": "Upload cancelled by user",
+            "progress": 0,
+            "status": "cancelled"
+        })
+        
+        # Disconnect WebSocket for this job
+        manager.disconnect(job_id)
+        
+        return {
+            "status": "cancelled",
+            "message": "Upload cancelled successfully",
+            "job_id": job_id
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error cancelling job {job_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to cancel job: {str(e)}")
 
 # Root endpoint removed - static files will be served at root
 
