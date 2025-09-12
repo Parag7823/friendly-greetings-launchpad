@@ -61,6 +61,61 @@ export class FastAPIProcessor {
     }
   }
 
+  private async calculateFileHash(fileBuffer: ArrayBuffer): Promise<string> {
+    const hashBuffer = await crypto.subtle.digest('SHA-256', fileBuffer);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+  }
+
+  private async checkForDuplicates(userId: string, fileHash: string, fileName: string): Promise<{
+    is_duplicate: boolean;
+    duplicate_files?: any[];
+    latest_duplicate?: any;
+    recommendation?: string;
+    message?: string;
+    error?: string;
+  }> {
+    try {
+      // Check if file with same hash exists
+      const { data: existingFiles, error } = await supabase
+        .from('raw_records')
+        .select('id, file_name, created_at, content')
+        .eq('user_id', userId)
+        .eq('file_hash', fileHash) as any;
+
+      if (error) {
+        console.error('Error checking for duplicates:', error);
+        return { is_duplicate: false, error: error.message };
+      }
+
+      if (existingFiles && existingFiles.length > 0) {
+        const duplicateFiles = existingFiles.map(file => ({
+          id: file.id,
+          filename: file.file_name,
+          uploaded_at: file.created_at,
+          total_rows: (file.content as any)?.total_rows || 0
+        }));
+
+        const latestDuplicate = duplicateFiles.reduce((latest, current) => 
+          new Date(current.uploaded_at) > new Date(latest.uploaded_at) ? current : latest
+        );
+
+        return {
+          is_duplicate: true,
+          duplicate_files: duplicateFiles,
+          latest_duplicate: latestDuplicate,
+          recommendation: 'replace_or_skip',
+          message: `Identical file '${latestDuplicate.filename}' was uploaded on ${latestDuplicate.uploaded_at.split('T')[0]}. Do you want to replace it or skip this upload?`
+        };
+      }
+
+      return { is_duplicate: false };
+    } catch (error) {
+      console.error('Duplicate check failed:', error);
+      return { is_duplicate: false, error: error instanceof Error ? error.message : 'Unknown error' };
+    }
+  }
+
   private setupWebSocketConnection(jobId: string): Promise<any> {
     return new Promise((resolve, reject) => {
       const wsUrl = `wss://friendly-greetings-launchpad.onrender.com/ws/${jobId}`;
@@ -173,12 +228,33 @@ export class FastAPIProcessor {
     let jobData: any = null;
     
     try {
-      this.updateProgress('upload', 'Uploading file to secure processing...', 10);
+      this.updateProgress('upload', 'Checking for duplicates...', 5);
       
-      // Upload file to Supabase storage first
+      // Get user first
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
         throw new Error('User authentication required');
+      }
+
+      // Calculate file hash for duplicate detection
+      const fileBuffer = await file.arrayBuffer();
+      const fileHash = await this.calculateFileHash(fileBuffer);
+      
+      // Check for duplicates
+      this.updateProgress('duplicate_check', 'Checking for duplicate files...', 10);
+      const duplicateCheck = await this.checkForDuplicates(user.id, fileHash, file.name);
+      
+      if (duplicateCheck.is_duplicate) {
+        // Handle duplicate detection
+        this.updateProgress('duplicate_detected', 'Duplicate file detected!', 15);
+        
+        // For now, we'll proceed with a warning, but in a real implementation,
+        // this would show a modal to the user
+        console.warn('Duplicate file detected:', duplicateCheck);
+        
+        // You can throw an error here to stop processing, or show a modal
+        // For now, let's continue with a warning
+        this.updateProgress('duplicate_warning', 'Duplicate detected - proceeding with warning...', 20);
       }
 
       const fileName = `${user.id}/${Date.now()}-${file.name}`;
@@ -301,6 +377,7 @@ export class FastAPIProcessor {
           .insert({
             user_id: user.id,
             file_name: file.name,
+            file_hash: fileHash,
             source: 'fastapi_backend',
             content: backendResult.results || {},
             metadata: {
@@ -436,6 +513,7 @@ export class FastAPIProcessor {
           .insert({
             user_id: user.id,
             file_name: file.name,
+            file_hash: fileHash,
             source: 'local_processing',
             content: {
               sheets: sheets.map(sheet => ({

@@ -3801,6 +3801,9 @@ class ExcelProcessor:
             # Initialize relationship detector
             openai_client = AsyncOpenAI(api_key=os.getenv('OPENAI_API_KEY'))
             relationship_detector = EnhancedRelationshipDetector(openai_client, supabase)
+        except ImportError:
+            logger.warning("Enhanced relationship detector not available, skipping relationship detection")
+            return
             
             # Detect all relationships
             relationship_results = await relationship_detector.detect_all_relationships(user_id)
@@ -5039,6 +5042,49 @@ async def process_excel(request: ProcessRequest, background_tasks: BackgroundTas
             })
             raise HTTPException(status_code=400, detail=f"File download failed: {str(e)}")
         
+        # Check for duplicates before processing
+        try:
+            await manager.send_update(request.job_id, {
+                "step": "duplicate_check",
+                "message": "🔍 Checking for duplicate files...",
+                "progress": 15
+            })
+            
+            duplicate_service = DuplicateDetectionService(supabase)
+            file_hash = duplicate_service.calculate_file_hash(file_content)
+            
+            duplicate_check = await duplicate_service.check_exact_duplicate(
+                request.user_id, 
+                file_hash, 
+                request.file_name
+            )
+            
+            if duplicate_check.get('is_duplicate', False):
+                await manager.send_update(request.job_id, {
+                    "step": "duplicate_detected",
+                    "message": f"⚠️ Duplicate file detected: {duplicate_check.get('message', 'File already exists')}",
+                    "progress": 20,
+                    "duplicate_info": duplicate_check
+                })
+                
+                # For now, we'll proceed with a warning
+                # In a real implementation, this would pause and wait for user decision
+                logger.warning(f"Duplicate file detected for user {request.user_id}: {request.file_name}")
+            else:
+                await manager.send_update(request.job_id, {
+                    "step": "no_duplicates",
+                    "message": "✅ No duplicates found, proceeding with processing...",
+                    "progress": 20
+                })
+                
+        except Exception as e:
+            logger.warning(f"Duplicate detection failed: {e} - proceeding with normal processing")
+            await manager.send_update(request.job_id, {
+                "step": "duplicate_check_failed",
+                "message": "⚠️ Duplicate check failed, proceeding with processing...",
+                "progress": 20
+            })
+        
         # Create or update job status to processing
         try:
             # Try to update existing job
@@ -5336,7 +5382,11 @@ async def trigger_entity_resolution(user_id: str, job_id: str, supabase: Client)
             return
         
         # Initialize entity resolution
-        from enhanced_relationship_detector import EnhancedRelationshipDetector
+        try:
+            from enhanced_relationship_detector import EnhancedRelationshipDetector
+        except ImportError:
+            logger.warning("Enhanced relationship detector not available, skipping relationship detection")
+            return
         openai_client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
         detector = EnhancedRelationshipDetector(openai_client, supabase)
         
@@ -5419,7 +5469,11 @@ async def trigger_relationship_detection(user_id: str, job_id: str, supabase: Cl
     """Trigger relationship detection for processed events"""
     try:
         # Initialize relationship detector
-        from enhanced_relationship_detector import EnhancedRelationshipDetector
+        try:
+            from enhanced_relationship_detector import EnhancedRelationshipDetector
+        except ImportError:
+            logger.warning("Enhanced relationship detector not available, skipping relationship detection")
+            return
         openai_client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
         detector = EnhancedRelationshipDetector(openai_client, supabase)
         
@@ -6582,7 +6636,11 @@ async def test_enhanced_relationship_detection(user_id: str):
     """Test ENHANCED relationship detection with cross-file capabilities"""
     try:
         # Import the enhanced detector
-        from enhanced_relationship_detector import EnhancedRelationshipDetector
+        try:
+            from enhanced_relationship_detector import EnhancedRelationshipDetector
+        except ImportError:
+            logger.warning("Enhanced relationship detector not available, skipping relationship detection")
+            return
 
         # Create test Supabase client
         supabase_url = os.getenv('SUPABASE_URL')

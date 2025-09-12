@@ -5,6 +5,7 @@ import { FileList, FileRowData } from './FileList';
 import { useToast } from '@/hooks/use-toast';
 import { useFastAPIProcessor } from './FastAPIProcessor';
 import { DuplicateDetectionModal } from './DuplicateDetectionModal';
+import { useAuth } from './AuthProvider';
 
 interface UploadedFile {
   id: string;
@@ -15,6 +16,7 @@ interface UploadedFile {
 }
 
 export const EnhancedFileUpload: React.FC = () => {
+  const { user } = useAuth();
   const [files, setFiles] = useState<FileRowData[]>([]);
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -61,6 +63,23 @@ export const EnhancedFileUpload: React.FC = () => {
   const processFile = async (file: File, fileId: string, customPrompt?: string) => {
     try {
       const result = await processFileWithFastAPI(file, customPrompt, (progress) => {
+        // Handle duplicate detection progress
+        if (progress.step === 'duplicate_detected') {
+          // Show duplicate modal
+          setDuplicateModal(prev => ({
+            ...prev,
+            isOpen: true,
+            phase: 'basic_duplicate',
+            duplicateInfo: {
+              message: 'Duplicate file detected!',
+              filename: file.name,
+              recommendation: 'replace_or_skip'
+            },
+            currentJobId: null,
+            currentFileHash: null
+          }));
+        }
+        
         setFiles(prev => prev.map(f => 
           f.id === fileId 
             ? {
@@ -234,7 +253,7 @@ export const EnhancedFileUpload: React.FC = () => {
         },
         body: JSON.stringify({
           job_id: duplicateModal.currentJobId,
-          user_id: 'current-user-id',
+          user_id: user?.id || 'anonymous',
           decision: decision,
           file_hash: duplicateModal.currentFileHash
         })
@@ -269,7 +288,7 @@ export const EnhancedFileUpload: React.FC = () => {
         },
         body: JSON.stringify({
           recommendation_id: duplicateModal.recommendation.id,
-          user_id: 'current-user-id',
+          user_id: user?.id || 'anonymous',
           accepted: accepted,
           feedback: feedback
         })

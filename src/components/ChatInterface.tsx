@@ -2,6 +2,7 @@ import { MessageCircle, Send, Upload, Plug } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { EnhancedFileUpload } from './EnhancedFileUpload';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
+import { useAuth } from './AuthProvider';
 
 interface ChatInterfaceProps {
   currentView?: string;
@@ -9,6 +10,7 @@ interface ChatInterfaceProps {
 }
 
 export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfaceProps) => {
+  const { user } = useAuth();
   const [message, setMessage] = useState('');
   const [messages, setMessages] = useState<Array<{ id: string; text: string; isUser: boolean; timestamp: Date }>>([]);
   const [currentChatId, setCurrentChatId] = useState<string | null>(null);
@@ -57,7 +59,7 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
               },
               body: JSON.stringify({
                 message: currentMessage,
-                user_id: 'current-user-id' // Replace with actual user ID
+                user_id: user?.id || 'anonymous'
               })
             });
             
@@ -96,7 +98,7 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
           },
           body: JSON.stringify({
             message: currentMessage,
-            user_id: 'current-user-id', // Replace with actual user ID
+            user_id: user?.id || 'anonymous',
             chat_id: chatId
           })
         });
