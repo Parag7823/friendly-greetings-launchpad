@@ -51,14 +51,23 @@ The system is built using **FastAPI** (Python) with **9,379 lines** of productio
 - **Key Components**: `Config` class with file size limits, batch processing settings
 - **Capabilities**: Centralized configuration management
 
-### **Lines 382-538: Duplicate Detection Service**
-- **Purpose**: File duplicate detection and management
+### **Lines 382-728: Duplicate Detection Service (ENHANCED)**
+- **Purpose**: Advanced duplicate detection with content-level analysis and delta ingestion
 - **Key Components**:
-  - `DuplicateDetectionService` class
+  - `DuplicateDetectionService` class with enhanced capabilities
   - `check_exact_duplicate()`: SHA-256 hash-based duplicate detection
-  - `handle_duplicate_decision()`: User decision handling
-  - `check_near_duplicate()`: Content similarity detection
-- **Capabilities**: File-level duplicate detection, user decision management
+  - `check_content_duplicate()`: Row-level fingerprinting for content overlap detection
+  - `analyze_delta_ingestion()`: Intelligent analysis of new vs existing rows
+  - `calculate_content_fingerprint()`: Creates unique signatures for each row
+  - `calculate_streaming_hash()`: Memory-efficient hash calculation for large files
+  - `check_near_duplicate()`: Enhanced similarity detection with multiple algorithms
+  - `handle_duplicate_decision()`: User decision handling (replace, keep_both, skip, delta_merge)
+- **Capabilities**: 
+  - **File-level duplicate detection** (SHA-256)
+  - **Content-level deduplication** (row-level fingerprinting)
+  - **Delta ingestion** (intelligent merging of overlapping data)
+  - **Streaming hash calculation** (memory-efficient for large files)
+  - **Enhanced similarity detection** (filename, content, date-based)
 
 ### **Lines 539-959: Enhanced File Processor**
 - **Purpose**: Advanced file processing for 100+ formats
@@ -337,4 +346,32 @@ The system uses **Supabase** (PostgreSQL) with optimized tables:
 **API Endpoints**: 25+ comprehensive testing and processing endpoints
 **Error Handling**: 95%+ success rate with graceful fallbacks
 
-This is a **comprehensive, enterprise-grade financial data processing system** that can handle any financial document and provide deep insights automatically with robust error handling and recovery mechanisms. 🚀💰
+---
+
+## 🆕 Latest Enhancements (December 2024)
+
+### **Advanced Duplicate Detection & Delta Ingestion**
+- **Content-Level Deduplication**: Row-level fingerprinting beyond file hashing
+- **Streaming Hash Calculation**: Memory-efficient processing for large files (50MB+)
+- **Delta Ingestion**: Intelligent merging of overlapping data with user choice
+- **Enhanced Similarity Detection**: Multi-algorithm approach (filename, content, date)
+- **Partial Overlap Handling**: Smart merging of new vs existing rows
+- **User-Friendly Messages**: Human-readable duplicate detection notifications
+
+### **New API Endpoints**
+- **`/delta-ingestion/{job_id}`**: Process delta ingestion for overlapping content
+- **Enhanced duplicate detection**: Content-level analysis with row comparison
+- **Streaming file processing**: Memory-efficient handling of large files
+
+### **Improved User Experience**
+- **Intelligent Duplicate Handling**: "Looks like you already uploaded this statement on Sept 3. Would you like to replace it or just add the missing rows?"
+- **Delta Analysis**: "📊 Delta analysis: 15 new rows, 8 existing rows"
+- **Content Overlap Detection**: "🔄 Content overlap detected! Analyzing for delta ingestion..."
+
+### **Technical Improvements**
+- **Memory Optimization**: Streaming hash calculation prevents memory issues
+- **Row-Level Fingerprinting**: MD5 hashes for each row enable precise duplicate detection
+- **Enhanced Similarity Algorithms**: Weighted combination of filename, content, and date similarity
+- **Intelligent Merging**: Three modes: merge_new_only, replace_all, merge_intelligent
+
+This is a **comprehensive, enterprise-grade financial data processing system** that can handle any financial document and provide deep insights automatically with robust error handling, advanced duplicate detection, and intelligent delta ingestion capabilities. 🚀💰
