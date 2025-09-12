@@ -124,7 +124,7 @@ export class FastAPIProcessor {
   }
 
   private async pollForResults(jobId: string, initialResponse: any): Promise<any> {
-    const maxAttempts = 30; // 5 minutes max (10 seconds * 30)
+    const maxAttempts = 60; // 5 minutes max (5 seconds * 60)
     let attempts = 0;
     
     while (attempts < maxAttempts) {
@@ -149,14 +149,14 @@ export class FastAPIProcessor {
           }
         }
         
-        // Wait 10 seconds before next poll
-        await new Promise(resolve => setTimeout(resolve, 10000));
+        // Wait 5 seconds before next poll (faster polling)
+        await new Promise(resolve => setTimeout(resolve, 5000));
         attempts++;
         
       } catch (error) {
         console.error('Polling error:', error);
         attempts++;
-        await new Promise(resolve => setTimeout(resolve, 5000)); // Wait 5 seconds on error
+        await new Promise(resolve => setTimeout(resolve, 2000)); // Wait 2 seconds on error
       }
     }
     
