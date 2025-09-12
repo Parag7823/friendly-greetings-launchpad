@@ -5275,6 +5275,38 @@ async def process_delta_ingestion(job_id: str, request: Request):
         })
         raise HTTPException(status_code=500, detail=str(e))
 
+def _extract_entities_simple(payload: dict) -> dict:
+    """Simple entity extraction using pattern matching"""
+    try:
+        entities = {
+            'employees': [],
+            'vendors': [],
+            'customers': [],
+            'projects': []
+        }
+        
+        # Convert payload to text for pattern matching
+        text = ' '.join([str(val) for val in payload.values() if val]).lower()
+        
+        # Simple pattern matching for entities
+        if any(keyword in text for keyword in ['employee', 'staff', 'worker']):
+            entities['employees'].append('Employee')
+        
+        if any(keyword in text for keyword in ['vendor', 'supplier', 'contractor']):
+            entities['vendors'].append('Vendor')
+        
+        if any(keyword in text for keyword in ['customer', 'client', 'buyer']):
+            entities['customers'].append('Customer')
+        
+        if any(keyword in text for keyword in ['project', 'campaign', 'initiative']):
+            entities['projects'].append('Project')
+        
+        return entities
+        
+    except Exception as e:
+        logger.error(f"Simple entity extraction failed: {e}")
+        return {'employees': [], 'vendors': [], 'customers': [], 'projects': []}
+
 async def run_downstream_processing_async(user_id: str, job_id: str, supabase: Client):
     """Run downstream processing asynchronously without blocking the main response"""
     try:
@@ -5305,13 +5337,14 @@ async def trigger_entity_resolution(user_id: str, job_id: str, supabase: Client)
         
         # Initialize entity resolution
         from enhanced_relationship_detector import EnhancedRelationshipDetector
-        detector = EnhancedRelationshipDetector(supabase)
+        openai_client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
+        detector = EnhancedRelationshipDetector(openai_client, supabase)
         
         # Process each event for entity extraction
         for event in events_result.data:
             try:
-                # Extract entities from the event payload
-                entities = detector.extract_entities_from_payload(event.get('payload', {}))
+                # Extract entities from the event payload using simple pattern matching
+                entities = _extract_entities_simple(event.get('payload', {}))
                 
                 # Store entities in normalized_entities table
                 for entity_type, entity_names in entities.items():
@@ -5338,6 +5371,7 @@ async def trigger_entity_resolution(user_id: str, job_id: str, supabase: Client)
     except Exception as e:
         logger.error(f"Entity resolution failed: {e}")
         raise
+    
 
 async def trigger_platform_discovery(user_id: str, job_id: str, supabase: Client):
     """Trigger platform discovery for processed events"""
@@ -5386,9 +5420,10 @@ async def trigger_relationship_detection(user_id: str, job_id: str, supabase: Cl
     try:
         # Initialize relationship detector
         from enhanced_relationship_detector import EnhancedRelationshipDetector
-        detector = EnhancedRelationshipDetector(supabase)
+        openai_client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
+        detector = EnhancedRelationshipDetector(openai_client, supabase)
         
-        # Detect all relationships
+        # Detect all relationships using enhanced detector
         relationships = await detector.detect_all_relationships(user_id)
         
         if relationships and relationships.get('relationships'):

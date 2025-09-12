@@ -69,7 +69,7 @@ The system is built using **FastAPI** (Python) with **9,379 lines** of productio
   - **Streaming hash calculation** (memory-efficient for large files)
   - **Enhanced similarity detection** (filename, content, date-based)
 
-### **Lines 539-959: Enhanced File Processor**
+### **Lines  
 - **Purpose**: Advanced file processing for 100+ formats
 - **Key Components**:
   - `EnhancedFileProcessor` class
