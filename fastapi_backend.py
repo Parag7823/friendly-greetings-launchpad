@@ -33,6 +33,26 @@ import requests
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+def check_env_vars():
+    """Check for required environment variables at startup."""
+    required_vars = ["SUPABASE_URL", "OPENAI_API_KEY"]
+    missing_vars = [var for var in required_vars if not os.getenv(var)]
+    
+    # Special check for Supabase service key, allowing for either name
+    supabase_service_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY") or os.getenv("SUPABASE_SERVICE_KEY")
+    if not supabase_service_key:
+        missing_vars.append("SUPABASE_SERVICE_ROLE_KEY or SUPABASE_SERVICE_KEY")
+
+    if missing_vars:
+        error_msg = f"CRITICAL ERROR: Missing required environment variables: {', '.join(missing_vars)}. The application cannot start."
+        logger.critical(error_msg)
+        raise EnvironmentError(error_msg)
+    else:
+        logger.info("All required environment variables are configured.")
+
+# Check environment variables on startup
+check_env_vars()
+
 # Handle missing libGL.so.1 gracefully (common in containerized environments)
 try:
     import cv2
