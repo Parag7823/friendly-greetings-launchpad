@@ -5611,21 +5611,17 @@ async def upload_and_process(
         # Read file content
         file_content = await file.read()
 
-        # Initialize Supabase client
-        supabase_url = os.environ.get("SUPABASE_URL")
-        supabase_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
-        if supabase_key:
-            supabase_key = clean_jwt_token(supabase_key)
-
-        # Clean the JWT token (remove newlines and whitespace)
-        if supabase_key:
-            supabase_key = clean_jwt_token(supabase_key)
-
+        # Initialize Supabase client (use same pattern as other working endpoints)
+        supabase_url = os.getenv("SUPABASE_URL")
+        supabase_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY") or os.getenv("SUPABASE_SERVICE_KEY")
+        
         if not supabase_url or not supabase_key:
+            logger.error("Missing Supabase credentials in environment")
             raise HTTPException(status_code=500, detail="Supabase credentials not configured")
 
         # Clean JWT token to prevent header value errors
-        supabase_key = clean_jwt_token(supabase_key)
+        if supabase_key:
+            supabase_key = clean_jwt_token(supabase_key)
         supabase: Client = create_client(supabase_url, supabase_key)
 
         # Create ExcelProcessor instance
