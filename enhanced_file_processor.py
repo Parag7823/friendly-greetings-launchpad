@@ -46,7 +46,7 @@ logger = logging.getLogger(__name__)
 class EnhancedFileProcessor:
     """Enhanced file processor with 100X capabilities"""
     
-    def __init__(self, merge_similarity_threshold: float = 0.6):
+    def __init__(self):
         self.supported_formats = {
             # Spreadsheet formats
             'excel': ['.xlsx', '.xls', '.xlsm', '.xlsb'],
@@ -65,9 +65,8 @@ class EnhancedFileProcessor:
         
         # Configure OCR
         self.ocr_config = '--oem 3 --psm 6'
-        self.merge_similarity_threshold = merge_similarity_threshold
         
-    async def process_file_enhanced(self, file_path: str, filename: str, 
+    async def process_file_enhanced(self, file_content: bytes, filename: str, 
                                   progress_callback=None) -> Dict[str, pd.DataFrame]:
         """
         Enhanced file processing with support for multiple formats
@@ -84,9 +83,8 @@ class EnhancedFileProcessor:
             if progress_callback:
                 await progress_callback("detecting", "🔍 Detecting file format and structure...", 5)
             
-            with open(file_path, 'rb') as f:
-                file_content_for_detection = f.read(1024) # Read first 1KB for detection
-            file_format = self._detect_file_format(filename, file_content_for_detection)
+            # Detect file format
+            file_format = self._detect_file_format(filename, file_content)
             logger.info(f"Detected file format: {file_format} for {filename}")
             
             if progress_callback:
@@ -94,7 +92,7 @@ class EnhancedFileProcessor:
             
             # Route to appropriate processor
             if file_format == 'excel':
-                return await self._process_excel_enhanced(file_path, filename, progress_callback)
+                return await self._process_excel_enhanced(file_content, filename, progress_callback)
             elif file_format == 'csv':
                 return await self._process_csv_enhanced(file_content, filename, progress_callback)
             elif file_format == 'ods':
@@ -916,7 +914,7 @@ class EnhancedFileProcessor:
                     similarity = overlap / total if total > 0 else 0
 
                     # If similarity is high enough, add to group
-                    if similarity >= self.merge_similarity_threshold:
+                    if similarity >= 0.6:  # 60% similarity threshold
                         current_group.append(other_sheet)
 
             if len(current_group) > 1:

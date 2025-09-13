@@ -13,7 +13,6 @@ import { Input } from './ui/input';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from './ui/tooltip';
 import { ChatContextMenu } from './ChatContextMenu';
 import { ShareModal } from './ShareModal';
-import { useAuth } from './AuthProvider';
 
 interface ChatHistory {
   id: string;
@@ -31,7 +30,6 @@ interface FinleySidebarProps {
 }
 
 export const FinleySidebar = ({ onClose, onNavigate, currentView = 'chat', isCollapsed = false, currentChatId = null }: FinleySidebarProps) => {
-  const { user } = useAuth();
   const [chatHistory, setChatHistory] = useState<ChatHistory[]>([]);
   const [editingChatId, setEditingChatId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState<string>('');
@@ -60,8 +58,7 @@ export const FinleySidebar = ({ onClose, onNavigate, currentView = 'chat', isCol
       
       // Also try to load from database (for persistence across devices)
       try {
-        if (!user?.id) return;
-        const response = await fetch(`/chat-history/${user.id}`);
+        const response = await fetch('/chat-history/current-user-id');
         if (response.ok) {
           const data = await response.json();
           if (data.chats && data.chats.length > 0) {
@@ -91,7 +88,7 @@ export const FinleySidebar = ({ onClose, onNavigate, currentView = 'chat', isCol
     };
 
     loadChatHistory();
-  }, [user]);
+  }, []);
 
   // Save chat history to localStorage whenever it changes
   useEffect(() => {
@@ -163,7 +160,7 @@ export const FinleySidebar = ({ onClose, onNavigate, currentView = 'chat', isCol
         body: JSON.stringify({
           chat_id: editingChatId,
           new_title: newTitle,
-          user_id: user?.id
+          user_id: 'current-user-id'
         })
       });
 
@@ -215,7 +212,7 @@ export const FinleySidebar = ({ onClose, onNavigate, currentView = 'chat', isCol
         },
         body: JSON.stringify({
           chat_id: chatId,
-          user_id: user?.id
+          user_id: 'current-user-id'
         })
       });
 

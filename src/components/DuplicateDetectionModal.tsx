@@ -23,7 +23,6 @@ interface VersionCandidate {
   created_at: string;
   total_rows: number;
   total_columns: number;
-  similarity?: number;
 }
 
 interface VersionRecommendation {
@@ -169,7 +168,6 @@ export const DuplicateDetectionModal: React.FC<DuplicateDetectionModalProps> = (
                   <p className="text-sm text-gray-500">
                     {candidate.total_rows} rows • {candidate.total_columns} columns • 
                     {new Date(candidate.created_at).toLocaleDateString()}
-                    {candidate.similarity && ` • ${Math.round(candidate.similarity * 100)}% content overlap`}
                   </p>
                 </div>
               </div>

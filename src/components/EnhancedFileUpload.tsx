@@ -62,57 +62,47 @@ export const EnhancedFileUpload: React.FC = () => {
 
   const processFile = async (file: File, fileId: string, customPrompt?: string) => {
     try {
-      const result = await processFileWithFastAPI(
-        file,
-        customPrompt,
-        (progress) => { // This single callback handles all WebSocket events
-          if (progress.step === 'duplicate_detected') {
-            setDuplicateModal({
-              isOpen: true,
-              phase: 'basic_duplicate',
-              duplicateInfo: progress.duplicate_info,
-              versionCandidates: null,
-              recommendation: null,
-              currentJobId: progress.job_id,
-              currentFileHash: progress.file_hash
-            });
-          } else if (progress.step === 'partial_duplicate_detected') {
-            setDuplicateModal({
-              isOpen: true,
-              phase: 'similar_files',
-              duplicateInfo: null,
-              versionCandidates: progress.partial_duplicate_info,
-              recommendation: null,
-              currentJobId: progress.job_id,
-              currentFileHash: null
-            });
-          } else {
-            // Handle standard progress updates
-            setFiles(prev => prev.map(f =>
-              f.id === fileId
-                ? {
-                  ...f,
-                  currentStep: progress.message,
-                  progress: progress.progress,
-                  sheetProgress: progress.sheetProgress,
-                  status: progress.progress === 100 ? 'completed' : 'processing'
-                }
-                : f
-            ));
-          }
-        },
-        (jobId) => { // onJobId callback
-          setFiles(prev => prev.map(f =>
-            f.id === fileId
-              ? { ...f, jobId }
-              : f
-          ));
+      const result = await processFileWithFastAPI(file, customPrompt, (progress) => {
+        // Handle duplicate detection progress
+        if (progress.step === 'duplicate_detected') {
+          // Show duplicate modal
+          setDuplicateModal(prev => ({
+            ...prev,
+            isOpen: true,
+            phase: 'basic_duplicate',
+            duplicateInfo: {
+              message: 'Duplicate file detected!',
+              filename: file.name,
+              recommendation: 'replace_or_skip'
+            },
+            currentJobId: null,
+            currentFileHash: null
+          }));
         }
-      );
+        
+        setFiles(prev => prev.map(f => 
+          f.id === fileId 
+            ? {
+                ...f,
+                currentStep: progress.message,
+                progress: progress.progress,
+                sheetProgress: progress.sheetProgress,
+                status: progress.progress === 100 ? 'completed' : 'processing'
+              }
+            : f
+        ));
+      }, (jobId) => {
+        // Store job ID for cancel functionality
+        setFiles(prev => prev.map(f => 
+          f.id === fileId 
+            ? { ...f, jobId }
+            : f
+        ));
+      });
 
       // Move to completed state
-      setFiles(prev => prev.map(f =>
-        f.id === fileId
+      setFiles(prev => prev.map(f => 
+        f.id === fileId 
           ? { ...f, status: 'completed' as const, progress: 100 }
           : f
       ));
@@ -132,13 +122,13 @@ export const EnhancedFileUpload: React.FC = () => {
       return result;
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Processing failed';
-      setFiles(prev => prev.map(f =>
-        f.id === fileId
-          ? {
-            ...f,
-            status: 'failed' as const,
-            error: errorMessage
-          }
+      setFiles(prev => prev.map(f => 
+        f.id === fileId 
+          ? { 
+              ...f, 
+              status: 'failed' as const, 
+              error: errorMessage 
+            }
           : f
       ));
       throw error;

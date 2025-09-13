@@ -180,20 +180,11 @@ export const FileRow: React.FC<FileRowProps> = ({
         )}
 
         {/* Error Message */}
-        {/* Status Messages (Error, Warning, Info) */}
         {error && (
           <div className="mt-2 p-2 rounded-md bg-destructive/10 border border-destructive/20">
             <div className="flex items-start gap-2">
               <AlertCircle className="w-4 h-4 text-destructive flex-shrink-0 mt-0.5" />
               <p className="text-xs text-destructive">{error}</p>
-            </div>
-          </div>
-        )}
-        {currentStep && currentStep.toLowerCase().includes('warning') && (
-          <div className="mt-2 p-2 rounded-md bg-yellow-500/10 border border-yellow-500/20">
-            <div className="flex items-start gap-2">
-              <AlertTriangle className="w-4 h-4 text-yellow-500 flex-shrink-0 mt-0.5" />
-              <p className="text-xs text-yellow-600">{currentStep}</p>
             </div>
           </div>
         )}
