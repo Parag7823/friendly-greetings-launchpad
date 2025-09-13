@@ -3267,7 +3267,7 @@ class ExcelProcessor:
             logger.error(f"Error reading file {filename}: {e}")
             raise HTTPException(status_code=400, detail=f"Error reading file {filename}: {str(e)}")
     
-    async def process_file(self, job_id: str, file_path: str, filename: str,
+    async def process_file(self, job_id: str, file_content: bytes, filename: str,
                           user_id: str, supabase: Client) -> Dict[str, Any]:
         """Optimized processing pipeline with duplicate detection and batch AI classification"""
 
