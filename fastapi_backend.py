@@ -5648,8 +5648,11 @@ async def upload_and_process(
         }
 
     except Exception as e:
+        import traceback
+        error_details = traceback.format_exc()
         logger.error(f"Upload and process error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Full traceback: {error_details}")
+        raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
 
 # ============================================================================
 # DUPLICATE HANDLING ENDPOINTS
