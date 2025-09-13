@@ -91,7 +91,7 @@ export const FinleySidebar = ({ onClose, onNavigate, currentView = 'chat', isCol
     };
 
     loadChatHistory();
-  }, []);
+  }, [user]);
 
   // Save chat history to localStorage whenever it changes
   useEffect(() => {

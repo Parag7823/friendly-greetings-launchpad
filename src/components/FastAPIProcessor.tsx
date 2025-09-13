@@ -275,7 +275,7 @@ export class FastAPIProcessor {
       }
 
       // Upload file
-      const uploadResponse = await fetch(`${this.apiUrl}/upload`, {
+      const uploadResponse = await fetch(`${this.apiUrl}/upload-and-process`, {
         method: 'POST',
         body: formData
       });
