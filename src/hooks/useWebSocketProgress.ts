@@ -16,6 +16,8 @@ interface WebSocketProgressData {
 
 interface UseWebSocketProgressOptions {
   onProgress?: (data: WebSocketProgressData) => void;
+  onDuplicateDetected?: (data: any) => void;
+  onPartialDuplicateDetected?: (data: any) => void;
   onComplete?: (data: any) => void;
   onError?: (error: string) => void;
 }
@@ -53,7 +55,11 @@ export const useWebSocketProgress = (options: UseWebSocketProgressOptions = {}) 
         const data = JSON.parse(event.data);
         console.log('WebSocket message received:', data);
 
-        if (data.status === 'completed') {
+        if (data.step === 'duplicate_detected') {
+          options.onDuplicateDetected?.(data);
+        } else if (data.step === 'partial_duplicate_detected') {
+          options.onPartialDuplicateDetected?.(data);
+        } else if (data.status === 'completed') {
           options.onComplete?.(data);
           ws.close();
         } else if (data.status === 'error') {

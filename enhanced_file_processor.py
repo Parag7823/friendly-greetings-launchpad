@@ -40,14 +40,13 @@ import cv2
 # Excel repair libraries
 import openpyxl
 from openpyxl.utils.exceptions import InvalidFileException
-import xlwings as xw
 
 logger = logging.getLogger(__name__)
 
 class EnhancedFileProcessor:
     """Enhanced file processor with 100X capabilities"""
     
-    def __init__(self):
+    def __init__(self, merge_similarity_threshold: float = 0.6):
         self.supported_formats = {
             # Spreadsheet formats
             'excel': ['.xlsx', '.xls', '.xlsm', '.xlsb'],
@@ -66,8 +65,9 @@ class EnhancedFileProcessor:
         
         # Configure OCR
         self.ocr_config = '--oem 3 --psm 6'
+        self.merge_similarity_threshold = merge_similarity_threshold
         
-    async def process_file_enhanced(self, file_content: bytes, filename: str, 
+    async def process_file_enhanced(self, file_path: str, filename: str, 
                                   progress_callback=None) -> Dict[str, pd.DataFrame]:
         """
         Enhanced file processing with support for multiple formats
@@ -84,8 +84,9 @@ class EnhancedFileProcessor:
             if progress_callback:
                 await progress_callback("detecting", "🔍 Detecting file format and structure...", 5)
             
-            # Detect file format
-            file_format = self._detect_file_format(filename, file_content)
+            with open(file_path, 'rb') as f:
+                file_content_for_detection = f.read(1024) # Read first 1KB for detection
+            file_format = self._detect_file_format(filename, file_content_for_detection)
             logger.info(f"Detected file format: {file_format} for {filename}")
             
             if progress_callback:
@@ -93,7 +94,7 @@ class EnhancedFileProcessor:
             
             # Route to appropriate processor
             if file_format == 'excel':
-                return await self._process_excel_enhanced(file_content, filename, progress_callback)
+                return await self._process_excel_enhanced(file_path, filename, progress_callback)
             elif file_format == 'csv':
                 return await self._process_csv_enhanced(file_content, filename, progress_callback)
             elif file_format == 'ods':
@@ -156,17 +157,25 @@ class EnhancedFileProcessor:
             if progress_callback:
                 await progress_callback("reading", "📖 Reading Excel file...", 20)
             
-            # Try standard processing first
+            # Check for password protection and macros
+            if '.xlsm' in filename.lower():
+                logger.warning(f"File {filename} may contain macros. Processing with caution.")
+                if progress_callback:
+                    await progress_callback("security_check", "⚠️ File may contain macros. Proceeding with caution...", 25)
+
             try:
+                # Try standard processing first
                 return await self._read_excel_standard(file_content, filename)
-            except Exception as e:
-                logger.warning(f"Standard Excel reading failed: {e}")
-                
+            except (InvalidFileException, zipfile.BadZipFile) as e:
+                if 'encrypted' in str(e).lower():
+                    raise ValueError("Password-protected Excel files are not supported.")
+                logger.warning(f"Standard Excel reading failed, attempting repair: {e}")
                 if progress_callback:
                     await progress_callback("repairing", "🔧 Attempting to repair corrupted Excel file...", 30)
-                
-                # Attempt auto-repair
                 return await self._repair_and_read_excel(file_content, filename, progress_callback)
+            except Exception as e:
+                logger.error(f"Enhanced Excel processing failed: {e}")
+                raise
                 
         except Exception as e:
             logger.error(f"Enhanced Excel processing failed: {e}")
@@ -233,29 +242,6 @@ class EnhancedFileProcessor:
                 except Exception as openpyxl_e:
                     logger.warning(f"OpenPyXL repair failed: {openpyxl_e}")
                 
-                # Try xlwings repair (if available)
-                try:
-                    if progress_callback:
-                        await progress_callback("repairing", "🔧 Attempting advanced repair...", 50)
-                    
-                    # This requires Excel to be installed
-                    app = xw.App(visible=False)
-                    wb = app.books.open(temp_path)
-                    
-                    # Save as new file
-                    repaired_path = temp_path.replace('.xlsx', '_xlwings_repaired.xlsx')
-                    wb.save(repaired_path)
-                    wb.close()
-                    app.quit()
-                    
-                    # Read repaired file
-                    with open(repaired_path, 'rb') as f:
-                        repaired_content = f.read()
-                    
-                    return await self._read_excel_standard(repaired_content, filename)
-                    
-                except Exception as xlwings_e:
-                    logger.warning(f"xlwings repair failed: {xlwings_e}")
                 
                 # Last resort: try to extract as much data as possible
                 return await self._extract_partial_excel_data(file_content, filename)
@@ -263,7 +249,7 @@ class EnhancedFileProcessor:
             finally:
                 # Cleanup temporary files
                 for path in [temp_path, temp_path.replace('.xlsx', '_repaired.xlsx'), 
-                           temp_path.replace('.xlsx', '_xlwings_repaired.xlsx')]:
+                           ]:
                     try:
                         if os.path.exists(path):
                             os.unlink(path)
@@ -480,14 +466,20 @@ class EnhancedFileProcessor:
                     if progress_callback:
                         await progress_callback("extracting", "🔍 Using tabula extraction...", 30)
 
-                    tabula_tables = tabula.read_pdf(temp_path, pages='all', multiple_tables=True)
+                    tabula_tables = tabula.read_pdf(temp_path, pages='all', multiple_tables=True, pandas_options={'header': None})
 
                     for i, df in enumerate(tabula_tables):
-                        if not df.empty and len(df.columns) > 1:
-                            table_count += 1
-                            tables[f'Table_{table_count}_Tabula'] = df
+                        if not df.empty:
+                            # Clean up empty rows and columns
+                            df.dropna(axis=0, how='all', inplace=True)
+                            df.dropna(axis=1, how='all', inplace=True)
+                            if not df.empty:
+                                table_count += 1
+                                tables[f'Table_{table_count}_Tabula'] = df
 
                 except Exception as tabula_e:
+                    if 'password' in str(tabula_e).lower():
+                        raise ValueError("Password-protected PDF files are not supported.")
                     logger.warning(f"Tabula extraction failed: {tabula_e}")
 
                 # Method 2: Try camelot (good for lattice tables)
@@ -532,7 +524,8 @@ class EnhancedFileProcessor:
                 if not tables:
                     raise ValueError("No tables found in PDF file")
 
-                return tables
+                # De-duplicate and merge similar tables
+                return self._deduplicate_and_merge_tables(tables)
 
             finally:
                 # Cleanup
@@ -564,9 +557,14 @@ class EnhancedFileProcessor:
                 extracted_files = []
 
                 if filename.lower().endswith('.zip'):
-                    with zipfile.ZipFile(archive_path, 'r') as zip_ref:
-                        zip_ref.extractall(temp_dir)
-                        extracted_files = zip_ref.namelist()
+                    try:
+                        with zipfile.ZipFile(archive_path, 'r') as zip_ref:
+                            zip_ref.extractall(temp_dir)
+                            extracted_files = zip_ref.namelist()
+                    except zipfile.BadZipFile as e:
+                        if 'encrypted' in str(e).lower():
+                            raise ValueError("Password-protected ZIP files are not supported.")
+                        raise
 
                 elif filename.lower().endswith('.7z'):
                     with py7zr.SevenZipFile(archive_path, mode='r') as archive:
@@ -918,7 +916,7 @@ class EnhancedFileProcessor:
                     similarity = overlap / total if total > 0 else 0
 
                     # If similarity is high enough, add to group
-                    if similarity >= 0.6:  # 60% similarity threshold
+                    if similarity >= self.merge_similarity_threshold:
                         current_group.append(other_sheet)
 
             if len(current_group) > 1:
@@ -1437,3 +1435,72 @@ class EnhancedFileProcessor:
         except Exception as e:
             logger.error(f"Failed to merge sheet group {sheet_names}: {e}")
             return None
+
+    def _deduplicate_and_merge_tables(self, tables: Dict[str, pd.DataFrame]) -> Dict[str, pd.DataFrame]:
+        """Deduplicate and merge similar tables extracted from a PDF."""
+        if len(tables) <= 1:
+            return tables
+
+        # Calculate hashes for all tables
+        table_hashes = {name: self._calculate_table_hash(df) for name, df in tables.items()}
+        
+        # Group identical tables
+        unique_tables = {}
+        for name, df in tables.items():
+            h = table_hashes[name]
+            if h not in unique_tables:
+                unique_tables[h] = (name, df)
+        
+        if len(unique_tables) == len(tables):
+            return tables # No identical tables found
+
+        # Further process for similar (not identical) tables
+        final_tables = {}
+        processed_hashes = set()
+
+        sorted_unique_tables = sorted(unique_tables.items(), key=lambda item: len(item[1][1]), reverse=True)
+
+        for h, (name, df) in sorted_unique_tables:
+            if h in processed_hashes:
+                continue
+
+            similar_group = [(h, name, df)]
+            processed_hashes.add(h)
+
+            for other_h, (other_name, other_df) in sorted_unique_tables:
+                if other_h in processed_hashes:
+                    continue
+                
+                similarity = self._calculate_table_similarity(df, other_df)
+                if similarity > 0.85: # High similarity threshold for merging
+                    similar_group.append((other_h, other_name, other_df))
+                    processed_hashes.add(other_h)
+            
+            if len(similar_group) > 1:
+                # Merge the group
+                merged_df = similar_group[0][2] # Start with the largest table
+                for _, _, other_df in similar_group[1:]:
+                    # A simple concat and drop duplicates, more sophisticated merging can be added
+                    merged_df = pd.concat([merged_df, other_df]).drop_duplicates().reset_index(drop=True)
+                final_tables[f"Merged_{similar_group[0][1]}"] = merged_df
+            else:
+                final_tables[name] = df
+
+        return final_tables
+
+    def _calculate_table_hash(self, df: pd.DataFrame) -> str:
+        """Calculates a hash for a DataFrame based on its content and structure."""
+        import hashlib
+        # Normalize dataframe for hashing
+        df_str = df.to_string(index=False, header=True, na_rep='').encode('utf-8')
+        return hashlib.md5(df_str).hexdigest()
+
+    def _calculate_table_similarity(self, df1: pd.DataFrame, df2: pd.DataFrame) -> float:
+        """Calculates a similarity score between two DataFrames."""
+        from difflib import SequenceMatcher
+        
+        # Normalize and convert to string
+        s1 = df1.to_string(index=False, header=True, na_rep='').lower()
+        s2 = df2.to_string(index=False, header=True, na_rep='').lower()
+        
+        return SequenceMatcher(None, s1, s2).ratio()

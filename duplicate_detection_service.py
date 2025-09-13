@@ -194,49 +194,40 @@ class DuplicateDetectionService:
     
     async def find_similar_files(self, user_id: str, filename: str, 
                                content_fingerprint: str, file_hash: str) -> List[Dict[str, Any]]:
-        """Find files that might be versions of the same document"""
+        """Find files that might be versions of the same document using the optimized database function."""
         try:
-            # Get all files for this user (excluding the current one by hash)
-            result = self.supabase.table('raw_records').select(
-                'id, file_name, file_hash, created_at, content'
-            ).eq('user_id', user_id).neq('file_hash', file_hash).execute()
+            normalized_filename = self.normalize_filename(filename)
             
+            result = self.supabase.rpc('find_similar_files_by_name', {
+                'p_user_id': user_id,
+                'p_normalized_filename': normalized_filename
+            }).execute()
+
             if not result.data:
                 return []
-            
+
             similar_files = []
-            normalized_current = self.normalize_filename(filename)
-            
             for record in result.data:
-                other_filename = record['file_name']
-                filename_similarity = self.calculate_filename_similarity(filename, other_filename)
-                
-                # Consider files similar if filename similarity > 0.7
-                if filename_similarity > 0.7:
-                    # Get content fingerprint from stored content
-                    other_fingerprint = record.get('content', {}).get('content_fingerprint', '')
-                    content_similarity = 1.0 if content_fingerprint == other_fingerprint else 0.0
-                    
-                    similar_files.append({
-                        'id': record['id'],
-                        'filename': other_filename,
-                        'file_hash': record['file_hash'],
-                        'created_at': record['created_at'],
-                        'filename_similarity': filename_similarity,
-                        'content_similarity': content_similarity,
-                        'normalized_filename': self.normalize_filename(other_filename),
-                        'version_pattern': self.extract_version_pattern(other_filename),
-                        'total_rows': record.get('content', {}).get('total_rows', 0)
-                    })
-            
-            # Sort by similarity score (filename + content)
-            similar_files.sort(
-                key=lambda x: (x['filename_similarity'] + x['content_similarity']) / 2, 
-                reverse=True
-            )
-            
+                if record['file_hash'] == file_hash:
+                    continue # Exclude the exact same file
+
+                other_fingerprint = record.get('content', {}).get('content_fingerprint', '')
+                content_similarity = 1.0 if content_fingerprint == other_fingerprint else 0.0
+
+                similar_files.append({
+                    'id': record['id'],
+                    'filename': record['file_name'],
+                    'file_hash': record['file_hash'],
+                    'created_at': record['created_at'],
+                    'filename_similarity': record['similarity'],
+                    'content_similarity': content_similarity,
+                    'normalized_filename': self.normalize_filename(record['file_name']),
+                    'version_pattern': self.extract_version_pattern(record['file_name']),
+                    'total_rows': record.get('content', {}).get('total_rows', 0)
+                })
+
             return similar_files
-            
+
         except Exception as e:
             logger.error(f"Error finding similar files: {e}")
             return []
@@ -809,6 +800,40 @@ class DuplicateDetectionService:
     # ============================================================================
     # COMPREHENSIVE WORKFLOW METHODS
     # ============================================================================
+
+    async def check_partial_duplicates(self, user_id: str, new_file_id: str) -> List[Dict[str, Any]]:
+        """Check for partial duplicates using Jaccard similarity on row hashes."""
+        try:
+            # Get other recent files for the user to compare against
+            recent_files_result = self.supabase.table('raw_records') \
+                .select('id, file_name') \
+                .eq('user_id', user_id) \
+                .neq('id', new_file_id) \
+                .order('created_at', desc=True) \
+                .limit(10) \
+                .execute()
+
+            if not recent_files_result.data:
+                return []
+
+            overlapping_files = []
+            for existing_file in recent_files_result.data:
+                similarity_result = self.supabase.rpc('jaccard_similarity', {
+                    'p_file_id_1': new_file_id,
+                    'p_file_id_2': existing_file['id']
+                }).execute()
+
+                if similarity_result.data and similarity_result.data > 0.7: # 70% overlap threshold
+                    overlapping_files.append({
+                        'file_id': existing_file['id'],
+                        'file_name': existing_file['file_name'],
+                        'similarity': similarity_result.data
+                    })
+            
+            return overlapping_files
+        except Exception as e:
+            logger.error(f"Error checking for partial duplicates: {e}")
+            return []
 
     async def process_file_upload(self, user_id: str, file_content: bytes,
                                 filename: str, sheets: Dict[str, pd.DataFrame]) -> Dict[str, Any]:

@@ -24,10 +24,11 @@ RUN npm run build
 FROM python:3.11-slim
 
 # Force cache invalidation - updated packages
-# Install system dependencies for python-magic and basic functionality
-RUN apt-get update && apt-get install -y \
+# Install system dependencies for python-magic, Tesseract (OCR), Java (Tabula), and basic functionality
+RUN apt-get update && apt-get install -y --no-install-recommends \
     libmagic1 \
-    libmagic-dev \
+    tesseract-ocr \
+    default-jre \
     gcc \
     libglib2.0-0 \
     libgomp1 \

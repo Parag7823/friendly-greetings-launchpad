@@ -3247,7 +3247,7 @@ class ExcelProcessor:
             logger.error(f"Error reading file {filename}: {e}")
             raise HTTPException(status_code=400, detail=f"Error reading file {filename}: {str(e)}")
     
-    async def process_file(self, job_id: str, file_content: bytes, filename: str,
+    async def process_file(self, job_id: str, file_path: str, filename: str,
                           user_id: str, supabase: Client) -> Dict[str, Any]:
         """Optimized processing pipeline with duplicate detection and batch AI classification"""
 
@@ -3277,7 +3277,7 @@ class ExcelProcessor:
             logger.warning(f"Failed to create processing transaction: {e}")
             transaction_id = None
 
-        # Step 1: Read the file
+        # Step 1: Read the file from path
         await manager.send_update(job_id, {
             "step": "reading",
             "message": f"📖 Reading and parsing your {filename}...",
@@ -3285,6 +3285,8 @@ class ExcelProcessor:
         })
 
         try:
+            with open(file_path, 'rb') as f:
+                file_content = f.read()
             sheets = await self.read_file(file_content, filename)
         except Exception as e:
             await manager.send_update(job_id, {
@@ -3464,27 +3466,30 @@ class ExcelProcessor:
             "progress": 35
         })
 
-        # Calculate file hash for duplicate detection
-        file_hash = hashlib.sha256(file_content).hexdigest()
+        # Calculate file hash for duplicate detection from file path
+        file_hash = duplicate_service.calculate_streaming_hash(file_path)
 
         # Store in raw_records (avoid non-existent columns)
         # Calculate content fingerprint for row-level deduplication
         content_fingerprint = duplicate_service.calculate_content_fingerprint(sheets)
         
+        normalized_filename = duplicate_service.normalize_filename(filename)
+
         raw_record_result = supabase.table('raw_records').insert({
             'user_id': user_id,
             'file_name': filename,
-            'file_size': len(file_content),
+            'file_size': os.path.getsize(file_path),
             'source': 'file_upload',
+            'file_hash': file_hash,
+            'normalized_filename': normalized_filename,
             'content': {
                 'sheets': list(sheets.keys()),
                 'platform_detection': platform_info,
                 'document_analysis': doc_analysis,
-                'file_hash': file_hash,
-                'content_fingerprint': content_fingerprint,  # Add content fingerprint
+                'content_fingerprint': content_fingerprint,
                 'total_rows': sum(len(sheet) for sheet in sheets.values()),
                 'processed_at': datetime.utcnow().isoformat(),
-                'duplicate_analysis': duplicate_analysis  # Store duplicate analysis results
+                'duplicate_analysis': duplicate_analysis
             },
             'status': 'processing',
             'classification_status': 'processing'
@@ -3495,7 +3500,18 @@ class ExcelProcessor:
         else:
             raise HTTPException(status_code=500, detail="Failed to create raw record")
         
-        # Step 4: Create or update ingestion_jobs entry
+        # Step 4: Store row hashes for partial duplicate detection
+        row_hashes = []
+        for sheet_name, df in sheets.items():
+            for index, row in df.iterrows():
+                row_str = "".join(map(str, row.values))
+                row_hash = hashlib.md5(row_str.encode('utf-8')).hexdigest()
+                row_hashes.append({'file_id': file_id, 'row_hash': row_hash})
+        
+        if row_hashes:
+            supabase.table('file_row_hashes').insert(row_hashes).execute()
+
+        # Step 5: Create or update ingestion_jobs entry
         try:
             # Try to create the job entry if it doesn't exist
             job_result = supabase.table('ingestion_jobs').insert({
@@ -3801,9 +3817,6 @@ class ExcelProcessor:
             # Initialize relationship detector
             openai_client = AsyncOpenAI(api_key=os.getenv('OPENAI_API_KEY'))
             relationship_detector = EnhancedRelationshipDetector(openai_client, supabase)
-        except ImportError:
-            logger.warning("Enhanced relationship detector not available, skipping relationship detection")
-            return
             
             # Detect all relationships
             relationship_results = await relationship_detector.detect_all_relationships(user_id)
@@ -3814,6 +3827,18 @@ class ExcelProcessor:
             
             # Add relationship results to insights
             insights['relationship_analysis'] = relationship_results
+        except ImportError:
+            logger.warning("Enhanced relationship detector not available, skipping relationship detection")
+            insights['relationship_analysis'] = {
+                'error': 'Enhanced relationship detector not available',
+                'message': 'Relationship detection skipped but processing continued'
+            }
+            # Send skip message to frontend
+            await manager.send_update(job_id, {
+                "step": "relationships_skipped",
+                "message": "⚠️ Relationship detection skipped (module not available)",
+                "progress": 98
+            })
             
             await manager.send_update(job_id, {
                 "step": "relationships_completed",
@@ -5029,101 +5054,37 @@ async def process_excel(request: ProcessRequest, background_tasks: BackgroundTas
             "progress": 5
         })
         
-        # Download file from Supabase storage
+        # Download file from Supabase storage and save to a temporary file
+        import tempfile
+        import os
+
+        temp_file_path = None
         try:
-            response = supabase.storage.from_('finely-upload').download(request.storage_path)
-            file_content = response
+            with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(request.file_name)[1]) as temp_file:
+                response = supabase.storage.from_('finely-upload').download(request.storage_path)
+                temp_file.write(response)
+                temp_file_path = temp_file.name
+
+            # Process the file with row-by-row streaming from the temp file path
+            results = await processor.process_file(
+                request.job_id, 
+                temp_file_path, 
+                request.file_name,
+                request.user_id,
+                supabase
+            )
         except Exception as e:
-            logger.error(f"Error downloading file: {e}")
+            logger.error(f"Error during file processing: {e}")
             await manager.send_update(request.job_id, {
                 "step": "error",
-                "message": f"Failed to download file: {str(e)}",
+                "message": f"File processing failed: {str(e)}",
                 "progress": 0
             })
-            raise HTTPException(status_code=400, detail=f"File download failed: {str(e)}")
-        
-        # Check for duplicates before processing
-        try:
-            await manager.send_update(request.job_id, {
-                "step": "duplicate_check",
-                "message": "🔍 Checking for duplicate files...",
-                "progress": 15
-            })
-            
-            duplicate_service = DuplicateDetectionService(supabase)
-            file_hash = duplicate_service.calculate_file_hash(file_content)
-            
-            duplicate_check = await duplicate_service.check_exact_duplicate(
-                request.user_id, 
-                file_hash, 
-                request.file_name
-            )
-            
-            if duplicate_check.get('is_duplicate', False):
-                await manager.send_update(request.job_id, {
-                    "step": "duplicate_detected",
-                    "message": f"⚠️ Duplicate file detected: {duplicate_check.get('message', 'File already exists')}",
-                    "progress": 20,
-                    "duplicate_info": duplicate_check
-                })
-                
-                # For now, we'll proceed with a warning
-                # In a real implementation, this would pause and wait for user decision
-                logger.warning(f"Duplicate file detected for user {request.user_id}: {request.file_name}")
-            else:
-                await manager.send_update(request.job_id, {
-                    "step": "no_duplicates",
-                    "message": "✅ No duplicates found, proceeding with processing...",
-                    "progress": 20
-                })
-                
-        except Exception as e:
-            logger.warning(f"Duplicate detection failed: {e} - proceeding with normal processing")
-            await manager.send_update(request.job_id, {
-                "step": "duplicate_check_failed",
-                "message": "⚠️ Duplicate check failed, proceeding with processing...",
-                "progress": 20
-            })
-        
-        # Create or update job status to processing
-        try:
-            # Try to update existing job
-            result = supabase.table('ingestion_jobs').update({
-            'status': 'processing',
-            'started_at': datetime.utcnow().isoformat(),
-            'progress': 10
-        }).eq('id', request.job_id).execute()
-        
-            # If no rows were updated, create the job
-            if not result.data:
-                supabase.table('ingestion_jobs').insert({
-                    'id': request.job_id,
-                    'job_type': 'fastapi_excel_analysis',
-                    'user_id': request.user_id,
-                    'status': 'processing',
-                    'started_at': datetime.utcnow().isoformat(),
-                    'progress': 10
-                }).execute()
-        except Exception as e:
-            logger.warning(f"Could not update job {request.job_id}, creating new one: {e}")
-            # Create the job if update fails
-            supabase.table('ingestion_jobs').insert({
-                'id': request.job_id,
-                'job_type': 'fastapi_excel_analysis',
-                'user_id': request.user_id,
-                'status': 'processing',
-                'started_at': datetime.utcnow().isoformat(),
-                'progress': 10
-            }).execute()
-        
-        # Process the file with row-by-row streaming
-        results = await processor.process_file(
-            request.job_id, 
-            file_content, 
-            request.file_name,
-            request.user_id,
-            supabase
-        )
+            raise HTTPException(status_code=500, detail=f"File processing failed: {str(e)}")
+        finally:
+            # Clean up the temporary file
+            if temp_file_path and os.path.exists(temp_file_path):
+                os.unlink(temp_file_path)
         
         # Update job with results
         supabase.table('ingestion_jobs').update({

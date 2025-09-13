@@ -1,5 +1,6 @@
 import React from 'react';
 import { FileRow, FileRowData } from './FileRow';
+export type { FileRowData };
 import { cn } from '@/lib/utils';
 
 interface FileListProps {
