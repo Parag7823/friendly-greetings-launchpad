@@ -66,6 +66,11 @@ class EnhancedFileProcessor:
         # Configure OCR
         self.ocr_config = '--oem 3 --psm 6'
         
+        # Configurable chunk sizes for streaming
+        self.excel_chunk_size = int(os.environ.get('EXCEL_CHUNK_SIZE', 1000))
+        self.csv_chunk_size = int(os.environ.get('CSV_CHUNK_SIZE', 10000))
+        self.streaming_threshold_mb = int(os.environ.get('STREAMING_THRESHOLD_MB', 10))
+        
     async def process_file_enhanced(self, file_content: bytes, filename: str, 
                                   progress_callback=None) -> Dict[str, pd.DataFrame]:
         """
@@ -180,11 +185,19 @@ class EnhancedFileProcessor:
             raise
     
     async def _read_excel_standard(self, file_content: bytes, filename: str) -> Dict[str, pd.DataFrame]:
-        """Standard Excel reading with multiple engine fallback"""
+        """Standard Excel reading with multiple engine fallback and streaming for large files"""
         file_stream = io.BytesIO(file_content)
         sheets = {}
         
-        # Try different engines
+        # Check file size for streaming approach
+        file_size_mb = len(file_content) / (1024 * 1024)
+        use_streaming = file_size_mb > self.streaming_threshold_mb
+        
+        if use_streaming:
+            logger.info(f"Large file detected ({file_size_mb:.1f}MB), using streaming approach")
+            return await self._read_excel_streaming(file_content, filename)
+        
+        # Try different engines for smaller files
         engines = ['openpyxl', 'xlrd', 'pyxlsb']
         
         for engine in engines:
@@ -209,6 +222,73 @@ class EnhancedFileProcessor:
                 continue
         
         raise ValueError("Could not read Excel file with any engine")
+    
+    async def _read_excel_streaming(self, file_content: bytes, filename: str) -> Dict[str, pd.DataFrame]:
+        """Streaming Excel reading for large files to avoid memory issues"""
+        try:
+            # Create temporary file for streaming
+            with tempfile.NamedTemporaryFile(suffix='.xlsx', delete=False) as temp_file:
+                temp_file.write(file_content)
+                temp_path = temp_file.name
+            
+            try:
+                sheets = {}
+                
+                # Use openpyxl for streaming (most memory efficient)
+                from openpyxl import load_workbook
+                workbook = load_workbook(temp_path, read_only=True, data_only=True)
+                
+                for sheet_name in workbook.sheetnames:
+                    try:
+                        # Read sheet in chunks to avoid memory issues
+                        sheet = workbook[sheet_name]
+                        
+                        # Convert to DataFrame in chunks
+                        data = []
+                        headers = None
+                        
+                        for row_idx, row in enumerate(sheet.iter_rows(values_only=True)):
+                            if row_idx == 0:
+                                headers = [str(cell) if cell is not None else f'Column_{i}' for i, cell in enumerate(row)]
+                            else:
+                                data.append(row)
+                            
+                            # Process in chunks to manage memory
+                            if len(data) >= self.excel_chunk_size:
+                                chunk_df = pd.DataFrame(data, columns=headers)
+                                if sheet_name not in sheets:
+                                    sheets[sheet_name] = chunk_df
+                                else:
+                                    sheets[sheet_name] = pd.concat([sheets[sheet_name], chunk_df], ignore_index=True)
+                                data = []  # Clear processed data
+                        
+                        # Process remaining data
+                        if data:
+                            chunk_df = pd.DataFrame(data, columns=headers)
+                            if sheet_name not in sheets:
+                                sheets[sheet_name] = chunk_df
+                            else:
+                                sheets[sheet_name] = pd.concat([sheets[sheet_name], chunk_df], ignore_index=True)
+                        
+                        logger.info(f"Streamed sheet {sheet_name}: {len(sheets[sheet_name])} rows")
+                        
+                    except Exception as sheet_e:
+                        logger.warning(f"Failed to stream sheet {sheet_name}: {sheet_e}")
+                        continue
+                
+                workbook.close()
+                return sheets
+                
+            finally:
+                # Clean up temporary file
+                try:
+                    os.unlink(temp_path)
+                except Exception:
+                    pass
+                    
+        except Exception as e:
+            logger.error(f"Streaming Excel reading failed: {e}")
+            raise ValueError(f"Could not read large Excel file: {e}")
     
     async def _repair_and_read_excel(self, file_content: bytes, filename: str, 
                                    progress_callback=None) -> Dict[str, pd.DataFrame]:
@@ -336,10 +416,18 @@ class EnhancedFileProcessor:
 
     async def _process_csv_enhanced(self, file_content: bytes, filename: str,
                                   progress_callback=None) -> Dict[str, pd.DataFrame]:
-        """Enhanced CSV processing with encoding detection and repair"""
+        """Enhanced CSV processing with encoding detection, repair, and streaming for large files"""
         try:
             if progress_callback:
                 await progress_callback("reading", "📄 Reading CSV file...", 20)
+
+            # Check file size for streaming approach
+            file_size_mb = len(file_content) / (1024 * 1024)
+            use_streaming = file_size_mb > (self.streaming_threshold_mb * 5)  # Use streaming for CSV files > 5x threshold
+            
+            if use_streaming:
+                logger.info(f"Large CSV file detected ({file_size_mb:.1f}MB), using streaming approach")
+                return await self._read_csv_streaming(file_content, filename, progress_callback)
 
             file_stream = io.BytesIO(file_content)
 
@@ -377,6 +465,70 @@ class EnhancedFileProcessor:
         except Exception as e:
             logger.error(f"Enhanced CSV processing failed: {e}")
             raise
+    
+    async def _read_csv_streaming(self, file_content: bytes, filename: str, progress_callback=None) -> Dict[str, pd.DataFrame]:
+        """Streaming CSV reading for large files to avoid memory issues"""
+        try:
+            if progress_callback:
+                await progress_callback("streaming", "📊 Streaming large CSV file...", 30)
+            
+            # Try to detect encoding
+            import chardet
+            detected = chardet.detect(file_content)
+            encoding = detected.get('encoding', 'utf-8')
+            
+            # Try different delimiters
+            delimiters = [',', ';', '\t', '|']
+            
+            for delimiter in delimiters:
+                try:
+                    # Create text stream
+                    text_content = file_content.decode(encoding, errors='ignore')
+                    lines = text_content.split('\n')
+                    
+                    if len(lines) < 2:
+                        continue
+                    
+                    # Process in chunks
+                    chunk_size = self.csv_chunk_size
+                    chunks = []
+                    
+                    for i in range(0, len(lines), chunk_size):
+                        chunk_lines = lines[i:i + chunk_size]
+                        chunk_text = '\n'.join(chunk_lines)
+                        
+                        # Create DataFrame from chunk
+                        chunk_stream = io.StringIO(chunk_text)
+                        chunk_df = pd.read_csv(
+                            chunk_stream,
+                            delimiter=delimiter,
+                            on_bad_lines='skip',
+                            low_memory=False
+                        )
+                        
+                        if not chunk_df.empty:
+                            chunks.append(chunk_df)
+                        
+                        # Update progress
+                        if progress_callback and i % (chunk_size * 5) == 0:
+                            progress = 30 + (i / len(lines)) * 50
+                            await progress_callback("streaming", f"📊 Processed {i:,} lines...", int(progress))
+                    
+                    if chunks:
+                        # Combine all chunks
+                        final_df = pd.concat(chunks, ignore_index=True)
+                        logger.info(f"Streamed CSV: {len(final_df):,} rows, {len(final_df.columns)} columns")
+                        return {'Sheet1': final_df}
+                        
+                except Exception as e:
+                    logger.warning(f"Failed to stream CSV with delimiter '{delimiter}': {e}")
+                    continue
+            
+            raise ValueError("Could not read large CSV file with any delimiter")
+            
+        except Exception as e:
+            logger.error(f"CSV streaming failed: {e}")
+            raise ValueError(f"Could not read large CSV file: {e}")
 
     async def _process_ods(self, file_content: bytes, filename: str,
                          progress_callback=None) -> Dict[str, pd.DataFrame]:
@@ -748,6 +900,11 @@ class EnhancedFileProcessor:
             if progress_callback:
                 await progress_callback("fallback", "🔄 Attempting fallback processing...", 10)
 
+            # Handle empty content gracefully
+            if not file_content or len(file_content) == 0:
+                logger.warning("Empty file content, returning empty DataFrame")
+                return {'Empty_File': pd.DataFrame()}
+
             # Try to read as text and parse
             try:
                 # Try different encodings
@@ -785,7 +942,9 @@ class EnhancedFileProcessor:
             except Exception as text_e:
                 logger.warning(f"Text fallback failed: {text_e}")
 
-            raise ValueError("Could not process file with any method")
+            # If all else fails, return empty DataFrame instead of raising error
+            logger.warning("All processing methods failed, returning empty DataFrame")
+            return {'Empty_File': pd.DataFrame()}
 
         except Exception as e:
             logger.error(f"Fallback processing failed: {e}")

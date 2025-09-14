@@ -100,7 +100,28 @@ export const EnhancedFileUpload: React.FC = () => {
         ));
       });
 
-      // Move to completed state
+      // Check if result indicates duplicate detection
+      if (result.status === 'duplicate_detected') {
+        // Show duplicate modal with actual duplicate information
+        setDuplicateModal(prev => ({
+          ...prev,
+          isOpen: true,
+          phase: 'basic_duplicate',
+          duplicateInfo: {
+            message: result.message || 'Duplicate file detected!',
+            filename: file.name,
+            recommendation: result.duplicate_analysis?.recommendation || 'replace_or_skip',
+            duplicateFiles: result.duplicate_analysis?.duplicate_files || []
+          },
+          currentJobId: result.job_id,
+          currentFileHash: null
+        }));
+        
+        // Don't proceed with normal completion
+        return result;
+      }
+
+      // Move to completed state only if not a duplicate
       setFiles(prev => prev.map(f => 
         f.id === fileId 
           ? { ...f, status: 'completed' as const, progress: 100 }

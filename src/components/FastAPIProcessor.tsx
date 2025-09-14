@@ -325,6 +325,28 @@ export class FastAPIProcessor {
         const initialResponse = await response.json();
         console.log('FastAPI processing started:', initialResponse);
 
+        // Check if duplicate was detected
+        if (initialResponse.status === 'duplicate_detected') {
+          this.updateProgress('duplicate_detected', 'Duplicate file detected!', 20);
+          
+          // Return duplicate information for user decision
+          return {
+            status: 'duplicate_detected',
+            duplicate_analysis: initialResponse.duplicate_analysis,
+            job_id: initialResponse.job_id,
+            requires_user_decision: true,
+            message: initialResponse.message,
+            // Return empty result structure for consistency
+            documentType: 'duplicate',
+            insights: {},
+            metrics: {},
+            summary: 'Duplicate file detected',
+            sheets: [],
+            customPromptSuggestions: [],
+            processingTime: 0
+          };
+        }
+
         // Connect to WebSocket for real-time progress updates
         this.updateProgress('websocket', 'Connecting to real-time updates...', 35);
         
