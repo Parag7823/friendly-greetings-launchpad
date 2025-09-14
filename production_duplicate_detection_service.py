@@ -117,6 +117,9 @@ class ProductionDuplicateDetectionService:
         # Thread pool for CPU-intensive operations
         self.executor = ThreadPoolExecutor(max_workers=self.max_workers)
         
+        # Security settings
+        self.max_filename_length = int(os.environ.get('MAX_FILENAME_LENGTH', 255))
+        
         # Metrics for observability
         self.metrics = {
             'cache_hits': 0,
@@ -128,6 +131,78 @@ class ProductionDuplicateDetectionService:
         }
         
         logger.info("Production Duplicate Detection Service initialized")
+    
+    def _validate_security(self, user_id: str, file_hash: str, filename: str) -> None:
+        """
+        Validate security parameters to prevent attacks
+        
+        Args:
+            user_id: User identifier
+            file_hash: File hash
+            filename: Original filename
+            
+        Raises:
+            ValueError: If security validation fails
+        """
+        # Validate user_id
+        if not user_id or not isinstance(user_id, str):
+            raise ValueError("Invalid user_id: must be a non-empty string")
+        
+        if len(user_id) > 255:
+            raise ValueError("User ID too long")
+        
+        # Validate file_hash
+        if not file_hash or not isinstance(file_hash, str):
+            raise ValueError("Invalid file_hash: must be a non-empty string")
+        
+        if len(file_hash) != 64:  # SHA-256 hash length
+            raise ValueError("Invalid file_hash: must be a valid SHA-256 hash")
+        
+        # Validate filename
+        if not filename or not isinstance(filename, str):
+            raise ValueError("Invalid filename: must be a non-empty string")
+        
+        if len(filename) > self.max_filename_length:
+            raise ValueError(f"Filename too long: {len(filename)} > {self.max_filename_length}")
+        
+        # Check for path traversal
+        if self._is_path_traversal_unsafe(filename):
+            raise ValueError(f"Filename contains path traversal patterns: {filename}")
+        
+        # Check for null bytes and control characters
+        if '\x00' in filename or '\x1a' in filename or '\x7f' in filename:
+            raise ValueError(f"Filename contains invalid characters: {filename}")
+    
+    def _is_path_traversal_unsafe(self, filename: str) -> bool:
+        """
+        Check if filename contains path traversal patterns
+        
+        Args:
+            filename: Filename to check
+            
+        Returns:
+            True if unsafe, False if safe
+        """
+        dangerous_patterns = [
+            '..',
+            '../',
+            '..\\',
+            '%2e%2e',
+            '%2E%2E',
+            '....//',
+            '....\\\\'
+        ]
+        
+        filename_lower = filename.lower()
+        for pattern in dangerous_patterns:
+            if pattern in filename_lower:
+                return True
+        
+        # Check for absolute paths
+        if filename.startswith('/') or (len(filename) > 1 and filename[1] == ':'):
+            return True
+            
+        return False
     
     async def detect_duplicates(
         self, 

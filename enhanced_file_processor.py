@@ -47,6 +47,12 @@ class EnhancedFileProcessor:
     """Enhanced file processor with 100X capabilities"""
     
     def __init__(self):
+        """
+        Initialize the Enhanced File Processor with security settings and format support.
+        
+        Sets up supported file formats, configurable chunk sizes for streaming,
+        and security parameters including file size limits and filename validation.
+        """
         self.supported_formats = {
             # Spreadsheet formats
             'excel': ['.xlsx', '.xls', '.xlsm', '.xlsb'],
@@ -71,6 +77,133 @@ class EnhancedFileProcessor:
         self.csv_chunk_size = int(os.environ.get('CSV_CHUNK_SIZE', 10000))
         self.streaming_threshold_mb = int(os.environ.get('STREAMING_THRESHOLD_MB', 10))
         
+        # Security settings
+        self.max_file_size = int(os.environ.get('MAX_FILE_SIZE_MB', 100)) * 1024 * 1024  # 100MB default
+        self.max_filename_length = int(os.environ.get('MAX_FILENAME_LENGTH', 255))
+        self.allowed_extensions = set()
+        for format_extensions in self.supported_formats.values():
+            self.allowed_extensions.update(format_extensions)
+    
+    def _validate_security(self, file_content: bytes, filename: str) -> None:
+        """
+        Validate file security to prevent attacks
+        
+        Args:
+            file_content: Raw file bytes
+            filename: Original filename
+            
+        Raises:
+            ValueError: If security validation fails
+        """
+        # Check file size
+        if len(file_content) > self.max_file_size:
+            raise ValueError(f"File size {len(file_content)} bytes exceeds maximum allowed size {self.max_file_size} bytes")
+        
+        # Check filename length
+        if len(filename) > self.max_filename_length:
+            raise ValueError(f"Filename length {len(filename)} exceeds maximum allowed length {self.max_filename_length}")
+        
+        # Check for path traversal
+        if self._is_path_traversal_unsafe(filename):
+            raise ValueError(f"Filename contains path traversal patterns: {filename}")
+        
+        # Check for null bytes and control characters
+        if '\x00' in filename or '\x1a' in filename or '\x7f' in filename:
+            raise ValueError(f"Filename contains invalid characters: {filename}")
+        
+        # Check file extension
+        file_ext = os.path.splitext(filename)[1].lower()
+        if file_ext not in self.allowed_extensions:
+            raise ValueError(f"File extension '{file_ext}' is not allowed. Allowed extensions: {sorted(self.allowed_extensions)}")
+        
+        # Check for empty file
+        if len(file_content) == 0:
+            raise ValueError("File is empty")
+    
+    def _is_path_traversal_unsafe(self, filename: str) -> bool:
+        """
+        Check if filename contains path traversal patterns
+        
+        Args:
+            filename: Filename to check
+            
+        Returns:
+            True if unsafe, False if safe
+        """
+        dangerous_patterns = [
+            '..',
+            '../',
+            '..\\',
+            '%2e%2e',
+            '%2E%2E',
+            '....//',
+            '....\\\\'
+        ]
+        
+        filename_lower = filename.lower()
+        for pattern in dangerous_patterns:
+            if pattern in filename_lower:
+                return True
+        
+        # Check for absolute paths
+        if filename.startswith('/') or (len(filename) > 1 and filename[1] == ':'):
+            return True
+            
+        return False
+    
+    def _sanitize_content(self, content: bytes) -> bytes:
+        """
+        Sanitize file content to remove potential malicious patterns
+        
+        Args:
+            content: Raw file content
+            
+        Returns:
+            Sanitized content
+        """
+        # Convert to string for pattern checking
+        try:
+            content_str = content.decode('utf-8', errors='ignore')
+        except:
+            # If can't decode, return as-is (binary file)
+            return content
+        
+        # Check for script injection patterns
+        script_patterns = [
+            '<script',
+            'javascript:',
+            'vbscript:',
+            'onload=',
+            'onerror=',
+            'onclick='
+        ]
+        
+        content_lower = content_str.lower()
+        for pattern in script_patterns:
+            if pattern in content_lower:
+                logger.warning(f"Detected potential script injection pattern: {pattern}")
+                # Remove the pattern (basic sanitization)
+                content_str = content_str.replace(pattern, '[REMOVED]')
+        
+        # Check for SQL injection patterns
+        sql_patterns = [
+            'union select',
+            'drop table',
+            'delete from',
+            'insert into',
+            'update set',
+            'exec(',
+            'execute('
+        ]
+        
+        for pattern in sql_patterns:
+            if pattern in content_lower:
+                logger.warning(f"Detected potential SQL injection pattern: {pattern}")
+                # Remove the pattern (basic sanitization)
+                content_str = content_str.replace(pattern, '[REMOVED]')
+        
+        return content_str.encode('utf-8')
+        
     async def process_file_enhanced(self, file_content: bytes, filename: str, 
                                   progress_callback=None) -> Dict[str, pd.DataFrame]:
         """
@@ -86,10 +219,19 @@ class EnhancedFileProcessor:
         """
         try:
             if progress_callback:
+                await progress_callback("security", "🔒 Validating file security...", 2)
+            
+            # Security validation first
+            self._validate_security(file_content, filename)
+            
+            # Sanitize content
+            sanitized_content = self._sanitize_content(file_content)
+            
+            if progress_callback:
                 await progress_callback("detecting", "🔍 Detecting file format and structure...", 5)
             
             # Detect file format
-            file_format = self._detect_file_format(filename, file_content)
+            file_format = self._detect_file_format(filename, sanitized_content)
             logger.info(f"Detected file format: {file_format} for {filename}")
             
             if progress_callback:
@@ -97,24 +239,29 @@ class EnhancedFileProcessor:
             
             # Route to appropriate processor
             if file_format == 'excel':
-                return await self._process_excel_enhanced(file_content, filename, progress_callback)
+                return await self._process_excel_enhanced(sanitized_content, filename, progress_callback)
             elif file_format == 'csv':
-                return await self._process_csv_enhanced(file_content, filename, progress_callback)
+                return await self._process_csv_enhanced(sanitized_content, filename, progress_callback)
             elif file_format == 'ods':
-                return await self._process_ods(file_content, filename, progress_callback)
+                return await self._process_ods(sanitized_content, filename, progress_callback)
             elif file_format == 'pdf':
-                return await self._process_pdf(file_content, filename, progress_callback)
+                return await self._process_pdf(sanitized_content, filename, progress_callback)
             elif file_format == 'zip':
-                return await self._process_archive(file_content, filename, progress_callback)
+                return await self._process_archive(sanitized_content, filename, progress_callback)
             elif file_format == 'image':
-                return await self._process_image(file_content, filename, progress_callback)
+                return await self._process_image(sanitized_content, filename, progress_callback)
             else:
                 raise ValueError(f"Unsupported file format: {file_format}")
                 
         except Exception as e:
             logger.error(f"Enhanced file processing failed for {filename}: {e}")
-            # Fallback to basic processing
-            return await self._fallback_processing(file_content, filename, progress_callback)
+            # Fallback to basic processing with sanitized content
+            try:
+                sanitized_content = self._sanitize_content(file_content)
+                return await self._fallback_processing(sanitized_content, filename, progress_callback)
+            except Exception as fallback_error:
+                logger.error(f"Fallback processing also failed for {filename}: {fallback_error}")
+                raise ValueError(f"File processing failed: {e}. Fallback also failed: {fallback_error}")
     
     def _detect_file_format(self, filename: str, file_content: bytes) -> str:
         """Detect file format using multiple methods"""

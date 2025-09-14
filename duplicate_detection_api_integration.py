@@ -67,6 +67,12 @@ class WebSocketManager:
     """Manages WebSocket connections for real-time updates"""
     
     def __init__(self):
+        """
+        Initialize the WebSocket manager for real-time duplicate detection updates.
+        
+        Maintains a dictionary of active WebSocket connections indexed by job_id
+        for sending real-time progress updates during duplicate detection.
+        """
         self.active_connections: Dict[str, WebSocket] = {}
     
     async def connect(self, websocket: WebSocket, job_id: str):

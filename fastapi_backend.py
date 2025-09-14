@@ -20,7 +20,6 @@ import pandas as pd
 import numpy as np
 import magic
 import filetype
-import aiohttp
 import requests
 import tempfile
 
@@ -80,6 +79,12 @@ os.environ['OPENCV_AVAILABLE'] = str(OPENCV_AVAILABLE)
 
 # Custom JSON encoder to handle datetime objects
 class DateTimeEncoder(json.JSONEncoder):
+    """
+    Custom JSON encoder for handling datetime objects in API responses.
+    
+    Extends the standard JSONEncoder to properly serialize datetime and pandas
+    Timestamp objects to ISO format strings for API responses.
+    """
     def default(self, obj):
         if isinstance(obj, datetime):
             return obj.isoformat()
@@ -904,143 +909,6 @@ class EnhancedFileProcessor:
             logger.error(f"Fallback processing also failed: {e}")
             raise
 
-class CurrencyNormalizer:
-    """Handles currency detection, conversion, and normalization"""
-    
-    def __init__(self):
-        self.exchange_api_base = "https://api.exchangerate-api.com/v4/latest/"
-        self.rates_cache = {}
-        self.cache_duration = timedelta(hours=24)
-    
-    async def detect_currency(self, amount: str, description: str, platform: str) -> str:
-        """Detect currency from amount, description, and platform context"""
-        try:
-            # Remove currency symbols and clean amount
-            cleaned_amount = re.sub(r'[^\d.-]', '', str(amount))
-            
-            # Platform-specific currency detection
-            platform_currencies = {
-                'razorpay': 'INR',
-                'stripe': 'USD',
-                'paypal': 'USD',
-                'gusto': 'USD',
-                'quickbooks': 'USD',
-                'xero': 'USD'
-            }
-            
-            # Check for currency symbols in description
-            currency_symbols = {
-                '$': 'USD',
-                '₹': 'INR',
-                '€': 'EUR',
-                '£': 'GBP',
-                '¥': 'JPY'
-            }
-            
-            for symbol, currency in currency_symbols.items():
-                if symbol in str(description):
-                    return currency
-            
-            # Check for currency codes in description
-            currency_codes = ['USD', 'INR', 'EUR', 'GBP', 'JPY', 'CAD', 'AUD']
-            for code in currency_codes:
-                if code.lower() in str(description).lower():
-                    return code
-            
-            # Platform-based default
-            if platform in platform_currencies:
-                return platform_currencies[platform]
-            
-            # Default to USD
-            return 'USD'
-            
-        except Exception as e:
-            logger.error(f"Currency detection failed: {e}")
-            return 'USD'
-    
-    async def get_exchange_rate(self, from_currency: str, to_currency: str = 'USD', date: str = None) -> float:
-        """Get exchange rate for currency conversion"""
-        try:
-            # Use current date if not provided
-            if not date:
-                date = datetime.now().strftime('%Y-%m-%d')
-            
-            # Check cache first
-            cache_key = f"{from_currency}_{to_currency}_{date}"
-            if cache_key in self.rates_cache:
-                cached_rate, cached_time = self.rates_cache[cache_key]
-                if datetime.now() - cached_time < self.cache_duration:
-                    return cached_rate
-            
-            # Fetch from API
-            if from_currency == to_currency:
-                rate = 1.0
-            else:
-                url = f"{self.exchange_api_base}{from_currency}"
-                async with aiohttp.ClientSession() as session:
-                    async with session.get(url) as response:
-                        if response.status == 200:
-                            data = await response.json()
-                            rate = data['rates'].get(to_currency, 1.0)
-                        else:
-                            # Fallback to hardcoded rates for common currencies
-                            fallback_rates = {
-                                'INR': 0.012,
-                                'EUR': 1.08,
-                                'GBP': 1.26,
-                                'JPY': 0.0067,
-                                'CAD': 0.74,
-                                'AUD': 0.66
-                            }
-                            rate = fallback_rates.get(from_currency, 1.0)
-            
-            # Cache the rate
-            self.rates_cache[cache_key] = (rate, datetime.now())
-            return rate
-            
-        except Exception as e:
-            logger.error(f"Exchange rate fetch failed: {e}")
-            # Return fallback rate
-            fallback_rates = {
-                'INR': 0.012,
-                'EUR': 1.08,
-                'GBP': 1.26,
-                'JPY': 0.0067,
-                'CAD': 0.74,
-                'AUD': 0.66
-            }
-            return fallback_rates.get(from_currency, 1.0)
-    
-    async def normalize_currency(self, amount: float, currency: str, description: str, platform: str, date: str = None) -> Dict[str, Any]:
-        """Normalize currency and convert to USD"""
-        try:
-            # Detect currency if not provided
-            if not currency:
-                currency = await self.detect_currency(amount, description, platform)
-            
-            # Get exchange rate
-            exchange_rate = await self.get_exchange_rate(currency, 'USD', date)
-            
-            # Convert to USD
-            amount_usd = amount * exchange_rate
-            
-            return {
-                "amount_original": amount,
-                "amount_usd": round(amount_usd, 2),
-                "currency": currency,
-                "exchange_rate": round(exchange_rate, 6),
-                "exchange_date": date or datetime.now().strftime('%Y-%m-%d')
-            }
-            
-        except Exception as e:
-            logger.error(f"Currency normalization failed: {e}")
-            return {
-                "amount_original": amount,
-                "amount_usd": amount,
-                "currency": currency or 'USD',
-                "exchange_rate": 1.0,
-                "exchange_date": date or datetime.now().strftime('%Y-%m-%d')
-            }
 
 class VendorStandardizer:
     """Handles vendor name standardization and cleaning"""
@@ -1287,7 +1155,6 @@ class DataEnrichmentProcessor:
     """Orchestrates all data enrichment processes with universal field detection"""
     
     def __init__(self, openai_client):
-        self.currency_normalizer = CurrencyNormalizer()
         self.vendor_standardizer = VendorStandardizer(openai_client)
         self.platform_id_extractor = PlatformIDExtractor()
         self.universal_extractors = UniversalExtractors()
@@ -1323,14 +1190,14 @@ class DataEnrichmentProcessor:
             if date is None:
                 date = self._extract_date(row_data)
             
-            # 1. Currency normalization
-            currency_info = await self.currency_normalizer.normalize_currency(
-                amount=amount,
-                currency=None,  # Will be detected
-                description=description,
-                platform=platform,
-                date=date
-            )
+            # Currency normalization removed - using original amount
+            currency_info = {
+                "amount_original": amount,
+                "amount_usd": amount,
+                "currency": "USD",
+                "exchange_rate": 1.0,
+                "exchange_date": date or datetime.now().strftime('%Y-%m-%d')
+            }
             
             # 2. Vendor standardization using universal extraction
             vendor_name = self.universal_extractors.extract_vendor_universal(row_data)
@@ -1496,6 +1363,12 @@ class DataEnrichmentProcessor:
 
 # WebSocket connection manager
 class ConnectionManager:
+    """
+    Manages WebSocket connections for real-time progress updates.
+    
+    Handles multiple WebSocket connections per job_id to support
+    real-time progress updates during file processing operations.
+    """
     def __init__(self):
         self.active_connections: Dict[str, List[WebSocket]] = {}
 
@@ -1520,12 +1393,24 @@ class ConnectionManager:
 manager = ConnectionManager()
 
 class ProcessRequest(BaseModel):
+    """
+    Request model for file processing operations.
+    
+    Contains all necessary information for processing a file including
+    job identification, storage path, filename, and user context.
+    """
     job_id: str
     storage_path: str
     file_name: str
     user_id: str
 
 class DocumentAnalyzer:
+    """
+    Analyzes documents using AI-powered classification and extraction.
+    
+    Provides intelligent document analysis capabilities including content
+    classification, data extraction, and structured information processing.
+    """
     def __init__(self, openai_client):
         self.openai = openai_client
     
@@ -2212,6 +2097,12 @@ class PlatformDetector:
         }
 
 class AIRowClassifier:
+    """
+    AI-powered row classification for financial data processing.
+    
+    Uses OpenAI's language models to intelligently classify and categorize
+    financial data rows, providing enhanced data understanding and processing.
+    """
     def __init__(self, openai_client, entity_resolver = None):
         self.openai = openai_client
         self.entity_resolver = entity_resolver
@@ -7442,79 +7333,6 @@ async def debug_environment():
             "timestamp": datetime.utcnow().isoformat()
         }
 
-@app.get("/test-currency-normalization")
-async def test_currency_normalization():
-    """Test currency normalization with sample data"""
-    try:
-        currency_normalizer = CurrencyNormalizer()
-        
-        test_cases = [
-            {
-                "amount": 9000,
-                "description": "Google Cloud Services ₹9000",
-                "platform": "razorpay",
-                "expected_currency": "INR"
-            },
-            {
-                "amount": 150.50,
-                "description": "Stripe payment $150.50",
-                "platform": "stripe",
-                "expected_currency": "USD"
-            },
-            {
-                "amount": 2000,
-                "description": "Office rent €2000",
-                "platform": "quickbooks",
-                "expected_currency": "EUR"
-            }
-        ]
-        
-        results = []
-        for test_case in test_cases:
-            try:
-                # Test currency detection
-                detected_currency = await currency_normalizer.detect_currency(
-                    test_case["amount"],
-                    test_case["description"],
-                    test_case["platform"]
-                )
-                
-                # Test currency normalization
-                normalized = await currency_normalizer.normalize_currency(
-                    amount=test_case["amount"],
-                    currency=detected_currency,
-                    description=test_case["description"],
-                    platform=test_case["platform"]
-                )
-                
-                results.append({
-                    "test_case": test_case,
-                    "detected_currency": detected_currency,
-                    "normalized_data": normalized,
-                    "success": True
-                })
-                
-            except Exception as e:
-                results.append({
-                    "test_case": test_case,
-                    "error": str(e),
-                    "success": False
-                })
-        
-        return {
-            "message": "Currency Normalization Test Results",
-            "total_tests": len(test_cases),
-            "successful_tests": len([r for r in results if r["success"]]),
-            "test_results": results
-        }
-        
-    except Exception as e:
-        logger.error(f"Currency normalization test failed: {e}")
-        return {
-            "message": "Currency Normalization Test Failed",
-            "error": str(e),
-            "test_results": []
-        }
 
 @app.get("/test-vendor-standardization")
 async def test_vendor_standardization():
@@ -7828,46 +7646,6 @@ async def test_vendor_search(user_id: str, vendor_name: str = "Google"):
             "timestamp": datetime.utcnow().isoformat()
         }
 
-@app.get("/test-currency-summary/{user_id}")
-async def test_currency_summary(user_id: str):
-    """Test currency conversion summary"""
-    try:
-        # Initialize Supabase client
-        supabase_url = os.getenv('SUPABASE_URL')
-        supabase_key = os.getenv('SUPABASE_KEY')
-        
-        if not supabase_url or not supabase_key:
-            return {
-                "message": "Supabase credentials not configured",
-                "timestamp": datetime.utcnow().isoformat()
-            }
-        
-        # Clean JWT token to prevent header value errors
-        supabase_key = clean_jwt_token(supabase_key)
-        supabase = create_client(supabase_url, supabase_key)
-        
-        # Call the database function
-        result = supabase.rpc('get_currency_summary', {'user_uuid': user_id}).execute()
-        
-        if result.data:
-            return {
-                "message": "Currency Summary Retrieved Successfully",
-                "summary": result.data,
-                "timestamp": datetime.utcnow().isoformat()
-            }
-        else:
-            return {
-                "message": "No currency summary found",
-                "summary": [],
-                "timestamp": datetime.utcnow().isoformat()
-            }
-        
-    except Exception as e:
-        return {
-            "message": "Currency Summary Test Failed",
-            "error": str(e),
-            "timestamp": datetime.utcnow().isoformat()
-        }
 
 class AIRelationshipDetector:
     """AI-powered universal relationship detection for ANY financial data"""
