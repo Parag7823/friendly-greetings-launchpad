@@ -551,8 +551,8 @@ class TestEnhancedFileProcessor:
             
             # Verify progress callbacks were called
             assert len(progress_calls) >= 2
-            assert progress_calls[0][0] == "detecting"
-            assert progress_calls[1][0] == "processing"
+            assert progress_calls[0][0] == "security"
+            assert progress_calls[1][0] == "detecting"
             
             assert isinstance(result, dict)
     

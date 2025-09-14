@@ -485,7 +485,7 @@ class ProductionDuplicateDetectionService:
         try:
             # Use efficient query with dedicated file_hash column and proper indexing
             result = self.supabase.table('raw_records').select(
-                'id, file_name, created_at, file_size, status, content'
+                'id, file_name, created_at, file_size, status'
             ).eq('user_id', user_id).eq('file_hash', file_hash).execute()
             
             return result.data or []

@@ -919,7 +919,13 @@ class VendorStandardizer:
         self.common_suffixes = [
             ' inc', ' corp', ' llc', ' ltd', ' co', ' company', ' pvt', ' private',
             ' limited', ' corporation', ' incorporated', ' enterprises', ' solutions',
-            ' services', ' systems', ' technologies', ' tech', ' group', ' holdings'
+            ' services', ' systems', ' technologies', ' tech', ' group', ' holdings',
+            'inc', 'corp', 'llc', 'ltd', 'co', 'company', 'pvt', 'private',
+            'limited', 'corporation', 'incorporated', 'enterprises', 'solutions',
+            'services', 'systems', 'technologies', 'tech', 'group', 'holdings',
+            'inc.', 'corp.', 'llc.', 'ltd.', 'co.', 'company.', 'pvt.', 'private.',
+            'limited.', 'corporation.', 'incorporated.', 'enterprises.', 'solutions.',
+            'services.', 'systems.', 'technologies.', 'tech.', 'group.', 'holdings.'
         ]
     
     async def standardize_vendor(self, vendor_name: str, platform: str = None) -> Dict[str, Any]:
@@ -969,16 +975,40 @@ class VendorStandardizer:
     def _rule_based_cleaning(self, vendor_name: str) -> str:
         """Rule-based vendor name cleaning"""
         try:
+            if not vendor_name or not isinstance(vendor_name, str):
+                return vendor_name or ""
+            
             # Convert to lowercase and clean
             cleaned = vendor_name.lower().strip()
             
-            # Remove common suffixes
+            # Remove common suffixes (with word boundary check)
             for suffix in self.common_suffixes:
+                # Check if suffix exists at the end
                 if cleaned.endswith(suffix):
-                    cleaned = cleaned[:-len(suffix)]
+                    # Ensure it's a word boundary (not part of another word)
+                    if len(cleaned) > len(suffix):
+                        char_before = cleaned[-(len(suffix) + 1)]
+                        # Allow removal if preceded by space, punctuation, or if it's the whole string
+                        if char_before.isspace() or char_before in '.,;:':
+                            cleaned = cleaned[:-len(suffix)]
+                    else:
+                        # If suffix is the whole string, don't remove it
+                        if len(cleaned) > len(suffix):
+                            cleaned = cleaned[:-len(suffix)]
             
-            # Remove extra whitespace
+            # Remove extra whitespace and punctuation
             cleaned = ' '.join(cleaned.split())
+            cleaned = cleaned.strip('.,;:')
+            
+            # Remove trailing punctuation from individual words
+            words = cleaned.split()
+            cleaned_words = []
+            for word in words:
+                # Remove trailing punctuation but keep internal punctuation (like .com)
+                if word.endswith(('.', ',', ';', ':')):
+                    word = word[:-1]
+                cleaned_words.append(word)
+            cleaned = ' '.join(cleaned_words)
             
             # Capitalize properly
             cleaned = cleaned.title()
