@@ -498,19 +498,23 @@ class ProductionDuplicateDetectionService:
         """
         Get recent files for similarity comparison.
         
+        This method is optimized for memory efficiency by only selecting
+        essential fields and limiting the number of records returned.
+        
         Args:
             user_id: User ID
             days: Number of days to look back
             
         Returns:
-            List of recent file records
+            List of recent file records (memory-optimized)
         """
         try:
             cutoff_date = (datetime.utcnow() - timedelta(days=days)).isoformat()
             
+            # Memory-optimized query: only select essential fields
             result = self.supabase.table('raw_records').select(
                 'id, file_name, created_at, file_size, content_fingerprint'
-            ).eq('user_id', user_id).gte('created_at', cutoff_date).limit(100).execute()
+            ).eq('user_id', user_id).gte('created_at', cutoff_date).limit(50).execute()  # Reduced limit for memory efficiency
             
             return result.data or []
             

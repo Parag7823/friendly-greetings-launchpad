@@ -459,7 +459,7 @@ try:
     logger.info(f"📊 File processing: max_size={config.max_file_size//1024//1024}MB, batch_size={config.batch_size}")
     logger.info(f"🤖 AI processing: max_concurrent={config.max_concurrent_ai_calls}, confidence={config.platform_confidence_threshold}")
     logger.info(f"🔧 Features: advanced={config.enable_advanced_file_processing}, duplicate_detection={config.enable_duplicate_detection}")
-except Exception as e:
+        except Exception as e:
     logger.error(f"❌ Configuration validation failed: {e}")
     raise
 
@@ -994,7 +994,7 @@ class VendorStandardizer:
                     else:
                         # If suffix is the whole string, don't remove it
                         if len(cleaned) > len(suffix):
-                            cleaned = cleaned[:-len(suffix)]
+                    cleaned = cleaned[:-len(suffix)]
             
             # Remove extra whitespace and punctuation
             cleaned = ' '.join(cleaned.split())
@@ -2918,7 +2918,7 @@ class ExcelProcessor:
         if PRODUCTION_DUPLICATE_SERVICE_AVAILABLE:
             duplicate_service = ProductionDuplicateDetectionService(supabase)
         else:
-            duplicate_service = DuplicateDetectionService(supabase)
+        duplicate_service = DuplicateDetectionService(supabase)
         
         # Create processing transaction for rollback capability
         transaction_id = str(uuid.uuid4())
@@ -4949,7 +4949,7 @@ async def process_delta_ingestion(job_id: str, request: Request):
         if PRODUCTION_DUPLICATE_SERVICE_AVAILABLE:
             duplicate_service = ProductionDuplicateDetectionService(supabase)
         else:
-            duplicate_service = DuplicateDetectionService(supabase)
+        duplicate_service = DuplicateDetectionService(supabase)
         
         await manager.send_update(job_id, {
             "step": "delta_processing",
@@ -5062,7 +5062,7 @@ async def trigger_entity_resolution(user_id: str, job_id: str, supabase: Client)
         
         # Initialize entity resolution
         try:
-                        from enhanced_relationship_detector import EnhancedRelationshipDetector
+        from enhanced_relationship_detector import EnhancedRelationshipDetector
         except ImportError:
             logger.warning("Enhanced relationship detector not available, skipping relationship detection")
             return
@@ -5149,7 +5149,7 @@ async def trigger_relationship_detection(user_id: str, job_id: str, supabase: Cl
     try:
         # Initialize relationship detector
         try:
-                        from enhanced_relationship_detector import EnhancedRelationshipDetector
+        from enhanced_relationship_detector import EnhancedRelationshipDetector
         except ImportError:
             logger.warning("Enhanced relationship detector not available, skipping relationship detection")
             return
@@ -5401,7 +5401,7 @@ async def handle_duplicate_decision(request: DuplicateDecisionRequest):
         if PRODUCTION_DUPLICATE_SERVICE_AVAILABLE:
             duplicate_service = ProductionDuplicateDetectionService(supabase)
         else:
-            duplicate_service = DuplicateDetectionService(supabase)
+        duplicate_service = DuplicateDetectionService(supabase)
 
         # Handle the duplicate decision
         result = await duplicate_service.handle_duplicate_decision(
@@ -5464,7 +5464,7 @@ async def submit_version_recommendation_feedback(request: VersionRecommendationF
         if PRODUCTION_DUPLICATE_SERVICE_AVAILABLE:
             duplicate_service = ProductionDuplicateDetectionService(supabase)
         else:
-            duplicate_service = DuplicateDetectionService(supabase)
+        duplicate_service = DuplicateDetectionService(supabase)
 
         # Update recommendation with feedback
         success = await duplicate_service.update_recommendation_feedback(
@@ -6322,7 +6322,7 @@ async def test_enhanced_relationship_detection(user_id: str):
     try:
         # Import the enhanced detector
         try:
-            from enhanced_relationship_detector import EnhancedRelationshipDetector
+        from enhanced_relationship_detector import EnhancedRelationshipDetector
         except ImportError:
             logger.warning("Enhanced relationship detector not available, skipping relationship detection")
             return

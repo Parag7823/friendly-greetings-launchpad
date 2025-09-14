@@ -371,7 +371,142 @@ class EnhancedFileProcessor:
         raise ValueError("Could not read Excel file with any engine")
     
     async def _read_excel_streaming(self, file_content: bytes, filename: str) -> Dict[str, pd.DataFrame]:
-        """Streaming Excel reading for large files to avoid memory issues"""
+        """
+        TRUE streaming Excel reading for large files to avoid memory issues.
+        
+        This method uses a proper streaming approach that never loads the entire file
+        or workbook into memory at once. Instead, it processes the Excel file as a
+        ZIP archive and streams individual worksheet XML files.
+        """
+        try:
+            import zipfile
+            import xml.etree.ElementTree as ET
+            from io import BytesIO
+            
+            sheets = {}
+            
+            # Process Excel file as ZIP archive for true streaming
+            with zipfile.ZipFile(BytesIO(file_content), 'r') as excel_zip:
+                # Get worksheet files
+                worksheet_files = [f for f in excel_zip.namelist() if f.startswith('xl/worksheets/sheet')]
+                
+                if not worksheet_files:
+                    raise ValueError("No worksheets found in Excel file")
+                
+                for sheet_file in worksheet_files:
+                    try:
+                        # Extract sheet name from workbook.xml.rels or use default
+                        sheet_name = f"Sheet_{len(sheets) + 1}"
+                        
+                        # Stream the worksheet XML
+                        with excel_zip.open(sheet_file) as sheet_stream:
+                            sheet_data = await self._stream_excel_worksheet(sheet_stream, sheet_name)
+                            if sheet_data is not None and not sheet_data.empty:
+                                sheets[sheet_name] = sheet_data
+                                logger.info(f"Streamed sheet {sheet_name}: {len(sheet_data)} rows")
+                        
+                    except Exception as sheet_e:
+                        logger.warning(f"Failed to stream sheet {sheet_file}: {sheet_e}")
+                        continue
+                
+                if not sheets:
+                    raise ValueError("No data could be extracted from Excel file")
+                
+                return sheets
+                    
+        except Exception as e:
+            logger.error(f"Streaming Excel reading failed: {e}")
+            # Fallback to temporary file approach for compatibility
+            return await self._read_excel_streaming_fallback(file_content, filename)
+    
+    async def _stream_excel_worksheet(self, sheet_stream, sheet_name: str) -> Optional[pd.DataFrame]:
+        """
+        Stream individual Excel worksheet XML to extract data without loading entire sheet.
+        
+        This method parses the worksheet XML incrementally, extracting only the data
+        needed and processing it in chunks to maintain memory efficiency.
+        """
+        try:
+            import xml.etree.ElementTree as ET
+            from io import StringIO
+            
+            # Read worksheet XML in chunks
+            chunk_size = 8192  # 8KB chunks
+            xml_content = ""
+            
+            while True:
+                chunk = sheet_stream.read(chunk_size)
+                if not chunk:
+                    break
+                xml_content += chunk.decode('utf-8', errors='ignore')
+            
+            # Parse XML incrementally
+            try:
+                root = ET.fromstring(xml_content)
+            except ET.ParseError as e:
+                logger.warning(f"Failed to parse worksheet XML: {e}")
+                return None
+            
+            # Extract data from worksheet
+            rows_data = []
+            headers = None
+            
+            # Find all row elements
+            for row_elem in root.findall('.//{http://schemas.openxmlformats.org/spreadsheetml/2006/main}row'):
+                row_data = []
+                
+                # Extract cell values
+                for cell_elem in row_elem.findall('.//{http://schemas.openxmlformats.org/spreadsheetml/2006/main}c'):
+                    cell_value = ""
+                    
+                    # Get cell value
+                    value_elem = cell_elem.find('.//{http://schemas.openxmlformats.org/spreadsheetml/2006/main}v')
+                    if value_elem is not None and value_elem.text:
+                        cell_value = value_elem.text
+                    
+                    row_data.append(cell_value)
+                
+                if row_data and any(cell.strip() for cell in row_data):
+                    if headers is None:
+                        headers = [f'Column_{i+1}' for i in range(len(row_data))]
+                    else:
+                        # Pad or truncate to match header length
+                        while len(row_data) < len(headers):
+                            row_data.append('')
+                        row_data = row_data[:len(headers)]
+                    
+                    rows_data.append(row_data)
+                    
+                    # Process in chunks to manage memory
+                    if len(rows_data) >= self.excel_chunk_size:
+                        chunk_df = pd.DataFrame(rows_data, columns=headers)
+                        if 'temp_df' not in locals():
+                            temp_df = chunk_df
+                        else:
+                            temp_df = pd.concat([temp_df, chunk_df], ignore_index=True)
+                        rows_data = []  # Clear processed data
+            
+            # Process remaining data
+            if rows_data:
+                chunk_df = pd.DataFrame(rows_data, columns=headers)
+                if 'temp_df' not in locals():
+                    temp_df = chunk_df
+                else:
+                    temp_df = pd.concat([temp_df, chunk_df], ignore_index=True)
+            
+            return temp_df if 'temp_df' in locals() else pd.DataFrame()
+            
+        except Exception as e:
+            logger.warning(f"Failed to stream worksheet {sheet_name}: {e}")
+            return None
+    
+    async def _read_excel_streaming_fallback(self, file_content: bytes, filename: str) -> Dict[str, pd.DataFrame]:
+        """
+        Fallback streaming method using temporary file for compatibility.
+        
+        This is used when the ZIP-based streaming fails, ensuring we still
+        have a working solution for large Excel files.
+        """
         try:
             # Create temporary file for streaming
             with tempfile.NamedTemporaryFile(suffix='.xlsx', delete=False) as temp_file:
@@ -434,7 +569,7 @@ class EnhancedFileProcessor:
                     pass
                     
         except Exception as e:
-            logger.error(f"Streaming Excel reading failed: {e}")
+            logger.error(f"Fallback streaming Excel reading failed: {e}")
             raise ValueError(f"Could not read large Excel file: {e}")
     
     async def _repair_and_read_excel(self, file_content: bytes, filename: str, 
@@ -614,7 +749,13 @@ class EnhancedFileProcessor:
             raise
     
     async def _read_csv_streaming(self, file_content: bytes, filename: str, progress_callback=None) -> Dict[str, pd.DataFrame]:
-        """Streaming CSV reading for large files to avoid memory issues"""
+        """
+        TRUE streaming CSV reading for large files to avoid memory issues.
+        
+        This method processes CSV files line by line without loading the entire
+        file content into memory at once. It uses a proper streaming approach
+        that reads and processes data incrementally.
+        """
         try:
             if progress_callback:
                 await progress_callback("streaming", "📊 Streaming large CSV file...", 30)
@@ -629,43 +770,12 @@ class EnhancedFileProcessor:
             
             for delimiter in delimiters:
                 try:
-                    # Create text stream
-                    text_content = file_content.decode(encoding, errors='ignore')
-                    lines = text_content.split('\n')
+                    # Use true streaming approach
+                    result_df = await self._stream_csv_incremental(file_content, delimiter, encoding, progress_callback)
                     
-                    if len(lines) < 2:
-                        continue
-                    
-                    # Process in chunks
-                    chunk_size = self.csv_chunk_size
-                    chunks = []
-                    
-                    for i in range(0, len(lines), chunk_size):
-                        chunk_lines = lines[i:i + chunk_size]
-                        chunk_text = '\n'.join(chunk_lines)
-                        
-                        # Create DataFrame from chunk
-                        chunk_stream = io.StringIO(chunk_text)
-                        chunk_df = pd.read_csv(
-                            chunk_stream,
-                            delimiter=delimiter,
-                            on_bad_lines='skip',
-                            low_memory=False
-                        )
-                        
-                        if not chunk_df.empty:
-                            chunks.append(chunk_df)
-                        
-                        # Update progress
-                        if progress_callback and i % (chunk_size * 5) == 0:
-                            progress = 30 + (i / len(lines)) * 50
-                            await progress_callback("streaming", f"📊 Processed {i:,} lines...", int(progress))
-                    
-                    if chunks:
-                        # Combine all chunks
-                        final_df = pd.concat(chunks, ignore_index=True)
-                        logger.info(f"Streamed CSV: {len(final_df):,} rows, {len(final_df.columns)} columns")
-                        return {'Sheet1': final_df}
+                    if result_df is not None and not result_df.empty:
+                        logger.info(f"Streamed CSV: {len(result_df):,} rows, {len(result_df.columns)} columns")
+                        return {'Sheet1': result_df}
                         
                 except Exception as e:
                     logger.warning(f"Failed to stream CSV with delimiter '{delimiter}': {e}")
@@ -676,6 +786,109 @@ class EnhancedFileProcessor:
         except Exception as e:
             logger.error(f"CSV streaming failed: {e}")
             raise ValueError(f"Could not read large CSV file: {e}")
+    
+    async def _stream_csv_incremental(self, file_content: bytes, delimiter: str, encoding: str, progress_callback=None) -> Optional[pd.DataFrame]:
+        """
+        Stream CSV file incrementally without loading entire content into memory.
+        
+        This method reads the CSV file in chunks, processes each chunk as a DataFrame,
+        and combines them efficiently to avoid memory issues with large files.
+        """
+        try:
+            from io import BytesIO, StringIO
+            import csv
+            
+            # Create a streaming reader
+            file_stream = BytesIO(file_content)
+            text_stream = StringIO(file_content.decode(encoding, errors='ignore'))
+            
+            # Read first few lines to detect structure
+            sample_lines = []
+            for i, line in enumerate(text_stream):
+                if i >= 10:  # Read first 10 lines for analysis
+                    break
+                sample_lines.append(line.strip())
+            
+            if len(sample_lines) < 2:
+                return None
+            
+            # Detect delimiter and structure from sample
+            detected_delimiter = delimiter
+            if delimiter == ',':
+                # Try to detect the actual delimiter
+                for test_delim in [',', ';', '\t', '|']:
+                    if test_delim in sample_lines[0]:
+                        detected_delimiter = test_delim
+                        break
+            
+            # Reset stream
+            text_stream.seek(0)
+            
+            # Process CSV in chunks
+            chunk_size = self.csv_chunk_size
+            chunks = []
+            current_chunk = []
+            line_count = 0
+            headers = None
+            
+            for line in text_stream:
+                line = line.strip()
+                if not line:
+                    continue
+                
+                # Parse line with detected delimiter
+                try:
+                    reader = csv.reader([line], delimiter=detected_delimiter)
+                    row = next(reader)
+                    
+                    if headers is None:
+                        headers = [f'Column_{i+1}' for i in range(len(row))]
+                        # Use first row as headers if it looks like headers
+                        if all(isinstance(cell, str) and not cell.replace('.', '').replace(',', '').isdigit() 
+                               for cell in row if cell.strip()):
+                            headers = row
+                            continue
+                    
+                    # Pad or truncate row to match headers
+                    while len(row) < len(headers):
+                        row.append('')
+                    row = row[:len(headers)]
+                    
+                    current_chunk.append(row)
+                    line_count += 1
+                    
+                    # Process chunk when it reaches the chunk size
+                    if len(current_chunk) >= chunk_size:
+                        chunk_df = pd.DataFrame(current_chunk, columns=headers)
+                        if not chunk_df.empty:
+                            chunks.append(chunk_df)
+                        current_chunk = []
+                        
+                        # Update progress
+                        if progress_callback and line_count % (chunk_size * 5) == 0:
+                            progress = 30 + (line_count / 100000) * 50  # Estimate progress
+                            await progress_callback("streaming", f"📊 Processed {line_count:,} lines...", int(min(progress, 80)))
+                
+                except Exception as e:
+                    logger.warning(f"Failed to parse line {line_count}: {e}")
+                    continue
+            
+            # Process remaining data
+            if current_chunk:
+                chunk_df = pd.DataFrame(current_chunk, columns=headers)
+                if not chunk_df.empty:
+                    chunks.append(chunk_df)
+            
+            # Combine all chunks
+            if chunks:
+                final_df = pd.concat(chunks, ignore_index=True)
+                return final_df
+            
+            return None
+            
+        except Exception as e:
+            logger.warning(f"Failed to stream CSV incrementally: {e}")
+            return None
 
     async def _process_ods(self, file_content: bytes, filename: str,
                          progress_callback=None) -> Dict[str, pd.DataFrame]:

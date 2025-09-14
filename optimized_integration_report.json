@@ -1,0 +1,34 @@
+{
+  "timestamp": "2025-09-15T02:09:55.283245",
+  "test_type": "Optimized Components Integration",
+  "results": {
+    "end_to_end": {
+      "total_time_seconds": 0.5885622501373291,
+      "file_processing_time": 0.5622754096984863,
+      "duplicate_detection_time": 0.0031418800354003906,
+      "vendor_standardization_time": 0.010511398315429688,
+      "platform_extraction_time": 0.012633562088012695,
+      "rows_processed": 9999,
+      "rows_per_second": 16988.857164500332,
+      "is_duplicate": false,
+      "vendor_results_count": 0,
+      "platform_results_count": 100
+    },
+    "concurrent": {
+      "total_time_seconds": 1.3981561660766602,
+      "files_processed": 5,
+      "total_rows_processed": 24995,
+      "rows_per_second": 17877.11602355408,
+      "files_per_second": 3.5761384323972956,
+      "success_rate": 1.0
+    }
+  },
+  "summary": {
+    "total_tests": 2,
+    "successful_tests": 2,
+    "success_rate_percent": 100.0,
+    "end_to_end_rows_per_second": 16988.857164500332,
+    "concurrent_files_per_second": 3.5761384323972956,
+    "overall_success": true
+  }
+}

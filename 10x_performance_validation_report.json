@@ -1,0 +1,42 @@
+{
+  "timestamp": "2025-09-15T02:03:08.622206",
+  "validation_type": "10X Performance Improvements",
+  "component_metrics": {
+    "deduplication": {
+      "files_per_second": 263.01820676473426,
+      "memory_per_file_kb": 34.0,
+      "processing_time_seconds": 0.19010090827941895,
+      "total_memory_mb": 1.66015625
+    },
+    "file_processor": {
+      "rows_per_second": 7450.170518064105,
+      "memory_usage_mb": 45.69921875,
+      "processing_time_seconds": 13.422377347946167
+    },
+    "vendor_standardizer": {
+      "error": "The api_key client option must be set either by passing api_key to the client or by setting the OPENAI_API_KEY environment variable"
+    },
+    "platform_extractor": {
+      "error": "The api_key client option must be set either by passing api_key to the client or by setting the OPENAI_API_KEY environment variable"
+    }
+  },
+  "improvement_ratios": {
+    "deduplication": {
+      "speed_improvement": 50.87392780749212,
+      "memory_improvement": 38.51764705882353,
+      "target_achieved": true
+    },
+    "file_processor": {
+      "speed_improvement": 1.18696227745988,
+      "target_achieved": false
+    }
+  },
+  "summary": {
+    "total_components_tested": 2,
+    "successful_components": 1,
+    "success_rate_percent": 50.0,
+    "average_speed_improvement": 26.030445042476,
+    "average_accuracy_percent": 0.0,
+    "overall_success": false
+  }
+}
