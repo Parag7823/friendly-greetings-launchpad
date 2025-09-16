@@ -1,35 +1,121 @@
--- Add data enrichment fields to raw_events table
--- This migration adds fields for currency normalization, vendor standardization, and platform ID extraction
+-- Safe migration to add data enrichment fields to raw_events table
+-- This migration safely adds fields for currency normalization, vendor standardization, and platform ID extraction
+-- It checks if columns exist before adding them to prevent errors
 
--- Add enrichment fields to raw_events table
-ALTER TABLE public.raw_events 
-ADD COLUMN amount_original DECIMAL(15,2),
-ADD COLUMN amount_usd DECIMAL(15,2),
-ADD COLUMN currency TEXT DEFAULT 'USD',
-ADD COLUMN exchange_rate DECIMAL(10,6),
-ADD COLUMN exchange_date DATE,
-ADD COLUMN vendor_raw TEXT,
-ADD COLUMN vendor_standard TEXT,
-ADD COLUMN vendor_confidence DECIMAL(3,2),
-ADD COLUMN vendor_cleaning_method TEXT,
-ADD COLUMN platform_ids JSONB DEFAULT '{}',
-ADD COLUMN standard_description TEXT,
-ADD COLUMN ingested_on TIMESTAMP WITH TIME ZONE DEFAULT now();
+-- Add enrichment fields to raw_events table (only if they don't exist)
+DO $$
+BEGIN
+    -- Add amount_original column if it doesn't exist
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                   WHERE table_name = 'raw_events' 
+                   AND column_name = 'amount_original' 
+                   AND table_schema = 'public') THEN
+        ALTER TABLE public.raw_events ADD COLUMN amount_original DECIMAL(15,2);
+    END IF;
+    
+    -- Add amount_usd column if it doesn't exist
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                   WHERE table_name = 'raw_events' 
+                   AND column_name = 'amount_usd' 
+                   AND table_schema = 'public') THEN
+        ALTER TABLE public.raw_events ADD COLUMN amount_usd DECIMAL(15,2);
+    END IF;
+    
+    -- Add currency column if it doesn't exist
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                   WHERE table_name = 'raw_events' 
+                   AND column_name = 'currency' 
+                   AND table_schema = 'public') THEN
+        ALTER TABLE public.raw_events ADD COLUMN currency TEXT DEFAULT 'USD';
+    END IF;
+    
+    -- Add exchange_rate column if it doesn't exist
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                   WHERE table_name = 'raw_events' 
+                   AND column_name = 'exchange_rate' 
+                   AND table_schema = 'public') THEN
+        ALTER TABLE public.raw_events ADD COLUMN exchange_rate DECIMAL(10,6);
+    END IF;
+    
+    -- Add exchange_date column if it doesn't exist
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                   WHERE table_name = 'raw_events' 
+                   AND column_name = 'exchange_date' 
+                   AND table_schema = 'public') THEN
+        ALTER TABLE public.raw_events ADD COLUMN exchange_date DATE;
+    END IF;
+    
+    -- Add vendor_raw column if it doesn't exist
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                   WHERE table_name = 'raw_events' 
+                   AND column_name = 'vendor_raw' 
+                   AND table_schema = 'public') THEN
+        ALTER TABLE public.raw_events ADD COLUMN vendor_raw TEXT;
+    END IF;
+    
+    -- Add vendor_standard column if it doesn't exist
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                   WHERE table_name = 'raw_events' 
+                   AND column_name = 'vendor_standard' 
+                   AND table_schema = 'public') THEN
+        ALTER TABLE public.raw_events ADD COLUMN vendor_standard TEXT;
+    END IF;
+    
+    -- Add vendor_confidence column if it doesn't exist
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                   WHERE table_name = 'raw_events' 
+                   AND column_name = 'vendor_confidence' 
+                   AND table_schema = 'public') THEN
+        ALTER TABLE public.raw_events ADD COLUMN vendor_confidence DECIMAL(3,2);
+    END IF;
+    
+    -- Add vendor_cleaning_method column if it doesn't exist
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                   WHERE table_name = 'raw_events' 
+                   AND column_name = 'vendor_cleaning_method' 
+                   AND table_schema = 'public') THEN
+        ALTER TABLE public.raw_events ADD COLUMN vendor_cleaning_method TEXT;
+    END IF;
+    
+    -- Add platform_ids column if it doesn't exist
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                   WHERE table_name = 'raw_events' 
+                   AND column_name = 'platform_ids' 
+                   AND table_schema = 'public') THEN
+        ALTER TABLE public.raw_events ADD COLUMN platform_ids JSONB DEFAULT '{}';
+    END IF;
+    
+    -- Add standard_description column if it doesn't exist
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                   WHERE table_name = 'raw_events' 
+                   AND column_name = 'standard_description' 
+                   AND table_schema = 'public') THEN
+        ALTER TABLE public.raw_events ADD COLUMN standard_description TEXT;
+    END IF;
+    
+    -- Add ingested_on column if it doesn't exist
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                   WHERE table_name = 'raw_events' 
+                   AND column_name = 'ingested_on' 
+                   AND table_schema = 'public') THEN
+        ALTER TABLE public.raw_events ADD COLUMN ingested_on TIMESTAMP WITH TIME ZONE DEFAULT now();
+    END IF;
+END $$;
 
--- Add indexes for new fields
-CREATE INDEX idx_raw_events_amount_usd ON public.raw_events(amount_usd);
-CREATE INDEX idx_raw_events_currency ON public.raw_events(currency);
-CREATE INDEX idx_raw_events_vendor_standard ON public.raw_events(vendor_standard);
-CREATE INDEX idx_raw_events_ingested_on ON public.raw_events(ingested_on);
+-- Add indexes for new fields (only if they don't exist)
+CREATE INDEX IF NOT EXISTS idx_raw_events_amount_usd ON public.raw_events(amount_usd);
+CREATE INDEX IF NOT EXISTS idx_raw_events_currency ON public.raw_events(currency);
+CREATE INDEX IF NOT EXISTS idx_raw_events_vendor_standard ON public.raw_events(vendor_standard);
+CREATE INDEX IF NOT EXISTS idx_raw_events_ingested_on ON public.raw_events(ingested_on);
 
--- CRITICAL: Add GIN index for platform_ids JSONB column for efficient querying
-CREATE INDEX idx_raw_events_platform_ids_gin ON public.raw_events USING GIN (platform_ids);
+-- CRITICAL: Add GIN index for platform_ids JSONB column for efficient querying (only if it doesn't exist)
+CREATE INDEX IF NOT EXISTS idx_raw_events_platform_ids_gin ON public.raw_events USING GIN (platform_ids);
 
--- Add composite indexes for common query patterns
-CREATE INDEX idx_raw_events_user_platform_ids ON public.raw_events(user_id, platform_ids) WHERE platform_ids != '{}';
-CREATE INDEX idx_raw_events_platform_confidence ON public.raw_events(source_platform, confidence_score) WHERE confidence_score > 0.5;
+-- Add composite indexes for common query patterns (only if they don't exist)
+CREATE INDEX IF NOT EXISTS idx_raw_events_user_platform_ids ON public.raw_events(user_id, platform_ids) WHERE platform_ids != '{}';
+CREATE INDEX IF NOT EXISTS idx_raw_events_platform_confidence ON public.raw_events(source_platform, confidence_score) WHERE confidence_score > 0.5;
 
--- Create specialized functions for platform ID operations
+-- Create specialized functions for platform ID operations (replace if they exist)
 CREATE OR REPLACE FUNCTION get_events_by_platform_id(
     p_user_id UUID,
     p_platform TEXT,
@@ -277,4 +363,4 @@ BEGIN
     GROUP BY re.currency
     ORDER BY total_usd_amount DESC;
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER; 
+$$ LANGUAGE plpgsql SECURITY DEFINER;

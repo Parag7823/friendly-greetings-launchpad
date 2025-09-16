@@ -565,8 +565,8 @@ class EnhancedFileProcessor:
                 # Clean up temporary file
                 try:
                     os.unlink(temp_path)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.warning(f"Failed to clean up temp file {temp_path}: {e}")
                     
         except Exception as e:
             logger.error(f"Fallback streaming Excel reading failed: {e}")
@@ -613,8 +613,8 @@ class EnhancedFileProcessor:
                     try:
                         if os.path.exists(path):
                             os.unlink(path)
-                    except:
-                        pass
+                    except Exception as e:
+                        logger.warning(f"Failed to clean up temp file {path}: {e}")
                         
         except Exception as e:
             logger.error(f"Excel repair failed: {e}")
@@ -948,8 +948,8 @@ class EnhancedFileProcessor:
                 # Cleanup
                 try:
                     os.unlink(temp_path)
-                except:
-                    pass
+                except Exception as e:
+                    logger.warning(f"Failed to clean up temp file {temp_path}: {e}")
 
         except Exception as e:
             logger.error(f"ODS processing failed: {e}")
@@ -1041,8 +1041,8 @@ class EnhancedFileProcessor:
                 # Cleanup
                 try:
                     os.unlink(temp_path)
-                except:
-                    pass
+                except Exception as e:
+                    logger.warning(f"Failed to clean up temp file {temp_path}: {e}")
 
         except Exception as e:
             logger.error(f"PDF processing failed: {e}")
@@ -1177,8 +1177,12 @@ class EnhancedFileProcessor:
 
             # Perform OCR
             try:
-                # Try to extract structured data
-                ocr_data = pytesseract.image_to_data(processed, config=self.ocr_config, output_type=pytesseract.Output.DICT)
+                # Try to extract structured data - run in thread pool to avoid blocking
+                loop = asyncio.get_event_loop()
+                ocr_data = await loop.run_in_executor(
+                    None,
+                    lambda: pytesseract.image_to_data(processed, config=self.ocr_config, output_type=pytesseract.Output.DICT)
+                )
 
                 # Group text by lines and columns
                 lines = {}
@@ -1236,7 +1240,12 @@ class EnhancedFileProcessor:
                     return {'OCR_Table': df}
                 else:
                     # Fallback: extract all text as single column
-                    all_text = pytesseract.image_to_string(processed, config=self.ocr_config)
+                    # Run OCR in thread pool to avoid blocking
+                    loop = asyncio.get_event_loop()
+                    all_text = await loop.run_in_executor(
+                        None,
+                        lambda: pytesseract.image_to_string(processed, config=self.ocr_config)
+                    )
                     lines = [line.strip() for line in all_text.split('\n') if line.strip()]
 
                     if lines:

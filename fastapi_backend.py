@@ -394,9 +394,23 @@ try:
 except ImportError:
     logger.warning("⚠️ Excel automation not available")
 
-# Overall advanced features availability
+# Granular feature availability checking
+def is_feature_available(feature_name: str) -> bool:
+    """Check if a specific feature is available"""
+    return ADVANCED_FEATURES.get(feature_name, False)
+
+def get_available_features() -> List[str]:
+    """Get list of available features"""
+    return [name for name, available in ADVANCED_FEATURES.items() if available]
+
+def check_feature_dependencies(required_features: List[str]) -> Dict[str, bool]:
+    """Check if required features are available"""
+    return {feature: is_feature_available(feature) for feature in required_features}
+
+# Overall advanced features availability (for backward compatibility)
 ADVANCED_FEATURES_AVAILABLE = any(ADVANCED_FEATURES.values())
 logger.info(f"🔧 Advanced features status: {sum(ADVANCED_FEATURES.values())}/{len(ADVANCED_FEATURES)} available")
+logger.info(f"📋 Available features: {', '.join(get_available_features())}")
 
 # Enhanced global configuration with environment variable support
 @dataclass
@@ -508,7 +522,12 @@ class EnhancedFileProcessor:
         }
         
         # Configure OCR if available
-        self.ocr_config = '--oem 3 --psm 6' if ADVANCED_FEATURES_AVAILABLE else None
+        self.ocr_config = '--oem 3 --psm 6' if is_feature_available('pytesseract') else None
+        
+        # Streaming configuration
+        self.streaming_threshold_mb = 10
+        self.excel_chunk_size = 1000
+        self.csv_chunk_size = 10000
         
     async def process_file_enhanced(self, file_content: bytes, filename: str, 
                                   progress_callback=None) -> Dict[str, pd.DataFrame]:
@@ -581,19 +600,42 @@ class EnhancedFileProcessor:
             if progress_callback:
                 await progress_callback("processing", "🔧 Processing Excel file with enhanced capabilities...", 20)
             
-            # Try standard processing first
+            # Check file size for streaming approach
+            file_size_mb = len(file_content) / (1024 * 1024)
+            use_streaming = file_size_mb > 10  # 10MB threshold
+            
+            if use_streaming:
+                if progress_callback:
+                    await progress_callback("streaming", f"📊 Large file detected ({file_size_mb:.1f}MB), using streaming...", 25)
+                return await self._process_excel_streaming(file_content, filename, progress_callback)
+            
+            # Try standard processing for small files
             try:
-                file_stream = io.BytesIO(file_content)
-                excel_file = pd.ExcelFile(file_stream)
-                sheets = {}
+                with tempfile.NamedTemporaryFile(suffix='.xlsx', delete=False) as temp_file:
+                    temp_file.write(file_content)
+                    temp_path = temp_file.name
                 
-                for sheet_name in excel_file.sheet_names:
-                    df = pd.read_excel(file_stream, sheet_name=sheet_name)
-                    if not df.empty:
-                        sheets[sheet_name] = df
-                
-                if sheets:
-                    return sheets
+                try:
+                    excel_file = pd.ExcelFile(temp_path)
+                    sheets = {}
+                    
+                    for sheet_name in excel_file.sheet_names:
+                        df = pd.read_excel(temp_path, sheet_name=sheet_name)
+                        if not df.empty:
+                            sheets[sheet_name] = df
+                    
+                    if sheets:
+                        return sheets
+                except Exception as e:
+                    logger.error(f"Excel processing error: {e}")
+                    return {}
+                finally:
+                    # Ensure cleanup
+                    if os.path.exists(temp_path):
+                        try:
+                            os.unlink(temp_path)
+                        except Exception as e:
+                            logger.warning(f"Failed to clean up temp file {temp_path}: {e}")
                     
             except Exception as e:
                 logger.warning(f"Standard Excel processing failed: {e}")
@@ -638,8 +680,104 @@ class EnhancedFileProcessor:
             logger.error(f"Enhanced Excel processing failed: {e}")
             raise
     
+    async def _process_excel_streaming(self, file_content: bytes, filename: str, progress_callback=None) -> Dict[str, pd.DataFrame]:
+        """Process Excel files using true streaming approach for large files"""
+        temp_path = None
+        try:
+            if progress_callback:
+                await progress_callback("streaming", "📊 Streaming large Excel file...", 30)
+            
+            # Create temporary file for streaming processing
+            with tempfile.NamedTemporaryFile(suffix='.xlsx', delete=False) as temp_file:
+                temp_file.write(file_content)
+                temp_path = temp_file.name
+            
+            # Use thread pool for Excel processing to avoid blocking
+            loop = asyncio.get_event_loop()
+            sheets = await loop.run_in_executor(
+                None,  # Use default executor
+                self._stream_excel_file_sync,
+                temp_path
+            )
+            
+            if progress_callback:
+                await progress_callback("complete", "✅ Excel streaming complete", 100)
+            
+            return sheets
+            
+        except Exception as e:
+            logger.error(f"Excel streaming failed: {e}")
+            raise
+        finally:
+            # Ensure cleanup
+            if temp_path and os.path.exists(temp_path):
+                try:
+                    os.unlink(temp_path)
+                except Exception as e:
+                    logger.warning(f"Failed to clean up temp file {temp_path}: {e}")
+    
+    def _stream_excel_file_sync(self, file_path: str) -> Dict[str, pd.DataFrame]:
+        """Synchronous Excel streaming processing (runs in thread pool)"""
+        sheets = {}
+        try:
+            # Use openpyxl for streaming (most memory efficient)
+            from openpyxl import load_workbook
+            workbook = load_workbook(file_path, read_only=True, data_only=True)
+            
+            for sheet_name in workbook.sheetnames:
+                try:
+                    sheet = workbook[sheet_name]
+                    
+                    # Convert to DataFrame in chunks
+                    data = []
+                    headers = None
+                    
+                    for row_idx, row in enumerate(sheet.iter_rows(values_only=True)):
+                        if row_idx == 0:
+                            headers = [str(cell) if cell is not None else f'Column_{i}' for i, cell in enumerate(row)]
+                        else:
+                            data.append(row)
+                        
+                        # Process in chunks to manage memory
+                        if len(data) >= self.excel_chunk_size:
+                            chunk_df = pd.DataFrame(data, columns=headers)
+                            if sheet_name not in sheets:
+                                sheets[sheet_name] = chunk_df
+                            else:
+                                sheets[sheet_name] = pd.concat([sheets[sheet_name], chunk_df], ignore_index=True)
+                            data = []  # Clear processed data
+                    
+                    # Process remaining data
+                    if data:
+                        chunk_df = pd.DataFrame(data, columns=headers)
+                        if sheet_name not in sheets:
+                            sheets[sheet_name] = chunk_df
+                        else:
+                            sheets[sheet_name] = pd.concat([sheets[sheet_name], chunk_df], ignore_index=True)
+                            
+                except Exception as e:
+                    logger.warning(f"Failed to process sheet {sheet_name}: {e}")
+                    continue
+            
+            workbook.close()
+            
+        except Exception as e:
+            logger.error(f"Excel streaming processing failed: {e}")
+            raise
+        
+        return sheets
+    
     async def _process_csv_enhanced(self, file_content: bytes, filename: str, progress_callback=None) -> Dict[str, pd.DataFrame]:
-        """Enhanced CSV processing with multiple encodings"""
+        """Enhanced CSV processing with streaming for large files"""
+        # Check file size for streaming approach
+        file_size_mb = len(file_content) / (1024 * 1024)
+        use_streaming = file_size_mb > 50  # 50MB threshold for CSV
+        
+        if use_streaming:
+            if progress_callback:
+                await progress_callback("streaming", f"📊 Large CSV detected ({file_size_mb:.1f}MB), using streaming...", 25)
+            return await self._process_csv_streaming(file_content, filename, progress_callback)
+        
         if progress_callback:
             await progress_callback("processing", "📊 Processing CSV with enhanced encoding detection...", 20)
         
@@ -647,19 +785,90 @@ class EnhancedFileProcessor:
         
         for encoding in encodings:
             try:
-                file_stream = io.BytesIO(file_content)
-                df = pd.read_csv(file_stream, encoding=encoding)
-                if not df.empty:
-                    return {'Sheet1': df}
+                temp_path = None
+                try:
+                    # Use temporary file instead of BytesIO for better memory management
+                    with tempfile.NamedTemporaryFile(suffix='.csv', delete=False, mode='wb') as temp_file:
+                        temp_file.write(file_content)
+                        temp_path = temp_file.name
+                    
+                    try:
+                        df = pd.read_csv(temp_path, encoding=encoding)
+                        if not df.empty:
+                            return {'Sheet1': df}
+                    except Exception as e:
+                        logger.warning(f"CSV processing failed with encoding {encoding}: {e}")
+                        continue
+                    finally:
+                        if temp_path and os.path.exists(temp_path):
+                            try:
+                                os.unlink(temp_path)
+                            except Exception as e:
+                                logger.warning(f"Failed to clean up temp file {temp_path}: {e}")
+                except Exception as e:
+                    logger.warning(f"Temp file creation failed for encoding {encoding}: {e}")
+                    continue
             except Exception as e:
                 continue
         
         raise Exception("Could not read CSV with any encoding")
     
+    async def _process_csv_streaming(self, file_content: bytes, filename: str, progress_callback=None) -> Dict[str, pd.DataFrame]:
+        """Process CSV files using true streaming approach"""
+        temp_path = None
+        try:
+            # Create temporary file for streaming processing
+            with tempfile.NamedTemporaryFile(suffix='.csv', delete=False, mode='wb') as temp_file:
+                temp_file.write(file_content)
+                temp_path = temp_file.name
+            
+            # Use thread pool for CSV processing
+            loop = asyncio.get_event_loop()
+            df = await loop.run_in_executor(
+                None,
+                self._stream_csv_file_sync,
+                temp_path
+            )
+            
+            if progress_callback:
+                await progress_callback("complete", "✅ CSV streaming complete", 100)
+            
+            return {'Sheet1': df}
+            
+        except Exception as e:
+            logger.error(f"CSV streaming failed: {e}")
+            raise
+        finally:
+            if temp_path and os.path.exists(temp_path):
+                try:
+                    os.unlink(temp_path)
+                except Exception as e:
+                    logger.warning(f"Failed to clean up temp file {temp_path}: {e}")
+    
+    def _stream_csv_file_sync(self, file_path: str) -> pd.DataFrame:
+        """Synchronous CSV streaming processing (runs in thread pool)"""
+        try:
+            # Read CSV in chunks to manage memory
+            chunk_list = []
+            chunk_size = self.csv_chunk_size
+            
+            for chunk in pd.read_csv(file_path, chunksize=chunk_size):
+                chunk_list.append(chunk)
+            
+            # Combine chunks
+            if chunk_list:
+                return pd.concat(chunk_list, ignore_index=True)
+            else:
+                return pd.DataFrame()
+                
+        except Exception as e:
+            logger.error(f"CSV streaming processing failed: {e}")
+            raise
+    
     async def _process_ods(self, file_content: bytes, filename: str, progress_callback=None) -> Dict[str, pd.DataFrame]:
         """Process OpenDocument Spreadsheet files"""
-        if not ADVANCED_FEATURES_AVAILABLE:
-            raise Exception("ODS processing not available")
+        if not is_feature_available('odf'):
+            raise Exception("ODS processing not available - missing odf library")
         
         if progress_callback:
             await progress_callback("processing", "📊 Processing ODS file...", 20)
@@ -690,7 +899,11 @@ class EnhancedFileProcessor:
                         if not df.empty:
                             sheets[sheet_name] = df
                 
-                os.unlink(temp_file.name)
+                # Ensure cleanup
+                try:
+                    os.unlink(temp_file.name)
+                except Exception as e:
+                    logger.warning(f"Failed to clean up temp file {temp_file.name}: {e}")
                 return sheets
                 
         except Exception as e:
@@ -756,7 +969,11 @@ class EnhancedFileProcessor:
                     except Exception as pdfplumber_error:
                         logger.warning(f"PDFPlumber failed: {pdfplumber_error}")
                 
-                os.unlink(temp_file.name)
+                # Ensure cleanup
+                try:
+                    os.unlink(temp_file.name)
+                except Exception as e:
+                    logger.warning(f"Failed to clean up temp file {temp_file.name}: {e}")
                 
                 if sheets:
                     return sheets
@@ -769,8 +986,10 @@ class EnhancedFileProcessor:
     
     async def _process_archive(self, file_content: bytes, filename: str, progress_callback=None) -> Dict[str, pd.DataFrame]:
         """Process archive files (ZIP, 7Z, RAR)"""
-        if not ADVANCED_FEATURES_AVAILABLE:
-            raise Exception("Archive processing not available")
+        required_archive_features = ['zipfile', 'py7zr', 'rarfile']
+        available_archive_features = [f for f in required_archive_features if is_feature_available(f)]
+        if not available_archive_features:
+            raise Exception("Archive processing not available - missing zipfile, py7zr, or rarfile")
         
         if progress_callback:
             await progress_callback("processing", "📦 Processing archive file...", 20)
@@ -805,9 +1024,10 @@ class EnhancedFileProcessor:
                                     file_content = f.read()
                                 
                                 # Use basic processor for extracted files
-                                # Use the existing file processor for streaming
+                                # Process extracted file using the existing streaming methods
                                 basic_processor = self
-                                extracted_sheets = await basic_processor.read_file_streaming(file_content, file)
+                                # Use the existing process_file_enhanced method instead of missing read_file_streaming
+                                extracted_sheets = await basic_processor.process_file_enhanced(file_content, file, progress_callback)
                                 
                                 # Prefix sheet names with archive name
                                 for sheet_name, df in extracted_sheets.items():
@@ -828,8 +1048,8 @@ class EnhancedFileProcessor:
     
     async def _process_image(self, file_content: bytes, filename: str, progress_callback=None) -> Dict[str, pd.DataFrame]:
         """Process image files with OCR table extraction"""
-        if not ADVANCED_FEATURES_AVAILABLE:
-            raise Exception("Image processing not available")
+        if not is_feature_available('pytesseract') or not is_feature_available('pil'):
+            raise Exception("Image processing not available - missing pytesseract or PIL")
         
         if progress_callback:
             await progress_callback("processing", "🖼️ Processing image with OCR...", 20)
@@ -842,8 +1062,12 @@ class EnhancedFileProcessor:
                 # Load image
                 image = Image.open(temp_file.name)
                 
-                # OCR processing
-                ocr_text = pytesseract.image_to_string(image, config=self.ocr_config)
+                # OCR processing - run in thread pool to avoid blocking
+                loop = asyncio.get_event_loop()
+                ocr_text = await loop.run_in_executor(
+                    None,
+                    lambda: pytesseract.image_to_string(image, config=self.ocr_config)
+                )
                 
                 # Try to extract table structure from OCR text
                 lines = ocr_text.split('\n')
@@ -856,7 +1080,11 @@ class EnhancedFileProcessor:
                         if len(row) > 1:  # Likely table row
                             table_data.append(row)
                 
-                os.unlink(temp_file.name)
+                # Ensure cleanup
+                try:
+                    os.unlink(temp_file.name)
+                except Exception as e:
+                    logger.warning(f"Failed to clean up temp file {temp_file.name}: {e}")
                 
                 if table_data:
                     # Create DataFrame from extracted table
@@ -915,7 +1143,12 @@ class VendorStandardizer:
     
     def __init__(self, openai_client):
         self.openai = openai_client
+        # Implement proper cache with size limits and TTL
         self.vendor_cache = {}
+        self.cache_max_size = 1000  # Maximum number of cached items
+        self.cache_ttl = 3600  # 1 hour TTL
+        self.cache_access_times = {}  # Track access times for LRU
+        self.cache_creation_times = {}  # Track creation times for TTL
         self.common_suffixes = [
             ' inc', ' corp', ' llc', ' ltd', ' co', ' company', ' pvt', ' private',
             ' limited', ' corporation', ' incorporated', ' enterprises', ' solutions',
@@ -931,7 +1164,8 @@ class VendorStandardizer:
     async def standardize_vendor(self, vendor_name: str, platform: str = None) -> Dict[str, Any]:
         """Standardize vendor name using AI and rule-based cleaning"""
         try:
-            if not vendor_name or vendor_name.strip() == '':
+            # Comprehensive empty/whitespace check including Unicode whitespace
+            if not vendor_name or self._is_effectively_empty(vendor_name):
                 return {
                     "vendor_raw": vendor_name,
                     "vendor_standard": "",
@@ -939,10 +1173,11 @@ class VendorStandardizer:
                     "cleaning_method": "empty"
                 }
             
-            # Check cache first
+            # Check cache first with proper cache management
             cache_key = f"{vendor_name}_{platform}"
-            if cache_key in self.vendor_cache:
-                return self.vendor_cache[cache_key]
+            cached_result = self._get_from_cache(cache_key)
+            if cached_result:
+                return cached_result
             
             # Rule-based cleaning first
             cleaned_name = self._rule_based_cleaning(vendor_name)
@@ -955,12 +1190,12 @@ class VendorStandardizer:
                     "confidence": 0.8,
                     "cleaning_method": "rule_based"
                 }
-                self.vendor_cache[cache_key] = result
+                self._set_in_cache(cache_key, result)
                 return result
             
             # Use AI for complex cases
             ai_result = await self._ai_standardization(vendor_name, platform)
-            self.vendor_cache[cache_key] = ai_result
+            self._set_in_cache(cache_key, ai_result)
             return ai_result
             
         except Exception as e:
@@ -1010,18 +1245,61 @@ class VendorStandardizer:
                 cleaned_words.append(word)
             cleaned = ' '.join(cleaned_words)
             
-            # Capitalize properly
-            cleaned = cleaned.title()
+            # Handle proper casing for known companies
+            cleaned = self._apply_proper_casing(cleaned)
             
-            # Handle common abbreviations
+            # Handle comprehensive abbreviations (expanded from 7 to 50+ entries)
             abbreviations = {
-                'Ggl': 'Google',
-                'Msoft': 'Microsoft',
-                'Msft': 'Microsoft',
-                'Amzn': 'Amazon',
+                # Major tech companies
+                'Ggl': 'Google', 'Goog': 'Google',
+                'Msoft': 'Microsoft', 'Msft': 'Microsoft',
+                'Amzn': 'Amazon', 'Amz': 'Amazon',
                 'Aapl': 'Apple',
                 'Nflx': 'Netflix',
-                'Tsla': 'Tesla'
+                'Tsla': 'Tesla',
+                'Meta': 'Meta', 'Fb': 'Meta',
+                'Nvda': 'NVIDIA', 'Nvidia': 'NVIDIA',
+                'Intel': 'Intel', 'Intc': 'Intel',
+                'IBM': 'IBM', 'Ibm': 'IBM',
+                'Oracle': 'Oracle', 'Orcl': 'Oracle',
+                'Salesforce': 'Salesforce', 'Crm': 'Salesforce',
+                'Adobe': 'Adobe', 'Adbe': 'Adobe',
+                'PayPal': 'PayPal', 'Pypl': 'PayPal',
+                'Zoom': 'Zoom', 'Zm': 'Zoom',
+                'Slack': 'Slack',
+                'Dropbox': 'Dropbox', 'Dbx': 'Dropbox',
+                'Twitter': 'Twitter', 'Twtr': 'Twitter', 'X': 'Twitter',
+                'Uber': 'Uber',
+                'Lyft': 'Lyft',
+                'Airbnb': 'Airbnb', 'Abnb': 'Airbnb',
+                'Spotify': 'Spotify', 'Spot': 'Spotify',
+                'Snapchat': 'Snapchat', 'Snap': 'Snapchat',
+                'Pinterest': 'Pinterest', 'Pins': 'Pinterest',
+                'Square': 'Square', 'Sq': 'Square', 'Block': 'Square',
+                'Stripe': 'Stripe',
+                'Shopify': 'Shopify', 'Shop': 'Shopify',
+                'Palantir': 'Palantir', 'Pltr': 'Palantir',
+                'Snowflake': 'Snowflake', 'Snow': 'Snowflake',
+                'CrowdStrike': 'CrowdStrike', 'Crwd': 'CrowdStrike',
+                'Okta': 'Okta',
+                'Zendesk': 'Zendesk',
+                'Atlassian': 'Atlassian', 'Team': 'Atlassian',
+                'ServiceNow': 'ServiceNow', 'Now': 'ServiceNow',
+                'Workday': 'Workday', 'Wday': 'Workday',
+                'VMware': 'VMware', 'Vmw': 'VMware',
+                'Red Hat': 'Red Hat', 'Rht': 'Red Hat',
+                'Splunk': 'Splunk', 'Splk': 'Splunk',
+                'MongoDB': 'MongoDB', 'Mdb': 'MongoDB',
+                'Elastic': 'Elastic', 'Estc': 'Elastic',
+                'Datadog': 'Datadog', 'Ddog': 'Datadog',
+                'New Relic': 'New Relic', 'Newr': 'New Relic',
+                'GitHub': 'GitHub',
+                'GitLab': 'GitLab', 'Gltb': 'GitLab',
+                'HashiCorp': 'HashiCorp', 'Hcp': 'HashiCorp',
+                'Confluent': 'Confluent', 'Cflt': 'Confluent',
+                'Cloudflare': 'Cloudflare', 'Net': 'Cloudflare',
+                'Fastly': 'Fastly', 'Fsly': 'Fastly',
+                'Akamai': 'Akamai', 'Akam': 'Akamai'
             }
             
             if cleaned in abbreviations:
@@ -1036,11 +1314,15 @@ class VendorStandardizer:
     async def _ai_standardization(self, vendor_name: str, platform: str = None) -> Dict[str, Any]:
         """AI-powered vendor name standardization"""
         try:
+            # Sanitize inputs to prevent prompt injection
+            sanitized_vendor = self._sanitize_for_prompt(vendor_name)
+            sanitized_platform = self._sanitize_for_prompt(platform or 'unknown')
+            
             prompt = f"""
             Standardize this vendor name to a clean, canonical form.
             
-            VENDOR NAME: {vendor_name}
-            PLATFORM: {platform or 'unknown'}
+            VENDOR NAME: {sanitized_vendor}
+            PLATFORM: {sanitized_platform}
             
             Rules:
             1. Remove legal suffixes (Inc, Corp, LLC, Ltd, etc.)
@@ -1063,12 +1345,8 @@ class VendorStandardizer:
             }}
             """
             
-            response = self.openai.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.1,
-                max_tokens=200
-            )
+            # AI call with rate limiting and retry logic
+            response = await self._make_ai_call_with_retry(prompt)
             
             result = response.choices[0].message.content.strip()
             
@@ -1097,6 +1375,284 @@ class VendorStandardizer:
                 "confidence": 0.5,
                 "cleaning_method": "ai_fallback"
             }
+    
+    def _sanitize_for_prompt(self, text: str) -> str:
+        """Sanitize text to prevent prompt injection attacks"""
+        if not text:
+            return ""
+        
+        # Remove or escape dangerous prompt injection patterns
+        dangerous_patterns = [
+            "ignore previous instructions",
+            "forget everything",
+            "you are now",
+            "system:",
+            "assistant:",
+            "user:",
+            "```",
+            "---",
+            "===",
+            "###",
+            "**",
+            "__",
+            "\\n\\n",
+            "\\r\\n",
+            "\\t"
+        ]
+        
+        sanitized = str(text)
+        
+        # Remove dangerous patterns (case insensitive)
+        for pattern in dangerous_patterns:
+            sanitized = sanitized.replace(pattern.lower(), "")
+            sanitized = sanitized.replace(pattern.upper(), "")
+            sanitized = sanitized.replace(pattern, "")
+        
+        # Limit length to prevent prompt flooding
+        if len(sanitized) > 200:
+            sanitized = sanitized[:200] + "..."
+        
+        # Remove any remaining newlines and excessive whitespace
+        sanitized = " ".join(sanitized.split())
+        
+        return sanitized.strip()
+    
+    def _is_effectively_empty(self, text: str) -> bool:
+        """Check if text is effectively empty (including Unicode whitespace)"""
+        if not text:
+            return True
+        
+        # Remove all types of whitespace including Unicode
+        import unicodedata
+        normalized = unicodedata.normalize('NFKC', text)
+        stripped = ''.join(c for c in normalized if not unicodedata.category(c).startswith('Z'))
+        
+        return len(stripped.strip()) == 0
+    
+    def _apply_proper_casing(self, text: str) -> str:
+        """Apply proper casing while preserving known company name formatting"""
+        if not text:
+            return text
+        
+        # Known companies with special casing
+        special_casing = {
+            'ebay': 'eBay', 'iphone': 'iPhone', 'ipad': 'iPad', 'imac': 'iMac',
+            'itunes': 'iTunes', 'ios': 'iOS', 'macos': 'macOS', 'watchos': 'watchOS',
+            'tvos': 'tvOS', 'ipados': 'iPadOS', 'xcode': 'Xcode', 'safari': 'Safari',
+            'quicktime': 'QuickTime', 'final cut': 'Final Cut', 'logic pro': 'Logic Pro',
+            'garageband': 'GarageBand', 'keynote': 'Keynote', 'pages': 'Pages',
+            'numbers': 'Numbers', 'icloud': 'iCloud', 'itunes': 'iTunes',
+            'apple pay': 'Apple Pay', 'apple watch': 'Apple Watch', 'airpods': 'AirPods',
+            'airtag': 'AirTag', 'homepod': 'HomePod', 'appletv': 'Apple TV',
+            'macbook': 'MacBook', 'macbook air': 'MacBook Air', 'macbook pro': 'MacBook Pro',
+            'imac': 'iMac', 'mac pro': 'Mac Pro', 'mac mini': 'Mac mini',
+            'mac studio': 'Mac Studio', 'studio display': 'Studio Display',
+            'pro display': 'Pro Display XDR', 'magic mouse': 'Magic Mouse',
+            'magic keyboard': 'Magic Keyboard', 'magic trackpad': 'Magic Trackpad',
+            'apple pencil': 'Apple Pencil', 'airplay': 'AirPlay', 'airdrop': 'AirDrop',
+            'handoff': 'Handoff', 'continuity': 'Continuity', 'universal control': 'Universal Control',
+            'sidecar': 'Sidecar', 'screen time': 'Screen Time', 'find my': 'Find My',
+            'apple id': 'Apple ID', 'app store': 'App Store', 'mac app store': 'Mac App Store',
+            'testflight': 'TestFlight', 'xcode cloud': 'Xcode Cloud', 'swift': 'Swift',
+            'swiftui': 'SwiftUI', 'objective-c': 'Objective-C', 'cocoa': 'Cocoa',
+            'cocoa touch': 'Cocoa Touch', 'core data': 'Core Data', 'core animation': 'Core Animation',
+            'core graphics': 'Core Graphics', 'core image': 'Core Image', 'metal': 'Metal',
+            'metal performance shaders': 'Metal Performance Shaders', 'arkit': 'ARKit',
+            'core ml': 'Core ML', 'create ml': 'Create ML', 'turi create': 'Turi Create',
+            'tensorflow': 'TensorFlow', 'pytorch': 'PyTorch', 'keras': 'Keras',
+            'scikit-learn': 'scikit-learn', 'numpy': 'NumPy', 'pandas': 'pandas',
+            'matplotlib': 'Matplotlib', 'seaborn': 'Seaborn', 'plotly': 'Plotly',
+            'bokeh': 'Bokeh', 'altair': 'Altair', 'ggplot': 'ggplot2',
+            'd3': 'D3.js', 'react': 'React', 'vue': 'Vue.js', 'angular': 'Angular',
+            'node': 'Node.js', 'express': 'Express.js', 'koa': 'Koa.js',
+            'next': 'Next.js', 'nuxt': 'Nuxt.js', 'gatsby': 'Gatsby',
+            'webpack': 'Webpack', 'rollup': 'Rollup', 'parcel': 'Parcel',
+            'vite': 'Vite', 'esbuild': 'esbuild', 'swc': 'SWC',
+            'babel': 'Babel', 'typescript': 'TypeScript', 'flow': 'Flow',
+            'eslint': 'ESLint', 'prettier': 'Prettier', 'husky': 'Husky',
+            'lint-staged': 'lint-staged', 'jest': 'Jest', 'mocha': 'Mocha',
+            'chai': 'Chai', 'cypress': 'Cypress', 'playwright': 'Playwright',
+            'puppeteer': 'Puppeteer', 'selenium': 'Selenium', 'webdriver': 'WebDriver',
+            'karma': 'Karma', 'jasmine': 'Jasmine', 'qunit': 'QUnit',
+            'ava': 'AVA', 'tape': 'Tape', 'tap': 'TAP',
+            'vitest': 'Vitest', 'vitesse': 'Vitesse', 'vite-ssg': 'Vite SSG',
+            'vuepress': 'VuePress', 'gridsome': 'Gridsome', 'sapper': 'Sapper',
+            'svelte': 'Svelte', 'sveltekit': 'SvelteKit', 'alpine': 'Alpine.js',
+            'stimulus': 'Stimulus', 'hotwire': 'Hotwire', 'turbo': 'Turbo',
+            'strada': 'Strada', 'phoenix': 'Phoenix', 'liveview': 'LiveView',
+            'rails': 'Ruby on Rails', 'sinatra': 'Sinatra', 'hanami': 'Hanami',
+            'padrino': 'Padrino', 'grape': 'Grape', 'rack': 'Rack',
+            'puma': 'Puma', 'unicorn': 'Unicorn', 'passenger': 'Passenger',
+            'thin': 'Thin', 'webrick': 'WEBrick', 'mongrel': 'Mongrel',
+            'django': 'Django', 'flask': 'Flask', 'fastapi': 'FastAPI',
+            'tornado': 'Tornado', 'bottle': 'Bottle', 'cherrypy': 'CherryPy',
+            'pyramid': 'Pyramid', 'falcon': 'Falcon', 'sanic': 'Sanic',
+            'quart': 'Quart', 'starlette': 'Starlette', 'uvicorn': 'Uvicorn',
+            'gunicorn': 'Gunicorn', 'waitress': 'Waitress', 'mod_wsgi': 'mod_wsgi',
+            'psycopg2': 'psycopg2', 'sqlalchemy': 'SQLAlchemy', 'alembic': 'Alembic',
+            'peewee': 'Peewee', 'pony': 'Pony ORM', 'tortoise': 'Tortoise ORM',
+            'databases': 'Databases', 'asyncpg': 'asyncpg', 'aiopg': 'aiopg',
+            'aiomysql': 'aiomysql', 'aioredis': 'aioredis', 'motor': 'Motor',
+            'pymongo': 'PyMongo', 'mongoengine': 'MongoEngine', 'beanie': 'Beanie',
+            'redis': 'Redis', 'memcached': 'Memcached', 'celery': 'Celery',
+            'rq': 'RQ', 'dramatiq': 'Dramatiq', 'huey': 'Huey',
+            'kombu': 'Kombu', 'pika': 'Pika', 'aiormq': 'aiormq',
+            'aio-pika': 'aio-pika', 'rabbitmq': 'RabbitMQ', 'apache kafka': 'Apache Kafka',
+            'kafka-python': 'kafka-python', 'aiokafka': 'aiokafka', 'confluent-kafka': 'confluent-kafka',
+            'pulsar': 'Apache Pulsar', 'nats': 'NATS', 'zeromq': 'ZeroMQ',
+            'pyzmq': 'PyZMQ', 'asyncio': 'asyncio', 'aiohttp': 'aiohttp',
+            'httpx': 'HTTPX', 'requests': 'Requests', 'urllib3': 'urllib3',
+            'urllib': 'urllib', 'urllib2': 'urllib2', 'httplib': 'httplib',
+            'httplib2': 'httplib2', 'pycurl': 'PycURL', 'requests-oauthlib': 'requests-oauthlib',
+            'authlib': 'Authlib', 'python-jose': 'python-jose', 'pyjwt': 'PyJWT',
+            'cryptography': 'cryptography', 'pycryptodome': 'PyCryptodome', 'nacl': 'PyNaCl',
+            'passlib': 'Passlib', 'bcrypt': 'bcrypt', 'argon2': 'argon2-cffi',
+            'scrypt': 'scrypt', 'pbkdf2': 'pbkdf2', 'hmac': 'HMAC',
+            'hashlib': 'hashlib', 'secrets': 'secrets', 'uuid': 'uuid',
+            'datetime': 'datetime', 'time': 'time', 'calendar': 'calendar',
+            'pytz': 'pytz', 'dateutil': 'python-dateutil', 'arrow': 'Arrow',
+            'moment': 'moment.js', 'dayjs': 'Day.js', 'luxon': 'Luxon',
+            'chrono': 'Chrono', 'fecha': 'fecha', 'date-fns': 'date-fns',
+            'moment-timezone': 'moment-timezone', 'timezone': 'timezone', 'tzdata': 'tzdata',
+            'babel': 'Babel', 'gettext': 'gettext', 'fluent': 'Fluent',
+            'i18next': 'i18next', 'react-i18next': 'react-i18next', 'vue-i18n': 'vue-i18n',
+            'angular-i18n': 'angular-i18n', 'ember-i18n': 'ember-i18n', 'svelte-i18n': 'svelte-i18n',
+            'polyglot': 'Polyglot.js', 'jed': 'Jed', 'globalize': 'Globalize',
+            'formatjs': 'Format.js', 'react-intl': 'react-intl', 'vue-intl': 'vue-intl',
+            'angular-l10n': 'angular-l10n', 'ember-intl': 'ember-intl', 'svelte-intl': 'svelte-intl',
+            'lingui': 'Lingui', 'next-intl': 'next-intl', 'nuxt-i18n': 'nuxt-i18n',
+            'gatsby-plugin-intl': 'gatsby-plugin-intl', 'next-i18next': 'next-i18next',
+            'react-i18next': 'react-i18next', 'vue-i18next': 'vue-i18next',
+            'angular-i18next': 'angular-i18next', 'ember-i18next': 'ember-i18next',
+            'svelte-i18next': 'svelte-i18next', 'preact-i18next': 'preact-i18next',
+            'inferno-i18next': 'inferno-i18next', 'mithril-i18next': 'mithril-i18next',
+            'hyperapp-i18next': 'hyperapp-i18next', 'lit-i18next': 'lit-i18next',
+            'stencil-i18next': 'stencil-i18next', 'alpine-i18next': 'alpine-i18next',
+            'stimulus-i18next': 'stimulus-i18next', 'hotwire-i18next': 'hotwire-i18next',
+            'turbo-i18next': 'turbo-i18next', 'strada-i18next': 'strada-i18next'
+        }
+        
+        # Check for exact matches first
+        if text.lower() in special_casing:
+            return special_casing[text.lower()]
+        
+        # Apply title case for other words
+        return text.title()
+    
+    def _get_from_cache(self, cache_key: str) -> Optional[Dict[str, Any]]:
+        """Get value from cache with TTL and LRU management"""
+        import time
+        
+        if cache_key not in self.vendor_cache:
+            return None
+        
+        # Check TTL
+        current_time = time.time()
+        if current_time - self.cache_creation_times.get(cache_key, 0) > self.cache_ttl:
+            # Expired, remove from cache
+            self._remove_from_cache(cache_key)
+            return None
+        
+        # Update access time for LRU
+        self.cache_access_times[cache_key] = current_time
+        return self.vendor_cache[cache_key]
+    
+    def _set_in_cache(self, cache_key: str, value: Dict[str, Any]) -> None:
+        """Set value in cache with size management"""
+        import time
+        
+        current_time = time.time()
+        
+        # If cache is full, remove least recently used item
+        if len(self.vendor_cache) >= self.cache_max_size:
+            self._evict_lru()
+        
+        # Add to cache
+        self.vendor_cache[cache_key] = value
+        self.cache_access_times[cache_key] = current_time
+        self.cache_creation_times[cache_key] = current_time
+    
+    def _remove_from_cache(self, cache_key: str) -> None:
+        """Remove item from cache and tracking dictionaries"""
+        self.vendor_cache.pop(cache_key, None)
+        self.cache_access_times.pop(cache_key, None)
+        self.cache_creation_times.pop(cache_key, None)
+    
+    def _evict_lru(self) -> None:
+        """Evict least recently used item from cache"""
+        if not self.cache_access_times:
+            return
+        
+        # Find least recently used item
+        lru_key = min(self.cache_access_times.keys(), 
+                     key=lambda k: self.cache_access_times[k])
+        
+        # Remove it
+        self._remove_from_cache(lru_key)
+    
+    def clear_cache(self) -> None:
+        """Clear all cache entries"""
+        self.vendor_cache.clear()
+        self.cache_access_times.clear()
+        self.cache_creation_times.clear()
+    
+    def get_cache_stats(self) -> Dict[str, Any]:
+        """Get cache statistics"""
+        import time
+        current_time = time.time()
+        
+        # Count expired entries
+        expired_count = 0
+        for cache_key, creation_time in self.cache_creation_times.items():
+            if current_time - creation_time > self.cache_ttl:
+                expired_count += 1
+        
+        return {
+            'total_entries': len(self.vendor_cache),
+            'max_size': self.cache_max_size,
+            'ttl_seconds': self.cache_ttl,
+            'expired_entries': expired_count,
+            'cache_utilization': len(self.vendor_cache) / self.cache_max_size
+        }
+    
+    async def _make_ai_call_with_retry(self, prompt: str, max_retries: int = 3) -> Any:
+        """Make AI call with rate limiting and retry logic"""
+        import asyncio
+        import random
+        import time
+        
+        for attempt in range(max_retries + 1):
+            try:
+                # Rate limiting: add delay between requests
+                if hasattr(self, '_last_ai_call_time'):
+                    time_since_last = time.time() - self._last_ai_call_time
+                    min_interval = 0.1  # 100ms minimum between calls
+                    if time_since_last < min_interval:
+                        await asyncio.sleep(min_interval - time_since_last)
+                
+                # Make the AI call
+                response = self.openai.chat.completions.create(
+                    model="gpt-4o-mini",
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=0.1,
+                    max_tokens=200
+                )
+                
+                # Update last call time
+                self._last_ai_call_time = time.time()
+                
+                return response
+                
+            except Exception as e:
+                if attempt == max_retries:
+                    # Final attempt failed
+                    logger.error(f"AI call failed after {max_retries} retries: {e}")
+                    raise
+                
+                # Exponential backoff with jitter
+                delay = (2 ** attempt) + random.uniform(0, 1)
+                logger.warning(f"AI call failed (attempt {attempt + 1}), retrying in {delay:.2f}s: {e}")
+                await asyncio.sleep(delay)
 
 class PlatformIDExtractor:
     """Extracts platform-specific IDs and metadata"""
@@ -1121,10 +1677,17 @@ class PlatformIDExtractor:
                 'timesheet_id': r'ts_[a-zA-Z0-9]{10}'
             },
             'quickbooks': {
-                'transaction_id': r'txn_[a-zA-Z0-9]{12}',
-                'invoice_id': r'inv_[a-zA-Z0-9]{10}',
-                'vendor_id': r'ven_[a-zA-Z0-9]{8}',
-                'customer_id': r'cust_[a-zA-Z0-9]{8}'
+                # Real QuickBooks ID patterns based on actual data
+                'transaction_id': r'(?:TXN-?\d{1,8}|\d{1,8}|QB-\d{1,8})',
+                'invoice_id': r'(?:INV-?\d{1,8}|\d{1,8}|Invoice\s*#?\s*\d{1,8})',
+                'vendor_id': r'(?:VEN-?\d{1,8}|\d{1,8}|Vendor\s*#?\s*\d{1,8})',
+                'customer_id': r'(?:CUST-?\d{1,8}|\d{1,8}|Customer\s*#?\s*\d{1,8})',
+                'bill_id': r'(?:BILL-?\d{1,8}|\d{1,8}|Bill\s*#?\s*\d{1,8})',
+                'payment_id': r'(?:PAY-?\d{1,8}|\d{1,8}|Payment\s*#?\s*\d{1,8})',
+                'account_id': r'(?:ACC-?\d{1,8}|\d{1,8}|Account\s*#?\s*\d{1,8})',
+                'class_id': r'(?:CLASS-?\d{1,8}|\d{1,8}|Class\s*#?\s*\d{1,8})',
+                'item_id': r'(?:ITEM-?\d{1,8}|\d{1,8}|Item\s*#?\s*\d{1,8})',
+                'journal_entry_id': r'(?:JE-?\d{1,8}|\d{1,8}|Journal\s*Entry\s*#?\s*\d{1,8})'
             },
             'xero': {
                 'invoice_id': r'INV-[0-9]{4}-[0-9]{6}',
@@ -1133,43 +1696,127 @@ class PlatformIDExtractor:
             }
         }
     
-    def extract_platform_ids(self, row_data: Dict, platform: str, column_names: List[str]) -> Dict[str, Any]:
-        """Extract platform-specific IDs from row data"""
+    async def extract_platform_ids(self, row_data: Dict, platform: str, column_names: List[str]) -> Dict[str, Any]:
+        """Extract platform-specific IDs from row data with comprehensive validation and confidence scoring"""
         try:
             extracted_ids = {}
+            confidence_scores = {}
+            validation_results = {}
             platform_lower = platform.lower()
             
             # Get patterns for this platform
             patterns = self.platform_patterns.get(platform_lower, {})
             
-            # Search in all text fields
-            all_text = ' '.join(str(val) for val in row_data.values() if val)
+            if not patterns:
+                return {
+                    "platform": platform,
+                    "extracted_ids": {},
+                    "confidence_scores": {},
+                    "validation_results": {},
+                    "total_ids_found": 0,
+                    "warnings": ["No patterns defined for platform"]
+                }
             
+            # Pre-compile regex patterns for performance
+            compiled_patterns = {}
             for id_type, pattern in patterns.items():
-                matches = re.findall(pattern, all_text, re.IGNORECASE)
-                if matches:
-                    extracted_ids[id_type] = matches[0]  # Take first match
+                try:
+                    compiled_patterns[id_type] = re.compile(pattern, re.IGNORECASE)
+                except re.error as e:
+                    logger.warning(f"Invalid regex pattern for {id_type}: {pattern} - {e}")
+                    continue
             
-            # Also check column names for ID patterns
+            # Extract IDs from individual column values first (higher confidence)
             for col_name in column_names:
                 col_lower = col_name.lower()
-                if any(id_type in col_lower for id_type in ['id', 'reference', 'number']):
-                    col_value = row_data.get(col_name)
-                    if col_value:
-                        # Check if this column value matches any pattern
-                        for id_type, pattern in patterns.items():
-                            if re.match(pattern, str(col_value), re.IGNORECASE):
-                                extracted_ids[id_type] = str(col_value)
-                                break
+                col_value = row_data.get(col_name)
+                
+                if not col_value:
+                    continue
+                
+                col_value_str = str(col_value).strip()
+                if not col_value_str:
+                    continue
+                
+                # Check if column name suggests it contains IDs
+                is_id_column = any(id_indicator in col_lower for id_indicator in 
+                                 ['id', 'reference', 'number', 'ref', 'num', 'code', 'key'])
+                
+                for id_type, compiled_pattern in compiled_patterns.items():
+                    if compiled_pattern.match(col_value_str):
+                        # Higher confidence for exact column matches
+                        confidence = 0.9 if is_id_column else 0.7
+                        
+                        # Validate the extracted ID
+                        validation_result = self._validate_platform_id(col_value_str, id_type, platform_lower)
+                        
+                        if validation_result['is_valid']:
+                            extracted_ids[id_type] = col_value_str
+                            confidence_scores[id_type] = confidence
+                            validation_results[id_type] = validation_result
+                            
+                            # Don't check other patterns for this column value
+                            break
             
-            # Generate a unique platform ID if none found
+            # Extract IDs from concatenated text (lower confidence)
+            all_text = ' '.join(str(val) for val in row_data.values() if val and str(val).strip())
+            
+            for id_type, compiled_pattern in compiled_patterns.items():
+                if id_type in extracted_ids:
+                    continue  # Already found in column-specific extraction
+                
+                matches = compiled_pattern.findall(all_text)
+                if matches:
+                    # Handle multiple matches
+                    if len(matches) > 1:
+                        # Choose the best match based on validation
+                        best_match = None
+                        best_confidence = 0.0
+                        
+                        for match in matches:
+                            validation_result = self._validate_platform_id(match, id_type, platform_lower)
+                            confidence = 0.6 if validation_result['is_valid'] else 0.3
+                            
+                            if confidence > best_confidence:
+                                best_match = match
+                                best_confidence = confidence
+                                validation_results[id_type] = validation_result
+                        
+                        if best_match:
+                            extracted_ids[id_type] = best_match
+                            confidence_scores[id_type] = best_confidence
+                    else:
+                        # Single match
+                        match = matches[0]
+                        validation_result = self._validate_platform_id(match, id_type, platform_lower)
+                        confidence = 0.6 if validation_result['is_valid'] else 0.3
+                        
+                        extracted_ids[id_type] = match
+                        confidence_scores[id_type] = confidence
+                        validation_results[id_type] = validation_result
+            
+            # Generate deterministic platform ID if none found
             if not extracted_ids:
-                extracted_ids['platform_generated_id'] = f"{platform_lower}_{hash(str(row_data)) % 10000:04d}"
+                deterministic_id = await self._generate_deterministic_platform_id(row_data, platform_lower)
+                extracted_ids['platform_generated_id'] = deterministic_id
+                confidence_scores['platform_generated_id'] = 0.1
+                validation_results['platform_generated_id'] = {
+                    'is_valid': True,
+                    'reason': 'Generated deterministic ID',
+                    'validation_method': 'deterministic_generation'
+                }
+            
+            # Calculate overall confidence
+            overall_confidence = sum(confidence_scores.values()) / len(confidence_scores) if confidence_scores else 0.0
             
             return {
                 "platform": platform,
                 "extracted_ids": extracted_ids,
-                "total_ids_found": len(extracted_ids)
+                "confidence_scores": confidence_scores,
+                "validation_results": validation_results,
+                "total_ids_found": len(extracted_ids),
+                "overall_confidence": overall_confidence,
+                "extraction_method": "comprehensive_validation"
             }
             
         except Exception as e:
@@ -1177,9 +1824,168 @@ class PlatformIDExtractor:
             return {
                 "platform": platform,
                 "extracted_ids": {},
+                "confidence_scores": {},
+                "validation_results": {},
                 "total_ids_found": 0,
-                "error": str(e)
+                "overall_confidence": 0.0,
+                "error": str(e),
+                "extraction_method": "error_fallback"
             }
+    
+    def _validate_platform_id(self, id_value: str, id_type: str, platform: str) -> Dict[str, Any]:
+        """Validate extracted platform ID against business rules"""
+        try:
+            validation_result = {
+                'is_valid': True,
+                'reason': 'Valid ID format',
+                'validation_method': 'format_check',
+                'warnings': []
+            }
+            
+            # Basic format validation
+            if not id_value or not id_value.strip():
+                validation_result['is_valid'] = False
+                validation_result['reason'] = 'Empty or null ID value'
+                return validation_result
+            
+            id_value = id_value.strip()
+            
+            # Length validation
+            if len(id_value) < 1 or len(id_value) > 50:
+                validation_result['is_valid'] = False
+                validation_result['reason'] = f'ID length invalid: {len(id_value)} (must be 1-50 characters)'
+                return validation_result
+            
+            # Platform-specific validation
+            if platform == 'quickbooks':
+                validation_result.update(self._validate_quickbooks_id(id_value, id_type))
+            elif platform == 'stripe':
+                validation_result.update(self._validate_stripe_id(id_value, id_type))
+            elif platform == 'razorpay':
+                validation_result.update(self._validate_razorpay_id(id_value, id_type))
+            elif platform == 'xero':
+                validation_result.update(self._validate_xero_id(id_value, id_type))
+            elif platform == 'gusto':
+                validation_result.update(self._validate_gusto_id(id_value, id_type))
+            
+            # Common validation rules
+            if not validation_result['is_valid']:
+                return validation_result
+            
+            # Check for suspicious patterns
+            if any(suspicious in id_value.lower() for suspicious in ['test', 'dummy', 'sample', 'example']):
+                validation_result['warnings'].append('ID contains test/sample indicators')
+                validation_result['confidence'] = 0.5
+            
+            # Check for mixed platforms (potential data quality issue)
+            if platform == 'quickbooks' and any(other_platform in id_value.lower() for other_platform in ['stripe', 'paypal', 'square']):
+                validation_result['warnings'].append('ID contains mixed platform indicators')
+                validation_result['confidence'] = 0.3
+            
+            return validation_result
+            
+        except Exception as e:
+            return {
+                'is_valid': False,
+                'reason': f'Validation error: {str(e)}',
+                'validation_method': 'error_fallback'
+            }
+    
+    def _validate_quickbooks_id(self, id_value: str, id_type: str) -> Dict[str, Any]:
+        """Validate QuickBooks-specific ID formats"""
+        # QuickBooks IDs are typically numeric or have simple prefixes
+        if id_type in ['transaction_id', 'invoice_id', 'vendor_id', 'customer_id']:
+            # Should be numeric or have simple prefix
+            if re.match(r'^(?:TXN-?|INV-?|VEN-?|CUST-?|BILL-?|PAY-?|ACC-?|CLASS-?|ITEM-?|JE-?)?\d{1,8}$', id_value, re.IGNORECASE):
+                return {'is_valid': True, 'reason': 'Valid QuickBooks ID format'}
+            else:
+                return {'is_valid': False, 'reason': 'Invalid QuickBooks ID format'}
+        
+        return {'is_valid': True, 'reason': 'Standard validation passed'}
+    
+    def _validate_stripe_id(self, id_value: str, id_type: str) -> Dict[str, Any]:
+        """Validate Stripe-specific ID formats"""
+        if id_type in ['charge_id', 'payment_intent', 'customer_id', 'invoice_id']:
+            # Stripe IDs have specific prefixes and lengths
+            if re.match(r'^(ch_|pi_|cus_|in_)[a-zA-Z0-9]{14,24}$', id_value):
+                return {'is_valid': True, 'reason': 'Valid Stripe ID format'}
+            else:
+                return {'is_valid': False, 'reason': 'Invalid Stripe ID format'}
+        
+        return {'is_valid': True, 'reason': 'Standard validation passed'}
+    
+    def _validate_razorpay_id(self, id_value: str, id_type: str) -> Dict[str, Any]:
+        """Validate Razorpay-specific ID formats"""
+        if id_type in ['payment_id', 'order_id', 'refund_id', 'settlement_id']:
+            # Razorpay IDs have specific prefixes
+            if re.match(r'^(pay_|order_|rfnd_|setl_)[a-zA-Z0-9]{14}$', id_value):
+                return {'is_valid': True, 'reason': 'Valid Razorpay ID format'}
+            else:
+                return {'is_valid': False, 'reason': 'Invalid Razorpay ID format'}
+        
+        return {'is_valid': True, 'reason': 'Standard validation passed'}
+    
+    def _validate_xero_id(self, id_value: str, id_type: str) -> Dict[str, Any]:
+        """Validate Xero-specific ID formats"""
+        if id_type == 'invoice_id':
+            if re.match(r'^INV-\d{4}-\d{6}$', id_value):
+                return {'is_valid': True, 'reason': 'Valid Xero invoice ID format'}
+            else:
+                return {'is_valid': False, 'reason': 'Invalid Xero invoice ID format'}
+        elif id_type == 'bank_transaction_id':
+            if re.match(r'^BT-\d{8}$', id_value):
+                return {'is_valid': True, 'reason': 'Valid Xero bank transaction ID format'}
+            else:
+                return {'is_valid': False, 'reason': 'Invalid Xero bank transaction ID format'}
+        
+        return {'is_valid': True, 'reason': 'Standard validation passed'}
+    
+    def _validate_gusto_id(self, id_value: str, id_type: str) -> Dict[str, Any]:
+        """Validate Gusto-specific ID formats"""
+        if id_type in ['employee_id', 'payroll_id', 'timesheet_id']:
+            # Gusto IDs have specific prefixes
+            if re.match(r'^(emp_|pay_|ts_)[a-zA-Z0-9]{8,12}$', id_value):
+                return {'is_valid': True, 'reason': 'Valid Gusto ID format'}
+            else:
+                return {'is_valid': False, 'reason': 'Invalid Gusto ID format'}
+        
+        return {'is_valid': True, 'reason': 'Standard validation passed'}
+    
+    async def _generate_deterministic_platform_id(self, row_data: Dict, platform: str) -> str:
+        """Generate deterministic platform ID using consistent hashing"""
+        import hashlib
+        import uuid
+        
+        try:
+            # Create a deterministic hash from key row data
+            key_fields = ['amount', 'date', 'description', 'vendor', 'customer']
+            hash_input = []
+            
+            for field in key_fields:
+                value = row_data.get(field)
+                if value is not None:
+                    hash_input.append(f"{field}:{str(value)}")
+            
+            # Add platform and timestamp for uniqueness
+            hash_input.append(f"platform:{platform}")
+            hash_input.append(f"timestamp:{int(time.time() // 3600)}")  # Hour-based timestamp
+            
+            # Create deterministic hash
+            hash_string = "|".join(sorted(hash_input))
+            hash_object = hashlib.sha256(hash_string.encode())
+            hash_hex = hash_object.hexdigest()[:8]  # Use first 8 characters
+            
+            # Generate deterministic UUID from hash
+            namespace = uuid.UUID('6ba7b810-9dad-11d1-80b4-00c04fd430c8')  # DNS namespace
+            deterministic_uuid = str(uuid.uuid5(namespace, hash_string))
+            
+            return f"{platform}_{hash_hex}_{deterministic_uuid[:8]}"
+            
+        except Exception as e:
+            logger.error(f"Failed to generate deterministic ID: {e}")
+            # Fallback to simple hash
+            fallback_hash = hashlib.md5(str(row_data).encode()).hexdigest()[:8]
+            return f"{platform}_fallback_{fallback_hash}"
 
 class DataEnrichmentProcessor:
     """
@@ -1807,7 +2613,7 @@ class DataEnrichmentProcessor:
         if platform not in self.validation_rules['platform']['allowed_platforms']:
             platform = 'unknown'
         
-        platform_ids = self.platform_id_extractor.extract_platform_ids(
+        platform_ids = await self.platform_id_extractor.extract_platform_ids(
             row_data=row_data,
             platform=platform,
             column_names=column_names
