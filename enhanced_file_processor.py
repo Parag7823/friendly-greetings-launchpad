@@ -161,7 +161,26 @@ class EnhancedFileProcessor:
         Returns:
             Sanitized content
         """
-        # Convert to string for pattern checking
+        # For binary files (Excel, PDF, etc.), don't try to decode as text
+        # Check if this looks like a binary file by examining the first few bytes
+        if len(content) > 4:
+            # Check for common binary file signatures
+            binary_signatures = [
+                b'PK\x03\x04',  # ZIP/Excel files
+                b'PK\x05\x06',  # ZIP files
+                b'\x89PNG',     # PNG files
+                b'GIF8',        # GIF files
+                b'\xFF\xD8\xFF', # JPEG files
+                b'%PDF',        # PDF files
+                b'\x00\x00\x01\x00', # ICO files
+            ]
+            
+            for signature in binary_signatures:
+                if content.startswith(signature):
+                    # This is a binary file, return as-is without sanitization
+                    return content
+        
+        # For text files, perform sanitization
         try:
             content_str = content.decode('utf-8', errors='ignore')
         except:

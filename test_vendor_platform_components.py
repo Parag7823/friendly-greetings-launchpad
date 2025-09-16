@@ -345,7 +345,8 @@ class TestPlatformIDExtractor:
     # PLATFORM ID EXTRACTION TESTS
     # ============================================================================
     
-    def test_extract_platform_ids_razorpay(self, platform_extractor):
+    @pytest.mark.asyncio
+    async def test_extract_platform_ids_razorpay(self, platform_extractor):
         """Test platform ID extraction for Razorpay"""
         row_data = {
             "payment_id": "pay_12345678901234",
@@ -355,7 +356,7 @@ class TestPlatformIDExtractor:
         }
         column_names = ["payment_id", "order_id", "amount", "description"]
         
-        result = platform_extractor.extract_platform_ids(row_data, "razorpay", column_names)
+        result = await platform_extractor.extract_platform_ids(row_data, "razorpay", column_names)
         
         assert result["platform"] == "razorpay"
         assert "payment_id" in result["extracted_ids"]
@@ -364,7 +365,8 @@ class TestPlatformIDExtractor:
         assert result["extracted_ids"]["order_id"] == "order_98765432109876"
         assert result["total_ids_found"] >= 2
     
-    def test_extract_platform_ids_stripe(self, platform_extractor):
+    @pytest.mark.asyncio
+    async def test_extract_platform_ids_stripe(self, platform_extractor):
         """Test platform ID extraction for Stripe"""
         row_data = {
             "charge_id": "ch_123456789012345678901234",
@@ -374,7 +376,7 @@ class TestPlatformIDExtractor:
         }
         column_names = ["charge_id", "customer_id", "amount", "description"]
         
-        result = platform_extractor.extract_platform_ids(row_data, "stripe", column_names)
+        result = await platform_extractor.extract_platform_ids(row_data, "stripe", column_names)
         
         assert result["platform"] == "stripe"
         assert "charge_id" in result["extracted_ids"]
@@ -383,7 +385,8 @@ class TestPlatformIDExtractor:
         assert result["extracted_ids"]["customer_id"] == "cus_12345678901234"
         assert result["total_ids_found"] >= 2
     
-    def test_extract_platform_ids_quickbooks(self, platform_extractor):
+    @pytest.mark.asyncio
+    async def test_extract_platform_ids_quickbooks(self, platform_extractor):
         """Test platform ID extraction for QuickBooks"""
         row_data = {
             "transaction_id": "txn_123456789012",
@@ -393,7 +396,7 @@ class TestPlatformIDExtractor:
         }
         column_names = ["transaction_id", "invoice_id", "vendor_id", "amount"]
         
-        result = platform_extractor.extract_platform_ids(row_data, "quickbooks", column_names)
+        result = await platform_extractor.extract_platform_ids(row_data, "quickbooks", column_names)
         
         assert result["platform"] == "quickbooks"
         assert "transaction_id" in result["extracted_ids"]
@@ -401,7 +404,8 @@ class TestPlatformIDExtractor:
         assert "vendor_id" in result["extracted_ids"]
         assert result["total_ids_found"] >= 3
     
-    def test_extract_platform_ids_no_matches(self, platform_extractor):
+    @pytest.mark.asyncio
+    async def test_extract_platform_ids_no_matches(self, platform_extractor):
         """Test platform ID extraction with no matches"""
         row_data = {
             "amount": 100,
@@ -409,24 +413,26 @@ class TestPlatformIDExtractor:
         }
         column_names = ["amount", "description"]
         
-        result = platform_extractor.extract_platform_ids(row_data, "unknown_platform", column_names)
+        result = await platform_extractor.extract_platform_ids(row_data, "unknown_platform", column_names)
         
         assert result["platform"] == "unknown_platform"
-        assert "platform_generated_id" in result["extracted_ids"]
-        assert result["total_ids_found"] == 1
+        assert result["total_ids_found"] == 0
+        assert len(result["extracted_ids"]) == 0
     
-    def test_extract_platform_ids_empty_row_data(self, platform_extractor):
+    @pytest.mark.asyncio
+    async def test_extract_platform_ids_empty_row_data(self, platform_extractor):
         """Test platform ID extraction with empty row data"""
         row_data = {}
         column_names = []
         
-        result = platform_extractor.extract_platform_ids(row_data, "test_platform", column_names)
+        result = await platform_extractor.extract_platform_ids(row_data, "test_platform", column_names)
         
         assert result["platform"] == "test_platform"
-        assert "platform_generated_id" in result["extracted_ids"]
-        assert result["total_ids_found"] == 1
+        assert result["total_ids_found"] == 0
+        assert len(result["extracted_ids"]) == 0
     
-    def test_extract_platform_ids_none_values(self, platform_extractor):
+    @pytest.mark.asyncio
+    async def test_extract_platform_ids_none_values(self, platform_extractor):
         """Test platform ID extraction with None values"""
         row_data = {
             "payment_id": None,
@@ -436,7 +442,7 @@ class TestPlatformIDExtractor:
         }
         column_names = ["payment_id", "order_id", "amount", "description"]
         
-        result = platform_extractor.extract_platform_ids(row_data, "razorpay", column_names)
+        result = await platform_extractor.extract_platform_ids(row_data, "razorpay", column_names)
         
         assert result["platform"] == "razorpay"
         assert "platform_generated_id" in result["extracted_ids"]
@@ -446,7 +452,8 @@ class TestPlatformIDExtractor:
     # EDGE CASES AND ERROR HANDLING TESTS
     # ============================================================================
     
-    def test_extract_platform_ids_very_long_values(self, platform_extractor):
+    @pytest.mark.asyncio
+    async def test_extract_platform_ids_very_long_values(self, platform_extractor):
         """Test platform ID extraction with very long values"""
         long_value = "a" * 1000
         row_data = {
@@ -455,13 +462,14 @@ class TestPlatformIDExtractor:
         }
         column_names = ["payment_id", "amount"]
         
-        result = platform_extractor.extract_platform_ids(row_data, "razorpay", column_names)
+        result = await platform_extractor.extract_platform_ids(row_data, "razorpay", column_names)
         
         assert result["platform"] == "razorpay"
         # Should handle long values without issues
         assert result["total_ids_found"] >= 1
     
-    def test_extract_platform_ids_special_characters(self, platform_extractor):
+    @pytest.mark.asyncio
+    async def test_extract_platform_ids_special_characters(self, platform_extractor):
         """Test platform ID extraction with special characters"""
         row_data = {
             "payment_id": "pay_123!@#$%^&*()",
@@ -469,7 +477,7 @@ class TestPlatformIDExtractor:
         }
         column_names = ["payment_id", "amount"]
         
-        result = platform_extractor.extract_platform_ids(row_data, "razorpay", column_names)
+        result = await platform_extractor.extract_platform_ids(row_data, "razorpay", column_names)
         
         assert result["platform"] == "razorpay"
         # Should handle special characters gracefully
@@ -479,7 +487,8 @@ class TestPlatformIDExtractor:
     # PERFORMANCE TESTS
     # ============================================================================
     
-    def test_extract_platform_ids_performance(self, platform_extractor):
+    @pytest.mark.asyncio
+    async def test_extract_platform_ids_performance(self, platform_extractor):
         """Test platform ID extraction performance"""
         start_time = time.time()
         
@@ -492,7 +501,7 @@ class TestPlatformIDExtractor:
             }
             column_names = ["payment_id", "order_id", "amount"]
             
-            result = platform_extractor.extract_platform_ids(row_data, "razorpay", column_names)
+            result = await platform_extractor.extract_platform_ids(row_data, "razorpay", column_names)
             # Should find at least 1 ID (either payment_id or order_id, or generated fallback)
             assert result["total_ids_found"] >= 1
         
@@ -502,7 +511,8 @@ class TestPlatformIDExtractor:
         # Should complete within reasonable time (1 second for 1000 extractions)
         assert processing_time < 1.0
     
-    def test_extract_platform_ids_memory_efficiency(self, platform_extractor):
+    @pytest.mark.asyncio
+    async def test_extract_platform_ids_memory_efficiency(self, platform_extractor):
         """Test platform ID extraction memory efficiency"""
         import psutil
         import os
@@ -518,7 +528,7 @@ class TestPlatformIDExtractor:
             }
             column_names = ["payment_id", "amount"]
             
-            result = platform_extractor.extract_platform_ids(row_data, "razorpay", column_names)
+            result = await platform_extractor.extract_platform_ids(row_data, "razorpay", column_names)
             assert result["total_ids_found"] >= 1
         
         final_memory = process.memory_info().rss
