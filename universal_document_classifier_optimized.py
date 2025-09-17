@@ -10,6 +10,7 @@ Version: 2.0.0
 """
 
 import asyncio
+import hashlib
 import json
 import logging
 import re
