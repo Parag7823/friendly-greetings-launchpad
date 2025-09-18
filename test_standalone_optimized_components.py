@@ -15,6 +15,7 @@ import tempfile
 import time
 from typing import Dict, Any, List
 import uuid
+import pytest
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -103,6 +104,7 @@ SAMPLE_ROW_DATA = {
     "vendor": "Whole Foods"
 }
 
+@pytest.mark.asyncio
 async def test_universal_platform_detector():
     """Test UniversalPlatformDetectorOptimized"""
     logger.info("🧪 Testing UniversalPlatformDetectorOptimized...")
@@ -135,11 +137,15 @@ async def test_universal_platform_detector():
         logger.error(f"❌ UniversalPlatformDetectorOptimized test failed: {e}")
         return False
 
+@pytest.mark.asyncio
 async def test_universal_document_classifier():
     """Test UniversalDocumentClassifierOptimized"""
     logger.info("🧪 Testing UniversalDocumentClassifierOptimized...")
     
     try:
+        # Set up environment for testing
+        os.environ['OPENAI_API_KEY'] = 'test-key'
+        
         from universal_document_classifier_optimized import UniversalDocumentClassifierOptimized
         
         # Initialize with mock client
@@ -165,11 +171,15 @@ async def test_universal_document_classifier():
         logger.error(f"❌ UniversalDocumentClassifierOptimized test failed: {e}")
         return False
 
+@pytest.mark.asyncio
 async def test_entity_resolver():
     """Test EntityResolverOptimized"""
     logger.info("🧪 Testing EntityResolverOptimized...")
     
     try:
+        # Set up environment for testing
+        os.environ['OPENAI_API_KEY'] = 'test-key'
+        
         from entity_resolver_optimized import EntityResolverOptimized
         
         # Initialize
@@ -201,11 +211,15 @@ async def test_entity_resolver():
         logger.error(f"❌ EntityResolverOptimized test failed: {e}")
         return False
 
+@pytest.mark.asyncio
 async def test_universal_extractors():
     """Test UniversalExtractorsOptimized with fallback field detection"""
     logger.info("🧪 Testing UniversalExtractorsOptimized...")
     
     try:
+        # Set up environment for testing
+        os.environ['OPENAI_API_KEY'] = 'test-key'
+        
         # Mock the field detector availability
         import universal_extractors_optimized
         universal_extractors_optimized.FIELD_DETECTOR_AVAILABLE = False
@@ -234,6 +248,7 @@ async def test_universal_extractors():
         logger.error(f"❌ UniversalExtractorsOptimized test failed: {e}")
         return False
 
+@pytest.mark.asyncio
 async def test_integration_workflow():
     """Test integration between all optimized components"""
     logger.info("🧪 Testing integration workflow...")

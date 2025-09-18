@@ -29,7 +29,12 @@ from odf.opendocument import load as load_ods
 from odf.table import Table, TableRow, TableCell
 from odf.text import P
 import tabula
-import camelot
+try:
+    import camelot
+    CAMELOT_AVAILABLE = True
+except ImportError as e:
+    logging.warning(f"Camelot not available: {e}")
+    CAMELOT_AVAILABLE = False
 import pdfplumber
 
 # OCR and image processing
@@ -1012,20 +1017,22 @@ class EnhancedFileProcessor:
                     logger.warning(f"Tabula extraction failed: {tabula_e}")
 
                 # Method 2: Try camelot (good for lattice tables)
-                try:
-                    if progress_callback:
-                        await progress_callback("extracting", "🐪 Using camelot extraction...", 50)
+                if CAMELOT_AVAILABLE:
+                    try:
+                        if progress_callback:
+                            await progress_callback("extracting", "🐪 Using camelot extraction...", 50)
 
-                    camelot_tables = camelot.read_pdf(temp_path, pages='all')
+                        camelot_tables = camelot.read_pdf(temp_path, pages='all')
 
-                    for i, table in enumerate(camelot_tables):
-                        df = table.df
-                        if not df.empty and len(df.columns) > 1:
-                            table_count += 1
-                            tables[f'Table_{table_count}_Camelot'] = df
-
-                except Exception as camelot_e:
-                    logger.warning(f"Camelot extraction failed: {camelot_e}")
+                        for i, table in enumerate(camelot_tables):
+                            df = table.df
+                            if not df.empty and len(df.columns) > 1:
+                                table_count += 1
+                                tables[f'Table_{table_count}_Camelot'] = df
+                    except Exception as camelot_e:
+                        logger.warning(f"Camelot extraction failed: {camelot_e}")
+                else:
+                    logger.warning("Camelot not available, skipping camelot extraction")
 
                 # Method 3: Try pdfplumber (good for text-based tables)
                 try:
