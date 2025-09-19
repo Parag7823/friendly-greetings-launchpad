@@ -6532,24 +6532,31 @@ class UniversalComponentDatabaseManager:
 # COMPREHENSIVE TESTING SUITE
 # ============================================================================
 
-from 표준화_모듈.데이터_정제 import Standardizer, VendorStandardizer
-from 표준화_모듈.플랫폼_ID_추출기 import PlatformIDExtractor
-from 데이터_보강.데이터_보강_프로세서 import DataEnrichmentProcessor
-from 예외_처리.에러_핸들러 import AppErrorHandler, log_error, handle_exception
-from 로깅.로거_설정 import logger
+# Korean module imports commented out - modules don't exist in deployment
+# from 표준화_모듈.데이터_정제 import Standardizer, VendorStandardizer
+# from 표준화_모듈.플랫폼_ID_추출기 import PlatformIDExtractor
+# from 데이터_보강.데이터_보강_프로세서 import DataEnrichmentProcessor
+# from 예외_처리.에러_핸들러 import AppErrorHandler, log_error, handle_exception
+# from 로깅.로거_설정 import logger
 from universal_field_detector import UniversalFieldDetector
-from 유틸리티.공통_유틸리티 import (get_file_extension, is_file_supported, 
-                                  is_archive, is_image, is_pdf, is_spreadsheet, 
-                                  is_text, is_unstructured, is_vectorizable, 
-                                  get_file_hash, get_file_metadata, 
-                                  get_file_preview, get_file_text, 
-                                  get_file_type, get_file_encoding, 
-                                  get_file_language, get_file_pii, 
-                                  get_file_sentiment, get_file_summary, 
-                                  get_file_topics, get_file_entities, 
-                                  get_file_keywords, get_file_categories, 
-                                  get_file_concepts, get_file_relations, 
-                                  get_file_custom_entities, get_file_custom_relations)
+# Korean utility module import commented out - module doesn't exist in deployment
+# from 유틸리티.공통_유틸리티 import (get_file_extension, is_file_supported, 
+#                                   is_archive, is_image, is_pdf, is_spreadsheet, 
+#                                   is_text, is_unstructured, is_vectorizable, 
+#                                   get_file_hash, get_file_metadata, 
+#                                   get_file_preview, get_file_text, 
+#                                   get_file_type, get_file_encoding, 
+#                                   get_file_language, get_file_pii, 
+#                                   get_file_sentiment, get_file_summary, 
+#                                   get_file_topics, get_file_entities, 
+#                                   get_file_keywords, get_file_readability, 
+#                                   get_file_complexity, get_file_quality, 
+#                                   get_file_structure, get_file_schema, 
+#                                   get_file_relationships, get_file_dependencies, 
+#                                   get_file_imports, get_file_exports, 
+#                                   get_file_functions, get_file_classes, 
+#                                   get_file_variables, get_file_constants, 
+#                                   get_file_comments, get_file_docstrings)
 
 class UniversalComponentTestSuite:
     """Comprehensive testing suite for all universal components"""
