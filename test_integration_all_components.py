@@ -29,7 +29,7 @@ with patch.dict(os.environ, {'OPENAI_API_KEY': 'mock_key'}):
             FileMetadata, 
             DuplicateType
         )
-        from enhanced_file_processor import EnhancedFileProcessor
+        # from enhanced_file_processor import EnhancedFileProcessor  # DEPRECATED: Module removed
         from fastapi_backend import VendorStandardizer, PlatformIDExtractor
 
 

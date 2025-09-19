@@ -32,7 +32,7 @@ from production_duplicate_detection_service import (
     DuplicateAction,
     DuplicateResult
 )
-from enhanced_file_processor import EnhancedFileProcessor
+# from enhanced_file_processor import EnhancedFileProcessor  # DEPRECATED: Module removed
 
 
 class TestWorkingComprehensiveSuite:

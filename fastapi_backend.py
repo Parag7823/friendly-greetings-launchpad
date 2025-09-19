@@ -37,6 +37,9 @@ from pydantic import BaseModel
 from supabase import create_client, Client
 from openai import OpenAI
 
+# Import optimized database utilities
+from database_optimization_utils import OptimizedDatabaseQueries, QueryResult
+
 # Import production duplicate detection service
 # Configure advanced logging first
 logging.basicConfig(
@@ -300,6 +303,24 @@ try:
 except Exception as e:
     logger.error(f"❌ Failed to initialize OpenAI client: {e}")
     openai = None
+
+# Initialize optimized database queries
+try:
+    supabase_url = os.environ.get("SUPABASE_URL")
+    supabase_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
+    if supabase_key:
+        supabase_key = clean_jwt_token(supabase_key)
+    
+    if supabase_url and supabase_key:
+        supabase_client = create_client(supabase_url, supabase_key)
+        optimized_db = OptimizedDatabaseQueries(supabase_client)
+        logger.info("✅ Optimized database queries initialized successfully")
+    else:
+        optimized_db = None
+        logger.warning("⚠️ Supabase credentials not found - optimized queries disabled")
+except Exception as e:
+    logger.error(f"❌ Failed to initialize optimized database queries: {e}")
+    optimized_db = None
 
 # Advanced functionality imports with individual error handling
 ADVANCED_FEATURES = {
@@ -7381,6 +7402,77 @@ async def run_performance_test(component: str, iterations: int = 100):
     except Exception as e:
         logger.error(f"Performance test failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+# ============================================================================
+# OPTIMIZED DATABASE QUERIES ENDPOINTS
+# ============================================================================
+
+@app.get("/api/v1/events/optimized/{user_id}")
+async def get_user_events_optimized(
+    user_id: str,
+    limit: int = 100,
+    offset: int = 0,
+    kind: Optional[str] = None,
+    source_platform: Optional[str] = None,
+    status: Optional[str] = None,
+    file_id: Optional[str] = None,
+    job_id: Optional[str] = None
+):
+    """
+    Get user events using optimized database queries with proper pagination.
+    This endpoint demonstrates the integrated OptimizedDatabaseQueries class.
+    """
+    try:
+        if not optimized_db:
+            raise HTTPException(
+                status_code=503, 
+                detail="Optimized database queries not available"
+            )
+        
+        # Use the optimized query method
+        result = await optimized_db.get_user_events_optimized(
+            user_id=user_id,
+            limit=min(limit, 1000),  # Cap at max page size
+            offset=offset,
+            kind=kind,
+            source_platform=source_platform,
+            status=status,
+            file_id=file_id,
+            job_id=job_id
+        )
+        
+        return {
+            "success": True,
+            "data": result.data,
+            "pagination": {
+                "count": result.count,
+                "has_more": result.has_more,
+                "next_offset": result.next_offset,
+                "current_offset": offset,
+                "limit": limit
+            },
+            "performance_note": "This endpoint uses optimized database queries with proper indexing and pagination"
+        }
+        
+    except Exception as e:
+        logger.error(f"Optimized events query failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/v1/database/optimization-status")
+async def get_optimization_status():
+    """
+    Check if optimized database queries are available and get performance info.
+    """
+    return {
+        "optimized_queries_available": optimized_db is not None,
+        "features": {
+            "pagination": True,
+            "column_selection": True,
+            "proper_indexing": True,
+            "performance_monitoring": True
+        } if optimized_db else {},
+        "recommendation": "Use /api/v1/events/optimized/{user_id} for better performance" if optimized_db else "Optimized queries not available"
+    }
 
 # ============================================================================
 # MAIN APPLICATION SETUP
