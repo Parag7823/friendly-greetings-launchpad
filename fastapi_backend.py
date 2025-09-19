@@ -1,5 +1,20 @@
-# Standard library imports
+# --- DEBUGGING DEPLOYMENT ---
 import os
+import logging
+
+# Get the current working directory
+cwd = os.getcwd()
+logging.warning(f"Current Working Directory: {cwd}")
+
+# List all files and directories in the CWD
+try:
+    dir_contents = os.listdir(cwd)
+    logging.warning(f"Contents of '{cwd}': {dir_contents}")
+except Exception as e:
+    logging.error(f"Could not list directory contents: {e}")
+# --- END DEBUGGING ---
+
+# Standard library imports
 import io
 import logging
 import hashlib
