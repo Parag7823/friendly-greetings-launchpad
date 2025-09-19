@@ -40,8 +40,12 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy backend code
+# Copy all necessary Python files and modules
 COPY fastapi_backend.py .
+COPY universal_*.py .
+COPY entity_resolver.py .
+COPY enhanced_relationship_detector.py .
+COPY database_optimization_utils.py .
 
 # Copy built frontend from frontend stage
 COPY --from=frontend-builder /app/frontend/dist ./dist
