@@ -46,6 +46,7 @@ COPY universal_*.py .
 COPY entity_resolver.py .
 COPY enhanced_relationship_detector.py .
 COPY database_optimization_utils.py .
+COPY production_duplicate_detection_service.py .
 
 # Copy built frontend from frontend stage
 COPY --from=frontend-builder /app/frontend/dist ./dist
