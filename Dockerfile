@@ -44,17 +44,18 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY fastapi_backend.py .
 COPY universal_*.py .
 COPY entity_resolver.py .
+COPY entity_resolver_optimized.py .
 COPY enhanced_relationship_detector.py .
 COPY database_optimization_utils.py .
 COPY production_duplicate_detection_service.py .
-COPY job_orchestration_system.py .
-COPY backend_integration.py .
 COPY transaction_manager.py .
 COPY streaming_processor.py .
 COPY atomic_duplicate_detector.py .
 COPY error_recovery_system.py .
 COPY ai_cache_system.py .
 COPY batch_optimizer.py .
+COPY observability_system.py .
+COPY security_system.py .
 
 # Copy built frontend from frontend stage
 COPY --from=frontend-builder /app/frontend/dist ./dist
