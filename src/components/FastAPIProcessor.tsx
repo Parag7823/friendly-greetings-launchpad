@@ -24,6 +24,11 @@ interface FastAPIProcessingResult {
   sheets: SheetMetadata[];
   customPromptSuggestions: string[];
   processingTime: number;
+  status?: string;
+  duplicate_analysis?: any;
+  job_id?: string;
+  requires_user_decision?: boolean;
+  message?: string;
 }
 
 interface FastAPIProcessingProgress {
@@ -77,11 +82,14 @@ export class FastAPIProcessor {
   }> {
     try {
       // Check if file with same hash exists
-      const { data: existingFiles, error } = await supabase
+      const result: any = await supabase
         .from('raw_records')
         .select('id, file_name, created_at, content')
         .eq('user_id', userId)
-        .eq('file_hash', fileHash) as any;
+        .eq('file_hash', fileHash);
+      
+      const existingFiles = result.data;
+      const error = result.error;
 
       if (error) {
         console.error('Error checking for duplicates:', error);
@@ -118,8 +126,8 @@ export class FastAPIProcessor {
 
   private setupWebSocketConnection(jobId: string): Promise<any> {
     return new Promise((resolve, reject) => {
-      const wsUrl = `wss://friendly-greetings-launchpad.onrender.com/ws/${jobId}`;
-      console.log(`Connecting to WebSocket: ${wsUrl}`);
+      const wsUrl = `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/ws/${jobId}`;
+      // Connecting to WebSocket for real-time updates
       
       const ws = new WebSocket(wsUrl);
       let timeoutId: NodeJS.Timeout;
@@ -131,14 +139,14 @@ export class FastAPIProcessor {
       }, 10000); // 10 second timeout
 
       ws.onopen = () => {
-        console.log('WebSocket connected for job:', jobId);
+        // WebSocket connected successfully
         clearTimeout(timeoutId);
       };
 
       ws.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data);
-          console.log('WebSocket progress update:', data);
+          // Process WebSocket progress update
 
           if (data.status === 'completed') {
             clearTimeout(timeoutId);
@@ -169,7 +177,7 @@ export class FastAPIProcessor {
       };
 
       ws.onclose = (event) => {
-        console.log('WebSocket closed:', event.code, event.reason);
+        // WebSocket connection closed
         clearTimeout(timeoutId);
         if (event.code !== 1000 && event.reason !== 'Processing completed') {
           reject(new Error('WebSocket connection closed unexpectedly'));
@@ -323,7 +331,7 @@ export class FastAPIProcessor {
         }
 
         const initialResponse = await response.json();
-        console.log('FastAPI processing started:', initialResponse);
+        // FastAPI processing started successfully
 
         // Check if duplicate was detected
         if (initialResponse.status === 'duplicate_detected') {
@@ -359,9 +367,9 @@ export class FastAPIProcessor {
               setTimeout(() => reject(new Error('WebSocket timeout')), 10000) // 10 second timeout
             )
           ]);
-          console.log('WebSocket processing completed:', backendResult);
+          // WebSocket processing completed successfully
         } catch (websocketError) {
-          console.log('WebSocket connection failed, using polling fallback:', websocketError);
+          // WebSocket connection failed, using polling fallback
           
           // Fallback: Poll for results instead of WebSocket
           this.updateProgress('polling', 'Using polling fallback for updates...', 40);
@@ -432,7 +440,7 @@ export class FastAPIProcessor {
             if (eventsError) {
               console.error('Failed to store raw events:', eventsError);
             } else {
-              console.log(`Created ${rawEvents.length} raw events from backend processing`);
+              // Successfully created raw events from backend processing
             }
           }
         }
@@ -581,7 +589,7 @@ export class FastAPIProcessor {
             if (eventsError) {
               console.error('Failed to store raw events:', eventsError);
             } else {
-              console.log(`Created ${rawEvents.length} raw events from local processing`);
+              // Successfully created raw events from local processing
             }
           }
         }

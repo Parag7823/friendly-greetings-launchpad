@@ -32,14 +32,14 @@ export const useWebSocketProgress = (options: UseWebSocketProgressOptions = {}) 
       return; // Already connected
     }
 
-    const wsUrl = `wss://friendly-greetings-launchpad.onrender.com/ws/${jobId}`;
-    console.log(`Connecting to WebSocket: ${wsUrl}`);
+    const wsUrl = `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/ws/${jobId}`;
+    // Connecting to WebSocket for progress updates
 
     const ws = new WebSocket(wsUrl);
     wsRef.current = ws;
 
     ws.onopen = () => {
-      console.log('WebSocket connected for job:', jobId);
+      // WebSocket connected successfully
       reconnectAttemptsRef.current = 0;
       
       toast({
@@ -51,7 +51,7 @@ export const useWebSocketProgress = (options: UseWebSocketProgressOptions = {}) 
     ws.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
-        console.log('WebSocket message received:', data);
+        // Process WebSocket message
 
         if (data.status === 'completed') {
           options.onComplete?.(data);
@@ -78,12 +78,12 @@ export const useWebSocketProgress = (options: UseWebSocketProgressOptions = {}) 
     };
 
     ws.onclose = (event) => {
-      console.log('WebSocket closed:', event.code, event.reason);
+      // WebSocket connection closed
       
       // Attempt reconnection if not manually closed and within retry limit
       if (event.code !== 1000 && reconnectAttemptsRef.current < maxReconnectAttempts) {
         const delay = Math.min(1000 * Math.pow(2, reconnectAttemptsRef.current), 10000);
-        console.log(`Attempting to reconnect in ${delay}ms...`);
+        // Attempting to reconnect with exponential backoff
         
         reconnectTimeoutRef.current = setTimeout(() => {
           reconnectAttemptsRef.current++;

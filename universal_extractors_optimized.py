@@ -53,15 +53,15 @@ try:
 except ImportError:
     MAGIC_AVAILABLE = False
 
+logger = logging.getLogger(__name__)
+
 # Import existing components with fallback
 try:
-    from fastapi_backend import UniversalFieldDetector
+    from universal_field_detector import UniversalFieldDetector
     FIELD_DETECTOR_AVAILABLE = True
 except ImportError:
     FIELD_DETECTOR_AVAILABLE = False
     logger.warning("UniversalFieldDetector not available, using fallback field detection")
-
-logger = logging.getLogger(__name__)
 
 @dataclass
 class ExtractionResult:

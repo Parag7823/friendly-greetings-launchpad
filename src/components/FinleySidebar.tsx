@@ -166,7 +166,7 @@ export const FinleySidebar = ({ onClose, onNavigate, currentView = 'chat', isCol
 
       if (response.ok) {
         const result = await response.json();
-        console.log('Rename response:', result);
+        // Chat rename successful
         
         // Update the chat history in state
         const updatedHistory = chatHistory.map(chat => 
@@ -183,7 +183,7 @@ export const FinleySidebar = ({ onClose, onNavigate, currentView = 'chat', isCol
         setEditingChatId(null);
         setEditingTitle('');
         
-        console.log('Chat renamed successfully:', newTitle);
+        // Chat renamed successfully
       } else {
         const errorData = await response.json();
         console.error('Rename failed:', errorData);
@@ -218,7 +218,7 @@ export const FinleySidebar = ({ onClose, onNavigate, currentView = 'chat', isCol
 
       if (response.ok) {
         const result = await response.json();
-        console.log('Delete response:', result);
+        // Chat delete successful
         
         // Update the chat history in state
         const updatedHistory = chatHistory.filter(chat => chat.id !== chatId);
@@ -232,7 +232,7 @@ export const FinleySidebar = ({ onClose, onNavigate, currentView = 'chat', isCol
           window.dispatchEvent(new CustomEvent('new-chat-requested'));
         }
         
-        console.log('Chat deleted successfully:', chatId);
+        // Chat deleted successfully
       } else {
         const errorData = await response.json();
         console.error('Delete failed:', errorData);
