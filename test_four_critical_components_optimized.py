@@ -50,7 +50,7 @@ from entity_resolver_optimized import EntityResolverOptimized
 
 # Import existing components for integration testing
 from production_duplicate_detection_service import ProductionDuplicateDetectionService
-# from enhanced_file_processor import EnhancedFileProcessor  # DEPRECATED: Module removed
+from enhanced_file_processor import EnhancedFileProcessor
 from fastapi_backend import VendorStandardizer, PlatformIDExtractor, DataEnrichmentProcessor, DocumentAnalyzer
 
 class TestUniversalExtractorsOptimized:

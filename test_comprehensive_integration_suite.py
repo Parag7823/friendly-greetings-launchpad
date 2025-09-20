@@ -42,7 +42,7 @@ from production_duplicate_detection_service import (
     DuplicateAction,
     DuplicateResult
 )
-# from enhanced_file_processor import EnhancedFileProcessor  # DEPRECATED: Module removed
+from enhanced_file_processor import EnhancedFileProcessor
 from fastapi_backend import VendorStandardizer, PlatformIDExtractor, DataEnrichmentProcessor
 from duplicate_detection_api_integration import DuplicateDetectionAPIIntegration, WebSocketManager
 
