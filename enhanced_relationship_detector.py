@@ -545,14 +545,18 @@ class EnhancedRelationshipDetector:
     def _extract_amount(self, payload: Dict) -> float:
         """Extract amount from payload using universal field detection"""
         try:
-            # Import universal extractors
-            from fastapi_backend import UniversalExtractors
-            universal_extractors = UniversalExtractors()
+            # Import universal extractors directly (avoid circular import)
+            from universal_extractors_optimized import UniversalExtractorsOptimized
+            universal_extractors = UniversalExtractorsOptimized()
             
-            # Use universal extraction first
-            amount = universal_extractors.extract_amount_universal(payload)
-            if amount is not None:
-                return amount
+            # Use universal extraction first (async method)
+            import asyncio
+            try:
+                amount_result = asyncio.run(universal_extractors.extract_amount_universal(payload))
+                if amount_result and amount_result.get('amount') is not None:
+                    return float(amount_result['amount'])
+            except:
+                pass  # Fall back to manual extraction
             
             # Fallback to old method
             amount_fields = ['amount', 'amount_usd', 'total', 'value', 'payment_amount']
@@ -573,14 +577,12 @@ class EnhancedRelationshipDetector:
     def _extract_date(self, event: Dict) -> Optional[datetime]:
         """Extract date from event using universal field detection"""
         try:
-            # Import universal extractors
-            from fastapi_backend import UniversalExtractors
-            universal_extractors = UniversalExtractors()
+            # Import universal extractors directly (avoid circular import)
+            from universal_extractors_optimized import UniversalExtractorsOptimized
+            universal_extractors = UniversalExtractorsOptimized()
             
-            # Use universal extraction first
-            date = universal_extractors.extract_date_universal(event)
-            if date is not None:
-                return date
+            # Note: No extract_date_universal method in optimized version
+            # Fall back to manual date extraction
             
             # Fallback to old method
             date_fields = ['created_at', 'date', 'timestamp', 'processed_at']
@@ -596,14 +598,18 @@ class EnhancedRelationshipDetector:
         """Extract entities from payload using universal field detection"""
         entities = []
         try:
-            # Import universal extractors
-            from fastapi_backend import UniversalExtractors
-            universal_extractors = UniversalExtractors()
+            # Import universal extractors directly (avoid circular import)
+            from universal_extractors_optimized import UniversalExtractorsOptimized
+            universal_extractors = UniversalExtractorsOptimized()
             
-            # Use universal extraction first
-            vendor_name = universal_extractors.extract_vendor_universal(payload)
-            if vendor_name:
-                entities.append(vendor_name)
+            # Use universal extraction first (async method)
+            import asyncio
+            try:
+                vendor_result = asyncio.run(universal_extractors.extract_vendor_universal(payload))
+                if vendor_result and vendor_result.get('vendor'):
+                    entities.append(vendor_result['vendor'])
+            except:
+                pass  # Fall back to manual extraction
             
             # Extract from entities field
             if 'entities' in payload:

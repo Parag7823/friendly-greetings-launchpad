@@ -42,8 +42,10 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy all necessary Python files and modules
 COPY fastapi_backend.py .
-COPY universal_*.py .
-COPY entity_resolver.py .
+COPY universal_field_detector.py .
+COPY universal_document_classifier_optimized.py .
+COPY universal_platform_detector_optimized.py .
+COPY universal_extractors_optimized.py .
 COPY entity_resolver_optimized.py .
 COPY enhanced_relationship_detector.py .
 COPY database_optimization_utils.py .
