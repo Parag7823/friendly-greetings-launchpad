@@ -40,6 +40,9 @@ from openai import OpenAI
 # Import optimized database utilities
 from database_optimization_utils import OptimizedDatabaseQueries, QueryResult
 
+# Import enhanced performance optimization modules
+from enhanced_api_endpoints import add_enhanced_endpoints_to_app
+
 # Import production duplicate detection service
 # Configure advanced logging first
 logging.basicConfig(
@@ -315,6 +318,14 @@ try:
         supabase_client = create_client(supabase_url, supabase_key)
         optimized_db = OptimizedDatabaseQueries(supabase_client)
         logger.info("✅ Optimized database queries initialized successfully")
+        
+        # Initialize enhanced performance optimization endpoints
+        try:
+            redis_url = os.environ.get("REDIS_URL")
+            add_enhanced_endpoints_to_app(app, supabase_client, openai, redis_url)
+            logger.info("✅ Enhanced performance optimization endpoints loaded")
+        except Exception as e:
+            logger.warning(f"⚠️ Enhanced endpoints initialization failed: {e}")
     else:
         optimized_db = None
         logger.warning("⚠️ Supabase credentials not found - optimized queries disabled")

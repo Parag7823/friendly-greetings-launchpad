@@ -27,6 +27,17 @@ opencv-python-headless==4.8.1.78
 py7zr==0.20.8
 rarfile==4.1
 
+# Job Orchestration and Performance Optimization Dependencies
+redis==5.0.1
+celery==5.3.4
+
+# Enhanced Data Processing
+sqlalchemy==2.0.23
+
+# Monitoring and Metrics
+prometheus-client==0.19.0
+structlog==23.2.0
+
 # BDD Testing Framework
 behave>=1.2.0
 pytest>=7.0.0
