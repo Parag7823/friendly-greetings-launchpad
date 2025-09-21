@@ -30,6 +30,7 @@ import tempfile
 # FastAPI and web framework imports
 from fastapi import FastAPI, HTTPException, BackgroundTasks, WebSocket, WebSocketDisconnect, UploadFile, Form, File
 from starlette.requests import Request
+from starlette.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -300,7 +301,9 @@ app.add_middleware(
         "http://localhost:3000",
         "http://localhost:5173", 
         "https://finley-ai.vercel.app",
-        "https://*.vercel.app"
+        "https://*.vercel.app",
+        "https://friendly-greetings-launchpad.onrender.com",
+        "https://*.onrender.com"
     ],
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
@@ -8230,7 +8233,6 @@ async def run_performance_test(component: str, iterations: int = 100):
 # ============================================================================
 
 @app.get("/health")
-@app.get("/")
 async def health_check():
     """Comprehensive health check for deployment debugging"""
     try:
@@ -8268,6 +8270,44 @@ async def health_check():
             "error": str(e),
             "timestamp": datetime.utcnow().isoformat()
         }
+
+# ============================================================================
+# STATIC FILE SERVING FOR FRONTEND
+# ============================================================================
+
+# Check if frontend dist directory exists and mount static files
+import pathlib
+frontend_dist_path = pathlib.Path(__file__).parent / "dist"
+if frontend_dist_path.exists():
+    app.mount("/static", StaticFiles(directory=str(frontend_dist_path)), name="static")
+    logger.info(f"✅ Frontend static files mounted from {frontend_dist_path}")
+    
+    # Serve index.html for SPA routing
+    @app.get("/{full_path:path}")
+    async def serve_frontend(full_path: str):
+        """Serve frontend for SPA routing (catch-all for non-API routes)"""
+        # Don't serve frontend for API routes, WebSocket, or docs
+        if (full_path.startswith("api/") or 
+            full_path.startswith("health") or 
+            full_path.startswith("docs") or
+            full_path.startswith("openapi.json") or
+            full_path.startswith("ws/") or
+            full_path.startswith("duplicate-detection/ws/")):
+            raise HTTPException(status_code=404, detail="API endpoint not found")
+        
+        # Serve static files directly if they exist
+        static_file_path = frontend_dist_path / full_path
+        if static_file_path.exists() and static_file_path.is_file():
+            return FileResponse(str(static_file_path))
+        
+        # Otherwise serve index.html for SPA routing
+        index_path = frontend_dist_path / "index.html"
+        if index_path.exists():
+            return FileResponse(str(index_path))
+        else:
+            raise HTTPException(status_code=404, detail="Frontend not found")
+else:
+    logger.warning("⚠️ Frontend dist directory not found - serving API only")
 
 # ============================================================================
 # MAIN APPLICATION SETUP
