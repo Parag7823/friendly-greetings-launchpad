@@ -549,13 +549,14 @@ class EnhancedRelationshipDetector:
             from universal_extractors_optimized import UniversalExtractorsOptimized
             universal_extractors = UniversalExtractorsOptimized()
             
-            # Use universal extraction first (async method)
-            import asyncio
+            # Use synchronous extraction method to avoid async/sync mixing
             try:
-                amount_result = asyncio.run(universal_extractors.extract_amount_universal(payload))
-                if amount_result and amount_result.get('amount') is not None:
-                    return float(amount_result['amount'])
-            except:
+                # Use synchronous fallback method instead of async
+                amount_result = universal_extractors._extract_amount_fallback(payload)
+                if amount_result and isinstance(amount_result, (int, float)):
+                    return float(amount_result)
+            except Exception as e:
+                logger.warning(f"Universal amount extraction failed: {e}")
                 pass  # Fall back to manual extraction
             
             # Fallback to old method
@@ -602,13 +603,14 @@ class EnhancedRelationshipDetector:
             from universal_extractors_optimized import UniversalExtractorsOptimized
             universal_extractors = UniversalExtractorsOptimized()
             
-            # Use universal extraction first (async method)
-            import asyncio
+            # Use synchronous extraction method to avoid async/sync mixing
             try:
-                vendor_result = asyncio.run(universal_extractors.extract_vendor_universal(payload))
-                if vendor_result and vendor_result.get('vendor'):
-                    entities.append(vendor_result['vendor'])
-            except:
+                # Use synchronous fallback method instead of async
+                vendor_result = universal_extractors._extract_vendor_fallback(payload)
+                if vendor_result and isinstance(vendor_result, str):
+                    entities.append(vendor_result)
+            except Exception as e:
+                logger.warning(f"Universal vendor extraction failed: {e}")
                 pass  # Fall back to manual extraction
             
             # Extract from entities field
@@ -723,6 +725,6 @@ async def test_enhanced_relationship_detection(user_id: str = "550e8400-e29b-41d
         }
 
 if __name__ == "__main__":
-    import asyncio
-    result = asyncio.run(test_enhanced_relationship_detection())
+    # Run test synchronously to avoid async/sync mixing
+    result = test_enhanced_relationship_detection()
     print(result) 

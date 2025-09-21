@@ -768,3 +768,68 @@ class UniversalExtractorsOptimized:
         except Exception as e:
             logger.error(f"Confidence calculation failed: {e}")
             return 0.5  # Default confidence
+    
+    def _extract_amount_fallback(self, payload: Dict) -> Optional[float]:
+        """Synchronous fallback method for amount extraction to avoid async/sync mixing"""
+        try:
+            # Try common amount fields
+            amount_fields = ['amount', 'amount_usd', 'total', 'value', 'payment_amount', 'price', 'cost']
+            for field in amount_fields:
+                if field in payload and payload[field] is not None:
+                    try:
+                        # Handle string amounts with currency symbols
+                        amount_str = str(payload[field]).replace('$', '').replace(',', '').strip()
+                        return float(amount_str)
+                    except (ValueError, TypeError):
+                        continue
+            
+            # Try to extract from text using regex
+            import re
+            text = str(payload)
+            # Look for currency patterns like $123.45, 123.45, etc.
+            patterns = [
+                r'\$?(\d{1,3}(?:,\d{3})*(?:\.\d{2})?)',  # $1,234.56 or 1,234.56
+                r'(\d+\.?\d*)'  # Simple decimal numbers
+            ]
+            
+            for pattern in patterns:
+                matches = re.findall(pattern, text)
+                if matches:
+                    try:
+                        return float(matches[0].replace(',', ''))
+                    except (ValueError, TypeError):
+                        continue
+            
+            return None
+            
+        except Exception as e:
+            logger.warning(f"Amount fallback extraction failed: {e}")
+            return None
+    
+    def _extract_vendor_fallback(self, payload: Dict) -> Optional[str]:
+        """Synchronous fallback method for vendor extraction to avoid async/sync mixing"""
+        try:
+            # Try common vendor fields
+            vendor_fields = ['vendor', 'merchant', 'company', 'business', 'supplier', 'payee', 'recipient']
+            for field in vendor_fields:
+                if field in payload and payload[field] is not None:
+                    vendor = str(payload[field]).strip()
+                    if vendor and len(vendor) > 1:  # Basic validation
+                        return vendor
+            
+            # Try to extract from description or memo fields
+            desc_fields = ['description', 'memo', 'note', 'details', 'transaction_description']
+            for field in desc_fields:
+                if field in payload and payload[field] is not None:
+                    desc = str(payload[field]).strip()
+                    # Simple heuristic: look for capitalized words that might be vendor names
+                    import re
+                    words = re.findall(r'\b[A-Z][a-zA-Z]+\b', desc)
+                    if words:
+                        return ' '.join(words[:2])  # Take first 2 capitalized words
+            
+            return None
+            
+        except Exception as e:
+            logger.warning(f"Vendor fallback extraction failed: {e}")
+            return None

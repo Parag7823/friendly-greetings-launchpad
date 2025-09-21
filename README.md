@@ -1,23 +1,45 @@
-**Obvio AI - The First Full-Time AI Finance Employees**
+Layer 1 – Data Ingestion (Revolutionary version)
 
-For early stage founders setting up a finance team is hard. Hiring a full-time CFO costs too much and junior accountants struggle alone. What they really need is intelligence at a fraction of the cost. And even well funded companies still run on unstructured exports, fragile spreadsheets and different scattered tools . It is not just slow but there is simply no system today that can handle finance and compliance on its own without people constantly stepping in.
+Current: Upload messy exports from multiple sources.
+Future: Autonomous, zero-effort ingestion from anywhere.
 
-Obvio AI is building autonomous finance employees that run your back office for you. Finley is just the first. Over the next 10 years we will roll out a full stack of intelligent agents-
+Core Idea
 
-Finley turns messy data into clean ledgers,
-Tess optimizes and executes cash operations,
-Lexi Handles filings, audits, and compliance 24/7,
-Nova Giving VCs,investor and founders portfolio intelligence,
-Aria finding and matching companies with the right growth capital
-Each agent builds on the last as Agent action needs clean data and deep context. So by sequencing trust first then automation we are actually building a system that compounds in value for every company that joins.
+No manual file uploads ever again.
 
-Before we bring autonomy in payments, filings or any other part of compliance we need a ledger users can trust. Finley builds that base file by file, match by match, line by line. In early rollouts it already closing books 3 days faster, hitting 97% accuracy and pulling a 90+ NPS all before we add deep intelligence. Finely is being build in 7 layers each designed to mimic what a full-time finance analyst does across weeks of work-
+Finley “hunts” for your financial data automatically — directly from email, cloud storage, accounting platforms, bank APIs, even scanned PDFs in a Dropbox folder.
 
-1. Ingesting unorganized data 2. Normalizing it into clean . 3. Computing Metrics 4. Simulating on financial suitations. 5. Agent layer 6. Memory graph 7. Explainability layer
+Works across borders, currencies, and platforms, without asking you for credentials every time.
 
-Shipping layer by layer to prove value early and to build trust. Each layer unlocks the next.
-This repo is where Finley comes to life. Backend runs on FastAPI. Frontend’s being built on Lovable AI. Cursor for writing code.
+Key Innovations
 
-By 2035 Obvio will run finance and compliance department for millions of companies saving billions of hours and becoming the operating layer for modern business. It will handle complex financial operations like compliance, filings and even for companies with multiple branches across different geographies by adapting to local rule and workflows acting like a full-stack finance team that just works and no matter where you operate.
+Self-learning connectors — If Finley sees a new file format once, it instantly learns it for all users globally.
 
+Pattern-based data hunting — Finley scans email inboxes, Slack messages, WhatsApp attachments (with permission) for relevant financial documents in real-time.
 
+Full historical catch-up — Onboarding once pulls all past years of records in hours, not weeks.
+
+📌 Result: Zero “where’s the file” moments. Founders never think about uploading again.
+
+Layer 2 – Data Normalization (Revolutionary version)
+
+Current: Parse and clean data into a structured format.
+Future: Global Finance Rosetta Stone.
+
+Core Idea
+
+Every messy file is normalized into the single universal finance schema — like Google Translate but for money.
+
+Works instantly across 1,000+ formats, currencies, accounting standards (GAAP, IFRS, local rules).
+
+Key Innovations
+
+Universal financial grammar — Finley can understand a ledger whether it’s a PDF in Thai Baht, an Excel in German, or a JSON from an obscure ERP in Brazil.
+
+Context-aware enrichment — Missing fields (e.g., vendor country, tax code) are inferred from global knowledge.
+
+Anomaly-first cleaning — Instead of just “fixing” data, Finley flags the exact weird line items humans should see.
+
+Global compliance mapping — While normalizing, Finley already maps transactions to local compliance codes (e.g., GST in India, VAT in EU) — no extra step later.
+
+📌 Result: Every transaction in the world speaks the same “financial language” instantly.

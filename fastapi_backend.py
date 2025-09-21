@@ -1,6 +1,7 @@
 # Standard library imports
 import os
 import io
+import sys
 import logging
 import hashlib
 import uuid
@@ -324,13 +325,35 @@ except Exception as e:
 
 # Initialize Supabase client and critical systems
 try:
-    supabase_url = os.environ.get("SUPABASE_URL")
-    supabase_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
+    # Try multiple possible environment variable names for Render compatibility
+    supabase_url = (
+        os.environ.get("SUPABASE_URL") or 
+        os.environ.get("SUPABASE_PROJECT_URL") or
+        os.environ.get("DATABASE_URL")  # Sometimes Render uses this
+    )
+    supabase_key = (
+        os.environ.get("SUPABASE_SERVICE_ROLE_KEY") or 
+        os.environ.get("SUPABASE_SERVICE_KEY") or  # This is what's in Render!
+        os.environ.get("SUPABASE_KEY") or
+        os.environ.get("SUPABASE_ANON_KEY")  # Fallback to anon key if service role not available
+    )
+    
+    # Enhanced diagnostics for deployment debugging
+    logger.info(f"🔍 Environment diagnostics:")
+    logger.info(f"   SUPABASE_URL present: {'✅' if supabase_url else '❌'}")
+    logger.info(f"   SUPABASE_SERVICE_ROLE_KEY present: {'✅' if supabase_key else '❌'}")
+    logger.info(f"   Available env vars: {sorted([k for k in os.environ.keys() if 'SUPABASE' in k.upper()])}")
+    
     if supabase_key:
         supabase_key = clean_jwt_token(supabase_key)
     
     if not supabase_url or not supabase_key:
-        raise ValueError("SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY environment variables are required")
+        missing_vars = []
+        if not supabase_url:
+            missing_vars.append("SUPABASE_URL")
+        if not supabase_key:
+            missing_vars.append("SUPABASE_SERVICE_KEY (or SUPABASE_SERVICE_ROLE_KEY)")
+        raise ValueError(f"Missing required environment variables: {', '.join(missing_vars)}. Please check your deployment configuration.")
     
     # Create global Supabase client
     supabase = create_client(supabase_url, supabase_key)
@@ -372,6 +395,29 @@ try:
 except Exception as e:
     logger.error(f"❌ Failed to initialize critical systems: {e}")
     supabase = None
+    # Log critical database failure for monitoring
+    logger.critical(f"🚨 DATABASE CONNECTION FAILED - System running in degraded mode: {e}")
+
+# Database health check function
+def check_database_health():
+    """Check if database connection is healthy and raise appropriate error if not"""
+    if not supabase:
+        logger.error("❌ CRITICAL: Database connection unavailable")
+        raise HTTPException(
+            status_code=503,
+            detail="Database service temporarily unavailable. Please try again later."
+        )
+    
+    try:
+        # Quick health check query
+        result = supabase.table('raw_events').select('id').limit(1).execute()
+        return True
+    except Exception as e:
+        logger.error(f"❌ Database health check failed: {e}")
+        raise HTTPException(
+            status_code=503,
+            detail="Database service experiencing issues. Please try again later."
+        )
 
 # Advanced functionality imports with individual error handling
 ADVANCED_FEATURES = {
@@ -6041,7 +6087,11 @@ async def get_chat_history(user_id: str):
     """Get chat history for user"""
     try:
         if not supabase:
-            return {"chats": [], "user_id": user_id, "status": "success"}
+            logger.error(f"❌ CRITICAL: Database connection unavailable for get_chat_history - user_id: {user_id}")
+            raise HTTPException(
+                status_code=503, 
+                detail="Database service temporarily unavailable. Please try again later."
+            )
             
         # Get chat messages from database
         result = supabase.table('chat_messages').select('*').eq('user_id', user_id).order('created_at', desc=True).execute()
@@ -6557,6 +6607,8 @@ async def resolve_entities_endpoint(request: EntityResolutionRequest):
 async def process_excel_endpoint(request: dict):
     """Process Excel file - Frontend compatibility endpoint with security validation"""
     try:
+        # Critical: Check database health before processing
+        check_database_health()
         # Security validation
         security_context = SecurityContext(
             user_id=request.get('user_id'),
@@ -6601,6 +6653,8 @@ async def process_excel_universal_endpoint(
 ):
     """Process Excel file using all universal components in pipeline"""
     try:
+        # Critical: Check database health before processing
+        check_database_health()
         # Initialize components
         excel_processor = ExcelProcessor()
         field_detector = UniversalFieldDetector()
@@ -6883,6 +6937,8 @@ async def process_with_websocket_endpoint(
 ):
     """Process file with real-time WebSocket updates"""
     try:
+        # Critical: Check database health before processing
+        check_database_health()
         # Send initial update
         await websocket_manager.send_overall_update(
             job_id=job_id,
@@ -8168,6 +8224,50 @@ async def run_performance_test(component: str, iterations: int = 100):
     except Exception as e:
         logger.error(f"Performance test failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+# ============================================================================
+# DEPLOYMENT HEALTH CHECK
+# ============================================================================
+
+@app.get("/health")
+@app.get("/")
+async def health_check():
+    """Comprehensive health check for deployment debugging"""
+    try:
+        health_status = {
+            "status": "healthy",
+            "timestamp": datetime.utcnow().isoformat(),
+            "version": "2.0.0",
+            "environment": {
+                "supabase_configured": bool(supabase),
+                "openai_configured": bool(openai),
+                "available_env_vars": sorted([k for k in os.environ.keys() if any(x in k.upper() for x in ['SUPABASE', 'OPENAI', 'DATABASE'])]),
+                "python_version": f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
+                "advanced_features": ADVANCED_FEATURES
+            },
+            "services": {
+                "database": "connected" if supabase else "disconnected",
+                "ai": "connected" if openai else "disconnected"
+            }
+        }
+        
+        # Test database connection if available
+        if supabase:
+            try:
+                result = supabase.table('raw_events').select('id').limit(1).execute()
+                health_status["services"]["database"] = "operational"
+            except Exception as e:
+                health_status["services"]["database"] = f"error: {str(e)}"
+                health_status["status"] = "degraded"
+        
+        return health_status
+        
+    except Exception as e:
+        return {
+            "status": "error",
+            "error": str(e),
+            "timestamp": datetime.utcnow().isoformat()
+        }
 
 # ============================================================================
 # MAIN APPLICATION SETUP
