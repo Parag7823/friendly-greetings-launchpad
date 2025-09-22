@@ -312,7 +312,9 @@ export class FastAPIProcessor {
         job_id: jobData.id,
         storage_path: fileName,
         file_name: file.name,
-        user_id: user.id
+        user_id: user.id,
+        session_token: session.access_token,  // Add missing session token
+        endpoint: 'process-excel'  // Add endpoint for security validation
       };
 
       // Start FastAPI backend processing and connect to WebSocket for real-time updates

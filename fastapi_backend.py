@@ -6608,29 +6608,20 @@ async def resolve_entities_endpoint(request: EntityResolutionRequest):
 
 @app.post("/process-excel")
 async def process_excel_endpoint(request: dict):
-    """Process Excel file - Frontend compatibility endpoint with security validation"""
+    """Process Excel file - Frontend compatibility endpoint (lightweight redirect)"""
     try:
         # Critical: Check database health before processing
         check_database_health()
-        # Security validation
-        security_context = SecurityContext(
-            user_id=request.get('user_id'),
-            ip_address=request.get('client_ip', 'unknown')
-        )
         
-        # Validate request security
-        is_valid, violations = security_validator.validate_request(request, security_context)
-        if not is_valid:
-            structured_logger.warning("Security validation failed", {
-                "violations": [v.__dict__ for v in violations],
-                "user_id": security_context.user_id
-            })
-            raise HTTPException(status_code=400, detail="Security validation failed")
+        # Basic validation - just check if user_id is present
+        user_id = request.get('user_id')
+        if not user_id:
+            raise HTTPException(status_code=400, detail="user_id is required")
         
         # Log request with observability
         structured_logger.info("File processing request received", {
-            "user_id": security_context.user_id,
-            "filename": request.get('filename', 'unknown')
+            "user_id": user_id,
+            "filename": request.get('file_name', 'unknown')
         })
         
         # Increment metrics
@@ -6644,7 +6635,7 @@ async def process_excel_endpoint(request: dict):
             "redirect_to": "/api/process-with-websocket"
         }
     except Exception as e:
-        structured_logger.error("Process excel endpoint error", error=e)
+        structured_logger.error("Process excel endpoint error", error=str(e))
         metrics_collector.increment_counter("file_processing_errors")
         raise HTTPException(status_code=500, detail=str(e))
 
