@@ -28,12 +28,14 @@ import requests
 import tempfile
 
 # FastAPI and web framework imports
-from fastapi import FastAPI, HTTPException, BackgroundTasks, WebSocket, WebSocketDisconnect, UploadFile, Form, File
+from fastapi import FastAPI, HTTPException, BackgroundTasks, WebSocket, WebSocketDisconnect, UploadFile, Form, File, Request
+from fastapi.exceptions import RequestValidationError
 from starlette.requests import Request
-from starlette.responses import FileResponse
+from starlette.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 # Database and external services
 from supabase import create_client, Client
@@ -310,6 +312,40 @@ app.add_middleware(
     allow_headers=["*"],
     expose_headers=["*"]
 )
+
+# Add global exception handlers for better error responses
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    """Handle request validation errors with proper 400 status"""
+    return JSONResponse(
+        status_code=400,
+        content={
+            "error": "Invalid request data", 
+            "details": exc.errors()
+        }
+    )
+
+@app.exception_handler(ValidationError)
+async def pydantic_validation_exception_handler(request: Request, exc: ValidationError):
+    """Handle Pydantic validation errors with proper 400 status"""
+    return JSONResponse(
+        status_code=400,
+        content={
+            "error": "Data validation failed",
+            "details": exc.errors()
+        }
+    )
+
+@app.exception_handler(ValueError)
+async def value_error_handler(request: Request, exc: ValueError):
+    """Handle ValueError with proper 400 status for client errors"""
+    return JSONResponse(
+        status_code=400,
+        content={
+            "error": "Invalid input data",
+            "details": str(exc)
+        }
+    )
 
 # Static file mounting will be done after all API routes are defined
 logger.info("🚀 Finley AI Backend starting in production mode")
@@ -6613,10 +6649,19 @@ async def process_excel_endpoint(request: dict):
         # Critical: Check database health before processing
         check_database_health()
         
-        # Basic validation - just check if user_id is present
+        # Enhanced validation with proper error handling
+        if not request:
+            raise HTTPException(status_code=400, detail="Request body is required")
+        
+        if not isinstance(request, dict):
+            raise HTTPException(status_code=400, detail="Request must be a valid JSON object")
+        
         user_id = request.get('user_id')
         if not user_id:
             raise HTTPException(status_code=400, detail="user_id is required")
+        
+        if not isinstance(user_id, str) or len(user_id.strip()) == 0:
+            raise HTTPException(status_code=400, detail="user_id must be a non-empty string")
         
         # Log request with observability
         structured_logger.info("File processing request received", {
@@ -6634,10 +6679,19 @@ async def process_excel_endpoint(request: dict):
             "message": "Use /api/process-with-websocket for full functionality",
             "redirect_to": "/api/process-with-websocket"
         }
+    except HTTPException:
+        # Re-raise HTTPException to preserve status code
+        raise
+    except ValueError as e:
+        # Client error - malformed data
+        structured_logger.warning("Process excel validation error", error=str(e))
+        metrics_collector.increment_counter("file_processing_validation_errors")
+        raise HTTPException(status_code=400, detail=f"Invalid request data: {str(e)}")
     except Exception as e:
+        # Server error - unexpected issue
         structured_logger.error("Process excel endpoint error", error=str(e))
         metrics_collector.increment_counter("file_processing_errors")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error occurred")
 
 @app.post("/api/process-excel-universal")
 async def process_excel_universal_endpoint(
@@ -6921,6 +6975,60 @@ class WebSocketProgressManager:
 
 # Initialize enhanced WebSocket manager
 websocket_manager = WebSocketProgressManager()
+
+@app.websocket("/ws/{client_id}")
+async def general_websocket(websocket: WebSocket, client_id: str):
+    """General WebSocket endpoint for testing and basic communication"""
+    await websocket.accept()
+    try:
+        await websocket.send_json({
+            "type": "connection",
+            "message": f"Connected to WebSocket with client_id: {client_id}",
+            "client_id": client_id,
+            "timestamp": datetime.utcnow().isoformat()
+        })
+        
+        while True:
+            # Keep connection alive and handle ping/pong
+            data = await websocket.receive_text()
+            if data == "ping":
+                await websocket.send_text("pong")
+            else:
+                await websocket.send_json({
+                    "type": "echo",
+                    "message": f"Received: {data}",
+                    "timestamp": datetime.utcnow().isoformat()
+                })
+    except WebSocketDisconnect:
+        logger.info(f"WebSocket disconnected for client {client_id}")
+    except Exception as e:
+        logger.error(f"WebSocket error for client {client_id}: {e}")
+
+@app.websocket("/duplicate-detection/ws/{job_id}")
+async def duplicate_detection_websocket(websocket: WebSocket, job_id: str):
+    """WebSocket endpoint for duplicate detection real-time updates"""
+    await websocket.accept()
+    try:
+        await websocket.send_json({
+            "type": "duplicate_detection_connected",
+            "job_id": job_id,
+            "message": "Connected to duplicate detection WebSocket",
+            "timestamp": datetime.utcnow().isoformat()
+        })
+        
+        while True:
+            data = await websocket.receive_text()
+            # Handle duplicate detection specific messages
+            await websocket.send_json({
+                "type": "duplicate_update",
+                "job_id": job_id,
+                "message": f"Processing duplicate detection: {data}",
+                "timestamp": datetime.utcnow().isoformat()
+            })
+    except WebSocketDisconnect:
+        logger.info(f"Duplicate detection WebSocket disconnected for job {job_id}")
+    except Exception as e:
+        logger.error(f"Duplicate detection WebSocket error for job {job_id}: {e}")
 
 @app.post("/api/process-with-websocket")
 async def process_with_websocket_endpoint(

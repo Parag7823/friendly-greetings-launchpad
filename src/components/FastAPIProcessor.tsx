@@ -81,12 +81,19 @@ export class FastAPIProcessor {
     error?: string;
   }> {
     try {
-      // Check if file with same hash exists
-      const result: any = await supabase
+      // Check if file with same hash exists - using explicit typing to avoid deep instantiation
+      interface RawRecordResult {
+        id: string;
+        file_name: string;
+        created_at: string;
+        content: any;
+      }
+      
+      const result = await supabase
         .from('raw_records')
         .select('id, file_name, created_at, content')
         .eq('user_id', userId)
-        .eq('file_hash', fileHash);
+        .eq('file_hash', fileHash) as { data: RawRecordResult[] | null; error: any };
       
       const existingFiles = result.data;
       const error = result.error;
