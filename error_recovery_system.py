@@ -130,7 +130,9 @@ class ErrorRecoverySystem:
             logger.info(f"Starting cleanup for failed job: {job_id}")
             
             # Step 1: Get job details
-            job_result = self.supabase.table('ingestion_jobs').select('*').eq('id', job_id).execute()
+            job_result = self.supabase.table('ingestion_jobs').select(
+                'id, user_id, file_id, transaction_id, status, created_at'
+            ).eq('id', job_id).execute()
             
             if not job_result.data:
                 return RecoveryResult(
@@ -349,7 +351,9 @@ class ErrorRecoverySystem:
                     fixed_issues.append(f"marked_invalid_event:{event['id']}")
             
             # Check 2: Ingestion jobs without proper status
-            stale_jobs = self.supabase.table('ingestion_jobs').select('*').eq(
+            stale_jobs = self.supabase.table('ingestion_jobs').select(
+                'id, user_id, status, created_at'
+            ).eq(
                 'user_id', user_id
             ).eq('status', 'processing').lt(
                 'created_at', (datetime.utcnow() - timedelta(hours=2)).isoformat()

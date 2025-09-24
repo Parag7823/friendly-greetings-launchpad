@@ -22,7 +22,7 @@ export const FileList: React.FC<FileListProps> = ({
   }
 
   return (
-    <div className={cn("space-y-3", className)}>
+    <div className={cn("space-y-3 relative", className)}>
       <div className="flex items-center justify-between">
         <h3 className="text-lg font-semibold text-foreground">
           Processing Files ({files.length})
@@ -33,7 +33,7 @@ export const FileList: React.FC<FileListProps> = ({
       </div>
       
       <div className={cn(
-        "overflow-y-auto space-y-2 pr-2",
+        "overflow-y-auto space-y-2 pr-2 min-h-0",
         "scrollbar-thin scrollbar-thumb-finley-accent/20 scrollbar-track-transparent",
         "hover:scrollbar-thumb-finley-accent/30 scroll-smooth",
         maxHeight

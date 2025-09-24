@@ -34,6 +34,63 @@ class OptimizedDatabaseQueries:
         self.max_page_size = 1000
     
     # ============================================================================
+    # RAW RECORDS & DUPLICATE MANAGEMENT QUERIES
+    # ============================================================================
+
+    async def get_duplicate_records(
+        self,
+        user_id: str,
+        limit: int = 100
+    ) -> List[Dict[str, Any]]:
+        """
+        Optimized query for retrieving duplicate records.
+        Filters on the dedicated is_duplicate flag and selects necessary fields only.
+        """
+        try:
+            result = (
+                self.supabase
+                .table('raw_records')
+                .select('id, file_name, file_size, created_at, status, content')
+                .eq('user_id', user_id)
+                .eq('is_duplicate', True)
+                .order('created_at', desc=True)
+                .limit(limit)
+                .execute()
+            )
+
+            return result.data or []
+
+        except Exception as e:
+            logger.error(f"Duplicate records query failed: {e}")
+            return []
+
+    async def get_pending_version_recommendations(
+        self,
+        user_id: str,
+        limit: int = 50
+    ) -> List[Dict[str, Any]]:
+        """
+        Optimized query for pending version recommendations awaiting user decision.
+        """
+        try:
+            result = (
+                self.supabase
+                .table('version_recommendations')
+                .select('id, user_id, file_id, version_group_id, recommendation_type, created_at, user_accepted, user_feedback')
+                .eq('user_id', user_id)
+                .is_('user_accepted', 'null')
+                .order('created_at', desc=True)
+                .limit(limit)
+                .execute()
+            )
+
+            return result.data or []
+
+        except Exception as e:
+            logger.error(f"Pending version recommendations query failed: {e}")
+            return []
+
+    # ============================================================================
     # RAW EVENTS QUERIES - Most frequently used table
     # ============================================================================
     
@@ -307,193 +364,64 @@ class OptimizedDatabaseQueries:
         except Exception as e:
             logger.error(f"Chat history query failed: {e}")
             return []
-    
+
     # ============================================================================
-    # BATCH OPERATIONS
-    # ============================================================================
-    
-    async def batch_insert_events(
-        self, 
-        events: List[Dict[str, Any]], 
-        batch_size: int = 100
-    ) -> Tuple[int, int]:
-        """
-        Optimized batch insert for events with error handling.
-        Returns: (successful_inserts, failed_inserts)
-        """
-        successful = 0
-        failed = 0
-        
-        try:
-            # Process in batches
-            for i in range(0, len(events), batch_size):
-                batch = events[i:i + batch_size]
-                
-                try:
-                    result = self.supabase.table('raw_events').insert(batch).execute()
-                    successful += len(batch)
-                    
-                except Exception as e:
-                    logger.error(f"Batch insert failed for batch {i//batch_size + 1}: {e}")
-                    failed += len(batch)
-            
-            return successful, failed
-            
-        except Exception as e:
-            logger.error(f"Batch insert operation failed: {e}")
-            return successful, failed
-    
-    async def batch_update_events_status(
-        self, 
-        event_ids: List[str], 
-        status: str,
-        batch_size: int = 100
-    ) -> int:
-        """
-        Optimized batch update for event status.
-        """
-        updated = 0
-        
-        try:
-            for i in range(0, len(event_ids), batch_size):
-                batch_ids = event_ids[i:i + batch_size]
-                
-                try:
-                    result = self.supabase.table('raw_events').update(
-                        {'status': status, 'updated_at': datetime.utcnow().isoformat()}
-                    ).in_('id', batch_ids).execute()
-                    
-                    updated += len(batch_ids)
-                    
-                except Exception as e:
-                    logger.error(f"Batch update failed for batch {i//batch_size + 1}: {e}")
-            
-            return updated
-            
-        except Exception as e:
-            logger.error(f"Batch update operation failed: {e}")
-            return updated
-    
-    # ============================================================================
-    # STATISTICS AND ANALYTICS
+    # UNIVERSAL COMPONENT RESULTS QUERIES
     # ============================================================================
     
-    async def get_user_statistics_optimized(self, user_id: str) -> Dict[str, Any]:
-        """
-        Get comprehensive user statistics using optimized queries.
-        """
-        try:
-            stats = {}
-            
-            # Get basic counts using count queries instead of SELECT *
-            events_count = self.supabase.table('raw_events').select(
-                'id', count='exact'
-            ).eq('user_id', user_id).execute()
-            
-            jobs_count = self.supabase.table('ingestion_jobs').select(
-                'id', count='exact'
-            ).eq('user_id', user_id).execute()
-            
-            records_count = self.supabase.table('raw_records').select(
-                'id', count='exact'
-            ).eq('user_id', user_id).execute()
-            
-            stats['total_events'] = events_count.count if hasattr(events_count, 'count') else 0
-            stats['total_jobs'] = jobs_count.count if hasattr(jobs_count, 'count') else 0
-            stats['total_records'] = records_count.count if hasattr(records_count, 'count') else 0
-            
-            # Get recent activity
-            recent_events = await self.get_recent_events_optimized(user_id, 5)
-            stats['recent_activity'] = recent_events
-            
-            # Get platform distribution
-            platforms = await self.get_platforms_for_user_optimized(user_id)
-            stats['unique_platforms'] = len(platforms)
-            stats['platforms'] = platforms
-            
-            return stats
-            
-        except Exception as e:
-            logger.error(f"User statistics query failed: {e}")
-            return {
-                'total_events': 0,
-                'total_jobs': 0,
-                'total_records': 0,
-                'recent_activity': [],
-                'unique_platforms': 0,
-                'platforms': []
-            }
-    
-    # ============================================================================
-    # UTILITY FUNCTIONS
-    # ============================================================================
-    
-    async def check_event_exists(self, event_id: str) -> bool:
-        """
-        Optimized existence check using count query.
-        Replaces: SELECT id FROM raw_events WHERE id = ?
-        """
-        try:
-            result = self.supabase.table('raw_events').select(
-                'id', count='exact'
-            ).eq('id', event_id).execute()
-            
-            return result.count > 0 if hasattr(result, 'count') else False
-            
-        except Exception as e:
-            logger.error(f"Event existence check failed: {e}")
-            return False
-    
-    async def get_file_versions_optimized(
-        self, 
-        user_id: str, 
-        limit: int = 50
+    async def get_component_results_optimized(
+        self,
+        user_id: str,
+        component_type: Optional[str] = None,
+        limit: int = 100
     ) -> List[Dict[str, Any]]:
         """
-        Optimized query for file versions.
+        Optimized query for universal_component_results.
+        Selects only necessary columns and supports filtering & ordering.
         """
         try:
-            result = self.supabase.table('file_versions').select(
-                'id, version_group_id, version_number, is_active_version, '
-                'original_filename, normalized_filename, total_rows, created_at'
-            ).eq('user_id', user_id).order('created_at', desc=True).limit(limit).execute()
+            query = self.supabase.table('universal_component_results').select(
+                'id, component_type, filename, result_data, metadata, created_at'
+            ).eq('user_id', user_id)
             
+            if component_type:
+                query = query.eq('component_type', component_type)
+            
+            query = query.order('created_at', desc=True).limit(limit)
+            result = query.execute()
             return result.data or []
             
         except Exception as e:
-            logger.error(f"File versions query failed: {e}")
+            logger.error(f"Component results query failed: {e}")
             return []
-
-
-# ============================================================================
-# FACTORY FUNCTION
-# ============================================================================
 
 def create_optimized_db_client() -> OptimizedDatabaseQueries:
     """
     Factory function to create an optimized database client.
     """
     try:
-        supabase_url = os.getenv('SUPABASE_URL')
-        supabase_key = os.getenv('SUPABASE_SERVICE_KEY')
+        supabase_url = (
+            os.getenv('SUPABASE_URL') or
+            os.getenv('SUPABASE_PROJECT_URL') or
+            os.getenv('DATABASE_URL')
+        )
+        supabase_key = (
+            os.getenv('SUPABASE_SERVICE_ROLE_KEY') or
+            os.getenv('SUPABASE_SERVICE_KEY') or
+            os.getenv('SUPABASE_KEY') or
+            os.getenv('SUPABASE_ANON_KEY')
+        )
         
         if not supabase_url or not supabase_key:
             raise ValueError("Supabase credentials not configured")
         
-        # Clean JWT token to prevent header value errors
         supabase_key = supabase_key.strip()
-        
         supabase_client = create_client(supabase_url, supabase_key)
         return OptimizedDatabaseQueries(supabase_client)
         
     except Exception as e:
         logger.error(f"Failed to create optimized database client: {e}")
         raise
-
-
-# ============================================================================
-# MIGRATION HELPER FUNCTIONS
-# ============================================================================
 
 async def run_database_optimization_migration():
     """

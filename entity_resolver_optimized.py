@@ -337,7 +337,9 @@ class EntityResolverOptimized:
         
         try:
             # Build query based on available identifiers
-            query = self.supabase.table('normalized_entities').select('*').eq('user_id', user_id).eq('entity_type', entity_type)
+            query = self.supabase.table('normalized_entities').select(
+                'id, canonical_name, email, tax_id, bank_account, phone'
+            ).eq('user_id', user_id).eq('entity_type', entity_type)
             
             # Add identifier filters
             if identifiers.get('email'):
@@ -370,7 +372,9 @@ class EntityResolverOptimized:
         
         try:
             # Get all entities of this type for the user
-            result = self.supabase.table('normalized_entities').select('*').eq('user_id', user_id).eq('entity_type', entity_type).execute()
+            result = self.supabase.table('normalized_entities').select(
+                'id, canonical_name, email, tax_id, bank_account, phone'
+            ).eq('user_id', user_id).eq('entity_type', entity_type).execute()
             
             if not result.data:
                 return None
@@ -534,7 +538,9 @@ class EntityResolverOptimized:
                 entity_id = result.data
                 
                 # Get entity details
-                entity_details = self.supabase.table('normalized_entities').select('*').eq('id', entity_id).single().execute()
+                entity_details = self.supabase.table('normalized_entities').select(
+                    'id, canonical_name, email, tax_id, bank_account, phone'
+                ).eq('id', entity_id).single().execute()
                 
                 if entity_details.data:
                     return entity_details.data

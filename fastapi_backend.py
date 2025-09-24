@@ -47,6 +47,9 @@ from error_recovery_system import initialize_error_recovery_system, get_error_re
 # Import optimization goldmine - FINALLY USING THIS!
 from database_optimization_utils import OptimizedDatabaseQueries, create_optimized_db_client, performance_monitor
 
+# Global optimized database client reference (set during startup)
+optimized_db: Optional[OptimizedDatabaseQueries] = None
+
 # Import AI caching system for 90% cost reduction
 from ai_cache_system import initialize_ai_cache, get_ai_cache, cache_ai_classification
 
@@ -105,7 +108,7 @@ os.environ['OPENCV_AVAILABLE'] = str(OPENCV_AVAILABLE)
 class DateTimeEncoder(json.JSONEncoder):
     """
     Custom JSON encoder for handling datetime objects in API responses.
-    
+
     Extends the standard JSONEncoder to properly serialize datetime and pandas
     Timestamp objects to ISO format strings for API responses.
     """
@@ -396,6 +399,7 @@ try:
 except Exception as e:
     logger.error(f"❌ Failed to initialize critical systems: {e}")
     supabase = None
+    optimized_db = None
     # Log critical database failure for monitoring
     logger.critical(f"🚨 DATABASE CONNECTION FAILED - System running in degraded mode: {e}")
 
@@ -5638,16 +5642,22 @@ async def get_performance_optimization_status():
     async def _extract_entities_from_events(self, user_id: str, file_id: str, supabase: Client) -> List[Dict]:
         """Extract entities from processed events for normalization"""
         try:
-            # Get events for this file
-            events = supabase.table('raw_events').select('*').eq('user_id', user_id).eq('file_id', file_id).execute()
+            # Get events for this file using optimized query when available
+            if optimized_db:
+                events_data = await optimized_db.get_events_for_entity_extraction(user_id, file_id)
+            else:
+                events = supabase.table('raw_events').select(
+                    'id, payload, kind, source_platform, row_index'
+                ).eq('user_id', user_id).eq('file_id', file_id).execute()
+                events_data = events.data or []
             
-            logger.info(f"Found {len(events.data)} events for entity extraction")
+            logger.info(f"Found {len(events_data)} events for entity extraction")
             
             entities = []
             entity_map = {}
             vendor_fields_found = []
             
-            for event in events.data:
+            for event in events_data:
                 # Extract vendor/entity information from payload
                 payload = event.get('payload', {})
                 
@@ -5674,7 +5684,7 @@ async def get_performance_optimization_status():
                     entities.append(entity)
                     entity_map[vendor_raw] = entity
             
-            logger.info(f"Extracted {len(entities)} entities from {len(events.data)} events")
+            logger.info(f"Extracted {len(entities)} entities from {len(events_data)} events")
             if vendor_fields_found:
                 logger.info(f"Found vendor fields: {vendor_fields_found[:5]}")  # Show first 5
             else:
@@ -6078,19 +6088,26 @@ async def get_duplicate_analysis(user_id: str):
 
         supabase = create_client(supabase_url, supabase_key)
         
-        # Get duplicate records for the user - OPTIMIZED!
-        duplicates_result = supabase.table("raw_records").select(
-            "id, file_name, file_size, created_at, content"
-        ).eq("user_id", user_id).eq("is_duplicate", True).limit(100).execute()
-        
-        # Get version recommendations
-        recommendations_result = supabase.table("version_recommendations").select("*").eq("user_id", user_id).is_("user_accepted", "null").execute()
+        # Get duplicate records and recommendations using optimized client when available
+        if optimized_db:
+            duplicates = await optimized_db.get_duplicate_records(user_id, limit=100)
+            recommendations = await optimized_db.get_pending_version_recommendations(user_id)
+        else:
+            duplicates_result = supabase.table("raw_records").select(
+                "id, file_name, file_size, created_at, content"
+            ).eq("user_id", user_id).eq("is_duplicate", True).limit(100).execute()
+            duplicates = duplicates_result.data or []
+
+            recommendations_result = supabase.table("version_recommendations").select(
+                "id, user_id, file_id, version_group_id, recommendation_type, created_at, user_accepted, user_feedback"
+            ).eq("user_id", user_id).is_("user_accepted", "null").execute()
+            recommendations = recommendations_result.data or []
         
         return {
-            "duplicates": duplicates_result.data or [],
-            "recommendations": recommendations_result.data or [],
-            "total_duplicates": len(duplicates_result.data or []),
-            "pending_recommendations": len(recommendations_result.data or [])
+            "duplicates": duplicates,
+            "recommendations": recommendations,
+            "total_duplicates": len(duplicates),
+            "pending_recommendations": len(recommendations)
         }
     except Exception as e:
         logger.error(f"Error getting duplicate analysis: {e}")
@@ -6110,27 +6127,30 @@ async def get_chat_history(user_id: str):
                 status_code=503, 
                 detail="Database service temporarily unavailable. Please try again later."
             )
-            
-        # Get chat messages from database
-        result = supabase.table('chat_messages').select('*').eq('user_id', user_id).order('created_at', desc=True).execute()
         
-        # Group messages by conversation/session
-        chats = []
-        if result.data:
-            # For now, create one chat per day or group by session
-            chat_groups = {}
-            for msg in result.data:
-                date_key = msg['created_at'][:10]  # YYYY-MM-DD
-                if date_key not in chat_groups:
-                    chat_groups[date_key] = {
-                        "id": f"chat_{date_key}",
-                        "title": f"Chat {date_key}",
-                        "created_at": msg['created_at'],
-                        "message_count": 0
-                    }
-                chat_groups[date_key]["message_count"] += 1
-            
-            chats = list(chat_groups.values())
+        # Get chat messages from database using optimized client when available
+        if optimized_db:
+            messages = await optimized_db.get_chat_history_optimized(user_id, limit=500)
+        else:
+            result = supabase.table('chat_messages').select(
+                'id, chat_id, message, is_user, created_at'
+            ).eq('user_id', user_id).order('created_at', desc=True).execute()
+            messages = result.data or []
+        # For now, create one chat per day or group by session
+        chat_groups = {}
+        for msg in messages:
+            created_at = msg.get('created_at', '') or ''
+            date_key = created_at[:10] if created_at else 'unknown'
+            if date_key not in chat_groups:
+                chat_groups[date_key] = {
+                    "id": f"chat_{date_key}",
+                    "title": f"Chat {date_key}",
+                    "created_at": created_at,
+                    "message_count": 0
+                }
+            chat_groups[date_key]["message_count"] += 1
+        
+        chats = list(chat_groups.values())
         
         return {
             "chats": chats,
@@ -6623,32 +6643,149 @@ async def resolve_entities_endpoint(request: EntityResolutionRequest):
 
 @app.post("/process-excel")
 async def process_excel_endpoint(request: dict):
-    """Process Excel file - Frontend compatibility endpoint (lightweight redirect)"""
+    """Start processing job from Supabase Storage and stream progress via WebSocket."""
     try:
         # Critical: Check database health before processing
         check_database_health()
-        
-        # Basic validation - just check if user_id is present
+
         user_id = request.get('user_id')
-        if not user_id:
-            raise HTTPException(status_code=400, detail="user_id is required")
-        
+        job_id = request.get('job_id')
+        storage_path = request.get('storage_path')
+        filename = request.get('file_name') or 'uploaded_file'
+        if not user_id or not job_id or not storage_path:
+            raise HTTPException(status_code=400, detail="user_id, job_id, and storage_path are required")
+
         # Log request with observability
         structured_logger.info("File processing request received", {
             "user_id": user_id,
-            "filename": request.get('file_name', 'unknown')
+            "filename": filename
         })
-        
+
+        # Pre-create job status so polling has data even before WS connects
+        websocket_manager.job_status[job_id] = {
+            "status": "starting",
+            "message": "Initializing processing...",
+            "progress": 0,
+            "started_at": datetime.utcnow().isoformat(),
+            "components": {}
+        }
+
+        async def _run_processing_job():
+            try:
+                # Notify start
+                await websocket_manager.send_overall_update(
+                    job_id=job_id,
+                    status="processing",
+                    message="📥 Downloading file from storage...",
+                    progress=5
+                )
+
+                # Download file bytes from Supabase Storage
+                file_bytes = None
+                try:
+                    storage = supabase.storage.from_("finely-upload")
+                    file_resp = storage.download(storage_path)
+                    # supabase-py returns bytes or Response-like
+                    file_bytes = file_resp if isinstance(file_resp, (bytes, bytearray)) else getattr(file_resp, 'data', None)
+                    if file_bytes is None:
+                        # Some versions return a dict-like with 'data'
+                        file_bytes = file_resp
+                except Exception as e:
+                    logger.error(f"Storage download failed: {e}")
+                    await websocket_manager.send_error(job_id, f"Download failed: {e}")
+                    websocket_manager.job_status[job_id] = {**websocket_manager.job_status.get(job_id, {}), "status": "failed", "error": str(e)}
+                    return
+
+                await websocket_manager.send_overall_update(
+                    job_id=job_id,
+                    status="processing",
+                    message="🧠 Initializing analysis pipeline...",
+                    progress=15
+                )
+
+                # Initialize components
+                excel_processor = ExcelProcessor()
+                field_detector = UniversalFieldDetector()
+                platform_detector = UniversalPlatformDetector()
+                document_classifier = UniversalDocumentClassifier()
+                data_extractor = UniversalExtractors()
+
+                # Step 1: Process Excel file
+                await websocket_manager.send_component_update(job_id, "excel_processor", "processing", "📊 Processing Excel file...", 20)
+                excel_result = await excel_processor.stream_xlsx_processing(
+                    file_content=file_bytes,
+                    filename=filename,
+                    user_id=user_id
+                )
+                await websocket_manager.send_component_update(job_id, "excel_processor", "completed", "✅ Excel processing completed", 40, {"summary": excel_result.get("summary", {})})
+
+                # Step 2: Platform detection
+                await websocket_manager.send_component_update(job_id, "platform_detector", "processing", "🔎 Detecting platform...", 50)
+                platform_result = await platform_detector.detect_platform_universal(
+                    payload={"file_content": file_bytes, "filename": filename},
+                    filename=filename,
+                    user_id=user_id
+                )
+                await websocket_manager.send_component_update(job_id, "platform_detector", "completed", "✅ Platform detection completed", 60, platform_result)
+
+                # Step 3: Document classification
+                await websocket_manager.send_component_update(job_id, "document_classifier", "processing", "🧾 Classifying document...", 65)
+                document_result = await document_classifier.classify_document_universal(
+                    payload={"file_content": file_bytes, "filename": filename},
+                    filename=filename,
+                    user_id=user_id
+                )
+                await websocket_manager.send_component_update(job_id, "document_classifier", "completed", "✅ Document classification completed", 75, document_result)
+
+                # Step 4: Data extraction
+                await websocket_manager.send_component_update(job_id, "data_extractor", "processing", "🧩 Extracting data...", 80)
+                extraction_result = await data_extractor.extract_data_universal(
+                    file_content=file_bytes,
+                    filename=filename,
+                    user_id=user_id
+                )
+                await websocket_manager.send_component_update(job_id, "data_extractor", "completed", "✅ Data extraction completed", 90)
+
+                # Step 5: Field detection (optional)
+                await websocket_manager.send_component_update(job_id, "field_detector", "processing", "📐 Detecting fields...", 92)
+                field_results = {}
+                for sheet_name, df in excel_result.get('sheets', {}).items():
+                    field_result = await field_detector.detect_field_types_universal(
+                        data=df.to_dict('records')[0] if hasattr(df, 'empty') and not df.empty else {},
+                        filename=filename,
+                        user_id=user_id
+                    )
+                    field_results[sheet_name] = field_result
+                await websocket_manager.send_component_update(job_id, "field_detector", "completed", "✅ Field detection completed", 95)
+
+                # Finalize
+                results = {
+                    "excel_processing": excel_result,
+                    "platform_detection": platform_result,
+                    "document_classification": document_result,
+                    "data_extraction": extraction_result,
+                    "field_detection": field_results
+                }
+
+                await websocket_manager.send_overall_update(
+                    job_id=job_id,
+                    status="completed",
+                    message="🎉 Processing completed successfully!",
+                    progress=100,
+                    results=results
+                )
+            except Exception as e:
+                logger.error(f"Processing job failed: {e}")
+                await websocket_manager.send_error(job_id, str(e))
+                websocket_manager.job_status[job_id] = {**websocket_manager.job_status.get(job_id, {}), "status": "failed", "error": str(e)}
+
+        # Kick off background processing task
+        asyncio.create_task(_run_processing_job())
+
         # Increment metrics
         metrics_collector.increment_counter("file_processing_requests")
-        
-        # Route to the WebSocket-enabled processing endpoint
-        # This endpoint bridges the frontend call to the advanced backend processing
-        return {
-            "status": "redirect",
-            "message": "Use /api/process-with-websocket for full functionality",
-            "redirect_to": "/api/process-with-websocket"
-        }
+
+        return {"status": "accepted", "job_id": job_id}
     except Exception as e:
         structured_logger.error("Process excel endpoint error", error=str(e))
         metrics_collector.increment_counter("file_processing_errors")
@@ -6772,7 +6909,7 @@ async def get_component_metrics():
 @app.websocket("/ws/universal-components/{job_id}")
 async def universal_components_websocket(websocket: WebSocket, job_id: str):
     """WebSocket endpoint for real-time updates from universal components"""
-    await manager.connect(websocket, job_id)
+    await websocket_manager.connect(websocket, job_id)
     try:
         # Keep connection alive and handle incoming messages
         while True:
@@ -6791,11 +6928,31 @@ async def universal_components_websocket(websocket: WebSocket, job_id: str):
                 })
                 
     except WebSocketDisconnect:
-        await manager.disconnect(job_id)
+        await websocket_manager.disconnect(job_id)
         logger.info(f"Universal components WebSocket disconnected for job {job_id}")
     except Exception as e:
         logger.error(f"Universal components WebSocket error for job {job_id}: {e}")
-        await manager.disconnect(job_id)
+        await websocket_manager.disconnect(job_id)
+
+# Frontend compatibility: primary WebSocket endpoint used by UI
+@app.websocket("/ws/{job_id}")
+async def websocket_progress_endpoint(websocket: WebSocket, job_id: str):
+    """Primary WebSocket endpoint for progress updates (UI expects /ws/{job_id})."""
+    await websocket_manager.connect(websocket, job_id)
+    try:
+        # Keep-alive loop with simple ping/pong support
+        while True:
+            try:
+                data = await websocket.receive_json()
+                if isinstance(data, dict) and data.get("type") == "ping":
+                    await websocket.send_json({"type": "pong", "timestamp": datetime.utcnow().isoformat()})
+            except Exception:
+                # If client sent non-JSON or closed abruptly, break gracefully
+                break
+    except WebSocketDisconnect:
+        await websocket_manager.disconnect(job_id)
+    except Exception:
+        await websocket_manager.disconnect(job_id)
 
 class WebSocketProgressManager:
     """Enhanced WebSocket manager for universal components progress updates"""
@@ -6836,96 +6993,102 @@ class WebSocketProgressManager:
     
     async def send_component_update(self, job_id: str, component: str, status: str, message: str, progress: int = None, data: Dict[str, Any] = None):
         """Send component-specific progress update"""
-        if job_id not in self.active_connections:
-            return False
-        
         try:
-            # Update job status
-            if job_id in self.job_status:
-                self.job_status[job_id]["components"][component] = {
-                    "status": status,
+            # Update job status regardless of WS connection
+            if job_id not in self.job_status:
+                self.job_status[job_id] = {
+                    "status": "processing",
                     "message": message,
-                    "progress": progress,
-                    "timestamp": datetime.utcnow().isoformat(),
-                    "data": data or {}
+                    "progress": progress or 0,
+                    "started_at": datetime.utcnow().isoformat(),
+                    "components": {}
                 }
-                
-                # Calculate overall progress
-                components = self.job_status[job_id]["components"]
-                if components:
-                    total_progress = sum(comp.get("progress", 0) for comp in components.values())
-                    self.job_status[job_id]["progress"] = total_progress // len(components)
-            
-            # Send update to WebSocket
-            update_message = {
-                "type": "component_update",
-                "job_id": job_id,
-                "component": component,
+            self.job_status[job_id]["components"][component] = {
                 "status": status,
                 "message": message,
                 "progress": progress,
-                "data": data or {},
-                "timestamp": datetime.utcnow().isoformat()
+                "timestamp": datetime.utcnow().isoformat(),
+                "data": data or {}
             }
-            
-            await self.active_connections[job_id].send_json(update_message)
+
+            # Recalculate overall progress
+            components = self.job_status[job_id]["components"]
+            if components:
+                total_progress = sum(comp.get("progress", 0) for comp in components.values())
+                self.job_status[job_id]["progress"] = total_progress // len(components)
+
+            # Send over WS if connected
+            if job_id in self.active_connections:
+                update_message = {
+                    "type": "component_update",
+                    "job_id": job_id,
+                    "component": component,
+                    "status": status,
+                    "message": message,
+                    "progress": progress,
+                    "data": data or {},
+                    "timestamp": datetime.utcnow().isoformat()
+                }
+                await self.active_connections[job_id].send_json(update_message)
             return True
-            
         except Exception as e:
             logger.error(f"Failed to send component update for job {job_id}: {e}")
             return False
     
     async def send_overall_update(self, job_id: str, status: str, message: str, progress: int = None, results: Dict[str, Any] = None):
         """Send overall job progress update"""
-        if job_id not in self.active_connections:
-            return False
-        
         try:
-            # Update job status
-            if job_id in self.job_status:
-                self.job_status[job_id].update({
-                    "status": status,
-                    "message": message,
-                    "progress": progress or self.job_status[job_id].get("progress", 0),
-                    "updated_at": datetime.utcnow().isoformat(),
-                    "results": results or {}
-                })
-            
-            # Send update to WebSocket
-            update_message = {
-                "type": "job_update",
-                "job_id": job_id,
+            # Update job status regardless of WS connection
+            base = self.job_status.get(job_id, {})
+            self.job_status[job_id] = {
+                **base,
                 "status": status,
                 "message": message,
-                "progress": progress,
-                "results": results or {},
-                "timestamp": datetime.utcnow().isoformat()
+                "progress": progress if progress is not None else base.get("progress", 0),
+                "updated_at": datetime.utcnow().isoformat(),
+                "results": results or base.get("results", {})
             }
-            
-            await self.active_connections[job_id].send_json(update_message)
+
+            # Send over WS if connected
+            if job_id in self.active_connections:
+                update_message = {
+                    "type": "job_update",
+                    "job_id": job_id,
+                    "status": status,
+                    "message": message,
+                    "progress": progress,
+                    "results": results or {},
+                    "timestamp": datetime.utcnow().isoformat()
+                }
+                await self.active_connections[job_id].send_json(update_message)
             return True
-            
         except Exception as e:
             logger.error(f"Failed to send overall update for job {job_id}: {e}")
             return False
     
     async def send_error(self, job_id: str, error_message: str, component: str = None):
         """Send error notification"""
-        if job_id not in self.active_connections:
-            return False
-        
         try:
-            error_message_data = {
-                "type": "error",
-                "job_id": job_id,
-                "error": error_message,
-                "component": component,
-                "timestamp": datetime.utcnow().isoformat()
+            # Update job status regardless of WS connection
+            base = self.job_status.get(job_id, {})
+            self.job_status[job_id] = {
+                **base,
+                "status": "failed",
+                "message": error_message,
+                "updated_at": datetime.utcnow().isoformat()
             }
-            
-            await self.active_connections[job_id].send_json(error_message_data)
+
+            # Send over WS if connected
+            if job_id in self.active_connections:
+                error_message_data = {
+                    "type": "error",
+                    "job_id": job_id,
+                    "error": error_message,
+                    "component": component,
+                    "timestamp": datetime.utcnow().isoformat()
+                }
+                await self.active_connections[job_id].send_json(error_message_data)
             return True
-            
         except Exception as e:
             logger.error(f"Failed to send error for job {job_id}: {e}")
             return False
@@ -6936,6 +7099,49 @@ class WebSocketProgressManager:
 
 # Initialize enhanced WebSocket manager
 websocket_manager = WebSocketProgressManager()
+
+# Legacy compatibility adapter for older code paths that used `manager.send_update(...)`
+class LegacyConnectionManagerAdapter:
+    async def send_update(self, job_id: str, payload: Dict[str, Any]):
+        step = payload.get("step", "processing")
+        status = payload.get("status")
+        if not status:
+            if step in ("error", "failed", "entity_resolution_failed", "platform_learning_failed"):
+                status = "failed"
+            elif step in ("completed",):
+                status = "completed"
+            else:
+                status = "processing"
+        message = payload.get("message", step)
+        progress = payload.get("progress")
+        results = payload.get("results")
+        await websocket_manager.send_overall_update(job_id, status, message, progress, results)
+
+# Instantiate legacy adapter so existing calls like `await manager.send_update(...)` keep working
+manager = LegacyConnectionManagerAdapter()
+
+@app.post("/cancel-upload/{job_id}")
+async def cancel_upload(job_id: str):
+    """Cancel an in-flight processing job and notify listeners."""
+    try:
+        base = websocket_manager.job_status.get(job_id, {})
+        websocket_manager.job_status[job_id] = {
+            **base,
+            "status": "cancelled",
+            "message": "Cancelled by user",
+            "updated_at": datetime.utcnow().isoformat()
+        }
+        # Notify over WS if connected
+        await websocket_manager.send_overall_update(
+            job_id=job_id,
+            status="cancelled",
+            message="Cancelled by user",
+            progress=base.get("progress", 0)
+        )
+        return {"status": "cancelled", "job_id": job_id}
+    except Exception as e:
+        logger.error(f"Failed to cancel job {job_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/process-with-websocket")
 async def process_with_websocket_endpoint(
@@ -7125,11 +7331,12 @@ async def get_job_status_endpoint(job_id: str):
     status = websocket_manager.get_job_status(job_id)
     if not status:
         raise HTTPException(status_code=404, detail="Job not found")
-    
-    return {
-        "status": "success",
-        "job_status": status
-    }
+    return status
+
+@app.get("/job-status/{job_id}")
+async def get_job_status_alias(job_id: str):
+    """Alias endpoint to match frontend polling path."""
+    return await get_job_status_endpoint(job_id)
 
 # ============================================================================
 # DATABASE INTEGRATION FOR UNIVERSAL COMPONENTS
@@ -7264,14 +7471,19 @@ class UniversalComponentDatabaseManager:
     async def get_component_results(self, user_id: str, component_type: str = None, limit: int = 100):
         """Retrieve component results from database"""
         try:
-            query = self.supabase.table('universal_component_results').select('*').eq('user_id', user_id)
-            
+            # Prefer optimized helper when available
+            if optimized_db:
+                results = await optimized_db.get_component_results_optimized(user_id, component_type, limit)
+                return results
+
+            # Fallback: limit columns even without optimized client
+            query = self.supabase.table('universal_component_results').select(
+                'id, component_type, filename, result_data, metadata, created_at'
+            ).eq('user_id', user_id)
             if component_type:
                 query = query.eq('component_type', component_type)
-            
             query = query.order('created_at', desc=True).limit(limit)
             response = query.execute()
-            
             return response.data if response.data else []
             
         except Exception as e:

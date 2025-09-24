@@ -34,7 +34,9 @@ class EnhancedRelationshipDetector:
         """Detect actual relationships between financial events"""
         try:
             # Get all events for the user
-            events = self.supabase.table('raw_events').select('*').eq('user_id', user_id).execute()
+            events = self.supabase.table('raw_events').select(
+                'id, payload, source_filename, created_at, source_platform'
+            ).eq('user_id', user_id).execute()
             
             if not events.data:
                 return {"relationships": [], "message": "No data found for relationship analysis"}

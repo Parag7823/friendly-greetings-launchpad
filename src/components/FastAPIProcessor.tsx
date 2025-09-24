@@ -82,7 +82,7 @@ export class FastAPIProcessor {
   }> {
     try {
       // Check if file with same hash exists
-      const result: any = await supabase
+      const result: any = await (supabase as any)
         .from('raw_records')
         .select('id, file_name, created_at, content')
         .eq('user_id', userId)
@@ -126,7 +126,10 @@ export class FastAPIProcessor {
 
   private setupWebSocketConnection(jobId: string): Promise<any> {
     return new Promise((resolve, reject) => {
-      const wsUrl = `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/ws/${jobId}`;
+      // Build WS URL from backend apiUrl to avoid cross-origin issues
+      const api = new URL(this.apiUrl);
+      const wsProtocol = api.protocol === 'https:' ? 'wss:' : 'ws:';
+      const wsUrl = `${wsProtocol}//${api.host}/ws/${jobId}`;
       // Connecting to WebSocket for real-time updates
       
       const ws = new WebSocket(wsUrl);
@@ -212,8 +215,8 @@ export class FastAPIProcessor {
           }
         }
         
-        // Wait 5 seconds before next poll (faster polling)
-        await new Promise(resolve => setTimeout(resolve, 5000));
+        // Wait ~1.5 seconds before next poll for snappier updates
+        await new Promise(resolve => setTimeout(resolve, 1500));
         attempts++;
         
       } catch (error) {
