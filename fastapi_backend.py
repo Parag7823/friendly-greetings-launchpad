@@ -6763,19 +6763,98 @@ async def process_excel_endpoint(request: dict):
                     field_results[sheet_name] = field_result
                 await websocket_manager.send_component_update(job_id, "field_detector", "completed", "✅ Field detection completed", 95)
 
+                # Step 6: Save data to database
+                await websocket_manager.send_component_update(job_id, "database_storage", "processing", "💾 Storing processed data...", 96)
+                
+                # Create raw_records entry
+                try:
+                    raw_record_data = {
+                        "user_id": user_id,
+                        "file_name": filename,
+                        "file_hash": job_id[:32],  # Use job_id as hash placeholder
+                        "source": "process_excel_endpoint",
+                        "status": "completed",
+                        "content": {
+                            "excel_processing": excel_result,
+                            "platform_detection": platform_result,
+                            "document_classification": document_result,
+                            "data_extraction": extraction_result,
+                            "field_detection": field_results,
+                            "processing_metadata": {
+                                "job_id": job_id,
+                                "processed_at": datetime.utcnow().isoformat(),
+                                "components_used": ["excel_processor", "platform_detector", "document_classifier", "data_extractor", "field_detector"]
+                            }
+                        }
+                    }
+                    
+                    record_result = supabase.table('raw_records').insert(raw_record_data).execute()
+                    record_id = record_result.data[0]['id'] if record_result.data else None
+                    
+                    # Create ingestion_jobs entry
+                    job_data = {
+                        "job_type": "process_excel_storage",
+                        "user_id": user_id,
+                        "status": "completed",
+                        "progress": 100,
+                        "metadata": {
+                            "filename": filename,
+                            "job_id": job_id,
+                            "record_id": record_id
+                        }
+                    }
+                    supabase.table('ingestion_jobs').insert(job_data).execute()
+                    
+                    # Create raw_events from Excel data if available
+                    events_created = 0
+                    if excel_result and excel_result.get('sheets'):
+                        for sheet_name, df in excel_result.get('sheets', {}).items():
+                            if hasattr(df, 'iterrows'):
+                                for idx, row in df.iterrows():
+                                    try:
+                                        event_data = {
+                                            "user_id": user_id,
+                                            "file_id": record_id,
+                                            "payload": row.to_dict(),
+                                            "row_index": idx + 1,
+                                            "sheet_name": sheet_name,
+                                            "source_filename": filename,
+                                            "status": "processed",
+                                            "kind": "data_row",
+                                            "confidence_score": 0.8
+                                        }
+                                        supabase.table('raw_events').insert(event_data).execute()
+                                        events_created += 1
+                                        
+                                        if events_created % 10 == 0:  # Update progress every 10 events
+                                            await websocket_manager.send_component_update(job_id, "database_storage", "processing", f"💾 Stored {events_created} events...", 97)
+                                    except Exception as row_error:
+                                        logger.warning(f"Failed to insert row {idx}: {row_error}")
+                                        continue
+                    
+                    await websocket_manager.send_component_update(job_id, "database_storage", "completed", f"✅ Stored {events_created} events in database", 98)
+                    
+                except Exception as db_error:
+                    logger.error(f"Database storage failed: {db_error}")
+                    await websocket_manager.send_component_update(job_id, "database_storage", "failed", f"❌ Database storage failed: {db_error}", 96)
+                
                 # Finalize
                 results = {
                     "excel_processing": excel_result,
                     "platform_detection": platform_result,
                     "document_classification": document_result,
                     "data_extraction": extraction_result,
-                    "field_detection": field_results
+                    "field_detection": field_results,
+                    "database_storage": {
+                        "events_created": events_created,
+                        "record_id": record_id
+                    }
                 }
 
                 await websocket_manager.send_overall_update(
                     job_id=job_id,
                     status="completed",
-                    message="🎉 Processing completed successfully!",
+                    message=f"🎉 Processing completed! {events_created} events stored in database.",
                     progress=100,
                     results=results
                 )
