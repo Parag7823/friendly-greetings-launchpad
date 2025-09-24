@@ -42,7 +42,6 @@ from openai import OpenAI
 # Import critical fixes systems
 from transaction_manager import initialize_transaction_manager, get_transaction_manager
 from streaming_processor import initialize_streaming_processor, get_streaming_processor, StreamingConfig
-from atomic_duplicate_detector import initialize_atomic_duplicate_detector, get_atomic_duplicate_detector
 from error_recovery_system import initialize_error_recovery_system, get_error_recovery_system, ErrorContext, ErrorSeverity
 
 # Import optimization goldmine - FINALLY USING THIS!
@@ -74,7 +73,7 @@ logger = logging.getLogger(__name__)
 
 # Import production duplicate detection service
 try:
-    from production_duplicate_detection_service import ProductionDuplicateDetectionService, FileMetadata
+    from production_duplicate_detection_service import ProductionDuplicateDetectionService, FileMetadata, DuplicateType
     PRODUCTION_DUPLICATE_SERVICE_AVAILABLE = True
     logger.info("✅ Production duplicate detection service available")
 except ImportError as e:
@@ -369,7 +368,6 @@ try:
         memory_limit_mb=500,
         max_file_size_gb=5
     ))
-    initialize_atomic_duplicate_detector(supabase)
     initialize_error_recovery_system(supabase)
     
     # Initialize observability and security systems
@@ -4366,30 +4364,40 @@ class ExcelProcessor:
             })
             raise HTTPException(status_code=400, detail=f"Failed to read file: {str(e)}")
 
-        # Step 2: Atomic Duplicate Detection (Race-condition free)
+        # Step 2: Duplicate Detection (Exact and Near) using Production Service
         await manager.send_update(job_id, {
-            "step": "atomic_duplicate_check",
-            "message": "🔒 Performing atomic duplicate detection...",
+            "step": "duplicate_check",
+            "message": "🔎 Checking for duplicates (exact and near)...",
             "progress": 15
         })
 
         try:
-            atomic_duplicate_detector = get_atomic_duplicate_detector()
-            duplicate_result = await atomic_duplicate_detector.detect_duplicates_atomic(
-                file_content, filename, user_id, sheets
-            )
-            
-            # Convert atomic result to legacy format for compatibility
-            duplicate_analysis = {
-                'is_duplicate': duplicate_result.is_duplicate,
-                'duplicate_files': duplicate_result.duplicate_files,
-                'similarity_score': duplicate_result.similarity_score,
-                'status': duplicate_result.status.value,
-                'requires_user_decision': duplicate_result.requires_user_decision
-            }
+            # Compute file hash for exact duplicate detection
+            file_hash_for_check = hashlib.sha256(file_content).hexdigest()
 
-            # Handle different duplicate detection phases
-            if duplicate_analysis.get('is_duplicate', False):
+            file_metadata = FileMetadata(
+                user_id=user_id,
+                file_hash=file_hash_for_check,
+                filename=filename,
+                file_size=len(file_content),
+                content_type='application/octet-stream',
+                upload_timestamp=datetime.utcnow()
+            )
+
+            dup_result = await duplicate_service.detect_duplicates(
+                file_content, file_metadata, enable_near_duplicate=True
+            )
+
+            # Exact duplicate handling
+            dup_type_val = getattr(getattr(dup_result, 'duplicate_type', None), 'value', None)
+            if getattr(dup_result, 'is_duplicate', False) and dup_type_val == 'exact':
+                duplicate_analysis = {
+                    'is_duplicate': True,
+                    'duplicate_files': dup_result.duplicate_files,
+                    'similarity_score': dup_result.similarity_score,
+                    'status': 'exact_duplicate',
+                    'requires_user_decision': True
+                }
                 await manager.send_update(job_id, {
                     "step": "duplicate_found",
                     "message": "⚠️ Identical file detected! User decision required.",
@@ -4397,8 +4405,6 @@ class ExcelProcessor:
                     "duplicate_info": duplicate_analysis,
                     "requires_user_decision": True
                 })
-
-                # Return early - wait for user decision
                 return {
                     "status": "duplicate_detected",
                     "duplicate_analysis": duplicate_analysis,
@@ -4406,12 +4412,44 @@ class ExcelProcessor:
                     "requires_user_decision": True
                 }
 
-            # Step 3: Content-level duplicate detection
-            content_fingerprint = duplicate_service.calculate_content_fingerprint(sheets)
+            # Near-duplicate handling
+            if getattr(dup_result, 'is_duplicate', False) and dup_type_val == 'near':
+                near_duplicate_analysis = {
+                    'is_near_duplicate': True,
+                    'similarity_score': dup_result.similarity_score,
+                    'duplicate_files': dup_result.duplicate_files
+                }
+                await manager.send_update(job_id, {
+                    "step": "near_duplicate_found",
+                    "message": f"🔍 Similar file detected ({dup_result.similarity_score:.1%} similarity). Consider delta ingestion.",
+                    "progress": 35,
+                    "near_duplicate_info": near_duplicate_analysis,
+                    "requires_user_decision": True
+                })
+                return {
+                    "status": "near_duplicate_detected",
+                    "near_duplicate_analysis": near_duplicate_analysis,
+                    "job_id": job_id,
+                    "requires_user_decision": True
+                }
+
+            # Step 3: Content-level duplicate detection (row-level overlap)
+            # Compute content fingerprint locally from sheets
+            try:
+                content_text_parts = []
+                for df in sheets.values():
+                    try:
+                        content_text_parts.append(df.astype(str).to_csv(index=False))
+                    except Exception:
+                        continue
+                combined_text = "\n".join(content_text_parts)
+                content_fingerprint = hashlib.sha256(combined_text.encode('utf-8', errors='ignore')).hexdigest()
+            except Exception:
+                content_fingerprint = ""
+
             content_duplicate_analysis = await duplicate_service.check_content_duplicate(
                 user_id, content_fingerprint, filename
             )
-            
             if content_duplicate_analysis.get('is_content_duplicate', False):
                 await manager.send_update(job_id, {
                     "step": "content_duplicate_found",
@@ -4420,14 +4458,15 @@ class ExcelProcessor:
                     "content_duplicate_info": content_duplicate_analysis,
                     "requires_user_decision": True
                 })
-                
+
                 # Analyze delta ingestion possibilities
+                delta_analysis = None
                 if content_duplicate_analysis.get('overlapping_files'):
                     existing_file_id = content_duplicate_analysis['overlapping_files'][0]['id']
                     delta_analysis = await duplicate_service.analyze_delta_ingestion(
                         user_id, sheets, existing_file_id
                     )
-                    
+
                     await manager.send_update(job_id, {
                         "step": "delta_analysis_complete",
                         "message": f"📊 Delta analysis: {delta_analysis['delta_analysis']['new_rows']} new rows, {delta_analysis['delta_analysis']['existing_rows']} existing rows",
@@ -4435,43 +4474,14 @@ class ExcelProcessor:
                         "delta_analysis": delta_analysis,
                         "requires_user_decision": True
                     })
-                
+
                 return {
                     "status": "content_duplicate_detected",
                     "content_duplicate_analysis": content_duplicate_analysis,
-                    "delta_analysis": delta_analysis if 'delta_analysis' in locals() else None,
+                    "delta_analysis": delta_analysis,
                     "job_id": job_id,
                     "requires_user_decision": True
                 }
-            
-            # Step 4: Near-duplicate detection (now enabled)
-            near_duplicate_analysis = await duplicate_service.check_near_duplicate(
-                user_id, file_content, filename
-            )
-            
-            if near_duplicate_analysis.get('is_near_duplicate', False):
-                await manager.send_update(job_id, {
-                    "step": "near_duplicate_found",
-                    "message": f"🔍 Similar file detected ({near_duplicate_analysis['similarity_score']:.1%} similarity). Consider delta ingestion.",
-                    "progress": 35,
-                    "near_duplicate_info": near_duplicate_analysis,
-                    "requires_user_decision": True
-                })
-                
-                return {
-                    "status": "near_duplicate_detected",
-                    "near_duplicate_analysis": near_duplicate_analysis,
-                    "job_id": job_id,
-                    "requires_user_decision": True
-                }
-
-            elif False:  # Skip similar files for now
-                await manager.send_update(job_id, {
-                    "step": "similar_files",
-                    "message": f"📄 Found {len(duplicate_analysis['similar_files'])} similar files",
-                    "progress": 20,
-                    "similar_files": duplicate_analysis['similar_files']
-                })
 
         except Exception as e:
             # Handle duplicate detection errors
@@ -4487,16 +4497,17 @@ class ExcelProcessor:
                 severity=ErrorSeverity.MEDIUM,
                 occurred_at=datetime.utcnow()
             )
-            
             await error_recovery.handle_processing_error(error_context)
-            
             # Continue with processing despite duplicate detection error
             logger.warning(f"Duplicate detection failed, continuing with processing: {e}")
+
+        # Ensure duplicate_analysis is defined for downstream usage
+        if 'duplicate_analysis' not in locals():
             duplicate_analysis = {
                 'is_duplicate': False,
                 'duplicate_files': [],
                 'similarity_score': 0.0,
-                'status': 'error',
+                'status': 'none',
                 'requires_user_decision': False
             }
 
@@ -5078,20 +5089,24 @@ async def get_critical_fixes_status():
             }
             status["issues_found"].append("Streaming processor initialization failed")
         
-        # Check 3: Atomic Duplicate Detector
+        # Check 3: Duplicate Detection Service (Production)
         try:
-            atomic_duplicate_detector = get_atomic_duplicate_detector()
-            status["critical_systems"]["atomic_duplicate_detector"] = {
-                "status": "operational",
-                "description": "Race-condition free duplicate detection implemented"
-            }
+            if PRODUCTION_DUPLICATE_SERVICE_AVAILABLE:
+                status["critical_systems"]["duplicate_detection_service"] = {
+                    "status": "operational",
+                    "description": "Production duplicate detection enabled (exact/near/content)"
+                }
+            else:
+                status["critical_systems"]["duplicate_detection_service"] = {
+                    "status": "degraded",
+                    "description": "Production duplicate detection service not available"
+                }
         except Exception as e:
-            status["critical_systems"]["atomic_duplicate_detector"] = {
+            status["critical_systems"]["duplicate_detection_service"] = {
                 "status": "error",
                 "error": str(e),
-                "description": "Atomic duplicate detector not available"
+                "description": "Duplicate detection service check failed"
             }
-            status["issues_found"].append("Atomic duplicate detector initialization failed")
         
         # Check 4: Error Recovery System
         try:
