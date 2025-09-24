@@ -3854,7 +3854,6 @@ class ExcelProcessor:
     
     def __init__(self):
         self.openai = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
-        self.analyzer = DocumentAnalyzer(self.openai)
         self.platform_detector = PlatformDetector()
         
         # Initialize universal components
@@ -4807,7 +4806,13 @@ class ExcelProcessor:
             "progress": 95
         })
         
-        insights = await self.analyzer.generate_insights(first_sheet, doc_analysis)
+        # Generate basic insights without DocumentAnalyzer
+        insights = {
+            "analysis": "File processed successfully",
+            "summary": f"Processed {processed_rows} rows with {events_created} events created",
+            "document_type": doc_analysis.get('type', 'financial_data'),
+            "confidence": doc_analysis.get('confidence', 0.8)
+        }
         
         # Add processing statistics
         insights.update({
@@ -6133,7 +6138,7 @@ async def get_chat_history(user_id: str):
             messages = await optimized_db.get_chat_history_optimized(user_id, limit=500)
         else:
             result = supabase.table('chat_messages').select(
-                'id, chat_id, message, is_user, created_at'
+                'id, chat_id, message, created_at'
             ).eq('user_id', user_id).order('created_at', desc=True).execute()
             messages = result.data or []
         # For now, create one chat per day or group by session

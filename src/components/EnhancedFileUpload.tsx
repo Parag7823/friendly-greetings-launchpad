@@ -6,6 +6,7 @@ import { useToast } from '@/hooks/use-toast';
 import { useFastAPIProcessor } from './FastAPIProcessor';
 import { DuplicateDetectionModal } from './DuplicateDetectionModal';
 import { useAuth } from './AuthProvider';
+import { config } from '@/config';
 
 interface UploadedFile {
   id: string;
@@ -220,7 +221,7 @@ export const EnhancedFileUpload: React.FC = () => {
     if (!fileData || !fileData.jobId) return;
 
     try {
-      const response = await fetch(`https://friendly-greetings-launchpad.onrender.com/cancel-upload/${fileData.jobId}`, {
+      const response = await fetch(`${config.apiUrl}/cancel-upload/${fileData.jobId}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

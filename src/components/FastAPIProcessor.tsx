@@ -2,6 +2,7 @@ import { useState, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 import { FileProcessingEvent } from '@/types/database';
+import { config } from '@/config';
 
 interface SheetMetadata {
   name: string;
@@ -47,8 +48,8 @@ export class FastAPIProcessor {
   private progressCallback?: (progress: FastAPIProcessingProgress) => void;
 
   constructor() {
-    // Use Render FastAPI URL
-    this.apiUrl = "https://friendly-greetings-launchpad.onrender.com";
+    // Use centralized config for API URL
+    this.apiUrl = config.apiUrl;
   }
 
   setProgressCallback(callback: (progress: FastAPIProcessingProgress) => void) {
@@ -126,10 +127,8 @@ export class FastAPIProcessor {
 
   private setupWebSocketConnection(jobId: string): Promise<any> {
     return new Promise((resolve, reject) => {
-      // Build WS URL from backend apiUrl to avoid cross-origin issues
-      const api = new URL(this.apiUrl);
-      const wsProtocol = api.protocol === 'https:' ? 'wss:' : 'ws:';
-      const wsUrl = `${wsProtocol}//${api.host}/ws/${jobId}`;
+      // Build WS URL from centralized config
+      const wsUrl = `${config.wsUrl}/ws/${jobId}`;
       // Connecting to WebSocket for real-time updates
       
       const ws = new WebSocket(wsUrl);

@@ -350,7 +350,7 @@ class OptimizedDatabaseQueries:
         """
         try:
             query = self.supabase.table('chat_messages').select(
-                'id, chat_id, message, is_user, created_at'
+                'id, chat_id, message, created_at'
             ).eq('user_id', user_id)
             
             if chat_id:
