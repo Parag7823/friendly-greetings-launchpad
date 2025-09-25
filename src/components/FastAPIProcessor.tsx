@@ -28,6 +28,9 @@ interface FastAPIProcessingResult {
   status?: string;
   duplicate_analysis?: any;
   job_id?: string;
+  file_hash?: string;
+  storage_path?: string;
+  file_name?: string;
   requires_user_decision?: boolean;
   message?: string;
 }
@@ -315,6 +318,7 @@ export class FastAPIProcessor {
         storage_path: fileName,
         file_name: file.name,
         user_id: user.id,
+        file_hash: fileHash,
         session_token: session.access_token,  // Add missing session token
         endpoint: 'process-excel'  // Add endpoint for security validation
       };
@@ -355,7 +359,10 @@ export class FastAPIProcessor {
             summary: 'Duplicate file detected',
             sheets: [],
             customPromptSuggestions: [],
-            processingTime: 0
+            processingTime: 0,
+            file_hash: fileHash,
+            storage_path: fileName,
+            file_name: file.name
           };
         }
 

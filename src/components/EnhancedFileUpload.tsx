@@ -1,7 +1,8 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { UploadBox } from './UploadBox';
-import { FileList, FileRowData } from './FileList';
+import { FileList } from './FileList';
+import type { FileRowData } from './FileRow';
 import { useToast } from '@/hooks/use-toast';
 import { useFastAPIProcessor } from './FastAPIProcessor';
 import { DuplicateDetectionModal } from './DuplicateDetectionModal';
@@ -30,7 +31,10 @@ export const EnhancedFileUpload: React.FC = () => {
     versionCandidates: null as any,
     recommendation: null as any,
     currentJobId: null as string | null,
-    currentFileHash: null as string | null
+    currentFileHash: null as string | null,
+    currentStoragePath: null as string | null,
+    currentFileName: null as string | null,
+    currentFileId: null as string | null
   });
 
   const { toast } = useToast();
@@ -115,7 +119,10 @@ export const EnhancedFileUpload: React.FC = () => {
             duplicateFiles: result.duplicate_analysis?.duplicate_files || []
           },
           currentJobId: result.job_id,
-          currentFileHash: null
+          currentFileHash: result.file_hash || null,
+          currentStoragePath: result.storage_path || null,
+          currentFileName: result.file_name || file.name,
+          currentFileId: fileId
         }));
         
         // Don't proceed with normal completion
@@ -268,32 +275,95 @@ export const EnhancedFileUpload: React.FC = () => {
     }
 
     try {
-      const response = await fetch('/api/handle-duplicate-decision', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          job_id: duplicateModal.currentJobId,
-          user_id: user?.id || 'anonymous',
-          decision: decision,
-          file_hash: duplicateModal.currentFileHash
-        })
-      });
-
-      if (response.ok) {
-        setDuplicateModal(prev => ({ ...prev, isOpen: false }));
-        toast({
-          title: "Decision Processed",
-          description: `File will be processed with decision: ${decision}`,
+      if (decision === 'skip') {
+        const response = await fetch(`${config.apiUrl}/handle-duplicate-decision`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            job_id: duplicateModal.currentJobId,
+            user_id: user?.id || 'anonymous',
+            decision: decision,
+            file_hash: duplicateModal.currentFileHash
+          })
         });
-      } else {
-        throw new Error('Failed to process duplicate decision');
+        if (!response.ok) throw new Error('Failed to process duplicate decision');
+        setDuplicateModal(prev => ({ ...prev, isOpen: false }));
+        toast({ title: 'Upload Skipped', description: 'Duplicate file was skipped.' });
+        return;
+      }
+
+      // For replace/keep_both, resume processing by calling /process-excel with resume flag
+      if (!duplicateModal.currentStoragePath || !duplicateModal.currentFileName || !duplicateModal.currentFileId) {
+        throw new Error('Missing storage or file info for resume');
+      }
+
+      // Optimistic UI update
+      const jobId = duplicateModal.currentJobId as string;
+      const fileRowId = duplicateModal.currentFileId as string;
+      setDuplicateModal(prev => ({ ...prev, isOpen: false }));
+      setFiles(prev => prev.map(f => 
+        f.id === fileRowId 
+          ? { ...f, status: 'processing' as const, currentStep: 'Resuming after duplicate decision...', progress: Math.max(25, f.progress || 0) }
+          : f
+      ));
+
+      const resumeBody = {
+        job_id: jobId,
+        storage_path: duplicateModal.currentStoragePath,
+        file_name: duplicateModal.currentFileName,
+        user_id: user?.id || 'anonymous',
+        file_hash: duplicateModal.currentFileHash,
+        resume_after_duplicate: true
+      };
+
+      const startResponse = await fetch(`${config.apiUrl}/process-excel`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(resumeBody)
+      });
+      if (!startResponse.ok) throw new Error(`Failed to resume processing: ${startResponse.statusText}`);
+
+      // Poll for updates
+      const maxAttempts = 120;
+      let attempts = 0;
+      while (attempts < maxAttempts) {
+        try {
+          const res = await fetch(`${config.apiUrl}/job-status/${jobId}`);
+          if (res.ok) {
+            const data = await res.json();
+            const status = data.status;
+            const progress = data.progress ?? 0;
+            const message = data.message || 'Processing...';
+            setFiles(prev => prev.map(f => 
+              f.id === fileRowId 
+                ? { ...f, currentStep: message, progress: progress, status: status === 'completed' ? 'completed' as const : status === 'failed' ? 'failed' as const : status === 'cancelled' ? 'cancelled' as const : 'processing' as const }
+                : f
+            ));
+            if (status === 'completed') {
+              toast({ title: 'Processing Complete', description: 'File processed successfully after duplicate resolution.' });
+              break;
+            }
+            if (status === 'failed') {
+              toast({ variant: 'destructive', title: 'Processing Failed', description: data.error || 'Unknown error' });
+              break;
+            }
+            if (status === 'cancelled') break;
+          }
+        } catch {
+          // ignore and retry
+        }
+        await new Promise(r => setTimeout(r, 1500));
+        attempts++;
+      }
+      if (attempts >= maxAttempts) {
+        toast({ variant: 'destructive', title: 'Timeout', description: 'Processing timed out after resume.' });
       }
     } catch (error) {
       toast({
         title: "Error",
-        description: "Failed to process duplicate decision",
+        description: error instanceof Error ? error.message : "Failed to process duplicate decision",
         variant: "destructive"
       });
     }
@@ -303,7 +373,7 @@ export const EnhancedFileUpload: React.FC = () => {
     if (!duplicateModal.recommendation) return;
 
     try {
-      const response = await fetch('/api/version-recommendation-feedback', {
+      const response = await fetch(`${config.apiUrl}/version-recommendation-feedback`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

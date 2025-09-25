@@ -4573,6 +4573,7 @@ class ExcelProcessor:
                 'user_id': user_id,
                 'file_name': filename,
                 'file_size': len(file_content),
+                'file_hash': file_hash,
                 'source': 'file_upload',
                 'content': {
                     'sheets': list(sheets.keys()),
@@ -5161,8 +5162,6 @@ async def get_critical_fixes_status():
         
         # Check 6: WebSocket Connection Management
         try:
-            # Check if WebSocket manager is properly configured
-            websocket_manager = WebSocketProgressManager()
             status["critical_systems"]["websocket_manager"] = {
                 "status": "operational",
                 "active_connections": len(websocket_manager.active_connections),
@@ -6028,8 +6027,75 @@ class DuplicateDecisionRequest(BaseModel):
 async def handle_duplicate_decision(request: DuplicateDecisionRequest):
     """Handle user's decision about duplicate files"""
     try:
-        # Implementation for handling duplicate decisions
-        return {"status": "success", "message": "Duplicate decision processed"}
+        # Validate job exists in memory
+        job_state = websocket_manager.job_status.get(request.job_id)
+        if not job_state:
+            raise HTTPException(status_code=404, detail="Job not found or expired")
+
+        decision = (request.decision or '').lower()
+
+        # If user chose to skip, mark as cancelled and update DB
+        if decision == 'skip':
+            websocket_manager.job_status[request.job_id] = {
+                **job_state,
+                "status": "cancelled",
+                "message": "Processing skipped due to duplicate",
+                "progress": 100
+            }
+            # Notify over WebSocket if connected
+            await websocket_manager.send_overall_update(
+                job_id=request.job_id,
+                status="cancelled",
+                message="Processing skipped by user due to duplicate",
+                progress=100
+            )
+
+            # Persist job status in DB (best-effort)
+            try:
+                supabase.table('ingestion_jobs').update({
+                    'status': 'cancelled',
+                    'updated_at': datetime.utcnow().isoformat(),
+                    'error_message': 'Skipped due to duplicate'
+                }).eq('id', request.job_id).execute()
+            except Exception as e:
+                logger.warning(f"Failed to update ingestion_jobs on skip for job {request.job_id}: {e}")
+
+            return {"status": "success", "message": "Duplicate decision processed: skipped"}
+
+        # For 'replace' or 'keep_both' we resume processing with the saved request
+        if decision in ('replace', 'keep_both'):
+            pending = job_state.get('pending_request') or {}
+            user_id = pending.get('user_id')
+            storage_path = pending.get('storage_path')
+            filename = pending.get('filename') or 'uploaded_file'
+            if not user_id or not storage_path:
+                raise HTTPException(status_code=400, detail="Pending request not found for this job")
+
+            # Update status and resume processing asynchronously
+            websocket_manager.job_status[request.job_id] = {
+                **job_state,
+                "status": "processing",
+                "message": f"Resuming after duplicate decision: {decision}",
+                "progress": max(job_state.get('progress', 10), 20)
+            }
+            await websocket_manager.send_overall_update(
+                job_id=request.job_id,
+                status="processing",
+                message=f"Resuming after duplicate decision: {decision}",
+                progress=websocket_manager.job_status[request.job_id]["progress"]
+            )
+
+            # Kick off processing job (server-side resume)
+            asyncio.create_task(start_processing_job(
+                user_id=user_id,
+                job_id=request.job_id,
+                storage_path=storage_path,
+                filename=filename
+            ))
+
+            return {"status": "success", "message": "Duplicate decision processed: resuming"}
+
+        raise HTTPException(status_code=400, detail="Invalid decision. Use one of: replace, keep_both, skip")
     except Exception as e:
         logger.error(f"Error handling duplicate decision: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -6063,7 +6129,7 @@ async def submit_version_recommendation_feedback(request: VersionRecommendationF
         result = supabase.table("version_recommendations").update({
             "user_accepted": request.accepted,
             "user_feedback": request.feedback,
-            "feedback_submitted_at": datetime.utcnow().isoformat()
+            "updated_at": datetime.utcnow().isoformat()
         }).eq("id", request.recommendation_id).eq("user_id", request.user_id).execute()
         
         if not result.data:
@@ -6659,6 +6725,57 @@ async def process_excel_endpoint(request: dict):
         filename = request.get('file_name') or 'uploaded_file'
         if not user_id or not job_id or not storage_path:
             raise HTTPException(status_code=400, detail="user_id, job_id, and storage_path are required")
+        
+        # Early duplicate check based on real file hash (if provided)
+        file_hash = request.get('file_hash')
+        resume_after_duplicate = request.get('resume_after_duplicate')
+        if file_hash and not resume_after_duplicate:
+            try:
+                dup_res = supabase.table('raw_records').select(
+                    'id, file_name, created_at, content'
+                ).eq('user_id', user_id).eq('file_hash', file_hash).limit(10).execute()
+                duplicates = dup_res.data or []
+                if duplicates:
+                    duplicate_files = [{
+                        "id": d.get("id"),
+                        "filename": d.get("file_name"),
+                        "uploaded_at": d.get("created_at"),
+                        "total_rows": (d.get("content") or {}).get("total_rows", 0)
+                    } for d in duplicates]
+                    # Best-effort latest duplicate selection
+                    try:
+                        latest = max(duplicate_files, key=lambda x: x["uploaded_at"] or "")
+                        latest_str = (latest.get('uploaded_at') or '')[:10]
+                        latest_name = latest.get('filename') or filename
+                    except Exception:
+                        latest_str = ''
+                        latest_name = filename
+                    message = f"Identical file '{latest_name}' was uploaded on {latest_str}. Do you want to replace it or skip this upload?"
+                    # Update job status for polling clients
+                    websocket_manager.job_status[job_id] = {
+                        **websocket_manager.job_status.get(job_id, {}),
+                        "status": "waiting_user_decision",
+                        "message": "Duplicate detected - waiting for user decision",
+                        "progress": 15,
+                        "pending_request": {
+                            "user_id": user_id,
+                            "storage_path": storage_path,
+                            "filename": filename,
+                            "file_hash": file_hash
+                        }
+                    }
+                    return {
+                        "status": "duplicate_detected",
+                        "job_id": job_id,
+                        "file_hash": file_hash,
+                        "duplicate_analysis": {
+                            "duplicate_files": duplicate_files,
+                            "recommendation": "replace_or_skip"
+                        },
+                        "message": message
+                    }
+            except Exception as e:
+                logger.warning(f"Early duplicate check failed for job {job_id}: {e}")
 
         # Log request with observability
         structured_logger.info("File processing request received", {
@@ -6677,6 +6794,10 @@ async def process_excel_endpoint(request: dict):
 
         async def _run_processing_job():
             try:
+                # Cooperative cancellation helper
+                def is_cancelled() -> bool:
+                    status = websocket_manager.job_status.get(job_id, {})
+                    return status.get("status") == "cancelled"
                 # Notify start
                 await websocket_manager.send_overall_update(
                     job_id=job_id,
@@ -6684,6 +6805,8 @@ async def process_excel_endpoint(request: dict):
                     message="📥 Downloading file from storage...",
                     progress=5
                 )
+                if is_cancelled():
+                    return
 
                 # Download file bytes from Supabase Storage
                 file_bytes = None
@@ -6707,6 +6830,8 @@ async def process_excel_endpoint(request: dict):
                     message="🧠 Initializing analysis pipeline...",
                     progress=15
                 )
+                if is_cancelled():
+                    return
 
                 # Initialize components
                 excel_processor = ExcelProcessor()
@@ -6717,6 +6842,8 @@ async def process_excel_endpoint(request: dict):
 
                 # Step 1: Process Excel file
                 await websocket_manager.send_component_update(job_id, "excel_processor", "processing", "📊 Processing Excel file...", 20)
+                if is_cancelled():
+                    return
                 excel_result = await excel_processor.stream_xlsx_processing(
                     file_content=file_bytes,
                     filename=filename,
@@ -6726,6 +6853,8 @@ async def process_excel_endpoint(request: dict):
 
                 # Step 2: Platform detection
                 await websocket_manager.send_component_update(job_id, "platform_detector", "processing", "🔎 Detecting platform...", 50)
+                if is_cancelled():
+                    return
                 platform_result = await platform_detector.detect_platform_universal(
                     payload={"file_content": file_bytes, "filename": filename},
                     filename=filename,
@@ -6735,6 +6864,8 @@ async def process_excel_endpoint(request: dict):
 
                 # Step 3: Document classification
                 await websocket_manager.send_component_update(job_id, "document_classifier", "processing", "🧾 Classifying document...", 65)
+                if is_cancelled():
+                    return
                 document_result = await document_classifier.classify_document_universal(
                     payload={"file_content": file_bytes, "filename": filename},
                     filename=filename,
@@ -6744,6 +6875,8 @@ async def process_excel_endpoint(request: dict):
 
                 # Step 4: Data extraction
                 await websocket_manager.send_component_update(job_id, "data_extractor", "processing", "🧩 Extracting data...", 80)
+                if is_cancelled():
+                    return
                 extraction_result = await data_extractor.extract_data_universal(
                     file_content=file_bytes,
                     filename=filename,
@@ -6755,6 +6888,8 @@ async def process_excel_endpoint(request: dict):
                 await websocket_manager.send_component_update(job_id, "field_detector", "processing", "📐 Detecting fields...", 92)
                 field_results = {}
                 for sheet_name, df in excel_result.get('sheets', {}).items():
+                    if is_cancelled():
+                        return
                     field_result = await field_detector.detect_field_types_universal(
                         data=df.to_dict('records')[0] if hasattr(df, 'empty') and not df.empty else {},
                         filename=filename,
@@ -6763,98 +6898,21 @@ async def process_excel_endpoint(request: dict):
                     field_results[sheet_name] = field_result
                 await websocket_manager.send_component_update(job_id, "field_detector", "completed", "✅ Field detection completed", 95)
 
-                # Step 6: Save data to database
-                await websocket_manager.send_component_update(job_id, "database_storage", "processing", "💾 Storing processed data...", 96)
-                
-                # Create raw_records entry
-                try:
-                    raw_record_data = {
-                        "user_id": user_id,
-                        "file_name": filename,
-                        "file_hash": job_id[:32],  # Use job_id as hash placeholder
-                        "source": "process_excel_endpoint",
-                        "status": "completed",
-                        "content": {
-                            "excel_processing": excel_result,
-                            "platform_detection": platform_result,
-                            "document_classification": document_result,
-                            "data_extraction": extraction_result,
-                            "field_detection": field_results,
-                            "processing_metadata": {
-                                "job_id": job_id,
-                                "processed_at": datetime.utcnow().isoformat(),
-                                "components_used": ["excel_processor", "platform_detector", "document_classifier", "data_extractor", "field_detector"]
-                            }
-                        }
-                    }
-                    
-                    record_result = supabase.table('raw_records').insert(raw_record_data).execute()
-                    record_id = record_result.data[0]['id'] if record_result.data else None
-                    
-                    # Create ingestion_jobs entry
-                    job_data = {
-                        "job_type": "process_excel_storage",
-                        "user_id": user_id,
-                        "status": "completed",
-                        "progress": 100,
-                        "metadata": {
-                            "filename": filename,
-                            "job_id": job_id,
-                            "record_id": record_id
-                        }
-                    }
-                    supabase.table('ingestion_jobs').insert(job_data).execute()
-                    
-                    # Create raw_events from Excel data if available
-                    events_created = 0
-                    if excel_result and excel_result.get('sheets'):
-                        for sheet_name, df in excel_result.get('sheets', {}).items():
-                            if hasattr(df, 'iterrows'):
-                                for idx, row in df.iterrows():
-                                    try:
-                                        event_data = {
-                                            "user_id": user_id,
-                                            "file_id": record_id,
-                                            "payload": row.to_dict(),
-                                            "row_index": idx + 1,
-                                            "sheet_name": sheet_name,
-                                            "source_filename": filename,
-                                            "status": "processed",
-                                            "kind": "data_row",
-                                            "confidence_score": 0.8
-                                        }
-                                        supabase.table('raw_events').insert(event_data).execute()
-                                        events_created += 1
-                                        
-                                        if events_created % 10 == 0:  # Update progress every 10 events
-                                            await websocket_manager.send_component_update(job_id, "database_storage", "processing", f"💾 Stored {events_created} events...", 97)
-                                    except Exception as row_error:
-                                        logger.warning(f"Failed to insert row {idx}: {row_error}")
-                                        continue
-                    
-                    await websocket_manager.send_component_update(job_id, "database_storage", "completed", f"✅ Stored {events_created} events in database", 98)
-                    
-                except Exception as db_error:
-                    logger.error(f"Database storage failed: {db_error}")
-                    await websocket_manager.send_component_update(job_id, "database_storage", "failed", f"❌ Database storage failed: {db_error}", 96)
-                
                 # Finalize
+                if is_cancelled():
+                    return
                 results = {
                     "excel_processing": excel_result,
                     "platform_detection": platform_result,
                     "document_classification": document_result,
                     "data_extraction": extraction_result,
-                    "field_detection": field_results,
-                    "database_storage": {
-                        "events_created": events_created,
-                        "record_id": record_id
-                    }
+                    "field_detection": field_results
                 }
 
                 await websocket_manager.send_overall_update(
                     job_id=job_id,
                     status="completed",
-                    message=f"🎉 Processing completed! {events_created} events stored in database.",
+                    message="🎉 Processing completed successfully!",
                     progress=100,
                     results=results
                 )
