@@ -7237,6 +7237,58 @@ class ConnectorSyncRequest(BaseModel):
 
 def _require_security(endpoint: str, user_id: str, session_token: Optional[str]):
     try:
+        # Optional dev bypass for connector testing
+        if os.environ.get("CONNECTORS_DEV_TRUST") == "1" or os.environ.get("SECURITY_DEV_TRUST") == "1":
+            return
+
+        # If we have a Supabase JWT but no active in-memory session, validate via Supabase Auth
+        if user_id and session_token and user_id not in security_validator.auth_validator.active_sessions:
+            try:
+                # Prefer initialized supabase_url, otherwise read from env
+                sb_url = (
+                    globals().get('supabase_url')
+                    or os.environ.get("SUPABASE_URL")
+                    or os.environ.get("SUPABASE_PROJECT_URL")
+                )
+                api_key = (
+                    os.environ.get("SUPABASE_ANON_KEY")
+                    or os.environ.get("SUPABASE_SERVICE_KEY")
+                    or os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
+                    or os.environ.get("SUPABASE_KEY")
+                )
+                if sb_url and api_key:
+                    headers = {
+                        "Authorization": f"Bearer {session_token}",
+                        "apikey": api_key,
+                    }
+                    resp = requests.get(f"{sb_url}/auth/v1/user", headers=headers, timeout=10)
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        if data.get("id") == user_id:
+                            # Extract expiry from JWT payload (no signature check; we already trusted Supabase response)
+                            exp_ts = None
+                            try:
+                                parts = session_token.split('.')
+                                if len(parts) >= 2:
+                                    payload_b64 = parts[1] + '==='  # pad for urlsafe decode
+                                    payload_json = base64.urlsafe_b64decode(payload_b64).decode('utf-8')
+                                    payload = json.loads(payload_json)
+                                    exp_ts = payload.get('exp')
+                            except Exception:
+                                exp_ts = None
+                            expires_at = (
+                                datetime.utcfromtimestamp(exp_ts)
+                                if isinstance(exp_ts, (int, float)) else datetime.utcnow() + timedelta(hours=1)
+                            )
+                            security_validator.auth_validator.active_sessions[user_id] = {
+                                'token': session_token,
+                                'created_at': datetime.utcnow(),
+                                'expires_at': expires_at,
+                                'last_activity': datetime.utcnow(),
+                            }
+            except Exception as e:
+                logger.warning(f"Supabase session validation bridge failed: {e}")
+
         valid, violations = security_validator.validate_request({
             'endpoint': endpoint,
             'user_id': user_id,
