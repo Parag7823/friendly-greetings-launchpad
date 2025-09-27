@@ -7319,9 +7319,18 @@ async def _store_external_item_attachment(user_id: str, provider: str, message_i
     storage_path = f"external/{provider}/{user_id}/{today}/{message_id}/{safe_name}"
     try:
         storage = supabase.storage.from_("finely-upload")
-        # Some supabase clients require file-like; httpx bytes accepted by python client
-        bio = io.BytesIO(content)
-        storage.upload(storage_path, bio)
+        # Render's supabase-py expects a filesystem path, not a BytesIO
+        # Write to a secure temporary file and upload by path
+        with tempfile.NamedTemporaryFile(delete=False) as tmp:
+            tmp.write(content)
+            tmp_path = tmp.name
+        try:
+            storage.upload(storage_path, tmp_path)
+        finally:
+            try:
+                os.remove(tmp_path)
+            except Exception:
+                pass
         return storage_path, file_hash
     except Exception as e:
         logger.error(f"Storage upload failed: {e}")
