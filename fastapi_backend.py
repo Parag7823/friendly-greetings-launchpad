@@ -306,10 +306,10 @@ app.add_middleware(
         "http://localhost:3000",
         "http://localhost:5173", 
         "https://finley-ai.vercel.app",
-        "https://*.vercel.app",
         "https://friendly-greetings-launchpad.onrender.com",
-        "https://*.onrender.com"
+        "https://friendly-greetings-launchpad-amey.onrender.com"
     ],
+    allow_origin_regex=r"^https?:\/\/([a-z0-9-]+\.)*(onrender\.com|vercel\.app)$",
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],

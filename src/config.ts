@@ -1,7 +1,7 @@
 // Environment-based configuration for API endpoints
 export const config = {
   // API base URL - defaults to production, can be overridden with VITE_API_URL
-  apiUrl: import.meta.env.VITE_API_URL || 'https://friendly-greetings-launchpad.onrender.com',
+  apiUrl: import.meta.env.VITE_API_URL || 'https://friendly-greetings-launchpad-amey.onrender.com',
   
   // WebSocket URL derived from API URL
   get wsUrl() {
