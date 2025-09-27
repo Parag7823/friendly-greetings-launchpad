@@ -57,6 +57,7 @@ COPY ai_cache_system.py .
 COPY batch_optimizer.py .
 COPY observability_system.py .
 COPY security_system.py .
+COPY nango_client.py .
 
 # Copy built frontend from frontend stage
 COPY --from=frontend-builder /app/frontend/dist ./dist
