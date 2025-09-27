@@ -532,6 +532,7 @@ export type Database = {
           created_at: string | null
           file_name: string | null
           file_size: number | null
+          file_hash: string | null
           id: string
           ingested_at: string | null
           metadata: Json | null
@@ -546,6 +547,7 @@ export type Database = {
           created_at?: string | null
           file_name?: string | null
           file_size?: number | null
+          file_hash?: string | null
           id?: string
           ingested_at?: string | null
           metadata?: Json | null
@@ -560,6 +562,7 @@ export type Database = {
           created_at?: string | null
           file_name?: string | null
           file_size?: number | null
+          file_hash?: string | null
           id?: string
           ingested_at?: string | null
           metadata?: Json | null

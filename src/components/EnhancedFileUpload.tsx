@@ -8,6 +8,7 @@ import { useFastAPIProcessor } from './FastAPIProcessor';
 import { DuplicateDetectionModal } from './DuplicateDetectionModal';
 import { useAuth } from './AuthProvider';
 import { config } from '@/config';
+import { supabase } from '@/integrations/supabase/client';
 
 interface UploadedFile {
   id: string;
@@ -275,90 +276,81 @@ export const EnhancedFileUpload: React.FC = () => {
     }
 
     try {
+      // Fetch session token for backend security validation
+      const { data: { session } } = await supabase.auth.getSession();
+
+      // Always notify backend of decision (skip, replace, keep_both)
+      const response = await fetch(`${config.apiUrl}/handle-duplicate-decision`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          job_id: duplicateModal.currentJobId,
+          user_id: user?.id || 'anonymous',
+          decision: decision,
+          file_hash: duplicateModal.currentFileHash,
+          session_token: session?.access_token
+        })
+      });
+      if (!response.ok) throw new Error('Failed to process duplicate decision');
+
+      // Close modal
+      setDuplicateModal(prev => ({ ...prev, isOpen: false }));
+
+      // If skip, just toast and return
       if (decision === 'skip') {
-        const response = await fetch(`${config.apiUrl}/handle-duplicate-decision`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            job_id: duplicateModal.currentJobId,
-            user_id: user?.id || 'anonymous',
-            decision: decision,
-            file_hash: duplicateModal.currentFileHash
-          })
-        });
-        if (!response.ok) throw new Error('Failed to process duplicate decision');
-        setDuplicateModal(prev => ({ ...prev, isOpen: false }));
         toast({ title: 'Upload Skipped', description: 'Duplicate file was skipped.' });
         return;
       }
 
-      // For replace/keep_both, resume processing by calling /process-excel with resume flag
-      if (!duplicateModal.currentStoragePath || !duplicateModal.currentFileName || !duplicateModal.currentFileId) {
-        throw new Error('Missing storage or file info for resume');
-      }
-
-      // Optimistic UI update
+      // For replace/keep_both, poll job status as backend resumes processing
       const jobId = duplicateModal.currentJobId as string;
-      const fileRowId = duplicateModal.currentFileId as string;
-      setDuplicateModal(prev => ({ ...prev, isOpen: false }));
-      setFiles(prev => prev.map(f => 
-        f.id === fileRowId 
-          ? { ...f, status: 'processing' as const, currentStep: 'Resuming after duplicate decision...', progress: Math.max(25, f.progress || 0) }
-          : f
-      ));
+      const fileRowId = duplicateModal.currentFileId as string | null;
 
-      const resumeBody = {
-        job_id: jobId,
-        storage_path: duplicateModal.currentStoragePath,
-        file_name: duplicateModal.currentFileName,
-        user_id: user?.id || 'anonymous',
-        file_hash: duplicateModal.currentFileHash,
-        resume_after_duplicate: true
-      };
+      if (fileRowId) {
+        // Optimistic UI update
+        setFiles(prev => prev.map(f => 
+          f.id === fileRowId 
+            ? { ...f, status: 'processing' as const, currentStep: 'Resuming after duplicate decision...', progress: Math.max(25, f.progress || 0) }
+            : f
+        ));
 
-      const startResponse = await fetch(`${config.apiUrl}/process-excel`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(resumeBody)
-      });
-      if (!startResponse.ok) throw new Error(`Failed to resume processing: ${startResponse.statusText}`);
-
-      // Poll for updates
-      const maxAttempts = 120;
-      let attempts = 0;
-      while (attempts < maxAttempts) {
-        try {
-          const res = await fetch(`${config.apiUrl}/job-status/${jobId}`);
-          if (res.ok) {
-            const data = await res.json();
-            const status = data.status;
-            const progress = data.progress ?? 0;
-            const message = data.message || 'Processing...';
-            setFiles(prev => prev.map(f => 
-              f.id === fileRowId 
-                ? { ...f, currentStep: message, progress: progress, status: status === 'completed' ? 'completed' as const : status === 'failed' ? 'failed' as const : status === 'cancelled' ? 'cancelled' as const : 'processing' as const }
-                : f
-            ));
-            if (status === 'completed') {
-              toast({ title: 'Processing Complete', description: 'File processed successfully after duplicate resolution.' });
-              break;
+        // Poll loop
+        const maxAttempts = 120;
+        let attempts = 0;
+        while (attempts < maxAttempts) {
+          try {
+            const res = await fetch(`${config.apiUrl}/job-status/${jobId}`);
+            if (res.ok) {
+              const data = await res.json();
+              const status = data.status;
+              const progress = data.progress ?? 0;
+              const message = data.message || 'Processing...';
+              setFiles(prev => prev.map(f => 
+                f.id === fileRowId 
+                  ? { ...f, currentStep: message, progress: progress, status: status === 'completed' ? 'completed' as const : status === 'failed' ? 'failed' as const : status === 'cancelled' ? 'cancelled' as const : 'processing' as const }
+                  : f
+              ));
+              if (status === 'completed') {
+                toast({ title: 'Processing Complete', description: 'File processed successfully after duplicate resolution.' });
+                break;
+              }
+              if (status === 'failed') {
+                toast({ variant: 'destructive', title: 'Processing Failed', description: data.error || 'Unknown error' });
+                break;
+              }
+              if (status === 'cancelled') break;
             }
-            if (status === 'failed') {
-              toast({ variant: 'destructive', title: 'Processing Failed', description: data.error || 'Unknown error' });
-              break;
-            }
-            if (status === 'cancelled') break;
+          } catch {
+            // ignore and retry
           }
-        } catch {
-          // ignore and retry
+          await new Promise(r => setTimeout(r, 1500));
+          attempts++;
         }
-        await new Promise(r => setTimeout(r, 1500));
-        attempts++;
-      }
-      if (attempts >= maxAttempts) {
-        toast({ variant: 'destructive', title: 'Timeout', description: 'Processing timed out after resume.' });
+        if (attempts >= maxAttempts) {
+          toast({ variant: 'destructive', title: 'Timeout', description: 'Processing timed out after resume.' });
+        }
       }
     } catch (error) {
       toast({
@@ -373,6 +365,7 @@ export const EnhancedFileUpload: React.FC = () => {
     if (!duplicateModal.recommendation) return;
 
     try {
+      const { data: { session } } = await supabase.auth.getSession();
       const response = await fetch(`${config.apiUrl}/version-recommendation-feedback`, {
         method: 'POST',
         headers: {
@@ -382,7 +375,8 @@ export const EnhancedFileUpload: React.FC = () => {
           recommendation_id: duplicateModal.recommendation.id,
           user_id: user?.id || 'anonymous',
           accepted: accepted,
-          feedback: feedback
+          feedback: feedback,
+          session_token: session?.access_token
         })
       });
 

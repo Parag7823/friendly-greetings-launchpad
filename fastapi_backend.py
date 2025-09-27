@@ -26,18 +26,21 @@ import magic
 import filetype
 import requests
 import tempfile
+from email.utils import parsedate_to_datetime
+import io
 
 # FastAPI and web framework imports
-from fastapi import FastAPI, HTTPException, BackgroundTasks, WebSocket, WebSocketDisconnect, UploadFile, Form, File
+from fastapi import FastAPI, HTTPException, BackgroundTasks, WebSocket, WebSocketDisconnect, UploadFile, Form, File, Response
 from starlette.requests import Request
 from starlette.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 # Database and external services
 from supabase import create_client, Client
 from openai import OpenAI
+from nango_client import NangoClient
 
 # Import critical fixes systems
 from transaction_manager import initialize_transaction_manager, get_transaction_manager
@@ -402,6 +405,16 @@ except Exception as e:
     optimized_db = None
     # Log critical database failure for monitoring
     logger.critical(f"🚨 DATABASE CONNECTION FAILED - System running in degraded mode: {e}")
+    # Initialize minimal observability/logging to prevent NameError in endpoints
+    try:
+        # Fallback lightweight initialization so code paths can still log
+        structured_logger = StructuredLogger("finley_backend_degraded")
+        metrics_collector = MetricsCollector()
+        observability_system = ObservabilitySystem()
+        security_validator = SecurityValidator()
+        logger.info("✅ Degraded mode observability initialized (no database)")
+    except Exception as init_err:
+        logger.warning(f"⚠️ Failed to initialize degraded observability systems: {init_err}")
 
 # Database health check function
 def check_database_health():
@@ -3325,7 +3338,7 @@ class AIRowClassifier:
                                 row_data,
                                 column_names,
                                 file_context.get('filename', 'test-file.xlsx'),
-                                f"row-{row_index}" if 'row_index' in locals() else 'row-unknown'
+                                f"row-{row_data.get('row_index', 'unknown')}"
                             )
                         else:
                             resolution_result = {
@@ -4017,7 +4030,7 @@ class ExcelProcessor:
             logger.error(f"Error detecting financial fields in sheet {sheet_name}: {e}")
             return financial_detection
     
-    async def stream_xlsx_processing(self, file_content: bytes, progress_callback=None) -> Dict[str, pd.DataFrame]:
+    async def stream_xlsx_processing(self, file_content: bytes, filename: Optional[str] = None, user_id: Optional[str] = None, progress_callback=None) -> Dict[str, Any]:
         """Memory-efficient streaming XLSX processing"""
         try:
             # Use openpyxl for streaming processing
@@ -4088,12 +4101,25 @@ class ExcelProcessor:
                     continue
             
             workbook.close()
-            return sheets
+            return {
+                'sheets': sheets,
+                'summary': {
+                    'sheet_count': len(sheets),
+                    'filename': filename
+                }
+            }
             
         except Exception as e:
             logger.error(f"Error in streaming XLSX processing: {e}")
             # Fallback to pandas
-            return pd.read_excel(io.BytesIO(file_content), sheet_name=None)
+            fallback_sheets = pd.read_excel(io.BytesIO(file_content), sheet_name=None)
+            return {
+                'sheets': fallback_sheets if isinstance(fallback_sheets, dict) else {'Sheet1': fallback_sheets},
+                'summary': {
+                    'sheet_count': len(fallback_sheets) if isinstance(fallback_sheets, dict) else (0 if fallback_sheets is None else 1),
+                    'filename': filename
+                }
+            }
 
     async def _fast_classify_row_cached(self, row: pd.Series, platform_info: dict, column_names: list) -> dict:
         """Fast cached classification with AI fallback - 90% cost reduction"""
@@ -4211,8 +4237,12 @@ class ExcelProcessor:
                 elif file_type.extension in ['xlsx', 'xls']:
                     return file_type.extension
             
-            # Fallback to python-magic
-            mime_type = magic.from_buffer(file_content, mime=True)
+            # Fallback to python-magic (guarded for environments where libmagic is unavailable)
+            mime_type = ''
+            try:
+                mime_type = magic.from_buffer(file_content, mime=True)
+            except Exception:
+                mime_type = ''
             if 'csv' in mime_type or 'text/plain' in mime_type:
                 return 'csv'
             elif 'excel' in mime_type or 'spreadsheet' in mime_type:
@@ -4933,45 +4963,49 @@ class ExcelProcessor:
             "progress": 97
         })
         
+        imports_available = True
         try:
             from enhanced_relationship_detector import EnhancedRelationshipDetector
             from openai import AsyncOpenAI
-            
-            # Initialize relationship detector
-            openai_client = AsyncOpenAI(api_key=os.getenv('OPENAI_API_KEY'))
-            relationship_detector = EnhancedRelationshipDetector(openai_client, supabase)
         except ImportError:
             logger.warning("Enhanced relationship detector not available, skipping relationship detection")
-            return
-            
-            # Detect all relationships
-            relationship_results = await relationship_detector.detect_all_relationships(user_id)
-            
-            # Store relationship instances
-            if relationship_results.get('relationships'):
-                await self._store_relationship_instances(relationship_results['relationships'], user_id, transaction_id, supabase)
-            
-            # Add relationship results to insights
-            insights['relationship_analysis'] = relationship_results
-            
-            await manager.send_update(job_id, {
-                "step": "relationships_completed",
-                "message": f"✅ Found {relationship_results.get('total_relationships', 0)} relationships between events",
-                "progress": 98
-            })
-            
-        except Exception as e:
-            logger.error(f"Relationship detection failed: {e}")
-            insights['relationship_analysis'] = {
-                'error': str(e),
-                'message': 'Relationship detection failed but processing completed'
-            }
-            # Send error to frontend
-            await manager.send_update(job_id, {
-                "step": "relationship_detection_failed",
-                "message": f"❌ Relationship detection failed: {str(e)}",
-                "progress": 98
-            })
+            imports_available = False
+
+        if imports_available:
+            try:
+                # Initialize relationship detector
+                openai_client = AsyncOpenAI(api_key=os.getenv('OPENAI_API_KEY'))
+                relationship_detector = EnhancedRelationshipDetector(openai_client, supabase)
+
+                # Detect all relationships
+                relationship_results = await relationship_detector.detect_all_relationships(user_id)
+                
+                # Store relationship instances
+                if relationship_results.get('relationships'):
+                    await self._store_relationship_instances(relationship_results['relationships'], user_id, transaction_id, supabase)
+                    # Also store cross-platform relationships for analytics
+                    await self._store_cross_platform_relationships(relationship_results['relationships'], user_id, supabase)
+                
+                # Add relationship results to insights
+                insights['relationship_analysis'] = relationship_results
+                
+                await manager.send_update(job_id, {
+                    "step": "relationships_completed",
+                    "message": f"✅ Found {relationship_results.get('total_relationships', 0)} relationships between events",
+                    "progress": 98
+                })
+            except Exception as e:
+                logger.error(f"Relationship detection failed: {e}")
+                insights['relationship_analysis'] = {
+                    'error': str(e),
+                    'message': 'Relationship detection failed but processing completed'
+                }
+                # Send error to frontend
+                await manager.send_update(job_id, {
+                    "step": "relationship_detection_failed",
+                    "message": f"❌ Relationship detection failed: {str(e)}",
+                    "progress": 98
+                })
 
         # Step 11: Compute and Store Metrics
         await manager.send_update(job_id, {
@@ -4992,7 +5026,7 @@ class ExcelProcessor:
                     'platform_detected': platform_info.get('platform', 'unknown'),
                     'platform_confidence': platform_info.get('confidence', 0.0),
                     'entities_resolved': len(entities) if 'entities' in locals() else 0,
-                    'relationships_found': relationship_results.get('total_relationships', 0) if 'relationship_results' in locals() else 0,
+                    'relationships_found': relationship_results.get('total_relationships', 0) if 'relationship_results' in locals() and relationship_results is not None else 0,
                     'processing_time_seconds': (datetime.utcnow() - datetime.fromisoformat(transaction_data['started_at'])).total_seconds() if transaction_id else 0
                 }
             }
@@ -5020,7 +5054,7 @@ class ExcelProcessor:
                         **transaction_data['metadata'],
                         'events_created': events_created,
                         'entities_resolved': len(entities) if 'entities' in locals() else 0,
-                        'relationships_found': relationship_results.get('total_relationships', 0) if 'relationship_results' in locals() else 0
+                        'relationships_found': relationship_results.get('total_relationships', 0) if 'relationship_results' in locals() and relationship_results is not None else 0
                     }
                 }).eq('id', transaction_id).execute()
                 logger.info(f"Committed processing transaction: {transaction_id}")
@@ -5558,7 +5592,7 @@ async def get_performance_optimization_status():
         except Exception as e:
             logger.error(f"Error storing platform patterns: {e}")
 
-    async def _store_relationship_instances(self, relationships: List[Dict], user_id: str, transaction_id: str, supabase: Client):
+    async def _store_relationship_instances(self, relationships: List[Dict], user_id: str, supabase: Client):
         """Store relationship instances in the database"""
         try:
             if not relationships:
@@ -5575,8 +5609,7 @@ async def get_performance_optimization_status():
                     'confidence_score': relationship.get('confidence_score', 0.5),
                     'detection_method': relationship.get('detection_method', 'ai'),
                     'pattern_id': relationship.get('pattern_id'),
-                    'reasoning': relationship.get('reasoning', ''),
-                    'transaction_id': transaction_id
+                    'reasoning': relationship.get('reasoning', '')
                 }
                 
                 result = supabase.table('relationship_instances').insert(rel_data).execute()
@@ -5587,6 +5620,72 @@ async def get_performance_optimization_status():
                     
         except Exception as e:
             logger.error(f"Error storing relationship instances: {e}")
+
+    async def _store_cross_platform_relationships(self, relationships: List[Dict], user_id: str, supabase: Client):
+        """Store cross-platform relationship rows for analytics and compatibility stats"""
+        try:
+            if not relationships:
+                return
+
+            # Build a set of event IDs to fetch platforms in one query
+            event_ids: List[str] = []
+            for rel in relationships:
+                src = rel.get('source_event_id')
+                tgt = rel.get('target_event_id')
+                if src:
+                    event_ids.append(src)
+                if tgt:
+                    event_ids.append(tgt)
+            event_ids = list({eid for eid in event_ids if eid})
+
+            if not event_ids:
+                return
+
+            # Fetch platforms for all involved events
+            platform_map: Dict[str, Any] = {}
+            try:
+                ev_res = supabase.table('raw_events').select('id, source_platform').in_('id', event_ids).execute()
+                for ev in (ev_res.data or []):
+                    platform_map[str(ev.get('id'))] = ev.get('source_platform')
+            except Exception as e:
+                logger.warning(f"Failed to fetch platforms for cross-platform relationships: {e}")
+
+            # Prepare batch insert
+            rows = []
+            for rel in relationships:
+                src_id = rel.get('source_event_id')
+                tgt_id = rel.get('target_event_id')
+                src_platform = platform_map.get(str(src_id))
+                tgt_platform = platform_map.get(str(tgt_id))
+                compatibility = None
+                if src_platform and tgt_platform:
+                    compatibility = 'same_platform' if src_platform == tgt_platform else 'cross_platform'
+
+                rows.append({
+                    'user_id': user_id,
+                    'source_event_id': src_id,
+                    'target_event_id': tgt_id,
+                    'relationship_type': rel.get('relationship_type', 'unknown'),
+                    'confidence_score': rel.get('confidence_score', 0.5),
+                    'detection_method': rel.get('detection_method', 'analysis'),
+                    'source_platform': src_platform,
+                    'target_platform': tgt_platform,
+                    'platform_compatibility': compatibility,
+                })
+
+            # Insert in batches to avoid payload limits
+            batch_size = 100
+            for i in range(0, len(rows), batch_size):
+                batch = rows[i:i+batch_size]
+                try:
+                    supabase.table('cross_platform_relationships').insert(batch).execute()
+                except Exception as e:
+                    logger.warning(f"Failed to insert cross_platform_relationships batch ({i}-{i+len(batch)}): {e}")
+
+            logger.info(f"Stored {len(rows)} cross_platform_relationships rows")
+
+        except Exception as e:
+            logger.error(f"Error storing cross-platform relationships: {e}")
 
     async def _store_discovered_platforms(self, platforms: List[Dict], user_id: str, transaction_id: str, supabase: Client):
         """Store discovered platforms in the database"""
@@ -6022,6 +6121,7 @@ class DuplicateDecisionRequest(BaseModel):
     user_id: str
     decision: str  # 'replace', 'keep_both', 'skip'
     file_hash: str
+    session_token: Optional[str] = None
 
 @app.post("/handle-duplicate-decision")
 async def handle_duplicate_decision(request: DuplicateDecisionRequest):
@@ -6033,6 +6133,22 @@ async def handle_duplicate_decision(request: DuplicateDecisionRequest):
             raise HTTPException(status_code=404, detail="Job not found or expired")
 
         decision = (request.decision or '').lower()
+
+        # Security validation: require session token for decision
+        try:
+            valid, violations = security_validator.validate_request({
+                'endpoint': 'handle-duplicate-decision',
+                'user_id': request.user_id,
+                'session_token': request.session_token
+            }, SecurityContext(user_id=request.user_id))
+            if not valid:
+                logger.warning(f"Security validation failed on duplicate decision for job {request.job_id}: {violations}")
+                raise HTTPException(status_code=401, detail="Unauthorized or invalid session")
+        except HTTPException:
+            raise
+        except Exception as sec_e:
+            logger.warning(f"Security validation error on duplicate decision for job {request.job_id}: {sec_e}")
+            raise HTTPException(status_code=401, detail="Unauthorized or invalid session")
 
         # If user chose to skip, mark as cancelled and update DB
         if decision == 'skip':
@@ -6109,11 +6225,28 @@ class VersionRecommendationFeedback(BaseModel):
     user_id: str
     accepted: bool
     feedback: Optional[str] = None
+    session_token: Optional[str] = None
 
 @app.post("/version-recommendation-feedback")
 async def submit_version_recommendation_feedback(request: VersionRecommendationFeedback):
     """Submit user feedback on version recommendations"""
     try:
+        # Security validation: require valid session token
+        try:
+            valid, violations = security_validator.validate_request({
+                'endpoint': 'version-recommendation-feedback',
+                'user_id': request.user_id,
+                'session_token': request.session_token
+            }, SecurityContext(user_id=request.user_id))
+            if not valid:
+                logger.warning(f"Security validation failed for version feedback {request.recommendation_id}: {violations}")
+                raise HTTPException(status_code=401, detail="Unauthorized or invalid session")
+        except HTTPException:
+            raise
+        except Exception as sec_e:
+            logger.warning(f"Security validation error for version feedback {request.recommendation_id}: {sec_e}")
+            raise HTTPException(status_code=401, detail="Unauthorized or invalid session")
+
         # Initialize Supabase client
         supabase_url = os.environ.get("SUPABASE_URL")
         supabase_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
@@ -6725,7 +6858,24 @@ async def process_excel_endpoint(request: dict):
         filename = request.get('file_name') or 'uploaded_file'
         if not user_id or not job_id or not storage_path:
             raise HTTPException(status_code=400, detail="user_id, job_id, and storage_path are required")
-        
+
+        # Security validation: sanitize and require valid session token
+        try:
+            _ = security_validator.input_sanitizer.sanitize_string(filename)
+            valid, violations = security_validator.validate_request({
+                'endpoint': 'process-excel',
+                'user_id': user_id,
+                'session_token': request.get('session_token')
+            }, SecurityContext(user_id=user_id))
+            if not valid:
+                logger.warning(f"Security validation failed for job {job_id}: {violations}")
+                raise HTTPException(status_code=401, detail="Unauthorized or invalid session")
+        except HTTPException:
+            raise
+        except Exception as sec_e:
+            logger.warning(f"Security validation error for job {job_id}: {sec_e}")
+            raise HTTPException(status_code=401, detail="Unauthorized or invalid session")
+
         # Early duplicate check based on real file hash (if provided)
         file_hash = request.get('file_hash')
         resume_after_duplicate = request.get('resume_after_duplicate')
@@ -6833,88 +6983,14 @@ async def process_excel_endpoint(request: dict):
                 if is_cancelled():
                     return
 
-                # Initialize components
+                # Use advanced processing pipeline that includes entity resolution and relationship detection
                 excel_processor = ExcelProcessor()
-                field_detector = UniversalFieldDetector()
-                platform_detector = UniversalPlatformDetector()
-                document_classifier = UniversalDocumentClassifier()
-                data_extractor = UniversalExtractors()
-
-                # Step 1: Process Excel file
-                await websocket_manager.send_component_update(job_id, "excel_processor", "processing", "📊 Processing Excel file...", 20)
-                if is_cancelled():
-                    return
-                excel_result = await excel_processor.stream_xlsx_processing(
-                    file_content=file_bytes,
-                    filename=filename,
-                    user_id=user_id
-                )
-                await websocket_manager.send_component_update(job_id, "excel_processor", "completed", "✅ Excel processing completed", 40, {"summary": excel_result.get("summary", {})})
-
-                # Step 2: Platform detection
-                await websocket_manager.send_component_update(job_id, "platform_detector", "processing", "🔎 Detecting platform...", 50)
-                if is_cancelled():
-                    return
-                platform_result = await platform_detector.detect_platform_universal(
-                    payload={"file_content": file_bytes, "filename": filename},
-                    filename=filename,
-                    user_id=user_id
-                )
-                await websocket_manager.send_component_update(job_id, "platform_detector", "completed", "✅ Platform detection completed", 60, platform_result)
-
-                # Step 3: Document classification
-                await websocket_manager.send_component_update(job_id, "document_classifier", "processing", "🧾 Classifying document...", 65)
-                if is_cancelled():
-                    return
-                document_result = await document_classifier.classify_document_universal(
-                    payload={"file_content": file_bytes, "filename": filename},
-                    filename=filename,
-                    user_id=user_id
-                )
-                await websocket_manager.send_component_update(job_id, "document_classifier", "completed", "✅ Document classification completed", 75, document_result)
-
-                # Step 4: Data extraction
-                await websocket_manager.send_component_update(job_id, "data_extractor", "processing", "🧩 Extracting data...", 80)
-                if is_cancelled():
-                    return
-                extraction_result = await data_extractor.extract_data_universal(
-                    file_content=file_bytes,
-                    filename=filename,
-                    user_id=user_id
-                )
-                await websocket_manager.send_component_update(job_id, "data_extractor", "completed", "✅ Data extraction completed", 90)
-
-                # Step 5: Field detection (optional)
-                await websocket_manager.send_component_update(job_id, "field_detector", "processing", "📐 Detecting fields...", 92)
-                field_results = {}
-                for sheet_name, df in excel_result.get('sheets', {}).items():
-                    if is_cancelled():
-                        return
-                    field_result = await field_detector.detect_field_types_universal(
-                        data=df.to_dict('records')[0] if hasattr(df, 'empty') and not df.empty else {},
-                        filename=filename,
-                        user_id=user_id
-                    )
-                    field_results[sheet_name] = field_result
-                await websocket_manager.send_component_update(job_id, "field_detector", "completed", "✅ Field detection completed", 95)
-
-                # Finalize
-                if is_cancelled():
-                    return
-                results = {
-                    "excel_processing": excel_result,
-                    "platform_detection": platform_result,
-                    "document_classification": document_result,
-                    "data_extraction": extraction_result,
-                    "field_detection": field_results
-                }
-
-                await websocket_manager.send_overall_update(
+                await excel_processor.process_file(
                     job_id=job_id,
-                    status="completed",
-                    message="🎉 Processing completed successfully!",
-                    progress=100,
-                    results=results
+                    file_content=file_bytes,
+                    filename=filename,
+                    user_id=user_id,
+                    supabase=supabase
                 )
             except Exception as e:
                 logger.error(f"Processing job failed: {e}")
@@ -7042,6 +7118,445 @@ async def get_component_metrics():
         
     except Exception as e:
         logger.error(f"Component metrics error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# ============================================================================
+# CONNECTORS (NANGO) - PHASE 1 GMAIL
+# ============================================================================
+
+# Nango configuration (dev by default; override via env for prod)
+NANGO_BASE_URL = os.environ.get("NANGO_BASE_URL", "https://api.nango.dev")
+NANGO_GMAIL_INTEGRATION_ID = os.environ.get("NANGO_GMAIL_INTEGRATION_ID", "google-mail")
+
+class ConnectorInitiateRequest(BaseModel):
+    provider: str  # expect 'google-mail' for Gmail
+    user_id: str
+    session_token: Optional[str] = None
+
+class ConnectorSyncRequest(BaseModel):
+    user_id: str
+    connection_id: str  # Nango connection id
+    integration_id: Optional[str] = None  # defaults to google-mail
+    mode: str = "historical"  # historical | incremental
+    lookback_days: Optional[int] = 365  # used for historical q filter
+    max_results: Optional[int] = 100  # per page
+    session_token: Optional[str] = None
+
+def _require_security(endpoint: str, user_id: str, session_token: Optional[str]):
+    try:
+        valid, violations = security_validator.validate_request({
+            'endpoint': endpoint,
+            'user_id': user_id,
+            'session_token': session_token
+        }, SecurityContext(user_id=user_id))
+        if not valid:
+            logger.warning(f"Security validation failed for endpoint {endpoint}: {violations}")
+            raise HTTPException(status_code=401, detail="Unauthorized or invalid session")
+    except HTTPException:
+        raise
+    except Exception as sec_e:
+        logger.warning(f"Security validation error for endpoint {endpoint}: {sec_e}")
+        raise HTTPException(status_code=401, detail="Unauthorized or invalid session")
+
+def _safe_filename(name: str) -> str:
+    try:
+        return security_validator.input_sanitizer.sanitize_string(name or "attachment")
+    except Exception:
+        return (name or "attachment").replace("/", "_").replace("\\", "_")[:200]
+
+async def _store_external_item_attachment(user_id: str, provider: str, message_id: str, filename: str, content: bytes) -> Tuple[str, str]:
+    """Store attachment bytes to Supabase Storage. Returns (storage_path, file_hash)."""
+    safe_name = _safe_filename(filename)
+    # Compute hash for dedupe
+    file_hash = hashlib.sha256(content).hexdigest()
+    # Build storage path
+    today = datetime.utcnow().strftime('%Y/%m/%d')
+    storage_path = f"external/{provider}/{user_id}/{today}/{message_id}/{safe_name}"
+    try:
+        storage = supabase.storage.from_("finely-upload")
+        # Some supabase clients require file-like; httpx bytes accepted by python client
+        bio = io.BytesIO(content)
+        storage.upload(storage_path, bio)
+        return storage_path, file_hash
+    except Exception as e:
+        logger.error(f"Storage upload failed: {e}")
+        raise
+
+async def _enqueue_file_processing(user_id: str, filename: str, storage_path: str) -> str:
+    """Create an ingestion job and start processing asynchronously. Returns job_id."""
+    job_id = str(uuid.uuid4())
+    # Create/update ingestion_jobs like existing code path
+    try:
+        job_data = {
+            'id': job_id,
+            'user_id': user_id,
+            'file_name': filename,
+            'status': 'queued',
+            'storage_path': storage_path,
+            'created_at': datetime.utcnow().isoformat()
+        }
+        # Best-effort insert
+        try:
+            supabase.table('ingestion_jobs').insert(job_data).execute()
+        except Exception:
+            pass
+        # Kick off processing (reuses existing pipeline)
+        asyncio.create_task(start_processing_job(user_id, job_id, storage_path, filename))
+        return job_id
+    except Exception as e:
+        logger.error(f"Failed to enqueue processing: {e}")
+        raise
+
+async def _gmail_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> Dict[str, Any]:
+    provider_key = req.integration_id or NANGO_GMAIL_INTEGRATION_ID
+    connection_id = req.connection_id
+    user_id = req.user_id
+
+    # Ensure connector + user_connection rows exist (idempotent upsert by natural keys)
+    try:
+        # Upsert connector definition
+        try:
+            supabase.table('connectors').insert({
+                'provider': provider_key,
+                'integration_id': provider_key,
+                'auth_type': 'OAUTH2',
+                'scopes': json.dumps(["https://mail.google.com/"]),
+                'endpoints_needed': json.dumps(["/emails", "/labels", "/attachment"]),
+                'enabled': True
+            }).execute()
+        except Exception:
+            # ignore duplicates
+            pass
+        # Fetch connector id
+        connector_row = supabase.table('connectors').select('id').eq('provider', provider_key).limit(1).execute()
+        connector_id = connector_row.data[0]['id'] if connector_row.data else None
+        # Upsert user_connection by nango_connection_id
+        try:
+            supabase.table('user_connections').insert({
+                'user_id': user_id,
+                'connector_id': connector_id,
+                'nango_connection_id': connection_id,
+                'status': 'active',
+                'sync_mode': 'pull'
+            }).execute()
+        except Exception:
+            pass
+        uc_row = supabase.table('user_connections').select('id').eq('nango_connection_id', connection_id).limit(1).execute()
+        user_connection_id = uc_row.data[0]['id'] if uc_row.data else None
+    except Exception as e:
+        logger.error(f"Failed to upsert connector records: {e}")
+        user_connection_id = None
+
+    # Start sync_run
+    sync_run_id = str(uuid.uuid4())
+    try:
+        supabase.table('sync_runs').insert({
+            'id': sync_run_id,
+            'user_id': user_id,
+            'user_connection_id': user_connection_id,
+            'type': req.mode,
+            'status': 'running',
+            'started_at': datetime.utcnow().isoformat(),
+            'stats': json.dumps({'records_fetched': 0, 'actions_used': 0})
+        }).execute()
+    except Exception:
+        pass
+
+    stats = {'records_fetched': 0, 'actions_used': 0, 'attachments_saved': 0, 'queued_jobs': 0, 'skipped': 0}
+    errors: List[str] = []
+
+    try:
+        # Connectivity check
+        try:
+            await nango.get_gmail_profile(provider_key, connection_id)
+            stats['actions_used'] += 1
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Gmail profile check failed: {e}")
+
+        # Determine lookback using connection cursor/last_synced_at
+        lookback_days = max(1, int(req.lookback_days or 365))
+        q = f"has:attachment newer_than:{lookback_days}d"
+        if req.mode != 'historical':
+            try:
+                uc_last = supabase.table('user_connections').select('last_synced_at').eq('nango_connection_id', connection_id).limit(1).execute()
+                last_ts = None
+                if uc_last.data and uc_last.data[0].get('last_synced_at'):
+                    last_ts = datetime.fromisoformat(uc_last.data[0]['last_synced_at'].replace('Z', '+00:00'))
+                if last_ts:
+                    delta_days = max(1, (datetime.utcnow() - last_ts).days or 1)
+                    q = f"has:attachment newer_than:{delta_days}d"
+            except Exception:
+                # fallback to 10 days
+                q = "has:attachment newer_than:10d"
+
+        page_token = None
+        max_per_page = max(1, min(int(req.max_results or 100), 500))
+
+        while True:
+            # Stop early if nearing free-plan record or action limits
+            if stats['actions_used'] > 900 or stats['records_fetched'] > 4500:
+                break
+
+            page = await nango.list_gmail_messages(provider_key, connection_id, q=q, page_token=page_token, max_results=max_per_page)
+            stats['actions_used'] += 1
+
+            message_ids = [m.get('id') for m in (page.get('messages') or []) if m.get('id')]
+            if not message_ids:
+                break
+
+            for mid in message_ids:
+                try:
+                    msg = await nango.get_gmail_message(provider_key, connection_id, mid)
+                    stats['actions_used'] += 1
+                    payload = msg.get('payload') or {}
+                    headers = payload.get('headers') or []
+                    subject = next((h.get('value') for h in headers if h.get('name') == 'Subject'), '')
+                    date_hdr = next((h.get('value') for h in headers if h.get('name') == 'Date'), None)
+                    source_ts = None
+                    if date_hdr:
+                        try:
+                            source_ts = parsedate_to_datetime(date_hdr).isoformat()
+                        except Exception:
+                            source_ts = datetime.utcnow().isoformat()
+
+                    # Walk parts recursively to find attachments
+                    def iter_parts(node):
+                        if not node:
+                            return
+                        if node.get('filename') and node.get('body', {}).get('attachmentId'):
+                            yield node
+                        for child in node.get('parts', []) or []:
+                            yield from iter_parts(child)
+
+                    parts = list(iter_parts(payload))
+
+                    for part in parts:
+                        filename = part.get('filename') or ''
+                        body = part.get('body') or {}
+                        attach_id = body.get('attachmentId')
+                        mime_type = part.get('mimeType', '')
+                        if not attach_id or not filename:
+                            continue
+
+                        # Relevance scoring
+                        score = 0.0
+                        name_l = filename.lower()
+                        subj_l = (subject or '').lower()
+                        patterns = ['invoice', 'statement', 'receipt', 'bill', 'payout', 'reconciliation']
+                        if any(p in name_l for p in patterns):
+                            score += 0.5
+                        if any(p in subj_l for p in patterns):
+                            score += 0.4
+                        if any(x in name_l for x in ['.csv', '.xlsx', '.xls', '.pdf']):
+                            score += 0.2
+                        score = min(score, 1.0)
+                        if score < 0.5:
+                            stats['skipped'] += 1
+                            continue
+
+                        # Fetch attachment
+                        content = await nango.get_gmail_attachment(provider_key, connection_id, mid, attach_id)
+                        stats['actions_used'] += 1
+                        if not content:
+                            continue
+
+                        # Store to storage
+                        storage_path, file_hash = await _store_external_item_attachment(user_id, 'gmail', mid, filename, content)
+                        stats['attachments_saved'] += 1
+
+                        # External items record
+                        try:
+                            provider_attachment_id = f"{mid}:{attach_id}"
+                            supabase.table('external_items').insert({
+                                'user_id': user_id,
+                                'user_connection_id': user_connection_id,
+                                'provider_id': provider_attachment_id,
+                                'kind': 'email',
+                                'source_ts': source_ts or datetime.utcnow().isoformat(),
+                                'hash': file_hash,
+                                'storage_path': storage_path,
+                                'metadata': json.dumps({'subject': subject, 'filename': filename, 'mime_type': mime_type}),
+                                'relevance_score': score,
+                                'status': 'stored'
+                            }).execute()
+                        except Exception:
+                            pass
+
+                        # Dedupe with DB quick check
+                        try:
+                            dup = supabase.table('raw_records').select('id').eq('user_id', user_id).eq('file_hash', file_hash).limit(1).execute()
+                            is_dup = bool(dup.data)
+                        except Exception:
+                            is_dup = False
+
+                        if is_dup:
+                            continue
+
+                        # Enqueue processing for spreadsheets only (PDF handled in phase 2)
+                        if any(name_l.endswith(ext) for ext in ['.csv', '.xlsx', '.xls']):
+                            await _enqueue_file_processing(user_id, filename, storage_path)
+                            stats['queued_jobs'] += 1
+                        else:
+                            # keep PDF stored for future OCR
+                            pass
+
+                        stats['records_fetched'] += 1
+
+                except Exception as item_e:
+                    logger.warning(f"Failed to process message {mid}: {item_e}")
+                    errors.append(str(item_e))
+
+            page_token = page.get('nextPageToken')
+            if not page_token:
+                break
+
+        run_status = 'succeeded' if not errors else ('partial' if stats['records_fetched'] > 0 else 'failed')
+        try:
+            supabase.table('sync_runs').update({
+                'status': run_status,
+                'finished_at': datetime.utcnow().isoformat(),
+                'stats': json.dumps(stats),
+                'error': '; '.join(errors)[:500]
+            }).eq('id', sync_run_id).execute()
+            # Update last_synced_at on connection
+            supabase.table('user_connections').update({
+                'last_synced_at': datetime.utcnow().isoformat()
+            }).eq('nango_connection_id', connection_id).execute()
+            # Upsert sync cursor
+            try:
+                supabase.table('sync_cursors').insert({
+                    'user_id': user_id,
+                    'user_connection_id': user_connection_id,
+                    'resource': 'emails',
+                    'cursor_type': 'time',
+                    'value': datetime.utcnow().isoformat()
+                }).execute()
+            except Exception:
+                try:
+                    supabase.table('sync_cursors').update({
+                        'value': datetime.utcnow().isoformat(),
+                        'updated_at': datetime.utcnow().isoformat()
+                    }).eq('user_connection_id', user_connection_id).eq('resource', 'emails').eq('cursor_type', 'time').execute()
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+        return {'status': run_status, 'sync_run_id': sync_run_id, 'stats': stats, 'errors': errors[:5]}
+
+    except Exception as e:
+        logger.error(f"Gmail sync failed: {e}")
+        try:
+            supabase.table('sync_runs').update({
+                'status': 'failed',
+                'finished_at': datetime.utcnow().isoformat(),
+                'error': str(e)
+            }).eq('id', sync_run_id).execute()
+        except Exception:
+            pass
+        raise
+
+@app.post("/api/connectors/providers")
+async def list_providers(request: dict):
+    """List supported providers for connectors (Phase 1: Gmail)."""
+    try:
+        user_id = (request or {}).get('user_id') or ''
+        session_token = (request or {}).get('session_token')
+        if user_id:
+            _require_security('connectors-providers', user_id, session_token)
+        return {
+            'providers': [
+                {
+                    'provider': 'google-mail',
+                    'display_name': 'Gmail',
+                    'integration_id': NANGO_GMAIL_INTEGRATION_ID,
+                    'auth_type': 'OAUTH2',
+                    'scopes': ['https://mail.google.com/'],
+                    'endpoints': ['/emails', '/labels', '/attachment']
+                }
+            ]
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"List providers failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/connectors/initiate")
+async def initiate_connector(req: ConnectorInitiateRequest):
+    """Create a Nango Connect session for the user to authorize Gmail in dev mode."""
+    _require_security('connectors-initiate', req.user_id, req.session_token)
+    try:
+        if req.provider != 'google-mail':
+            raise HTTPException(status_code=400, detail="Unsupported provider in Phase 1")
+        nango = NangoClient(base_url=NANGO_BASE_URL)
+        session = await nango.create_connect_session(
+            end_user={'id': req.user_id},
+            allowed_integrations=[NANGO_GMAIL_INTEGRATION_ID]
+        )
+        return {
+            'status': 'ok',
+            'integration_id': NANGO_GMAIL_INTEGRATION_ID,
+            'connect_session': session  # includes token; FE can use Nango Connect UI
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Initiate connector failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/connectors/sync")
+async def connectors_sync(req: ConnectorSyncRequest):
+    """Run a sync for Gmail via Nango (historical or incremental)."""
+    _require_security('connectors-sync', req.user_id, req.session_token)
+    try:
+        if (req.integration_id or NANGO_GMAIL_INTEGRATION_ID) != NANGO_GMAIL_INTEGRATION_ID:
+            raise HTTPException(status_code=400, detail="Only Gmail supported in Phase 1")
+        nango = NangoClient(base_url=NANGO_BASE_URL)
+        result = await _gmail_sync_run(nango, req)
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Connectors sync failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/connectors/status")
+async def connectors_status(connection_id: str, user_id: str, session_token: Optional[str] = None):
+    _require_security('connectors-status', user_id, session_token)
+    try:
+        # Fetch user_connection and recent runs
+        uc = supabase.table('user_connections').select('id, status, last_synced_at, created_at').eq('nango_connection_id', connection_id).limit(1).execute()
+        uc_id = uc.data[0]['id'] if uc.data else None
+        runs = []
+        if uc_id:
+            runs_res = supabase.table('sync_runs').select('id, type, status, started_at, finished_at, stats, error').eq('user_connection_id', uc_id).order('started_at', desc=True).limit(10).execute()
+            runs = runs_res.data or []
+        return {'connection': uc.data[0] if uc.data else None, 'recent_runs': runs}
+    except Exception as e:
+        logger.error(f"Connectors status failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/webhooks/nango")
+async def nango_webhook(request: dict):
+    """Accept Nango webhooks (dev/prod). In dev, Nango may host webhooks; we store for replay."""
+    try:
+        payload = request or {}
+        # Optional: verify signature if header provided via Starlette Request (omitted here due to dev mode)
+        user_id = payload.get('user_id') or payload.get('end_user', {}).get('id') or 'unknown'
+        try:
+            supabase.table('webhook_events').insert({
+                'user_id': user_id,
+                'event_type': payload.get('type'),
+                'payload': json.dumps(payload),
+                'signature_valid': True,
+                'status': 'queued'
+            }).execute()
+        except Exception:
+            pass
+        return {'status': 'received'}
+    except Exception as e:
+        logger.error(f"Webhook handling failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 # ============================================================================
@@ -7241,6 +7756,58 @@ class WebSocketProgressManager:
 
 # Initialize enhanced WebSocket manager
 websocket_manager = WebSocketProgressManager()
+
+
+async def start_processing_job(user_id: str, job_id: str, storage_path: str, filename: str):
+    try:
+        def is_cancelled() -> bool:
+            status = websocket_manager.job_status.get(job_id, {})
+            return status.get("status") == "cancelled"
+
+        await websocket_manager.send_overall_update(
+            job_id=job_id,
+            status="processing",
+            message="📥 Downloading file from storage...",
+            progress=5
+        )
+        if is_cancelled():
+            return
+
+        file_bytes = None
+        try:
+            storage = supabase.storage.from_("finely-upload")
+            file_resp = storage.download(storage_path)
+            file_bytes = file_resp if isinstance(file_resp, (bytes, bytearray)) else getattr(file_resp, 'data', None)
+            if file_bytes is None:
+                file_bytes = file_resp
+        except Exception as e:
+            logger.error(f"Storage download failed: {e}")
+            await websocket_manager.send_error(job_id, f"Download failed: {e}")
+            websocket_manager.job_status[job_id] = {**websocket_manager.job_status.get(job_id, {}), "status": "failed", "error": str(e)}
+            return
+
+        await websocket_manager.send_overall_update(
+            job_id=job_id,
+            status="processing",
+            message="🧠 Initializing analysis pipeline...",
+            progress=15
+        )
+        if is_cancelled():
+            return
+
+        excel_processor = ExcelProcessor()
+        await excel_processor.process_file(
+            job_id=job_id,
+            file_content=file_bytes,
+            filename=filename,
+            user_id=user_id,
+            supabase=supabase
+        )
+    except Exception as e:
+        logger.error(f"Processing job failed (resume path): {e}")
+        await websocket_manager.send_error(job_id, str(e))
+        websocket_manager.job_status[job_id] = {**websocket_manager.job_status.get(job_id, {}), "status": "failed", "error": str(e)}
+
 
 # Legacy compatibility adapter for older code paths that used `manager.send_update(...)`
 class LegacyConnectionManagerAdapter:
