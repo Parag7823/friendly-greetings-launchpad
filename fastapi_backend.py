@@ -18,7 +18,6 @@ from difflib import SequenceMatcher
 from universal_field_detector import UniversalFieldDetector
 from universal_platform_detector_optimized import UniversalPlatformDetectorOptimized as UniversalPlatformDetector
 from universal_document_classifier_optimized import UniversalDocumentClassifierOptimized as UniversalDocumentClassifier
-from universal_extractors_optimized import UniversalExtractorsOptimized as UniversalExtractors
 from entity_resolver_optimized import EntityResolverOptimized as EntityResolver
 import pandas as pd
 import numpy as np
@@ -28,6 +27,9 @@ import requests
 import tempfile
 from email.utils import parsedate_to_datetime
 import base64
+import pdfplumber
+import tabula
+import hmac
 
 # FastAPI and web framework imports
 from fastapi import FastAPI, HTTPException, BackgroundTasks, WebSocket, WebSocketDisconnect, UploadFile, Form, File, Response
@@ -39,6 +41,24 @@ from pydantic import BaseModel, ValidationError
 
 # Database and external services
 from supabase import create_client, Client
+
+# Celery app (Phase 4 orchestration)
+try:
+    from celery_app import celery_app
+except Exception:
+    celery_app = None
+
+# Optional Celery tasks (import safely to avoid cycles when not present)
+try:
+    from tasks import task_gmail_sync, task_pdf_processing, task_spreadsheet_processing
+except Exception:
+    task_gmail_sync = None
+    task_pdf_processing = None
+    task_spreadsheet_processing = None
+
+def _use_celery() -> bool:
+    return (os.environ.get("USE_CELERY", "").lower() in ("1", "true", "yes")) and bool(celery_app)
+
 from openai import OpenAI
 try:
     # Prefer external module if available
@@ -134,6 +154,44 @@ except Exception:
                     return base64.b64decode(b64)
                 except Exception:
                     return base64.urlsafe_b64decode(b64)
+
+            # ------------------------- Generic Proxy Helpers -------------------------
+            async def proxy_get(self, provider: str, path: str, params: Optional[Dict[str, Any]] = None,
+                                 connection_id: Optional[str] = None, provider_config_key: Optional[str] = None,
+                                 headers: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
+                url = f"{self.base_url}/proxy/{provider}/{path.lstrip('/')}"
+                merged_headers = self._headers(provider_config_key, connection_id)
+                if headers:
+                    merged_headers.update(headers)
+                async with httpx.AsyncClient(timeout=60.0) as client:
+                    resp = await client.get(url, params=params or {}, headers=merged_headers)
+                    resp.raise_for_status()
+                    return resp.json()
+
+            async def proxy_get_bytes(self, provider: str, path: str, params: Optional[Dict[str, Any]] = None,
+                                       connection_id: Optional[str] = None, provider_config_key: Optional[str] = None) -> bytes:
+                """GET via Nango Proxy and return raw bytes (for media endpoints like Drive alt=media)."""
+                url = f"{self.base_url}/proxy/{provider}/{path.lstrip('/')}"
+                async with httpx.AsyncClient(timeout=120.0) as client:
+                    resp = await client.get(url, params=params or {}, headers=self._headers(provider_config_key, connection_id))
+                    resp.raise_for_status()
+                    return resp.content
+
+            async def proxy_post(self, provider: str, path: str, json_body: Optional[Dict[str, Any]] = None,
+                                  connection_id: Optional[str] = None, provider_config_key: Optional[str] = None,
+                                  headers: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
+                url = f"{self.base_url}/proxy/{provider}/{path.lstrip('/')}"
+                merged_headers = self._headers(provider_config_key, connection_id)
+                if headers:
+                    merged_headers.update(headers)
+                async with httpx.AsyncClient(timeout=90.0) as client:
+                    resp = await client.post(url, json=json_body or {}, headers=merged_headers)
+                    resp.raise_for_status()
+                    # Dropbox download returns bytes; guard for JSON parse errors
+                    try:
+                        return resp.json()
+                    except Exception:
+                        return {"_raw": resp.content}
 
 # Import critical fixes systems
 from transaction_manager import initialize_transaction_manager, get_transaction_manager
@@ -888,6 +946,165 @@ class EnhancedFileProcessor:
         except Exception as e:
             logger.error(f"Enhanced Excel processing failed: {e}")
             raise
+
+async def _zohomail_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> Dict[str, Any]:
+    """Synchronous NOOP sync for Zoho Mail to validate the connection and record a run.
+    We intentionally do not call remote APIs yet; this sets up DB rows for testing.
+    """
+    provider_key = NANGO_ZOHO_MAIL_INTEGRATION_ID
+    connection_id = req.connection_id
+    user_id = req.user_id
+    stats = {'records_fetched': 0, 'actions_used': 0, 'attachments_saved': 0, 'queued_jobs': 0, 'skipped': 0}
+    # Upserts
+    try:
+        try:
+            supabase.table('connectors').insert({
+                'provider': provider_key,
+                'integration_id': provider_key,
+                'auth_type': 'OAUTH2',
+                'scopes': json.dumps([]),
+                'endpoints_needed': json.dumps([]),
+                'enabled': True
+            }).execute()
+        except Exception:
+            pass
+        conn_row = supabase.table('connectors').select('id').eq('provider', provider_key).limit(1).execute()
+        connector_id = conn_row.data[0]['id'] if conn_row.data else None
+        try:
+            supabase.table('user_connections').insert({
+                'user_id': user_id,
+                'connector_id': connector_id,
+                'nango_connection_id': connection_id,
+                'status': 'active',
+                'sync_mode': 'pull'
+            }).execute()
+        except Exception:
+            pass
+        uc_row = supabase.table('user_connections').select('id').eq('nango_connection_id', connection_id).limit(1).execute()
+        user_connection_id = uc_row.data[0]['id'] if uc_row.data else None
+    except Exception:
+        user_connection_id = None
+
+    sync_run_id = str(uuid.uuid4())
+    try:
+        supabase.table('sync_runs').insert({
+            'id': sync_run_id,
+            'user_id': user_id,
+            'user_connection_id': user_connection_id,
+            'type': req.mode,
+            'status': 'succeeded',
+            'started_at': datetime.utcnow().isoformat(),
+            'finished_at': datetime.utcnow().isoformat(),
+            'stats': json.dumps(stats)
+        }).execute()
+        supabase.table('user_connections').update({'last_synced_at': datetime.utcnow().isoformat()}).eq('nango_connection_id', connection_id).execute()
+    except Exception:
+        pass
+    return {'status': 'succeeded', 'sync_run_id': sync_run_id, 'stats': stats, 'note': 'noop-sync'}
+
+async def _quickbooks_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> Dict[str, Any]:
+    """Synchronous NOOP sync for QuickBooks (Sandbox)."""
+    provider_key = NANGO_QUICKBOOKS_INTEGRATION_ID
+    connection_id = req.connection_id
+    user_id = req.user_id
+    stats = {'records_fetched': 0, 'actions_used': 0, 'attachments_saved': 0, 'queued_jobs': 0, 'skipped': 0}
+    try:
+        try:
+            supabase.table('connectors').insert({
+                'provider': provider_key,
+                'integration_id': provider_key,
+                'auth_type': 'OAUTH2',
+                'scopes': json.dumps([]),
+                'endpoints_needed': json.dumps([]),
+                'enabled': True
+            }).execute()
+        except Exception:
+            pass
+        conn_row = supabase.table('connectors').select('id').eq('provider', provider_key).limit(1).execute()
+        connector_id = conn_row.data[0]['id'] if conn_row.data else None
+        try:
+            supabase.table('user_connections').insert({
+                'user_id': user_id,
+                'connector_id': connector_id,
+                'nango_connection_id': connection_id,
+                'status': 'active',
+                'sync_mode': 'pull'
+            }).execute()
+        except Exception:
+            pass
+        uc_row = supabase.table('user_connections').select('id').eq('nango_connection_id', connection_id).limit(1).execute()
+        user_connection_id = uc_row.data[0]['id'] if uc_row.data else None
+    except Exception:
+        user_connection_id = None
+
+    sync_run_id = str(uuid.uuid4())
+    try:
+        supabase.table('sync_runs').insert({
+            'id': sync_run_id,
+            'user_id': user_id,
+            'user_connection_id': user_connection_id,
+            'type': req.mode,
+            'status': 'succeeded',
+            'started_at': datetime.utcnow().isoformat(),
+            'finished_at': datetime.utcnow().isoformat(),
+            'stats': json.dumps(stats)
+        }).execute()
+        supabase.table('user_connections').update({'last_synced_at': datetime.utcnow().isoformat()}).eq('nango_connection_id', connection_id).execute()
+    except Exception:
+        pass
+    return {'status': 'succeeded', 'sync_run_id': sync_run_id, 'stats': stats, 'note': 'noop-sync'}
+
+async def _xero_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> Dict[str, Any]:
+    """Synchronous NOOP sync for Xero."""
+    provider_key = NANGO_XERO_INTEGRATION_ID
+    connection_id = req.connection_id
+    user_id = req.user_id
+    stats = {'records_fetched': 0, 'actions_used': 0, 'attachments_saved': 0, 'queued_jobs': 0, 'skipped': 0}
+    try:
+        try:
+            supabase.table('connectors').insert({
+                'provider': provider_key,
+                'integration_id': provider_key,
+                'auth_type': 'OAUTH2',
+                'scopes': json.dumps([]),
+                'endpoints_needed': json.dumps([]),
+                'enabled': True
+            }).execute()
+        except Exception:
+            pass
+        conn_row = supabase.table('connectors').select('id').eq('provider', provider_key).limit(1).execute()
+        connector_id = conn_row.data[0]['id'] if conn_row.data else None
+        try:
+            supabase.table('user_connections').insert({
+                'user_id': user_id,
+                'connector_id': connector_id,
+                'nango_connection_id': connection_id,
+                'status': 'active',
+                'sync_mode': 'pull'
+            }).execute()
+        except Exception:
+            pass
+        uc_row = supabase.table('user_connections').select('id').eq('nango_connection_id', connection_id).limit(1).execute()
+        user_connection_id = uc_row.data[0]['id'] if uc_row.data else None
+    except Exception:
+        user_connection_id = None
+
+    sync_run_id = str(uuid.uuid4())
+    try:
+        supabase.table('sync_runs').insert({
+            'id': sync_run_id,
+            'user_id': user_id,
+            'user_connection_id': user_connection_id,
+            'type': req.mode,
+            'status': 'succeeded',
+            'started_at': datetime.utcnow().isoformat(),
+            'finished_at': datetime.utcnow().isoformat(),
+            'stats': json.dumps(stats)
+        }).execute()
+        supabase.table('user_connections').update({'last_synced_at': datetime.utcnow().isoformat()}).eq('nango_connection_id', connection_id).execute()
+    except Exception:
+        pass
+    return {'status': 'succeeded', 'sync_run_id': sync_run_id, 'stats': stats, 'note': 'noop-sync'}
     
     async def _process_excel_streaming(self, file_content: bytes, filename: str, progress_callback=None) -> Dict[str, pd.DataFrame]:
         """Process Excel files using true streaming approach for large files"""
@@ -7220,6 +7437,13 @@ async def get_component_metrics():
 # Nango configuration (dev by default; override via env for prod)
 NANGO_BASE_URL = os.environ.get("NANGO_BASE_URL", "https://api.nango.dev")
 NANGO_GMAIL_INTEGRATION_ID = os.environ.get("NANGO_GMAIL_INTEGRATION_ID", "google-mail")
+NANGO_DROPBOX_INTEGRATION_ID = os.environ.get("NANGO_DROPBOX_INTEGRATION_ID", "dropbox")
+NANGO_GOOGLE_DRIVE_INTEGRATION_ID = os.environ.get("NANGO_GOOGLE_DRIVE_INTEGRATION_ID", "google-drive")
+NANGO_ZOHO_MAIL_INTEGRATION_ID = os.environ.get("NANGO_ZOHO_MAIL_INTEGRATION_ID", "zoho-mail")
+NANGO_ZOHO_BOOKS_INTEGRATION_ID = os.environ.get("NANGO_ZOHO_BOOKS_INTEGRATION_ID", "zoho-books")
+NANGO_QUICKBOOKS_INTEGRATION_ID = os.environ.get("NANGO_QUICKBOOKS_INTEGRATION_ID", "quickbooks-sandbox")
+NANGO_XERO_INTEGRATION_ID = os.environ.get("NANGO_XERO_INTEGRATION_ID", "xero")
+NANGO_SAGE_INTEGRATION_ID = os.environ.get("NANGO_SAGE_INTEGRATION_ID", "sage-accounting")
 
 class ConnectorInitiateRequest(BaseModel):
     provider: str  # expect 'google-mail' for Gmail
@@ -7354,12 +7578,154 @@ async def _enqueue_file_processing(user_id: str, filename: str, storage_path: st
             supabase.table('ingestion_jobs').insert(job_data).execute()
         except Exception:
             pass
-        # Kick off processing (reuses existing pipeline)
-        asyncio.create_task(start_processing_job(user_id, job_id, storage_path, filename))
+        # Kick off processing via Celery if enabled, otherwise inline task
+        if _use_celery() and task_spreadsheet_processing:
+            try:
+                task_spreadsheet_processing.apply_async(args=[user_id, filename, storage_path, job_id])
+            except Exception as e:
+                logger.warning(f"Celery dispatch failed, falling back to inline task: {e}")
+                asyncio.create_task(start_processing_job(user_id, job_id, storage_path, filename))
+        else:
+            asyncio.create_task(start_processing_job(user_id, job_id, storage_path, filename))
         return job_id
     except Exception as e:
         logger.error(f"Failed to enqueue processing: {e}")
         raise
+
+async def _enqueue_pdf_processing(user_id: str, filename: str, storage_path: str) -> str:
+    """Create a PDF OCR ingestion job and start processing asynchronously. Returns job_id."""
+    job_id = str(uuid.uuid4())
+    try:
+        job_data = {
+            'id': job_id,
+            'user_id': user_id,
+            'file_name': filename,
+            'status': 'queued',
+            'storage_path': storage_path,
+            'created_at': datetime.utcnow().isoformat()
+        }
+        try:
+            supabase.table('ingestion_jobs').insert(job_data).execute()
+        except Exception:
+            pass
+        if _use_celery() and task_pdf_processing:
+            try:
+                task_pdf_processing.apply_async(args=[user_id, filename, storage_path, job_id])
+            except Exception as e:
+                logger.warning(f"Celery dispatch failed for PDF, falling back: {e}")
+                asyncio.create_task(start_pdf_processing_job(user_id, job_id, storage_path, filename))
+        else:
+            asyncio.create_task(start_pdf_processing_job(user_id, job_id, storage_path, filename))
+        return job_id
+    except Exception as e:
+        logger.error(f"Failed to enqueue PDF processing: {e}")
+        raise
+
+async def start_pdf_processing_job(user_id: str, job_id: str, storage_path: str, filename: str):
+    """Download a PDF from storage, extract text/tables, and store into raw_records."""
+    try:
+        # Mark job as processing
+        try:
+            supabase.table('ingestion_jobs').update({
+                'status': 'processing',
+                'updated_at': datetime.utcnow().isoformat()
+            }).eq('id', job_id).execute()
+        except Exception:
+            pass
+
+        # Download file bytes from Storage
+        storage = supabase.storage.from_("finely-upload")
+        file_bytes = storage.download(storage_path)
+        if hasattr(file_bytes, 'data') and isinstance(file_bytes.data, (bytes, bytearray)):
+            # Some SDK versions wrap bytes in a Response-like object
+            file_bytes = file_bytes.data
+
+        if not file_bytes:
+            raise RuntimeError("Empty file downloaded for PDF processing")
+
+        file_hash = hashlib.sha256(file_bytes).hexdigest()
+
+        # Extract text using pdfplumber (limit pages for performance)
+        text_excerpt = ""
+        pages_processed = 0
+        try:
+            with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
+                max_pages = 10
+                for i, page in enumerate(pdf.pages[:max_pages]):
+                    pages_processed += 1
+                    try:
+                        page_text = page.extract_text() or ""
+                        if page_text:
+                            # Cap excerpt size to avoid oversized payloads
+                            if len(text_excerpt) < 16000:
+                                text_excerpt += ("\n\n" + page_text)
+                    except Exception:
+                        continue
+        except Exception as e:
+            logger.warning(f"pdfplumber extraction failed for {filename}: {e}")
+
+        # Extract tables using tabula on first few pages
+        tables_preview = []
+        try:
+            with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as tmp_pdf:
+                tmp_pdf.write(file_bytes)
+                tmp_path = tmp_pdf.name
+            try:
+                dfs = tabula.read_pdf(tmp_path, pages='1-3', multiple_tables=True, stream=True, lattice=False)
+                for df in dfs[:3]:
+                    try:
+                        tables_preview.append(df.head(10).to_dict(orient='records'))
+                    except Exception:
+                        continue
+            finally:
+                try:
+                    os.remove(tmp_path)
+                except Exception:
+                    pass
+        except Exception as e:
+            logger.warning(f"tabula extraction failed for {filename}: {e}")
+
+        # Insert minimal raw_records entry
+        record = {
+            'user_id': user_id,
+            'file_name': filename,
+            'file_size': len(file_bytes),
+            'file_hash': file_hash,
+            'source': 'email_pdf',
+            'content': {
+                'file_hash': file_hash,
+                'text_excerpt': (text_excerpt[:16000] if text_excerpt else None),
+                'tables_preview': tables_preview if tables_preview else None,
+                'pages_processed': pages_processed,
+                'processed_at': datetime.utcnow().isoformat()
+            },
+            'status': 'completed',
+            'classification_status': 'pending'
+        }
+        try:
+            supabase.table('raw_records').insert(record).execute()
+        except Exception as e:
+            logger.warning(f"Failed to insert raw_records for PDF {filename}: {e}")
+
+        # Mark job as completed
+        try:
+            supabase.table('ingestion_jobs').update({
+                'status': 'completed',
+                'updated_at': datetime.utcnow().isoformat()
+            }).eq('id', job_id).execute()
+        except Exception:
+            pass
+
+    except Exception as e:
+        logger.error(f"PDF processing job failed for {filename}: {e}")
+        try:
+            supabase.table('ingestion_jobs').update({
+                'status': 'failed',
+                'error_message': str(e),
+                'updated_at': datetime.utcnow().isoformat()
+            }).eq('id', job_id).execute()
+        except Exception:
+            pass
 
 async def _gmail_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> Dict[str, Any]:
     provider_key = req.integration_id or NANGO_GMAIL_INTEGRATION_ID
@@ -7546,12 +7912,15 @@ async def _gmail_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> Dict
                         if is_dup:
                             continue
 
-                        # Enqueue processing for spreadsheets only (PDF handled in phase 2)
+                        # Enqueue processing for spreadsheets and PDFs (Phase 2)
                         if any(name_l.endswith(ext) for ext in ['.csv', '.xlsx', '.xls']):
                             await _enqueue_file_processing(user_id, filename, storage_path)
                             stats['queued_jobs'] += 1
+                        elif name_l.endswith('.pdf'):
+                            await _enqueue_pdf_processing(user_id, filename, storage_path)
+                            stats['queued_jobs'] += 1
                         else:
-                            # keep PDF stored for future OCR
+                            # Other attachment types: stored only
                             pass
 
                         stats['records_fetched'] += 1
@@ -7610,9 +7979,271 @@ async def _gmail_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> Dict
             pass
         raise
 
+async def _dropbox_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> Dict[str, Any]:
+    provider_key = NANGO_DROPBOX_INTEGRATION_ID
+    connection_id = req.connection_id
+    user_id = req.user_id
+    stats = {'records_fetched': 0, 'actions_used': 0, 'attachments_saved': 0, 'queued_jobs': 0, 'skipped': 0}
+    errors: List[str] = []
+    # Upserts
+    try:
+        try:
+            supabase.table('connectors').insert({
+                'provider': provider_key,
+                'integration_id': provider_key,
+                'auth_type': 'OAUTH2',
+                'scopes': json.dumps(["files.content.read", "files.metadata.read"]),
+                'endpoints_needed': json.dumps(["/2/files/list_folder", "/2/files/download"]),
+                'enabled': True
+            }).execute()
+        except Exception:
+            pass
+        conn_row = supabase.table('connectors').select('id').eq('provider', provider_key).limit(1).execute()
+        connector_id = conn_row.data[0]['id'] if conn_row.data else None
+        try:
+            supabase.table('user_connections').insert({
+                'user_id': user_id,
+                'connector_id': connector_id,
+                'nango_connection_id': connection_id,
+                'status': 'active',
+                'sync_mode': 'pull'
+            }).execute()
+        except Exception:
+            pass
+        uc_row = supabase.table('user_connections').select('id').eq('nango_connection_id', connection_id).limit(1).execute()
+        user_connection_id = uc_row.data[0]['id'] if uc_row.data else None
+    except Exception:
+        user_connection_id = None
+
+    sync_run_id = str(uuid.uuid4())
+    try:
+        supabase.table('sync_runs').insert({
+            'id': sync_run_id,
+            'user_id': user_id,
+            'user_connection_id': user_connection_id,
+            'type': req.mode,
+            'status': 'running',
+            'started_at': datetime.utcnow().isoformat(),
+            'stats': json.dumps(stats)
+        }).execute()
+    except Exception:
+        pass
+
+    try:
+        payload = {"path": "", "recursive": True}
+        cursor = None
+        while True:
+            if cursor:
+                page = await nango.proxy_post('dropbox', '2/files/list_folder/continue', json_body={"cursor": cursor}, connection_id=connection_id, provider_config_key=provider_key)
+            else:
+                page = await nango.proxy_post('dropbox', '2/files/list_folder', json_body=payload, connection_id=connection_id, provider_config_key=provider_key)
+            stats['actions_used'] += 1
+            entries = page.get('entries') or []
+            for ent in entries:
+                try:
+                    if ent.get('.tag') != 'file':
+                        continue
+                    name = ent.get('name') or ''
+                    path_lower = ent.get('path_lower') or ent.get('path_display')
+                    server_modified = ent.get('server_modified')
+                    score = 0.0
+                    nl = name.lower()
+                    if any(p in nl for p in ['invoice', 'receipt', 'statement', 'bill']):
+                        score += 0.5
+                    if any(nl.endswith(ext) for ext in ['.csv', '.xlsx', '.xls', '.pdf']):
+                        score += 0.3
+                    if score < 0.5:
+                        stats['skipped'] += 1
+                        continue
+                    # Download
+                    dl = await nango.proxy_post('dropbox', '2/files/download', json_body=None, connection_id=connection_id, provider_config_key=provider_key, headers={"Dropbox-API-Arg": json.dumps({"path": path_lower})})
+                    raw = dl.get('_raw')
+                    if not raw:
+                        continue
+                    storage_path, file_hash = await _store_external_item_attachment(user_id, 'dropbox', path_lower.strip('/').replace('/', '_')[:50], name, raw)
+                    stats['attachments_saved'] += 1
+                    try:
+                        supabase.table('external_items').insert({
+                            'user_id': user_id,
+                            'user_connection_id': user_connection_id,
+                            'provider_id': path_lower,
+                            'kind': 'file',
+                            'source_ts': server_modified or datetime.utcnow().isoformat(),
+                            'hash': file_hash,
+                            'storage_path': storage_path,
+                            'metadata': json.dumps({'name': name}),
+                            'relevance_score': score,
+                            'status': 'stored'
+                        }).execute()
+                    except Exception:
+                        pass
+                    try:
+                        dup = supabase.table('raw_records').select('id').eq('user_id', user_id).eq('file_hash', file_hash).limit(1).execute()
+                        is_dup = bool(dup.data)
+                    except Exception:
+                        is_dup = False
+                    if not is_dup:
+                        if any(nl.endswith(ext) for ext in ['.csv', '.xlsx', '.xls']):
+                            await _enqueue_file_processing(user_id, name, storage_path)
+                            stats['queued_jobs'] += 1
+                        elif nl.endswith('.pdf'):
+                            await _enqueue_pdf_processing(user_id, name, storage_path)
+                            stats['queued_jobs'] += 1
+                    stats['records_fetched'] += 1
+                except Exception as e:
+                    errors.append(str(e))
+            cursor = page.get('cursor') if page.get('has_more') else None
+            if not cursor:
+                break
+        run_status = 'succeeded' if not errors else ('partial' if stats['records_fetched'] > 0 else 'failed')
+        try:
+            supabase.table('sync_runs').update({'status': run_status, 'finished_at': datetime.utcnow().isoformat(), 'stats': json.dumps(stats), 'error': '; '.join(errors)[:500]}).eq('id', sync_run_id).execute()
+            supabase.table('user_connections').update({'last_synced_at': datetime.utcnow().isoformat()}).eq('nango_connection_id', connection_id).execute()
+        except Exception:
+            pass
+        return {'status': run_status, 'sync_run_id': sync_run_id, 'stats': stats, 'errors': errors[:5]}
+    except Exception as e:
+        logger.error(f"Dropbox sync failed: {e}")
+        try:
+            supabase.table('sync_runs').update({'status': 'failed', 'finished_at': datetime.utcnow().isoformat(), 'error': str(e)}).eq('id', sync_run_id).execute()
+        except Exception:
+            pass
+        raise
+
+async def _gdrive_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> Dict[str, Any]:
+    provider_key = NANGO_GOOGLE_DRIVE_INTEGRATION_ID
+    connection_id = req.connection_id
+    user_id = req.user_id
+    stats = {'records_fetched': 0, 'actions_used': 0, 'attachments_saved': 0, 'queued_jobs': 0, 'skipped': 0}
+    errors: List[str] = []
+    try:
+        try:
+            supabase.table('connectors').insert({
+                'provider': provider_key,
+                'integration_id': provider_key,
+                'auth_type': 'OAUTH2',
+                'scopes': json.dumps(["https://www.googleapis.com/auth/drive.readonly"]),
+                'endpoints_needed': json.dumps(["drive/v3/files"]),
+                'enabled': True
+            }).execute()
+        except Exception:
+            pass
+        conn_row = supabase.table('connectors').select('id').eq('provider', provider_key).limit(1).execute()
+        connector_id = conn_row.data[0]['id'] if conn_row.data else None
+        try:
+            supabase.table('user_connections').insert({
+                'user_id': user_id,
+                'connector_id': connector_id,
+                'nango_connection_id': connection_id,
+                'status': 'active',
+                'sync_mode': 'pull'
+            }).execute()
+        except Exception:
+            pass
+        uc_row = supabase.table('user_connections').select('id').eq('nango_connection_id', connection_id).limit(1).execute()
+        user_connection_id = uc_row.data[0]['id'] if uc_row.data else None
+    except Exception:
+        user_connection_id = None
+
+    sync_run_id = str(uuid.uuid4())
+    try:
+        supabase.table('sync_runs').insert({
+            'id': sync_run_id,
+            'user_id': user_id,
+            'user_connection_id': user_connection_id,
+            'type': req.mode,
+            'status': 'running',
+            'started_at': datetime.utcnow().isoformat(),
+            'stats': json.dumps(stats)
+        }).execute()
+    except Exception:
+        pass
+
+    try:
+        lookback_days = max(1, int(req.lookback_days or 90))
+        modified_after = (datetime.utcnow() - timedelta(days=lookback_days)).isoformat(timespec='seconds') + 'Z'
+        page_token = None
+        while True:
+            q = "(mimeType contains 'pdf' or mimeType contains 'spreadsheet' or name contains '.csv' or name contains '.xlsx' or name contains '.xls') and trashed = false and modifiedTime > '" + modified_after + "'"
+            params = {'q': q, 'pageSize': 200, 'fields': 'files(id,name,mimeType,modifiedTime),nextPageToken'}
+            if page_token:
+                params['pageToken'] = page_token
+            page = await nango.proxy_get('google-drive', 'drive/v3/files', params=params, connection_id=connection_id, provider_config_key=provider_key)
+            stats['actions_used'] += 1
+            files = page.get('files') or []
+            if not files:
+                break
+            for f in files:
+                try:
+                    fid = f.get('id'); name = f.get('name') or ''; mime = f.get('mimeType') or ''
+                    if not fid or not name:
+                        continue
+                    score = 0.0
+                    nl = name.lower()
+                    if any(p in nl for p in ['invoice', 'receipt', 'statement', 'bill']):
+                        score += 0.5
+                    if any(nl.endswith(ext) for ext in ['.csv', '.xlsx', '.xls', '.pdf']):
+                        score += 0.3
+                    if score < 0.5:
+                        stats['skipped'] += 1
+                        continue
+                    # Download content
+                    raw = await nango.proxy_get_bytes('google-drive', f'drive/v3/files/{fid}', params={'alt': 'media'}, connection_id=connection_id, provider_config_key=provider_key)
+                    if not raw:
+                        continue
+                    storage_path, file_hash = await _store_external_item_attachment(user_id, 'gdrive', fid, name, raw)
+                    stats['attachments_saved'] += 1
+                    try:
+                        supabase.table('external_items').insert({
+                            'user_id': user_id,
+                            'user_connection_id': user_connection_id,
+                            'provider_id': fid,
+                            'kind': 'file',
+                            'source_ts': f.get('modifiedTime') or datetime.utcnow().isoformat(),
+                            'hash': file_hash,
+                            'storage_path': storage_path,
+                            'metadata': json.dumps({'name': name, 'mime': mime}),
+                            'relevance_score': score,
+                            'status': 'stored'
+                        }).execute()
+                    except Exception:
+                        pass
+                    try:
+                        dup = supabase.table('raw_records').select('id').eq('user_id', user_id).eq('file_hash', file_hash).limit(1).execute()
+                        is_dup = bool(dup.data)
+                    except Exception:
+                        is_dup = False
+                    if not is_dup:
+                        if any(nl.endswith(ext) for ext in ['.csv', '.xlsx', '.xls']):
+                            await _enqueue_file_processing(user_id, name, storage_path)
+                            stats['queued_jobs'] += 1
+                        elif nl.endswith('.pdf'):
+                            await _enqueue_pdf_processing(user_id, name, storage_path)
+                            stats['queued_jobs'] += 1
+                    stats['records_fetched'] += 1
+                except Exception as e:
+                    errors.append(str(e))
+            page_token = page.get('nextPageToken')
+            if not page_token:
+                break
+        run_status = 'succeeded' if not errors else ('partial' if stats['records_fetched'] > 0 else 'failed')
+        try:
+            supabase.table('sync_runs').update({'status': run_status, 'finished_at': datetime.utcnow().isoformat(), 'stats': json.dumps(stats), 'error': '; '.join(errors)[:500]}).eq('id', sync_run_id).execute()
+            supabase.table('user_connections').update({'last_synced_at': datetime.utcnow().isoformat()}).eq('nango_connection_id', connection_id).execute()
+        except Exception:
+            pass
+        return {'status': run_status, 'sync_run_id': sync_run_id, 'stats': stats, 'errors': errors[:5]}
+    except Exception as e:
+        logger.error(f"GDrive sync failed: {e}")
+        try:
+            supabase.table('sync_runs').update({'status': 'failed', 'finished_at': datetime.utcnow().isoformat(), 'error': str(e)}).eq('id', sync_run_id).execute()
+        except Exception:
+            pass
+        raise
+
 @app.post("/api/connectors/providers")
 async def list_providers(request: dict):
-    """List supported providers for connectors (Phase 1: Gmail)."""
+    """List supported providers for connectors (Gmail, Zoho Mail, Dropbox, Google Drive, Zoho Books, QuickBooks, Xero, Sage)."""
     try:
         user_id = (request or {}).get('user_id') or ''
         session_token = (request or {}).get('session_token')
@@ -7620,14 +8251,14 @@ async def list_providers(request: dict):
             _require_security('connectors-providers', user_id, session_token)
         return {
             'providers': [
-                {
-                    'provider': 'google-mail',
-                    'display_name': 'Gmail',
-                    'integration_id': NANGO_GMAIL_INTEGRATION_ID,
-                    'auth_type': 'OAUTH2',
-                    'scopes': ['https://mail.google.com/'],
-                    'endpoints': ['/emails', '/labels', '/attachment']
-                }
+                {'provider': 'google-mail', 'display_name': 'Gmail', 'integration_id': NANGO_GMAIL_INTEGRATION_ID, 'auth_type': 'OAUTH2', 'scopes': ['https://mail.google.com/'], 'endpoints': ['/emails', '/labels', '/attachment']},
+                {'provider': 'zoho-mail', 'display_name': 'Zoho Mail', 'integration_id': NANGO_ZOHO_MAIL_INTEGRATION_ID, 'auth_type': 'OAUTH2', 'scopes': [], 'endpoints': []},
+                {'provider': 'dropbox', 'display_name': 'Dropbox', 'integration_id': NANGO_DROPBOX_INTEGRATION_ID, 'auth_type': 'OAUTH2', 'scopes': ['files.content.read','files.metadata.read'], 'endpoints': ['/2/files/list_folder','/2/files/download']},
+                {'provider': 'google-drive', 'display_name': 'Google Drive', 'integration_id': NANGO_GOOGLE_DRIVE_INTEGRATION_ID, 'auth_type': 'OAUTH2', 'scopes': ['https://www.googleapis.com/auth/drive.readonly'], 'endpoints': ['drive/v3/files']},
+                {'provider': 'zoho-books', 'display_name': 'Zoho Books', 'integration_id': NANGO_ZOHO_BOOKS_INTEGRATION_ID, 'auth_type': 'OAUTH2', 'scopes': [], 'endpoints': []},
+                {'provider': 'quickbooks-sandbox', 'display_name': 'QuickBooks (Sandbox)', 'integration_id': NANGO_QUICKBOOKS_INTEGRATION_ID, 'auth_type': 'OAUTH2', 'scopes': [], 'endpoints': []},
+                {'provider': 'xero', 'display_name': 'Xero', 'integration_id': NANGO_XERO_INTEGRATION_ID, 'auth_type': 'OAUTH2', 'scopes': [], 'endpoints': []},
+                {'provider': 'sage-accounting', 'display_name': 'Sage Accounting', 'integration_id': NANGO_SAGE_INTEGRATION_ID, 'auth_type': 'OAUTH2', 'scopes': [], 'endpoints': []}
             ]
         }
     except HTTPException:
@@ -7638,21 +8269,26 @@ async def list_providers(request: dict):
 
 @app.post("/api/connectors/initiate")
 async def initiate_connector(req: ConnectorInitiateRequest):
-    """Create a Nango Connect session for the user to authorize Gmail in dev mode."""
+    """Create a Nango Connect session for supported providers."""
     _require_security('connectors-initiate', req.user_id, req.session_token)
     try:
-        if req.provider != 'google-mail':
-            raise HTTPException(status_code=400, detail="Unsupported provider in Phase 1")
-        nango = NangoClient(base_url=NANGO_BASE_URL)
-        session = await nango.create_connect_session(
-            end_user={'id': req.user_id},
-            allowed_integrations=[NANGO_GMAIL_INTEGRATION_ID]
-        )
-        return {
-            'status': 'ok',
-            'integration_id': NANGO_GMAIL_INTEGRATION_ID,
-            'connect_session': session  # includes token; FE can use Nango Connect UI
+        provider_map = {
+            'google-mail': NANGO_GMAIL_INTEGRATION_ID,
+            'zoho-mail': NANGO_ZOHO_MAIL_INTEGRATION_ID,
+            'dropbox': NANGO_DROPBOX_INTEGRATION_ID,
+            'google-drive': NANGO_GOOGLE_DRIVE_INTEGRATION_ID,
+            'zoho-books': NANGO_ZOHO_BOOKS_INTEGRATION_ID,
+            'quickbooks': NANGO_QUICKBOOKS_INTEGRATION_ID,
+            'quickbooks-sandbox': NANGO_QUICKBOOKS_INTEGRATION_ID,
+            'xero': NANGO_XERO_INTEGRATION_ID,
+            'sage-accounting': NANGO_SAGE_INTEGRATION_ID,
         }
+        integ = provider_map.get(req.provider)
+        if not integ:
+            raise HTTPException(status_code=400, detail="Unsupported provider")
+        nango = NangoClient(base_url=NANGO_BASE_URL)
+        session = await nango.create_connect_session(end_user={'id': req.user_id}, allowed_integrations=[integ])
+        return {'status': 'ok', 'integration_id': integ, 'connect_session': session}
     except HTTPException:
         raise
     except Exception as e:
@@ -7661,18 +8297,60 @@ async def initiate_connector(req: ConnectorInitiateRequest):
 
 @app.post("/api/connectors/sync")
 async def connectors_sync(req: ConnectorSyncRequest):
-    """Run a sync for Gmail via Nango (historical or incremental)."""
+    """Run a sync via Nango (historical or incremental) for supported providers."""
     _require_security('connectors-sync', req.user_id, req.session_token)
     try:
-        if (req.integration_id or NANGO_GMAIL_INTEGRATION_ID) != NANGO_GMAIL_INTEGRATION_ID:
-            raise HTTPException(status_code=400, detail="Only Gmail supported in Phase 1")
+        integ = (req.integration_id or NANGO_GMAIL_INTEGRATION_ID)
         nango = NangoClient(base_url=NANGO_BASE_URL)
-        result = await _gmail_sync_run(nango, req)
-        return result
+        if integ == NANGO_GMAIL_INTEGRATION_ID:
+            if _use_celery() and task_gmail_sync:
+                try:
+                    task_gmail_sync.apply_async(args=[req.model_dump()])
+                    return {"status": "queued", "provider": integ, "mode": req.mode}
+                except Exception as e:
+                    logger.warning(f"Celery dispatch for Gmail sync failed, falling back inline: {e}")
+            return await _gmail_sync_run(nango, req)
+        elif integ == NANGO_DROPBOX_INTEGRATION_ID:
+            return await _dropbox_sync_run(nango, req)
+        elif integ == NANGO_GOOGLE_DRIVE_INTEGRATION_ID:
+            return await _gdrive_sync_run(nango, req)
+        elif integ == NANGO_ZOHO_MAIL_INTEGRATION_ID:
+            return await _zohomail_sync_run(nango, req)
+        elif integ == NANGO_QUICKBOOKS_INTEGRATION_ID:
+            return await _quickbooks_sync_run(nango, req)
+        elif integ == NANGO_XERO_INTEGRATION_ID:
+            return await _xero_sync_run(nango, req)
+        else:
+            raise HTTPException(status_code=400, detail="Provider sync not yet implemented")
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Connectors sync failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+class ConnectorMetadataUpdate(BaseModel):
+    user_id: str
+    connection_id: str
+    updates: Dict[str, Any]
+    session_token: Optional[str] = None
+
+@app.post('/api/connectors/metadata')
+async def update_connection_metadata(req: ConnectorMetadataUpdate):
+    """Update provider-specific metadata for a user connection (e.g., realmId, tenantId)."""
+    _require_security('connectors-metadata', req.user_id, req.session_token)
+    try:
+        row = supabase.table('user_connections').select('metadata').eq('nango_connection_id', req.connection_id).limit(1).execute()
+        base_meta = (row.data[0].get('metadata') if row.data else {}) or {}
+        if isinstance(base_meta, str):
+            try:
+                base_meta = json.loads(base_meta)
+            except Exception:
+                base_meta = {}
+        new_meta = {**base_meta, **(req.updates or {})}
+        supabase.table('user_connections').update({'metadata': new_meta}).eq('nango_connection_id', req.connection_id).execute()
+        return {'status': 'ok', 'metadata': new_meta}
+    except Exception as e:
+        logger.error(f"Metadata update failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/connectors/status")
@@ -7692,25 +8370,282 @@ async def connectors_status(connection_id: str, user_id: str, session_token: Opt
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/webhooks/nango")
-async def nango_webhook(request: dict):
-    """Accept Nango webhooks (dev/prod). In dev, Nango may host webhooks; we store for replay."""
+async def nango_webhook(request: Request):
+    """Nango webhook receiver with HMAC verification and idempotency.
+
+    Signature header candidates: X-Nango-Signature, Nango-Signature. HMAC-SHA256 of raw body using NANGO_WEBHOOK_SECRET.
+    """
     try:
-        payload = request or {}
-        # Optional: verify signature if header provided via Starlette Request (omitted here due to dev mode)
-        user_id = payload.get('user_id') or payload.get('end_user', {}).get('id') or 'unknown'
+        raw = await request.body()
+        payload = {}
         try:
-            supabase.table('webhook_events').insert({
-                'user_id': user_id,
-                'event_type': payload.get('type'),
-                'payload': json.dumps(payload),
-                'signature_valid': True,
-                'status': 'queued'
-            }).execute()
+            payload = json.loads(raw.decode('utf-8') or '{}')
         except Exception:
             pass
-        return {'status': 'received'}
+
+        # Verify signature if secret configured
+        secret = os.environ.get("NANGO_WEBHOOK_SECRET")
+        header_sig = (
+            request.headers.get('X-Nango-Signature')
+            or request.headers.get('Nango-Signature')
+            or request.headers.get('x-nango-signature')
+            or request.headers.get('nango-signature')
+        )
+        signature_valid = False
+        computed_hex = None
+        if secret and header_sig:
+            try:
+                digest = hmac.new(secret.encode('utf-8'), raw, 'sha256').hexdigest()
+                computed_hex = digest
+                # Accept common formats: exact hex, "sha256=<hex>", or a csv like "v1=<hex>"
+                candidates = [digest, f"sha256={digest}"]
+                if header_sig.startswith('v1='):
+                    candidates.append(header_sig.split('v1=')[-1])
+                signature_valid = any(hmac.compare_digest(header_sig, c) for c in candidates) or any(hmac.compare_digest(c, header_sig) for c in candidates)
+            except Exception as e:
+                logger.warning(f"Webhook signature computation failed: {e}")
+                signature_valid = False
+        elif not secret:
+            logger.warning("NANGO_WEBHOOK_SECRET not set; accepting webhook in dev mode")
+            signature_valid = True
+
+        # Extract event and connection details
+        event_type = payload.get('type') or payload.get('event_type')
+        event_id = payload.get('id') or payload.get('event_id')
+        end_user = payload.get('end_user') or {}
+        user_id = payload.get('user_id') or end_user.get('id')
+        connection_id = (
+            payload.get('connection_id')
+            or (payload.get('connection') or {}).get('id')
+            or (payload.get('data') or {}).get('connection_id')
+        )
+
+        # Persist webhook for audit/idempotency
+        try:
+            supabase.table('webhook_events').insert({
+                'user_id': user_id or 'unknown',
+                'user_connection_id': None,
+                'event_type': event_type,
+                'payload': payload,  # supabase-py will json encode
+                'signature_valid': bool(signature_valid),
+                'status': 'queued',
+                'error': None,
+                'event_id': event_id
+            }).execute()
+        except Exception as e:
+            # Conflict on unique(event_id) is fine; treat as already processed
+            logger.info(f"Webhook insert dedup or failure: {e}")
+
+        # If we have a connection id and signature is valid, trigger incremental sync
+        if signature_valid and connection_id and user_id:
+            try:
+                # Lookup connector integration id (assume Gmail for now; extendable)
+                uc = supabase.table('user_connections').select('id, connector_id').eq('nango_connection_id', connection_id).limit(1).execute()
+                if uc.data:
+                    connector_id = uc.data[0]['connector_id']
+                    conn = supabase.table('connectors').select('provider, integration_id').eq('id', connector_id).limit(1).execute()
+                    provider = (conn.data[0]['integration_id'] if conn.data else NANGO_GMAIL_INTEGRATION_ID)
+                else:
+                    provider = NANGO_GMAIL_INTEGRATION_ID
+
+                if provider == NANGO_GMAIL_INTEGRATION_ID:
+                    req = ConnectorSyncRequest(
+                        user_id=user_id,
+                        connection_id=connection_id,
+                        integration_id=NANGO_GMAIL_INTEGRATION_ID,
+                        mode='incremental',
+                        max_results=100
+                    )
+                    if _use_celery() and task_gmail_sync:
+                        task_gmail_sync.apply_async(args=[req.model_dump()])
+                    else:
+                        nango = NangoClient(base_url=NANGO_BASE_URL)
+                        asyncio.create_task(_gmail_sync_run(nango, req))
+                elif provider == NANGO_DROPBOX_INTEGRATION_ID:
+                    req = ConnectorSyncRequest(
+                        user_id=user_id,
+                        connection_id=connection_id,
+                        integration_id=NANGO_DROPBOX_INTEGRATION_ID,
+                        mode='incremental',
+                        max_results=500
+                    )
+                    nango = NangoClient(base_url=NANGO_BASE_URL)
+                    asyncio.create_task(_dropbox_sync_run(nango, req))
+                elif provider == NANGO_GOOGLE_DRIVE_INTEGRATION_ID:
+                    req = ConnectorSyncRequest(
+                        user_id=user_id,
+                        connection_id=connection_id,
+                        integration_id=NANGO_GOOGLE_DRIVE_INTEGRATION_ID,
+                        mode='incremental',
+                        max_results=500
+                    )
+                    nango = NangoClient(base_url=NANGO_BASE_URL)
+                    asyncio.create_task(_gdrive_sync_run(nango, req))
+                elif provider == NANGO_ZOHO_MAIL_INTEGRATION_ID:
+                    req = ConnectorSyncRequest(
+                        user_id=user_id,
+                        connection_id=connection_id,
+                        integration_id=NANGO_ZOHO_MAIL_INTEGRATION_ID,
+                        mode='incremental',
+                        max_results=100
+                    )
+                    nango = NangoClient(base_url=NANGO_BASE_URL)
+                    asyncio.create_task(_zohomail_sync_run(nango, req))
+                elif provider == NANGO_QUICKBOOKS_INTEGRATION_ID:
+                    req = ConnectorSyncRequest(
+                        user_id=user_id,
+                        connection_id=connection_id,
+                        integration_id=NANGO_QUICKBOOKS_INTEGRATION_ID,
+                        mode='incremental',
+                        max_results=100
+                    )
+                    nango = NangoClient(base_url=NANGO_BASE_URL)
+                    asyncio.create_task(_quickbooks_sync_run(nango, req))
+                elif provider == NANGO_XERO_INTEGRATION_ID:
+                    req = ConnectorSyncRequest(
+                        user_id=user_id,
+                        connection_id=connection_id,
+                        integration_id=NANGO_XERO_INTEGRATION_ID,
+                        mode='incremental',
+                        max_results=100
+                    )
+                    nango = NangoClient(base_url=NANGO_BASE_URL)
+                    asyncio.create_task(_xero_sync_run(nango, req))
+            except Exception as e:
+                logger.warning(f"Failed to trigger incremental sync from webhook: {e}")
+
+        return {'status': 'received', 'signature_valid': bool(signature_valid)}
     except Exception as e:
         logger.error(f"Webhook handling failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+def _require_scheduler_auth(request: Request):
+    token = os.environ.get('SCHEDULER_TOKEN')
+    if not token:
+        # If not configured, block by default
+        raise HTTPException(status_code=403, detail='Scheduler token not configured')
+    auth = request.headers.get('Authorization') or ''
+    if auth.startswith('Bearer '):
+        provided = auth.split(' ', 1)[1]
+    else:
+        provided = request.headers.get('X-Scheduler-Token') or request.query_params.get('token')
+    if not provided or not hmac.compare_digest(provided, token):
+        raise HTTPException(status_code=403, detail='Invalid scheduler token')
+
+@app.post('/api/connectors/scheduler/run')
+async def run_scheduled_syncs(request: Request, provider: Optional[str] = None, limit: int = 25):
+    """Orchestrate incremental syncs for due connections. Secured by SCHEDULER_TOKEN."""
+    _require_scheduler_auth(request)
+    try:
+        now = datetime.utcnow()
+        # Fetch active connections
+        conns = supabase.table('user_connections').select('id, user_id, nango_connection_id, sync_frequency_minutes, last_synced_at, connector_id, status').eq('status', 'active').limit(1000).execute()
+        dispatched = []
+        for row in (conns.data or []):
+            if len(dispatched) >= max(1, min(limit, 100)):
+                break
+            freq = row.get('sync_frequency_minutes') or 60
+            last = row.get('last_synced_at')
+            due = True
+            try:
+                if last:
+                    last_dt = datetime.fromisoformat(str(last).replace('Z', '+00:00'))
+                    due = (now - last_dt) >= timedelta(minutes=freq)
+            except Exception:
+                due = True
+            if not due:
+                continue
+
+            # Provider filter
+            conn_provider = None
+            if row.get('connector_id'):
+                try:
+                    c = supabase.table('connectors').select('integration_id').eq('id', row['connector_id']).limit(1).execute()
+                    conn_provider = c.data[0]['integration_id'] if c.data else None
+                except Exception:
+                    conn_provider = None
+            if provider and conn_provider and provider != conn_provider:
+                continue
+
+            # Dispatch provider-specific sync
+            if (conn_provider or NANGO_GMAIL_INTEGRATION_ID) == NANGO_GMAIL_INTEGRATION_ID:
+                req = ConnectorSyncRequest(
+                    user_id=row['user_id'],
+                    connection_id=row['nango_connection_id'],
+                    integration_id=NANGO_GMAIL_INTEGRATION_ID,
+                    mode='incremental',
+                    max_results=100
+                )
+                if _use_celery() and task_gmail_sync:
+                    try:
+                        task_gmail_sync.apply_async(args=[req.model_dump()])
+                    except Exception as e:
+                        logger.warning(f"Celery dispatch failed in scheduler: {e}")
+                        nango = NangoClient(base_url=NANGO_BASE_URL)
+                        asyncio.create_task(_gmail_sync_run(nango, req))
+                else:
+                    nango = NangoClient(base_url=NANGO_BASE_URL)
+                    asyncio.create_task(_gmail_sync_run(nango, req))
+                dispatched.append(row['nango_connection_id'])
+            elif conn_provider == NANGO_DROPBOX_INTEGRATION_ID:
+                req = ConnectorSyncRequest(
+                    user_id=row['user_id'],
+                    connection_id=row['nango_connection_id'],
+                    integration_id=NANGO_DROPBOX_INTEGRATION_ID,
+                    mode='incremental',
+                    max_results=500
+                )
+                nango = NangoClient(base_url=NANGO_BASE_URL)
+                asyncio.create_task(_dropbox_sync_run(nango, req))
+                dispatched.append(row['nango_connection_id'])
+            elif conn_provider == NANGO_GOOGLE_DRIVE_INTEGRATION_ID:
+                req = ConnectorSyncRequest(
+                    user_id=row['user_id'],
+                    connection_id=row['nango_connection_id'],
+                    integration_id=NANGO_GOOGLE_DRIVE_INTEGRATION_ID,
+                    mode='incremental',
+                    max_results=500
+                )
+                nango = NangoClient(base_url=NANGO_BASE_URL)
+                asyncio.create_task(_gdrive_sync_run(nango, req))
+                dispatched.append(row['nango_connection_id'])
+            elif conn_provider == NANGO_ZOHO_MAIL_INTEGRATION_ID:
+                req = ConnectorSyncRequest(
+                    user_id=row['user_id'],
+                    connection_id=row['nango_connection_id'],
+                    integration_id=NANGO_ZOHO_MAIL_INTEGRATION_ID,
+                    mode='incremental',
+                    max_results=100
+                )
+                nango = NangoClient(base_url=NANGO_BASE_URL)
+                asyncio.create_task(_zohomail_sync_run(nango, req))
+                dispatched.append(row['nango_connection_id'])
+            elif conn_provider == NANGO_QUICKBOOKS_INTEGRATION_ID:
+                req = ConnectorSyncRequest(
+                    user_id=row['user_id'],
+                    connection_id=row['nango_connection_id'],
+                    integration_id=NANGO_QUICKBOOKS_INTEGRATION_ID,
+                    mode='incremental',
+                    max_results=100
+                )
+                nango = NangoClient(base_url=NANGO_BASE_URL)
+                asyncio.create_task(_quickbooks_sync_run(nango, req))
+                dispatched.append(row['nango_connection_id'])
+            elif conn_provider == NANGO_XERO_INTEGRATION_ID:
+                req = ConnectorSyncRequest(
+                    user_id=row['user_id'],
+                    connection_id=row['nango_connection_id'],
+                    integration_id=NANGO_XERO_INTEGRATION_ID,
+                    mode='incremental',
+                    max_results=100
+                )
+                nango = NangoClient(base_url=NANGO_BASE_URL)
+                asyncio.create_task(_xero_sync_run(nango, req))
+                dispatched.append(row['nango_connection_id'])
+
+        return {"status": "ok", "dispatched": dispatched, "count": len(dispatched)}
+    except Exception as e:
+        logger.error(f"Scheduler run failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 # ============================================================================
