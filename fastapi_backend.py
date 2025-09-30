@@ -18,6 +18,7 @@ from difflib import SequenceMatcher
 from universal_field_detector import UniversalFieldDetector
 from universal_platform_detector_optimized import UniversalPlatformDetectorOptimized as UniversalPlatformDetector
 from universal_document_classifier_optimized import UniversalDocumentClassifierOptimized as UniversalDocumentClassifier
+from universal_extractors_optimized import UniversalExtractorsOptimized as UniversalExtractors
 from entity_resolver_optimized import EntityResolverOptimized as EntityResolver
 import pandas as pd
 import numpy as np
@@ -38,9 +39,15 @@ from starlette.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ValidationError
+try:
+    # pydantic v2
+    from pydantic import field_validator
+except Exception:
+    field_validator = None  # fallback if not available
 
 # Database and external services
 from supabase import create_client, Client
+from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_LATEST
 
 # Celery app (Phase 4 orchestration)
 try:
@@ -58,6 +65,20 @@ except Exception:
 
 def _use_celery() -> bool:
     return (os.environ.get("USE_CELERY", "").lower() in ("1", "true", "yes")) and bool(celery_app)
+
+def _queue_backend() -> str:
+    """Return the queue backend mode: 'sync' (default) or 'arq'."""
+    return (os.environ.get("QUEUE_BACKEND") or "sync").lower()
+
+async def get_arq_pool():
+    """Create and return an ARQ Redis pool using ARQ_REDIS_URL (or REDIS_URL)."""
+    # Import inside function to avoid import overhead when not using ARQ
+    from arq import create_pool
+    from arq.connections import RedisSettings
+    url = os.environ.get("ARQ_REDIS_URL") or os.environ.get("REDIS_URL")
+    if not url:
+        raise RuntimeError("ARQ_REDIS_URL (or REDIS_URL) not set for QUEUE_BACKEND=arq")
+    return await create_pool(RedisSettings.from_dsn(url))
 
 from openai import OpenAI
 try:
@@ -227,6 +248,62 @@ logging.basicConfig(
     ]
 )
 logger = logging.getLogger(__name__)
+
+# ----------------------------------------------------------------------------
+# Metrics (Prometheus)
+# ----------------------------------------------------------------------------
+JOBS_ENQUEUED = Counter('jobs_enqueued_total', 'Jobs enqueued by provider and mode', ['provider', 'mode'])
+JOBS_PROCESSED = Counter('jobs_processed_total', 'Jobs processed by provider and status', ['provider', 'status'])
+DB_WRITES = Counter('db_writes_total', 'Database writes by table/op/status', ['table', 'op', 'status'])
+DB_WRITE_LATENCY = Histogram('db_write_latency_seconds', 'DB write latency seconds', ['table', 'op'])
+
+# ----------------------------------------------------------------------------
+# DB helper wrappers with metrics
+# ----------------------------------------------------------------------------
+def _db_insert(table: str, payload):
+    t0 = time.time()
+    try:
+        res = supabase.table(table).insert(payload).execute()
+        DB_WRITES.labels(table=table, op='insert', status='ok').inc()
+        DB_WRITE_LATENCY.labels(table=table, op='insert').observe(max(0.0, time.time() - t0))
+        return res
+    except Exception as e:
+        DB_WRITES.labels(table=table, op='insert', status='error').inc()
+        DB_WRITE_LATENCY.labels(table=table, op='insert').observe(max(0.0, time.time() - t0))
+        raise
+
+def _db_update(table: str, updates: dict, eq_col: str, eq_val):
+    t0 = time.time()
+    try:
+        res = supabase.table(table).update(updates).eq(eq_col, eq_val).execute()
+        DB_WRITES.labels(table=table, op='update', status='ok').inc()
+        DB_WRITE_LATENCY.labels(table=table, op='update').observe(max(0.0, time.time() - t0))
+        return res
+    except Exception:
+        DB_WRITES.labels(table=table, op='update', status='error').inc()
+        DB_WRITE_LATENCY.labels(table=table, op='update').observe(max(0.0, time.time() - t0))
+        raise
+
+def _db_insert_many_external_items(items: list) -> int:
+    """Best-effort batch insert for external_items. Falls back to per-row on conflict."""
+    if not items:
+        return 0
+    try:
+        _db_insert('external_items', items)
+        return len(items)
+    except Exception as e:
+        # On duplicate conflicts or other errors, try per-row to salvage progress
+        inserted = 0
+        for it in items:
+            try:
+                _db_insert('external_items', it)
+                inserted += 1
+            except Exception as ie:
+                # Ignore duplicates; log other errors
+                if 'duplicate key value' in str(ie) or 'Unique' in str(ie):
+                    continue
+                logger.warning(f"external_items insert failed for provider_id={it.get('provider_id')}: {ie}")
+        return inserted
 
 # Import production duplicate detection service
 try:
@@ -453,22 +530,57 @@ app = FastAPI(
 # Enhanced CORS middleware with security considerations
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://localhost:5173", 
-        "https://finley-ai.vercel.app",
-        "https://friendly-greetings-launchpad.onrender.com",
-        "https://friendly-greetings-launchpad-amey.onrender.com"
-    ],
-    allow_origin_regex=r"^https?:\/\/([a-z0-9-]+\.)*(onrender\.com|vercel\.app)$",
+    allow_origins=["*"],
     allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_methods=["*"],
     allow_headers=["*"],
-    expose_headers=["*"]
 )
 
-# Static file mounting will be done after all API routes are defined
-logger.info("🚀 Finley AI Backend starting in production mode")
+# Startup environment validation
+@app.on_event("startup")
+async def validate_critical_environment():
+    """Validate all required environment variables before accepting requests"""
+    logger.info("🔍 Validating environment configuration...")
+    
+    required_vars = {
+        "OPENAI_API_KEY": "OpenAI API access for AI classification",
+        "SUPABASE_URL": "Supabase project URL",
+        "SUPABASE_SERVICE_ROLE_KEY": "Supabase service role key for backend operations",
+        "NANGO_SECRET_KEY": "Nango API secret for connector integrations"
+    }
+    
+    missing = []
+    for var, description in required_vars.items():
+        if not os.environ.get(var):
+            missing.append(f"  - {var}: {description}")
+    
+    if missing:
+        error_msg = "🚨 CRITICAL: Missing required environment variables:\n" + "\n".join(missing)
+        logger.error(error_msg)
+        raise RuntimeError(error_msg + "\n\nPlease set these in your .env file before starting the server.")
+    
+    # Validate Redis if using ARQ queue backend
+    if _queue_backend() == 'arq':
+        redis_url = os.environ.get("ARQ_REDIS_URL") or os.environ.get("REDIS_URL")
+        if not redis_url:
+            raise RuntimeError(
+                "🚨 CRITICAL: REDIS_URL or ARQ_REDIS_URL required when QUEUE_BACKEND=arq\n"
+                "Set one of these environment variables or change QUEUE_BACKEND to 'sync'"
+            )
+    
+    logger.info("✅ All required environment variables present and valid")
+    logger.info(f"   Queue Backend: {_queue_backend()}")
+    logger.info(f"   Celery Enabled: {_use_celery()}")
+
+# Expose Prometheus metrics
+@app.get("/metrics")
+async def metrics_endpoint():
+    try:
+        data = generate_latest()
+        return Response(content=data, media_type=CONTENT_TYPE_LATEST)
+    except Exception as e:
+        logger.error(f"/metrics failed: {e}")
+        raise HTTPException(status_code=500, detail="metrics unavailable")
 
 # Initialize OpenAI client with error handling
 try:
@@ -948,17 +1060,18 @@ class EnhancedFileProcessor:
             raise
 
 async def _zohomail_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> Dict[str, Any]:
-    """Synchronous NOOP sync for Zoho Mail to validate the connection and record a run.
-    We intentionally do not call remote APIs yet; this sets up DB rows for testing.
-    """
+    """Zoho Mail ingestion: fetch messages with attachments and persist attachments as external_items."""
     provider_key = NANGO_ZOHO_MAIL_INTEGRATION_ID
     connection_id = req.connection_id
     user_id = req.user_id
     stats = {'records_fetched': 0, 'actions_used': 0, 'attachments_saved': 0, 'queued_jobs': 0, 'skipped': 0}
-    # Upserts
-    try:
+
+    # Ensure connector exists
+    conn_row = supabase.table('connectors').select('id').eq('provider', provider_key).limit(1).execute()
+    connector_id = conn_row.data[0]['id'] if conn_row.data else None
+    if not connector_id:
         try:
-            supabase.table('connectors').insert({
+            res = supabase.table('connectors').insert({
                 'provider': provider_key,
                 'integration_id': provider_key,
                 'auth_type': 'OAUTH2',
@@ -966,51 +1079,204 @@ async def _zohomail_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> D
                 'endpoints_needed': json.dumps([]),
                 'enabled': True
             }).execute()
-        except Exception:
-            pass
-        conn_row = supabase.table('connectors').select('id').eq('provider', provider_key).limit(1).execute()
-        connector_id = conn_row.data[0]['id'] if conn_row.data else None
-        try:
-            supabase.table('user_connections').insert({
-                'user_id': user_id,
-                'connector_id': connector_id,
-                'nango_connection_id': connection_id,
-                'status': 'active',
-                'sync_mode': 'pull'
-            }).execute()
-        except Exception:
-            pass
-        uc_row = supabase.table('user_connections').select('id').eq('nango_connection_id', connection_id).limit(1).execute()
-        user_connection_id = uc_row.data[0]['id'] if uc_row.data else None
-    except Exception:
-        user_connection_id = None
+            connector_id = (res.data[0]['id'] if res and res.data else None)
+        except Exception as e:
+            logger.warning(f"Zoho connectors upsert failed: {e}")
 
-    sync_run_id = str(uuid.uuid4())
+    # Ensure user_connection exists
     try:
-        supabase.table('sync_runs').insert({
-            'id': sync_run_id,
+        supabase.table('user_connections').insert({
             'user_id': user_id,
-            'user_connection_id': user_connection_id,
-            'type': req.mode,
-            'status': 'succeeded',
-            'started_at': datetime.utcnow().isoformat(),
-            'finished_at': datetime.utcnow().isoformat(),
-            'stats': json.dumps(stats)
+            'connector_id': connector_id,
+            'nango_connection_id': connection_id,
+            'status': 'active',
+            'sync_mode': 'pull'
         }).execute()
-        supabase.table('user_connections').update({'last_synced_at': datetime.utcnow().isoformat()}).eq('nango_connection_id', connection_id).execute()
     except Exception:
         pass
-    return {'status': 'succeeded', 'sync_run_id': sync_run_id, 'stats': stats, 'note': 'noop-sync'}
+    uc_row = supabase.table('user_connections').select('id, metadata').eq('nango_connection_id', connection_id).limit(1).execute()
+    user_connection_id = uc_row.data[0]['id'] if uc_row.data else None
+    uc_meta = (uc_row.data[0].get('metadata') if uc_row.data else {}) or {}
+    if isinstance(uc_meta, str):
+        try:
+            uc_meta = json.loads(uc_meta)
+        except Exception:
+            uc_meta = {}
+
+    # Start sync run
+    sync_run_id = str(uuid.uuid4())
+    supabase.table('sync_runs').insert({
+        'id': sync_run_id,
+        'user_id': user_id,
+        'user_connection_id': user_connection_id,
+        'type': req.mode,
+        'status': 'running',
+        'started_at': datetime.utcnow().isoformat(),
+        'stats': json.dumps(stats)
+    }).execute()
+
+    try:
+        # Resolve Zoho accountId
+        account_id = uc_meta.get('accountId')
+        if not account_id:
+            accounts = await nango.proxy_get('zoho-mail', 'api/accounts', connection_id=connection_id, provider_config_key=provider_key)
+            stats['actions_used'] += 1
+            account_id = None
+            if isinstance(accounts, dict):
+                if isinstance(accounts.get('accounts'), list) and accounts['accounts']:
+                    account_id = accounts['accounts'][0].get('accountId') or accounts['accounts'][0].get('id')
+                elif isinstance(accounts.get('data'), dict):
+                    accs = accounts['data'].get('accounts')
+                    if isinstance(accs, list) and accs:
+                        account_id = accs[0].get('accountId') or accs[0].get('id')
+            elif isinstance(accounts, list) and accounts:
+                account_id = accounts[0].get('accountId') or accounts[0].get('id')
+            if not account_id:
+                raise HTTPException(status_code=400, detail='Zoho Mail accountId not found; set via /api/connectors/metadata')
+            # Persist discovered accountId
+            try:
+                supabase.table('user_connections').update({'metadata': {**uc_meta, 'accountId': account_id}}).eq('nango_connection_id', connection_id).execute()
+            except Exception:
+                pass
+
+        # Page messages with attachments
+        max_total = max(1, min(req.max_results or 100, 500))
+        fetched = 0
+        while fetched < max_total:
+            params = {'hasAttachment': 'true', 'limit': min(100, max_total - fetched), 'from': (fetched + 1)}
+            msgs = await nango.proxy_get('zoho-mail', f'api/accounts/{account_id}/messages', params=params, connection_id=connection_id, provider_config_key=provider_key)
+            stats['actions_used'] += 1
+            items = []
+            if isinstance(msgs, dict):
+                items = msgs.get('messages') or msgs.get('data') or []
+            elif isinstance(msgs, list):
+                items = msgs
+            if not items:
+                break
+            for m in items:
+                mid = m.get('messageId') or m.get('id') or m.get('entityId')
+                if not mid:
+                    stats['skipped'] += 1
+                    continue
+                # Fetch detail for attachments
+                try:
+                    detail = await nango.proxy_get('zoho-mail', f'api/accounts/{account_id}/messages/{mid}', connection_id=connection_id, provider_config_key=provider_key)
+                    stats['actions_used'] += 1
+                except Exception:
+                    detail = m
+                attachments = detail.get('attachments') or []
+                batch_items: List[Dict[str, Any]] = []
+                for att in attachments:
+                    part_id = att.get('partId') or att.get('id') or att.get('contentId')
+                    fname = att.get('fileName') or att.get('name') or 'attachment'
+                    if not part_id:
+                        stats['skipped'] += 1
+                        continue
+                    content = b''
+                    # Try common content endpoints
+                    try:
+                        content = await nango.proxy_get_bytes('zoho-mail', f'api/accounts/{account_id}/messages/{mid}/attachments/{part_id}/content', connection_id=connection_id, provider_config_key=provider_key)
+                        stats['actions_used'] += 1
+                    except Exception:
+                        try:
+                            content = await nango.proxy_get_bytes('zoho-mail', f'api/accounts/{account_id}/messages/{mid}/content', params={'partId': part_id}, connection_id=connection_id, provider_config_key=provider_key)
+                            stats['actions_used'] += 1
+                        except Exception:
+                            content = b''
+                    if not content:
+                        stats['skipped'] += 1
+                        continue
+
+                    storage_path, file_hash = await _store_external_item_attachment(user_id, 'zoho-mail', str(mid), fname, content)
+                    stats['attachments_saved'] += 1
+                    metadata = {
+                        'subject': detail.get('subject') or m.get('subject'),
+                        'from': detail.get('from') or m.get('fromAddress') or m.get('from'),
+                        'to': detail.get('to') or m.get('toAddress') or m.get('to'),
+                        'size': att.get('size'),
+                        'message_id': mid,
+                        'correlation_id': req.correlation_id,
+                    }
+                    item = {
+                        'user_id': user_id,
+                        'user_connection_id': user_connection_id,
+                        'provider_id': f"{mid}:{part_id}",
+                        'kind': 'file',
+                        'source_ts': None,
+                        'hash': file_hash,
+                        'storage_path': storage_path,
+                        'metadata': metadata,
+                        'status': 'stored'
+                    }
+                    batch_items.append(item)
+
+                    # Enqueue processing
+                    try:
+                        lower = (fname or '').lower()
+                        if lower.endswith('.pdf'):
+                            await _enqueue_pdf_processing(user_id, fname, storage_path)
+                        else:
+                            await _enqueue_file_processing(user_id, fname, storage_path)
+                        stats['queued_jobs'] += 1
+                    except Exception as e:
+                        logger.warning(f"Zoho enqueue failed: {e}")
+
+                # Batch insert for this message's attachments
+                if batch_items:
+                    inserted = _db_insert_many_external_items(batch_items)
+                    stats['records_fetched'] += inserted
+                fetched += 1
+                if fetched >= max_total:
+                    break
+            if fetched >= max_total:
+                break
+
+        supabase.table('sync_runs').update({'status': 'succeeded', 'finished_at': datetime.utcnow().isoformat(), 'stats': json.dumps(stats)}).eq('id', sync_run_id).execute()
+        JOBS_PROCESSED.labels(provider=provider_key, status='succeeded').inc()
+        supabase.table('user_connections').update({'last_synced_at': datetime.utcnow().isoformat()}).eq('nango_connection_id', connection_id).execute()
+        return {'status': 'succeeded', 'sync_run_id': sync_run_id, 'stats': stats}
+    except HTTPException:
+        supabase.table('sync_runs').update({'status': 'failed', 'finished_at': datetime.utcnow().isoformat(), 'stats': json.dumps(stats)}).eq('id', sync_run_id).execute()
+        JOBS_PROCESSED.labels(provider=provider_key, status='failed').inc()
+        raise
+    except Exception as e:
+        logger.error(f"Zoho Mail sync failed: {e}")
+        
+        # Error recovery
+        try:
+            recovery_system = get_error_recovery_system()
+            error_context = ErrorContext(
+                error_id=str(uuid.uuid4()),
+                user_id=user_id,
+                job_id=sync_run_id,
+                transaction_id=None,
+                operation_type='zohomail_sync',
+                error_message=str(e),
+                error_details={'sync_run_id': sync_run_id, 'connection_id': connection_id, 'provider': provider_key, 'correlation_id': req.correlation_id},
+                severity=ErrorSeverity.HIGH,
+                occurred_at=datetime.utcnow()
+            )
+            await recovery_system.handle_processing_error(error_context)
+        except Exception as recovery_error:
+            logger.error(f"Error recovery failed: {recovery_error}")
+        
+        supabase.table('sync_runs').update({'status': 'failed', 'finished_at': datetime.utcnow().isoformat(), 'error': str(e), 'stats': json.dumps(stats)}).eq('id', sync_run_id).execute()
+        JOBS_PROCESSED.labels(provider=provider_key, status='failed').inc()
+        raise HTTPException(status_code=500, detail='Zoho Mail sync failed')
 
 async def _quickbooks_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> Dict[str, Any]:
-    """Synchronous NOOP sync for QuickBooks (Sandbox)."""
+    """QuickBooks ingestion: fetch Invoices, Bills, and Payments via QBO Query API and persist as external_items."""
     provider_key = NANGO_QUICKBOOKS_INTEGRATION_ID
     connection_id = req.connection_id
     user_id = req.user_id
     stats = {'records_fetched': 0, 'actions_used': 0, 'attachments_saved': 0, 'queued_jobs': 0, 'skipped': 0}
-    try:
+
+    # Ensure connector and user_connection
+    conn_row = supabase.table('connectors').select('id').eq('provider', provider_key).limit(1).execute()
+    connector_id = conn_row.data[0]['id'] if conn_row.data else None
+    if not connector_id:
         try:
-            supabase.table('connectors').insert({
+            res = supabase.table('connectors').insert({
                 'provider': provider_key,
                 'integration_id': provider_key,
                 'auth_type': 'OAUTH2',
@@ -1018,51 +1284,204 @@ async def _quickbooks_sync_run(nango: NangoClient, req: ConnectorSyncRequest) ->
                 'endpoints_needed': json.dumps([]),
                 'enabled': True
             }).execute()
-        except Exception:
-            pass
-        conn_row = supabase.table('connectors').select('id').eq('provider', provider_key).limit(1).execute()
-        connector_id = conn_row.data[0]['id'] if conn_row.data else None
-        try:
-            supabase.table('user_connections').insert({
-                'user_id': user_id,
-                'connector_id': connector_id,
-                'nango_connection_id': connection_id,
-                'status': 'active',
-                'sync_mode': 'pull'
-            }).execute()
-        except Exception:
-            pass
-        uc_row = supabase.table('user_connections').select('id').eq('nango_connection_id', connection_id).limit(1).execute()
-        user_connection_id = uc_row.data[0]['id'] if uc_row.data else None
-    except Exception:
-        user_connection_id = None
-
-    sync_run_id = str(uuid.uuid4())
+            connector_id = (res.data[0]['id'] if res and res.data else None)
+        except Exception as e:
+            logger.warning(f"QuickBooks connectors upsert failed: {e}")
     try:
-        supabase.table('sync_runs').insert({
-            'id': sync_run_id,
+        supabase.table('user_connections').insert({
             'user_id': user_id,
-            'user_connection_id': user_connection_id,
-            'type': req.mode,
-            'status': 'succeeded',
-            'started_at': datetime.utcnow().isoformat(),
-            'finished_at': datetime.utcnow().isoformat(),
-            'stats': json.dumps(stats)
+            'connector_id': connector_id,
+            'nango_connection_id': connection_id,
+            'status': 'active',
+            'sync_mode': 'pull'
         }).execute()
-        supabase.table('user_connections').update({'last_synced_at': datetime.utcnow().isoformat()}).eq('nango_connection_id', connection_id).execute()
     except Exception:
         pass
-    return {'status': 'succeeded', 'sync_run_id': sync_run_id, 'stats': stats, 'note': 'noop-sync'}
+    uc_row = supabase.table('user_connections').select('id, metadata').eq('nango_connection_id', connection_id).limit(1).execute()
+    user_connection_id = uc_row.data[0]['id'] if uc_row.data else None
+    uc_meta = (uc_row.data[0].get('metadata') if uc_row.data else {}) or {}
+    if isinstance(uc_meta, str):
+        try:
+            uc_meta = json.loads(uc_meta)
+        except Exception:
+            uc_meta = {}
+
+    # Start sync run
+    sync_run_id = str(uuid.uuid4())
+    supabase.table('sync_runs').insert({
+        'id': sync_run_id,
+        'user_id': user_id,
+        'user_connection_id': user_connection_id,
+        'type': req.mode,
+        'status': 'running',
+        'started_at': datetime.utcnow().isoformat(),
+        'stats': json.dumps(stats)
+    }).execute()
+
+    try:
+        # Discover realmId
+        realm_id = uc_meta.get('realmId') or uc_meta.get('realm_id')
+        if not realm_id:
+            raise HTTPException(status_code=400, detail='QuickBooks realmId not set; provide via /api/connectors/metadata')
+
+        limit = max(1, min(req.max_results or 100, 500))
+
+        async def qbo_query(sql: str) -> Dict[str, Any]:
+            params = {"query": sql}
+            page = await nango.proxy_get('quickbooks', f'v3/company/{realm_id}/query', params=params, connection_id=connection_id, provider_config_key=provider_key)
+            stats['actions_used'] += 1
+            return page
+
+        # Fetch Invoices
+        inv_sql = f"SELECT Id, TxnDate, TotalAmt, DocNumber FROM Invoice ORDER BY TxnDate DESC STARTPOSITION 1 MAXRESULTS {limit}"
+        inv_page = await qbo_query(inv_sql)
+        invoices = (inv_page.get('QueryResponse') or {}).get('Invoice') or []
+        batch_items: List[Dict[str, Any]] = []
+        for inv in invoices:
+            pid = inv.get('Id')
+            if not pid:
+                stats['skipped'] += 1
+                continue
+            meta = {
+                'TxnType': 'Invoice',
+                'DocNumber': inv.get('DocNumber'),
+                'TxnDate': inv.get('TxnDate'),
+                'TotalAmt': inv.get('TotalAmt'),
+                'correlation_id': req.correlation_id,
+            }
+            item = {
+                'user_id': user_id,
+                'user_connection_id': user_connection_id,
+                'provider_id': f"Invoice:{pid}",
+                'kind': 'txn',
+                'source_ts': inv.get('TxnDate'),
+                'hash': None,
+                'storage_path': None,
+                'metadata': meta,
+                'status': 'fetched'
+            }
+            batch_items.append(item)
+        if batch_items:
+            inserted = _db_insert_many_external_items(batch_items)
+            stats['records_fetched'] += inserted
+            stats['skipped'] += max(0, len(batch_items) - inserted)
+
+        # Fetch Bills
+        bill_sql = f"SELECT Id, TxnDate, TotalAmt, DocNumber FROM Bill ORDER BY TxnDate DESC STARTPOSITION 1 MAXRESULTS {limit}"
+        bill_page = await qbo_query(bill_sql)
+        bills = (bill_page.get('QueryResponse') or {}).get('Bill') or []
+        batch_items = []
+        for bill in bills:
+            pid = bill.get('Id')
+            if not pid:
+                stats['skipped'] += 1
+                continue
+            meta = {
+                'TxnType': 'Bill',
+                'DocNumber': bill.get('DocNumber'),
+                'TxnDate': bill.get('TxnDate'),
+                'TotalAmt': bill.get('TotalAmt'),
+                'correlation_id': req.correlation_id,
+            }
+            item = {
+                'user_id': user_id,
+                'user_connection_id': user_connection_id,
+                'provider_id': f"Bill:{pid}",
+                'kind': 'txn',
+                'source_ts': bill.get('TxnDate'),
+                'hash': None,
+                'storage_path': None,
+                'metadata': meta,
+                'status': 'fetched'
+            }
+            batch_items.append(item)
+        if batch_items:
+            inserted = _db_insert_many_external_items(batch_items)
+            stats['records_fetched'] += inserted
+            stats['skipped'] += max(0, len(batch_items) - inserted)
+
+        # Fetch Payments
+        pay_sql = f"SELECT Id, TxnDate, TotalAmt FROM Payment ORDER BY TxnDate DESC STARTPOSITION 1 MAXRESULTS {limit}"
+        pay_page = await qbo_query(pay_sql)
+        payments = (pay_page.get('QueryResponse') or {}).get('Payment') or []
+        batch_items = []
+        for pay in payments:
+            pid = pay.get('Id')
+            if not pid:
+                stats['skipped'] += 1
+                continue
+            meta = {
+                'TxnType': 'Payment',
+                'TxnDate': pay.get('TxnDate'),
+                'TotalAmt': pay.get('TotalAmt'),
+                'correlation_id': req.correlation_id,
+            }
+            item = {
+                'user_id': user_id,
+                'user_connection_id': user_connection_id,
+                'provider_id': f"Payment:{pid}",
+                'kind': 'txn',
+                'source_ts': pay.get('TxnDate'),
+                'hash': None,
+                'storage_path': None,
+                'metadata': meta,
+                'status': 'fetched'
+            }
+            batch_items.append(item)
+        if batch_items:
+            inserted = _db_insert_many_external_items(batch_items)
+            stats['records_fetched'] += inserted
+            stats['skipped'] += max(0, len(batch_items) - inserted)
+
+        supabase.table('sync_runs').update({'status': 'succeeded', 'finished_at': datetime.utcnow().isoformat(), 'stats': json.dumps(stats)}).eq('id', sync_run_id).execute()
+        JOBS_PROCESSED.labels(provider=provider_key, status='succeeded').inc()
+        supabase.table('user_connections').update({'last_synced_at': datetime.utcnow().isoformat()}).eq('nango_connection_id', connection_id).execute()
+        return {'status': 'succeeded', 'sync_run_id': sync_run_id, 'stats': stats}
+    except HTTPException:
+        supabase.table('sync_runs').update({'status': 'failed', 'finished_at': datetime.utcnow().isoformat(), 'stats': json.dumps(stats)}).eq('id', sync_run_id).execute()
+        JOBS_PROCESSED.labels(provider=provider_key, status='failed').inc()
+        raise
+    except Exception as e:
+        logger.error(f"QuickBooks sync failed: {e}")
+        
+        # Error recovery
+        try:
+            recovery_system = get_error_recovery_system()
+            error_context = ErrorContext(
+                error_id=str(uuid.uuid4()),
+                user_id=user_id,
+                job_id=sync_run_id,
+                transaction_id=None,
+                operation_type='quickbooks_sync',
+                error_message=str(e),
+                error_details={'sync_run_id': sync_run_id, 'connection_id': connection_id, 'provider': provider_key, 'correlation_id': req.correlation_id},
+                severity=ErrorSeverity.HIGH,
+                occurred_at=datetime.utcnow()
+            )
+            await recovery_system.handle_processing_error(error_context)
+        except Exception as recovery_error:
+            logger.error(f"Error recovery failed: {recovery_error}")
+        
+        supabase.table('sync_runs').update({'status': 'failed', 'finished_at': datetime.utcnow().isoformat(), 'error': str(e), 'stats': json.dumps(stats)}).eq('id', sync_run_id).execute()
+        JOBS_PROCESSED.labels(provider=provider_key, status='failed').inc()
+        raise HTTPException(status_code=500, detail='QuickBooks sync failed')
 
 async def _xero_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> Dict[str, Any]:
-    """Synchronous NOOP sync for Xero."""
+    """Xero ingestion: fetch Invoices, Contacts, Payments and persist as external_items.
+
+    Requires tenantId header; we discover via `connections` when missing and persist to metadata.
+    """
     provider_key = NANGO_XERO_INTEGRATION_ID
     connection_id = req.connection_id
     user_id = req.user_id
     stats = {'records_fetched': 0, 'actions_used': 0, 'attachments_saved': 0, 'queued_jobs': 0, 'skipped': 0}
-    try:
+
+    # Ensure connector and user_connection
+    conn_row = supabase.table('connectors').select('id').eq('provider', provider_key).limit(1).execute()
+    connector_id = conn_row.data[0]['id'] if conn_row.data else None
+    if not connector_id:
         try:
-            supabase.table('connectors').insert({
+            res = supabase.table('connectors').insert({
                 'provider': provider_key,
                 'integration_id': provider_key,
                 'auth_type': 'OAUTH2',
@@ -1070,41 +1489,233 @@ async def _xero_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> Dict[
                 'endpoints_needed': json.dumps([]),
                 'enabled': True
             }).execute()
-        except Exception:
-            pass
-        conn_row = supabase.table('connectors').select('id').eq('provider', provider_key).limit(1).execute()
-        connector_id = conn_row.data[0]['id'] if conn_row.data else None
-        try:
-            supabase.table('user_connections').insert({
-                'user_id': user_id,
-                'connector_id': connector_id,
-                'nango_connection_id': connection_id,
-                'status': 'active',
-                'sync_mode': 'pull'
-            }).execute()
-        except Exception:
-            pass
-        uc_row = supabase.table('user_connections').select('id').eq('nango_connection_id', connection_id).limit(1).execute()
-        user_connection_id = uc_row.data[0]['id'] if uc_row.data else None
-    except Exception:
-        user_connection_id = None
-
-    sync_run_id = str(uuid.uuid4())
+            connector_id = (res.data[0]['id'] if res and res.data else None)
+        except Exception as e:
+            logger.warning(f"Xero connectors upsert failed: {e}")
     try:
-        supabase.table('sync_runs').insert({
-            'id': sync_run_id,
+        supabase.table('user_connections').insert({
             'user_id': user_id,
-            'user_connection_id': user_connection_id,
-            'type': req.mode,
-            'status': 'succeeded',
-            'started_at': datetime.utcnow().isoformat(),
-            'finished_at': datetime.utcnow().isoformat(),
-            'stats': json.dumps(stats)
+            'connector_id': connector_id,
+            'nango_connection_id': connection_id,
+            'status': 'active',
+            'sync_mode': 'pull'
         }).execute()
-        supabase.table('user_connections').update({'last_synced_at': datetime.utcnow().isoformat()}).eq('nango_connection_id', connection_id).execute()
     except Exception:
         pass
-    return {'status': 'succeeded', 'sync_run_id': sync_run_id, 'stats': stats, 'note': 'noop-sync'}
+    uc_row = supabase.table('user_connections').select('id, metadata').eq('nango_connection_id', connection_id).limit(1).execute()
+    user_connection_id = uc_row.data[0]['id'] if uc_row.data else None
+    uc_meta = (uc_row.data[0].get('metadata') if uc_row.data else {}) or {}
+    if isinstance(uc_meta, str):
+        try:
+            uc_meta = json.loads(uc_meta)
+        except Exception:
+            uc_meta = {}
+
+    # Start sync run
+    sync_run_id = str(uuid.uuid4())
+    supabase.table('sync_runs').insert({
+        'id': sync_run_id,
+        'user_id': user_id,
+        'user_connection_id': user_connection_id,
+        'type': req.mode,
+        'status': 'running',
+        'started_at': datetime.utcnow().isoformat(),
+        'stats': json.dumps(stats)
+    }).execute()
+
+    try:
+        # Resolve tenantId
+        tenant_id = uc_meta.get('tenantId') or uc_meta.get('tenant_id')
+        if not tenant_id:
+            cons = await nango.proxy_get('xero', 'connections', connection_id=connection_id, provider_config_key=provider_key)
+            stats['actions_used'] += 1
+            if isinstance(cons, list) and cons:
+                tenant_id = cons[0].get('tenantId') or cons[0].get('tenant_id')
+            elif isinstance(cons, dict):
+                arr = cons.get('data') or cons.get('connections') or []
+                if isinstance(arr, list) and arr:
+                    tenant_id = arr[0].get('tenantId') or arr[0].get('tenant_id')
+        if not tenant_id:
+            raise HTTPException(status_code=400, detail='Xero tenantId not set; provide via /api/connectors/metadata')
+        if 'tenantId' not in uc_meta:
+            try:
+                supabase.table('user_connections').update({'metadata': {**uc_meta, 'tenantId': tenant_id}}).eq('nango_connection_id', connection_id).execute()
+            except Exception:
+                pass
+
+        headers = {"xero-tenant-id": tenant_id}
+        limit = max(1, min(req.max_results or 100, 500))
+
+        async def xero_get(path: str, params: Dict[str, Any] | None = None) -> Dict[str, Any]:
+            page = await nango.proxy_get('xero', path, params=params or {}, connection_id=connection_id, provider_config_key=provider_key, headers=headers)
+            stats['actions_used'] += 1
+            return page
+
+        # Invoices
+        fetched = 0
+        page_no = 1
+        while fetched < limit:
+            inv_page = await xero_get('api.xro/2.0/Invoices', params={'page': page_no, 'order': 'Date DESC'})
+            invoices = inv_page.get('Invoices') or inv_page.get('data') or []
+            if not invoices:
+                break
+            batch_items: List[Dict[str, Any]] = []
+            for inv in invoices:
+                pid = inv.get('InvoiceID') or inv.get('InvoiceId') or inv.get('ID')
+                if not pid:
+                    stats['skipped'] += 1
+                    continue
+                meta = {
+                    'TxnType': 'Invoice',
+                    'InvoiceNumber': inv.get('InvoiceNumber'),
+                    'Date': inv.get('Date'),
+                    'Total': inv.get('Total'),
+                    'Status': inv.get('Status'),
+                    'correlation_id': req.correlation_id,
+                }
+                item = {
+                    'user_id': user_id,
+                    'user_connection_id': user_connection_id,
+                    'provider_id': f"Invoice:{pid}",
+                    'kind': 'txn',
+                    'source_ts': inv.get('Date'),
+                    'hash': None,
+                    'storage_path': None,
+                    'metadata': meta,
+                    'status': 'fetched'
+                }
+                batch_items.append(item)
+                fetched += 1
+                if fetched >= limit:
+                    break
+            if batch_items:
+                inserted = _db_insert_many_external_items(batch_items)
+                stats['records_fetched'] += inserted
+                stats['skipped'] += max(0, len(batch_items) - inserted)
+            if fetched >= limit:
+                break
+            page_no += 1
+
+        # Contacts (optional but useful for normalization)
+        fetched_c = 0
+        page_c = 1
+        while fetched_c < limit:
+            con_page = await xero_get('api.xro/2.0/Contacts', params={'page': page_c, 'order': 'UpdatedDateUTC DESC'})
+            contacts = con_page.get('Contacts') or con_page.get('data') or []
+            if not contacts:
+                break
+            batch_items = []
+            for c in contacts:
+                pid = c.get('ContactID') or c.get('ID')
+                if not pid:
+                    stats['skipped'] += 1
+                    continue
+                meta = {
+                    'TxnType': 'Contact',
+                    'Name': c.get('Name'),
+                    'EmailAddress': c.get('EmailAddress'),
+                    'UpdatedDateUTC': c.get('UpdatedDateUTC'),
+                    'correlation_id': req.correlation_id,
+                }
+                item = {
+                    'user_id': user_id,
+                    'user_connection_id': user_connection_id,
+                    'provider_id': f"Contact:{pid}",
+                    'kind': 'entity',
+                    'source_ts': c.get('UpdatedDateUTC'),
+                    'hash': None,
+                    'storage_path': None,
+                    'metadata': meta,
+                    'status': 'fetched'
+                }
+                batch_items.append(item)
+                fetched_c += 1
+                if fetched_c >= limit:
+                    break
+            if batch_items:
+                inserted = _db_insert_many_external_items(batch_items)
+                stats['records_fetched'] += inserted
+                stats['skipped'] += max(0, len(batch_items) - inserted)
+            if fetched_c >= limit:
+                break
+            page_c += 1
+
+        # Payments
+        fetched_p = 0
+        page_p = 1
+        while fetched_p < limit:
+            pay_page = await xero_get('api.xro/2.0/Payments', params={'page': page_p, 'order': 'Date DESC'})
+            payments = pay_page.get('Payments') or pay_page.get('data') or []
+            if not payments:
+                break
+            batch_items = []
+            for p in payments:
+                pid = p.get('PaymentID') or p.get('ID')
+                if not pid:
+                    stats['skipped'] += 1
+                    continue
+                meta = {
+                    'TxnType': 'Payment',
+                    'Date': p.get('Date'),
+                    'Total': p.get('Amount'),
+                    'Status': p.get('Status'),
+                    'correlation_id': req.correlation_id,
+                }
+                item = {
+                    'user_id': user_id,
+                    'user_connection_id': user_connection_id,
+                    'provider_id': f"Payment:{pid}",
+                    'kind': 'txn',
+                    'source_ts': p.get('Date'),
+                    'hash': None,
+                    'storage_path': None,
+                    'metadata': meta,
+                    'status': 'fetched'
+                }
+                batch_items.append(item)
+                fetched_p += 1
+                if fetched_p >= limit:
+                    break
+            if batch_items:
+                inserted = _db_insert_many_external_items(batch_items)
+                stats['records_fetched'] += inserted
+                stats['skipped'] += max(0, len(batch_items) - inserted)
+            if fetched_p >= limit:
+                break
+            page_p += 1
+
+        supabase.table('sync_runs').update({'status': 'succeeded', 'finished_at': datetime.utcnow().isoformat(), 'stats': json.dumps(stats)}).eq('id', sync_run_id).execute()
+        JOBS_PROCESSED.labels(provider=provider_key, status='succeeded').inc()
+        supabase.table('user_connections').update({'last_synced_at': datetime.utcnow().isoformat()}).eq('nango_connection_id', connection_id).execute()
+        return {'status': 'succeeded', 'sync_run_id': sync_run_id, 'stats': stats}
+    except HTTPException:
+        supabase.table('sync_runs').update({'status': 'failed', 'finished_at': datetime.utcnow().isoformat(), 'stats': json.dumps(stats)}).eq('id', sync_run_id).execute()
+        JOBS_PROCESSED.labels(provider=provider_key, status='failed').inc()
+        raise
+    except Exception as e:
+        logger.error(f"Xero sync failed: {e}")
+        
+        # Error recovery
+        try:
+            recovery_system = get_error_recovery_system()
+            error_context = ErrorContext(
+                error_id=str(uuid.uuid4()),
+                user_id=user_id,
+                job_id=sync_run_id,
+                transaction_id=None,
+                operation_type='xero_sync',
+                error_message=str(e),
+                error_details={'sync_run_id': sync_run_id, 'connection_id': connection_id, 'provider': provider_key, 'correlation_id': req.correlation_id},
+                severity=ErrorSeverity.HIGH,
+                occurred_at=datetime.utcnow()
+            )
+            await recovery_system.handle_processing_error(error_context)
+        except Exception as recovery_error:
+            logger.error(f"Error recovery failed: {recovery_error}")
+        
+        supabase.table('sync_runs').update({'status': 'failed', 'finished_at': datetime.utcnow().isoformat(), 'error': str(e), 'stats': json.dumps(stats)}).eq('id', sync_run_id).execute()
+        JOBS_PROCESSED.labels(provider=provider_key, status='failed').inc()
+        raise HTTPException(status_code=500, detail='Xero sync failed')
     
     async def _process_excel_streaming(self, file_content: bytes, filename: str, progress_callback=None) -> Dict[str, pd.DataFrame]:
         """Process Excel files using true streaming approach for large files"""
@@ -7458,6 +8069,39 @@ class ConnectorSyncRequest(BaseModel):
     lookback_days: Optional[int] = 365  # used for historical q filter
     max_results: Optional[int] = 100  # per page
     session_token: Optional[str] = None
+    correlation_id: Optional[str] = None
+
+    if field_validator:
+        @field_validator('max_results')
+        @classmethod
+        def _validate_max_results(cls, v):
+            if v is None:
+                return 100
+            try:
+                iv = int(v)
+            except Exception:
+                raise ValueError('max_results must be an integer')
+            if iv <= 0:
+                raise ValueError('max_results must be positive')
+            return min(iv, 1000)
+
+        @field_validator('lookback_days')
+        @classmethod
+        def _validate_lookback_days(cls, v):
+            if v is None:
+                return 365
+            iv = int(v)
+            if iv < 0:
+                raise ValueError('lookback_days must be >= 0')
+            return iv
+
+        @field_validator('mode')
+        @classmethod
+        def _validate_mode(cls, v):
+            allowed = {'historical', 'incremental'}
+            if v not in allowed:
+                raise ValueError('mode must be one of historical, incremental')
+            return v
 
 def _require_security(endpoint: str, user_id: str, session_token: Optional[str]):
     try:
@@ -7578,8 +8222,15 @@ async def _enqueue_file_processing(user_id: str, filename: str, storage_path: st
             supabase.table('ingestion_jobs').insert(job_data).execute()
         except Exception:
             pass
-        # Kick off processing via Celery if enabled, otherwise inline task
-        if _use_celery() and task_spreadsheet_processing:
+        # Dispatch via ARQ when enabled, else Celery, else inline
+        if _queue_backend() == 'arq':
+            try:
+                pool = await get_arq_pool()
+                await pool.enqueue_job('process_spreadsheet', user_id, filename, storage_path, job_id)
+            except Exception as e:
+                logger.warning(f"ARQ dispatch failed, falling back to inline: {e}")
+                asyncio.create_task(start_processing_job(user_id, job_id, storage_path, filename))
+        elif _use_celery() and task_spreadsheet_processing:
             try:
                 task_spreadsheet_processing.apply_async(args=[user_id, filename, storage_path, job_id])
             except Exception as e:
@@ -7608,7 +8259,14 @@ async def _enqueue_pdf_processing(user_id: str, filename: str, storage_path: str
             supabase.table('ingestion_jobs').insert(job_data).execute()
         except Exception:
             pass
-        if _use_celery() and task_pdf_processing:
+        if _queue_backend() == 'arq':
+            try:
+                pool = await get_arq_pool()
+                await pool.enqueue_job('process_pdf', user_id, filename, storage_path, job_id)
+            except Exception as e:
+                logger.warning(f"ARQ dispatch failed for PDF, falling back: {e}")
+                asyncio.create_task(start_pdf_processing_job(user_id, job_id, storage_path, filename))
+        elif _use_celery() and task_pdf_processing:
             try:
                 task_pdf_processing.apply_async(args=[user_id, filename, storage_path, job_id])
             except Exception as e:
@@ -7624,6 +8282,14 @@ async def _enqueue_pdf_processing(user_id: str, filename: str, storage_path: str
 async def start_pdf_processing_job(user_id: str, job_id: str, storage_path: str, filename: str):
     """Download a PDF from storage, extract text/tables, and store into raw_records."""
     try:
+        # Bind job to user for WebSocket authorization
+        base = websocket_manager.job_status.get(job_id, {})
+        websocket_manager.job_status[job_id] = {
+            **base,
+            "user_id": user_id,
+            "status": base.get("status", "queued"),
+            "started_at": base.get("started_at") or datetime.utcnow().isoformat(),
+        }
         # Mark job as processing
         try:
             supabase.table('ingestion_jobs').update({
@@ -7811,6 +8477,9 @@ async def _gmail_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> Dict
 
         page_token = None
         max_per_page = max(1, min(int(req.max_results or 100), 500))
+        # Concurrency for attachment downloads
+        max_concurrency = int(os.environ.get('CONNECTOR_CONCURRENCY', '5') or '5')
+        sem = asyncio.Semaphore(max(1, min(max_concurrency, 10)))
 
         while True:
             # Stop early if nearing free-plan record or action limits
@@ -7823,6 +8492,9 @@ async def _gmail_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> Dict
             message_ids = [m.get('id') for m in (page.get('messages') or []) if m.get('id')]
             if not message_ids:
                 break
+
+            # Batch collection for this page
+            page_batch_items = []
 
             for mid in message_ids:
                 try:
@@ -7850,14 +8522,13 @@ async def _gmail_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> Dict
 
                     parts = list(iter_parts(payload))
 
-                    for part in parts:
+                    async def process_part(part):
                         filename = part.get('filename') or ''
                         body = part.get('body') or {}
                         attach_id = body.get('attachmentId')
                         mime_type = part.get('mimeType', '')
                         if not attach_id or not filename:
-                            continue
-
+                            return None
                         # Relevance scoring
                         score = 0.0
                         name_l = filename.lower()
@@ -7872,22 +8543,17 @@ async def _gmail_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> Dict
                         score = min(score, 1.0)
                         if score < 0.5:
                             stats['skipped'] += 1
-                            continue
-
-                        # Fetch attachment
-                        content = await nango.get_gmail_attachment(provider_key, connection_id, mid, attach_id)
-                        stats['actions_used'] += 1
-                        if not content:
-                            continue
-
-                        # Store to storage
-                        storage_path, file_hash = await _store_external_item_attachment(user_id, 'gmail', mid, filename, content)
-                        stats['attachments_saved'] += 1
-
-                        # External items record
-                        try:
+                            return None
+                        async with sem:
+                            content = await nango.get_gmail_attachment(provider_key, connection_id, mid, attach_id)
+                            stats['actions_used'] += 1
+                            if not content:
+                                return None
+                            storage_path, file_hash = await _store_external_item_attachment(user_id, 'gmail', mid, filename, content)
+                            stats['attachments_saved'] += 1
+                            
                             provider_attachment_id = f"{mid}:{attach_id}"
-                            supabase.table('external_items').insert({
+                            item = {
                                 'user_id': user_id,
                                 'user_connection_id': user_connection_id,
                                 'provider_id': provider_attachment_id,
@@ -7895,39 +8561,45 @@ async def _gmail_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> Dict
                                 'source_ts': source_ts or datetime.utcnow().isoformat(),
                                 'hash': file_hash,
                                 'storage_path': storage_path,
-                                'metadata': json.dumps({'subject': subject, 'filename': filename, 'mime_type': mime_type}),
+                                'metadata': {'subject': subject, 'filename': filename, 'mime_type': mime_type, 'correlation_id': req.correlation_id},
                                 'relevance_score': score,
                                 'status': 'stored'
-                            }).execute()
-                        except Exception:
-                            pass
+                            }
+                            
+                            # Check for duplicate and enqueue processing
+                            try:
+                                dup = supabase.table('raw_records').select('id').eq('user_id', user_id).eq('file_hash', file_hash).limit(1).execute()
+                                is_dup = bool(dup.data)
+                            except Exception:
+                                is_dup = False
+                            if not is_dup:
+                                if any(name_l.endswith(ext) for ext in ['.csv', '.xlsx', '.xls']):
+                                    await _enqueue_file_processing(user_id, filename, storage_path)
+                                    stats['queued_jobs'] += 1
+                                elif name_l.endswith('.pdf'):
+                                    await _enqueue_pdf_processing(user_id, filename, storage_path)
+                                    stats['queued_jobs'] += 1
+                            
+                            return item
 
-                        # Dedupe with DB quick check
-                        try:
-                            dup = supabase.table('raw_records').select('id').eq('user_id', user_id).eq('file_hash', file_hash).limit(1).execute()
-                            is_dup = bool(dup.data)
-                        except Exception:
-                            is_dup = False
-
-                        if is_dup:
-                            continue
-
-                        # Enqueue processing for spreadsheets and PDFs (Phase 2)
-                        if any(name_l.endswith(ext) for ext in ['.csv', '.xlsx', '.xls']):
-                            await _enqueue_file_processing(user_id, filename, storage_path)
-                            stats['queued_jobs'] += 1
-                        elif name_l.endswith('.pdf'):
-                            await _enqueue_pdf_processing(user_id, filename, storage_path)
-                            stats['queued_jobs'] += 1
-                        else:
-                            # Other attachment types: stored only
-                            pass
-
-                        stats['records_fetched'] += 1
+                    if parts:
+                        tasks = [asyncio.create_task(process_part(p)) for p in parts]
+                        if tasks:
+                            results = await asyncio.gather(*tasks, return_exceptions=True)
+                            # Collect valid items for batch insert
+                            for result in results:
+                                if result and isinstance(result, dict) and not isinstance(result, Exception):
+                                    page_batch_items.append(result)
 
                 except Exception as item_e:
                     logger.warning(f"Failed to process message {mid}: {item_e}")
                     errors.append(str(item_e))
+
+            # Batch insert all items from this page
+            if page_batch_items:
+                inserted = _db_insert_many_external_items(page_batch_items)
+                stats['records_fetched'] += inserted
+                stats['skipped'] += max(0, len(page_batch_items) - inserted)
 
             page_token = page.get('nextPageToken')
             if not page_token:
@@ -7962,6 +8634,11 @@ async def _gmail_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> Dict
                     }).eq('user_connection_id', user_connection_id).eq('resource', 'emails').eq('cursor_type', 'time').execute()
                 except Exception:
                     pass
+            # Metrics: mark job processed
+            try:
+                JOBS_PROCESSED.labels(provider=provider_key, status=run_status).inc()
+            except Exception:
+                pass
         except Exception:
             pass
 
@@ -7969,12 +8646,41 @@ async def _gmail_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> Dict
 
     except Exception as e:
         logger.error(f"Gmail sync failed: {e}")
+        
+        # Error recovery: clean up partial data
+        try:
+            recovery_system = get_error_recovery_system()
+            error_context = ErrorContext(
+                error_id=str(uuid.uuid4()),
+                user_id=user_id,
+                job_id=sync_run_id,
+                transaction_id=None,
+                operation_type='gmail_sync',
+                error_message=str(e),
+                error_details={
+                    'sync_run_id': sync_run_id,
+                    'connection_id': connection_id,
+                    'provider': provider_key,
+                    'correlation_id': req.correlation_id
+                },
+                severity=ErrorSeverity.HIGH,
+                occurred_at=datetime.utcnow()
+            )
+            await recovery_system.handle_processing_error(error_context)
+        except Exception as recovery_error:
+            logger.error(f"Error recovery failed: {recovery_error}")
+        
+        # Mark sync_run as failed
         try:
             supabase.table('sync_runs').update({
                 'status': 'failed',
                 'finished_at': datetime.utcnow().isoformat(),
                 'error': str(e)
             }).eq('id', sync_run_id).execute()
+        except Exception:
+            pass
+        try:
+            JOBS_PROCESSED.labels(provider=provider_key, status='failed').inc()
         except Exception:
             pass
         raise
@@ -8031,52 +8737,58 @@ async def _dropbox_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> Di
 
     try:
         payload = {"path": "", "recursive": True}
+        # Load last cursor for incremental mode
         cursor = None
-        while True:
-            if cursor:
-                page = await nango.proxy_post('dropbox', '2/files/list_folder/continue', json_body={"cursor": cursor}, connection_id=connection_id, provider_config_key=provider_key)
-            else:
-                page = await nango.proxy_post('dropbox', '2/files/list_folder', json_body=payload, connection_id=connection_id, provider_config_key=provider_key)
-            stats['actions_used'] += 1
-            entries = page.get('entries') or []
-            for ent in entries:
-                try:
-                    if ent.get('.tag') != 'file':
-                        continue
-                    name = ent.get('name') or ''
-                    path_lower = ent.get('path_lower') or ent.get('path_display')
-                    server_modified = ent.get('server_modified')
-                    score = 0.0
-                    nl = name.lower()
-                    if any(p in nl for p in ['invoice', 'receipt', 'statement', 'bill']):
-                        score += 0.5
-                    if any(nl.endswith(ext) for ext in ['.csv', '.xlsx', '.xls', '.pdf']):
-                        score += 0.3
-                    if score < 0.5:
-                        stats['skipped'] += 1
-                        continue
+        if req.mode != 'historical':
+            try:
+                cur_row = supabase.table('sync_cursors').select('value').eq('user_connection_id', user_connection_id).eq('resource', 'dropbox').eq('cursor_type', 'opaque').limit(1).execute()
+                cursor = (cur_row.data[0]['value'] if cur_row and cur_row.data else None)
+            except Exception:
+                cursor = None
+
+        # Concurrency control for downloads
+        max_concurrency = int(os.environ.get('CONNECTOR_CONCURRENCY', '5') or '5')
+        sem = asyncio.Semaphore(max(1, min(max_concurrency, 10)))
+
+        async def process_entry(ent: Dict[str, Any]):
+            try:
+                if ent.get('.tag') != 'file':
+                    return None
+                name = ent.get('name') or ''
+                path_lower = ent.get('path_lower') or ent.get('path_display')
+                server_modified = ent.get('server_modified')
+                score = 0.0
+                nl = name.lower()
+                if any(p in nl for p in ['invoice', 'receipt', 'statement', 'bill']):
+                    score += 0.5
+                if any(nl.endswith(ext) for ext in ['.csv', '.xlsx', '.xls', '.pdf']):
+                    score += 0.3
+                if score < 0.5:
+                    stats['skipped'] += 1
+                    return None
+                async with sem:
                     # Download
                     dl = await nango.proxy_post('dropbox', '2/files/download', json_body=None, connection_id=connection_id, provider_config_key=provider_key, headers={"Dropbox-API-Arg": json.dumps({"path": path_lower})})
+                    stats['actions_used'] += 1
                     raw = dl.get('_raw')
                     if not raw:
-                        continue
+                        return None
                     storage_path, file_hash = await _store_external_item_attachment(user_id, 'dropbox', path_lower.strip('/').replace('/', '_')[:50], name, raw)
                     stats['attachments_saved'] += 1
-                    try:
-                        supabase.table('external_items').insert({
-                            'user_id': user_id,
-                            'user_connection_id': user_connection_id,
-                            'provider_id': path_lower,
-                            'kind': 'file',
-                            'source_ts': server_modified or datetime.utcnow().isoformat(),
-                            'hash': file_hash,
-                            'storage_path': storage_path,
-                            'metadata': json.dumps({'name': name}),
-                            'relevance_score': score,
-                            'status': 'stored'
-                        }).execute()
-                    except Exception:
-                        pass
+                    
+                    item = {
+                        'user_id': user_id,
+                        'user_connection_id': user_connection_id,
+                        'provider_id': path_lower,
+                        'kind': 'file',
+                        'source_ts': server_modified or datetime.utcnow().isoformat(),
+                        'hash': file_hash,
+                        'storage_path': storage_path,
+                        'metadata': {'name': name, 'correlation_id': req.correlation_id},
+                        'relevance_score': score,
+                        'status': 'stored'
+                    }
+                    
                     try:
                         dup = supabase.table('raw_records').select('id').eq('user_id', user_id).eq('file_hash', file_hash).limit(1).execute()
                         is_dup = bool(dup.data)
@@ -8089,23 +8801,95 @@ async def _dropbox_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> Di
                         elif nl.endswith('.pdf'):
                             await _enqueue_pdf_processing(user_id, name, storage_path)
                             stats['queued_jobs'] += 1
-                    stats['records_fetched'] += 1
-                except Exception as e:
-                    errors.append(str(e))
-            cursor = page.get('cursor') if page.get('has_more') else None
-            if not cursor:
+                    
+                    return item
+            except Exception as e:
+                errors.append(str(e))
+                return None
+
+        while True:
+            if cursor:
+                page = await nango.proxy_post('dropbox', '2/files/list_folder/continue', json_body={"cursor": cursor}, connection_id=connection_id, provider_config_key=provider_key)
+            else:
+                page = await nango.proxy_post('dropbox', '2/files/list_folder', json_body=payload, connection_id=connection_id, provider_config_key=provider_key)
+            stats['actions_used'] += 1
+            entries = page.get('entries') or []
+            if entries:
+                tasks = [asyncio.create_task(process_entry(ent)) for ent in entries]
+                if tasks:
+                    results = await asyncio.gather(*tasks, return_exceptions=True)
+                    # Collect valid items for batch insert
+                    batch_items = [r for r in results if r and isinstance(r, dict) and not isinstance(r, Exception)]
+                    if batch_items:
+                        inserted = _db_insert_many_external_items(batch_items)
+                        stats['records_fetched'] += inserted
+                        stats['skipped'] += max(0, len(batch_items) - inserted)
+            # Always carry forward the latest cursor
+            cursor = page.get('cursor') or cursor
+            if not page.get('has_more'):
                 break
+
+        # Save cursor for incremental runs
+        if cursor:
+            try:
+                supabase.table('sync_cursors').insert({
+                    'user_id': user_id,
+                    'user_connection_id': user_connection_id,
+                    'resource': 'dropbox',
+                    'cursor_type': 'opaque',
+                    'value': cursor
+                }).execute()
+            except Exception:
+                try:
+                    supabase.table('sync_cursors').update({
+                        'value': cursor,
+                        'updated_at': datetime.utcnow().isoformat()
+                    }).eq('user_connection_id', user_connection_id).eq('resource', 'dropbox').eq('cursor_type', 'opaque').execute()
+                except Exception:
+                    pass
         run_status = 'succeeded' if not errors else ('partial' if stats['records_fetched'] > 0 else 'failed')
         try:
             supabase.table('sync_runs').update({'status': run_status, 'finished_at': datetime.utcnow().isoformat(), 'stats': json.dumps(stats), 'error': '; '.join(errors)[:500]}).eq('id', sync_run_id).execute()
             supabase.table('user_connections').update({'last_synced_at': datetime.utcnow().isoformat()}).eq('nango_connection_id', connection_id).execute()
+            try:
+                JOBS_PROCESSED.labels(provider=provider_key, status=run_status).inc()
+            except Exception:
+                pass
         except Exception:
             pass
         return {'status': run_status, 'sync_run_id': sync_run_id, 'stats': stats, 'errors': errors[:5]}
     except Exception as e:
         logger.error(f"Dropbox sync failed: {e}")
+        
+        # Error recovery
+        try:
+            recovery_system = get_error_recovery_system()
+            error_context = ErrorContext(
+                error_id=str(uuid.uuid4()),
+                user_id=user_id,
+                job_id=sync_run_id,
+                transaction_id=None,
+                operation_type='dropbox_sync',
+                error_message=str(e),
+                error_details={
+                    'sync_run_id': sync_run_id,
+                    'connection_id': connection_id,
+                    'provider': provider_key,
+                    'correlation_id': req.correlation_id
+                },
+                severity=ErrorSeverity.HIGH,
+                occurred_at=datetime.utcnow()
+            )
+            await recovery_system.handle_processing_error(error_context)
+        except Exception as recovery_error:
+            logger.error(f"Error recovery failed: {recovery_error}")
+        
         try:
             supabase.table('sync_runs').update({'status': 'failed', 'finished_at': datetime.utcnow().isoformat(), 'error': str(e)}).eq('id', sync_run_id).execute()
+        except Exception:
+            pass
+        try:
+            JOBS_PROCESSED.labels(provider=provider_key, status='failed').inc()
         except Exception:
             pass
         raise
@@ -8162,7 +8946,19 @@ async def _gdrive_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> Dic
     try:
         lookback_days = max(1, int(req.lookback_days or 90))
         modified_after = (datetime.utcnow() - timedelta(days=lookback_days)).isoformat(timespec='seconds') + 'Z'
+        # Prefer precise incremental using last_synced_at when available
+        if req.mode != 'historical':
+            try:
+                uc_last = supabase.table('user_connections').select('last_synced_at').eq('nango_connection_id', connection_id).limit(1).execute()
+                if uc_last.data and uc_last.data[0].get('last_synced_at'):
+                    last_ts = datetime.fromisoformat(uc_last.data[0]['last_synced_at'].replace('Z', '+00:00'))
+                    modified_after = last_ts.isoformat(timespec='seconds').replace('+00:00', 'Z')
+            except Exception:
+                pass
         page_token = None
+        # Concurrency for downloads
+        max_concurrency = int(os.environ.get('CONNECTOR_CONCURRENCY', '5') or '5')
+        sem = asyncio.Semaphore(max(1, min(max_concurrency, 10)))
         while True:
             q = "(mimeType contains 'pdf' or mimeType contains 'spreadsheet' or name contains '.csv' or name contains '.xlsx' or name contains '.xls') and trashed = false and modifiedTime > '" + modified_after + "'"
             params = {'q': q, 'pageSize': 200, 'fields': 'files(id,name,mimeType,modifiedTime),nextPageToken'}
@@ -8173,11 +8969,11 @@ async def _gdrive_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> Dic
             files = page.get('files') or []
             if not files:
                 break
-            for f in files:
+            async def process_file(f):
                 try:
                     fid = f.get('id'); name = f.get('name') or ''; mime = f.get('mimeType') or ''
                     if not fid or not name:
-                        continue
+                        return None
                     score = 0.0
                     nl = name.lower()
                     if any(p in nl for p in ['invoice', 'receipt', 'statement', 'bill']):
@@ -8186,15 +8982,15 @@ async def _gdrive_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> Dic
                         score += 0.3
                     if score < 0.5:
                         stats['skipped'] += 1
-                        continue
-                    # Download content
-                    raw = await nango.proxy_get_bytes('google-drive', f'drive/v3/files/{fid}', params={'alt': 'media'}, connection_id=connection_id, provider_config_key=provider_key)
-                    if not raw:
-                        continue
-                    storage_path, file_hash = await _store_external_item_attachment(user_id, 'gdrive', fid, name, raw)
-                    stats['attachments_saved'] += 1
-                    try:
-                        supabase.table('external_items').insert({
+                        return None
+                    async with sem:
+                        raw = await nango.proxy_get_bytes('google-drive', f'drive/v3/files/{fid}', params={'alt': 'media'}, connection_id=connection_id, provider_config_key=provider_key)
+                        if not raw:
+                            return None
+                        storage_path, file_hash = await _store_external_item_attachment(user_id, 'gdrive', fid, name, raw)
+                        stats['attachments_saved'] += 1
+                        
+                        item = {
                             'user_id': user_id,
                             'user_connection_id': user_connection_id,
                             'provider_id': fid,
@@ -8202,27 +8998,38 @@ async def _gdrive_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> Dic
                             'source_ts': f.get('modifiedTime') or datetime.utcnow().isoformat(),
                             'hash': file_hash,
                             'storage_path': storage_path,
-                            'metadata': json.dumps({'name': name, 'mime': mime}),
+                            'metadata': {'name': name, 'mime': mime, 'correlation_id': req.correlation_id},
                             'relevance_score': score,
                             'status': 'stored'
-                        }).execute()
-                    except Exception:
-                        pass
-                    try:
-                        dup = supabase.table('raw_records').select('id').eq('user_id', user_id).eq('file_hash', file_hash).limit(1).execute()
-                        is_dup = bool(dup.data)
-                    except Exception:
-                        is_dup = False
-                    if not is_dup:
-                        if any(nl.endswith(ext) for ext in ['.csv', '.xlsx', '.xls']):
-                            await _enqueue_file_processing(user_id, name, storage_path)
-                            stats['queued_jobs'] += 1
-                        elif nl.endswith('.pdf'):
-                            await _enqueue_pdf_processing(user_id, name, storage_path)
-                            stats['queued_jobs'] += 1
-                    stats['records_fetched'] += 1
+                        }
+                        
+                        try:
+                            dup = supabase.table('raw_records').select('id').eq('user_id', user_id).eq('file_hash', file_hash).limit(1).execute()
+                            is_dup = bool(dup.data)
+                        except Exception:
+                            is_dup = False
+                        if not is_dup:
+                            if any(nl.endswith(ext) for ext in ['.csv', '.xlsx', '.xls']):
+                                await _enqueue_file_processing(user_id, name, storage_path)
+                                stats['queued_jobs'] += 1
+                            elif nl.endswith('.pdf'):
+                                await _enqueue_pdf_processing(user_id, name, storage_path)
+                                stats['queued_jobs'] += 1
+                        
+                        return item
                 except Exception as e:
                     errors.append(str(e))
+                    return None
+
+            tasks = [asyncio.create_task(process_file(f)) for f in files]
+            if tasks:
+                results = await asyncio.gather(*tasks, return_exceptions=True)
+                # Collect valid items for batch insert
+                batch_items = [r for r in results if r and isinstance(r, dict) and not isinstance(r, Exception)]
+                if batch_items:
+                    inserted = _db_insert_many_external_items(batch_items)
+                    stats['records_fetched'] += inserted
+                    stats['skipped'] += max(0, len(batch_items) - inserted)
             page_token = page.get('nextPageToken')
             if not page_token:
                 break
@@ -8230,13 +9037,45 @@ async def _gdrive_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> Dic
         try:
             supabase.table('sync_runs').update({'status': run_status, 'finished_at': datetime.utcnow().isoformat(), 'stats': json.dumps(stats), 'error': '; '.join(errors)[:500]}).eq('id', sync_run_id).execute()
             supabase.table('user_connections').update({'last_synced_at': datetime.utcnow().isoformat()}).eq('nango_connection_id', connection_id).execute()
+            try:
+                JOBS_PROCESSED.labels(provider=provider_key, status=run_status).inc()
+            except Exception:
+                pass
         except Exception:
             pass
         return {'status': run_status, 'sync_run_id': sync_run_id, 'stats': stats, 'errors': errors[:5]}
     except Exception as e:
         logger.error(f"GDrive sync failed: {e}")
+        
+        # Error recovery
+        try:
+            recovery_system = get_error_recovery_system()
+            error_context = ErrorContext(
+                error_id=str(uuid.uuid4()),
+                user_id=user_id,
+                job_id=sync_run_id,
+                transaction_id=None,
+                operation_type='gdrive_sync',
+                error_message=str(e),
+                error_details={
+                    'sync_run_id': sync_run_id,
+                    'connection_id': connection_id,
+                    'provider': provider_key,
+                    'correlation_id': req.correlation_id
+                },
+                severity=ErrorSeverity.HIGH,
+                occurred_at=datetime.utcnow()
+            )
+            await recovery_system.handle_processing_error(error_context)
+        except Exception as recovery_error:
+            logger.error(f"Error recovery failed: {recovery_error}")
+        
         try:
             supabase.table('sync_runs').update({'status': 'failed', 'finished_at': datetime.utcnow().isoformat(), 'error': str(e)}).eq('id', sync_run_id).execute()
+        except Exception:
+            pass
+        try:
+            JOBS_PROCESSED.labels(provider=provider_key, status='failed').inc()
         except Exception:
             pass
         raise
@@ -8301,24 +9140,64 @@ async def connectors_sync(req: ConnectorSyncRequest):
     _require_security('connectors-sync', req.user_id, req.session_token)
     try:
         integ = (req.integration_id or NANGO_GMAIL_INTEGRATION_ID)
+        # Validate provider enum
+        allowed = {NANGO_GMAIL_INTEGRATION_ID, NANGO_DROPBOX_INTEGRATION_ID, NANGO_GOOGLE_DRIVE_INTEGRATION_ID,
+                   NANGO_ZOHO_MAIL_INTEGRATION_ID, NANGO_ZOHO_BOOKS_INTEGRATION_ID, NANGO_QUICKBOOKS_INTEGRATION_ID,
+                   NANGO_XERO_INTEGRATION_ID, NANGO_SAGE_INTEGRATION_ID}
+        if integ not in allowed:
+            raise HTTPException(status_code=400, detail="Unsupported provider integration_id")
+
+        # Ensure correlation id
+        req.correlation_id = req.correlation_id or str(uuid.uuid4())
         nango = NangoClient(base_url=NANGO_BASE_URL)
         if integ == NANGO_GMAIL_INTEGRATION_ID:
+            if _queue_backend() == 'arq':
+                pool = await get_arq_pool()
+                await pool.enqueue_job('gmail_sync', req.model_dump())
+                JOBS_ENQUEUED.labels(provider=integ, mode=req.mode).inc()
+                return {"status": "queued", "provider": integ, "mode": req.mode}
             if _use_celery() and task_gmail_sync:
                 try:
                     task_gmail_sync.apply_async(args=[req.model_dump()])
+                    JOBS_ENQUEUED.labels(provider=integ, mode=req.mode).inc()
                     return {"status": "queued", "provider": integ, "mode": req.mode}
                 except Exception as e:
                     logger.warning(f"Celery dispatch for Gmail sync failed, falling back inline: {e}")
             return await _gmail_sync_run(nango, req)
         elif integ == NANGO_DROPBOX_INTEGRATION_ID:
+            if _queue_backend() == 'arq':
+                pool = await get_arq_pool()
+                await pool.enqueue_job('dropbox_sync', req.model_dump())
+                JOBS_ENQUEUED.labels(provider=integ, mode=req.mode).inc()
+                return {"status": "queued", "provider": integ, "mode": req.mode}
             return await _dropbox_sync_run(nango, req)
         elif integ == NANGO_GOOGLE_DRIVE_INTEGRATION_ID:
+            if _queue_backend() == 'arq':
+                pool = await get_arq_pool()
+                await pool.enqueue_job('gdrive_sync', req.model_dump())
+                JOBS_ENQUEUED.labels(provider=integ, mode=req.mode).inc()
+                return {"status": "queued", "provider": integ, "mode": req.mode}
             return await _gdrive_sync_run(nango, req)
         elif integ == NANGO_ZOHO_MAIL_INTEGRATION_ID:
+            if _queue_backend() == 'arq':
+                pool = await get_arq_pool()
+                await pool.enqueue_job('zoho_mail_sync', req.model_dump())
+                JOBS_ENQUEUED.labels(provider=integ, mode=req.mode).inc()
+                return {"status": "queued", "provider": integ, "mode": req.mode}
             return await _zohomail_sync_run(nango, req)
         elif integ == NANGO_QUICKBOOKS_INTEGRATION_ID:
+            if _queue_backend() == 'arq':
+                pool = await get_arq_pool()
+                await pool.enqueue_job('quickbooks_sync', req.model_dump())
+                JOBS_ENQUEUED.labels(provider=integ, mode=req.mode).inc()
+                return {"status": "queued", "provider": integ, "mode": req.mode}
             return await _quickbooks_sync_run(nango, req)
         elif integ == NANGO_XERO_INTEGRATION_ID:
+            if _queue_backend() == 'arq':
+                pool = await get_arq_pool()
+                await pool.enqueue_job('xero_sync', req.model_dump())
+                JOBS_ENQUEUED.labels(provider=integ, mode=req.mode).inc()
+                return {"status": "queued", "provider": integ, "mode": req.mode}
             return await _xero_sync_run(nango, req)
         else:
             raise HTTPException(status_code=400, detail="Provider sync not yet implemented")
@@ -8419,6 +9298,8 @@ async def nango_webhook(request: Request):
             or (payload.get('connection') or {}).get('id')
             or (payload.get('data') or {}).get('connection_id')
         )
+        # Derive correlation id for tracing across queue/DB
+        correlation_id = payload.get('correlation_id') or event_id or str(uuid.uuid4())
 
         # Persist webhook for audit/idempotency
         try:
@@ -8454,63 +9335,105 @@ async def nango_webhook(request: Request):
                         connection_id=connection_id,
                         integration_id=NANGO_GMAIL_INTEGRATION_ID,
                         mode='incremental',
-                        max_results=100
+                        max_results=100,
+                        correlation_id=correlation_id
                     )
-                    if _use_celery() and task_gmail_sync:
+                    if _queue_backend() == 'arq':
+                        pool = await get_arq_pool()
+                        await pool.enqueue_job('gmail_sync', req.model_dump())
+                        JOBS_ENQUEUED.labels(provider=NANGO_GMAIL_INTEGRATION_ID, mode='incremental').inc()
+                    elif _use_celery() and task_gmail_sync:
                         task_gmail_sync.apply_async(args=[req.model_dump()])
+                        JOBS_ENQUEUED.labels(provider=NANGO_GMAIL_INTEGRATION_ID, mode='incremental').inc()
                     else:
                         nango = NangoClient(base_url=NANGO_BASE_URL)
                         asyncio.create_task(_gmail_sync_run(nango, req))
+                        JOBS_ENQUEUED.labels(provider=NANGO_GMAIL_INTEGRATION_ID, mode='incremental').inc()
                 elif provider == NANGO_DROPBOX_INTEGRATION_ID:
                     req = ConnectorSyncRequest(
                         user_id=user_id,
                         connection_id=connection_id,
                         integration_id=NANGO_DROPBOX_INTEGRATION_ID,
                         mode='incremental',
-                        max_results=500
+                        max_results=500,
+                        correlation_id=correlation_id
                     )
-                    nango = NangoClient(base_url=NANGO_BASE_URL)
-                    asyncio.create_task(_dropbox_sync_run(nango, req))
+                    if _queue_backend() == 'arq':
+                        pool = await get_arq_pool()
+                        await pool.enqueue_job('dropbox_sync', req.model_dump())
+                        JOBS_ENQUEUED.labels(provider=NANGO_DROPBOX_INTEGRATION_ID, mode='incremental').inc()
+                    else:
+                        nango = NangoClient(base_url=NANGO_BASE_URL)
+                        asyncio.create_task(_dropbox_sync_run(nango, req))
+                        JOBS_ENQUEUED.labels(provider=NANGO_DROPBOX_INTEGRATION_ID, mode='incremental').inc()
                 elif provider == NANGO_GOOGLE_DRIVE_INTEGRATION_ID:
                     req = ConnectorSyncRequest(
                         user_id=user_id,
                         connection_id=connection_id,
                         integration_id=NANGO_GOOGLE_DRIVE_INTEGRATION_ID,
                         mode='incremental',
-                        max_results=500
+                        max_results=500,
+                        correlation_id=correlation_id
                     )
-                    nango = NangoClient(base_url=NANGO_BASE_URL)
-                    asyncio.create_task(_gdrive_sync_run(nango, req))
+                    if _queue_backend() == 'arq':
+                        pool = await get_arq_pool()
+                        await pool.enqueue_job('gdrive_sync', req.model_dump())
+                        JOBS_ENQUEUED.labels(provider=NANGO_GOOGLE_DRIVE_INTEGRATION_ID, mode='incremental').inc()
+                    else:
+                        nango = NangoClient(base_url=NANGO_BASE_URL)
+                        asyncio.create_task(_gdrive_sync_run(nango, req))
+                        JOBS_ENQUEUED.labels(provider=NANGO_GOOGLE_DRIVE_INTEGRATION_ID, mode='incremental').inc()
                 elif provider == NANGO_ZOHO_MAIL_INTEGRATION_ID:
                     req = ConnectorSyncRequest(
                         user_id=user_id,
                         connection_id=connection_id,
                         integration_id=NANGO_ZOHO_MAIL_INTEGRATION_ID,
                         mode='incremental',
-                        max_results=100
+                        max_results=100,
+                        correlation_id=correlation_id
                     )
-                    nango = NangoClient(base_url=NANGO_BASE_URL)
-                    asyncio.create_task(_zohomail_sync_run(nango, req))
+                    if _queue_backend() == 'arq':
+                        pool = await get_arq_pool()
+                        await pool.enqueue_job('zoho_mail_sync', req.model_dump())
+                        JOBS_ENQUEUED.labels(provider=NANGO_ZOHO_MAIL_INTEGRATION_ID, mode='incremental').inc()
+                    else:
+                        nango = NangoClient(base_url=NANGO_BASE_URL)
+                        asyncio.create_task(_zohomail_sync_run(nango, req))
+                        JOBS_ENQUEUED.labels(provider=NANGO_ZOHO_MAIL_INTEGRATION_ID, mode='incremental').inc()
                 elif provider == NANGO_QUICKBOOKS_INTEGRATION_ID:
                     req = ConnectorSyncRequest(
                         user_id=user_id,
                         connection_id=connection_id,
                         integration_id=NANGO_QUICKBOOKS_INTEGRATION_ID,
                         mode='incremental',
-                        max_results=100
+                        max_results=100,
+                        correlation_id=correlation_id
                     )
-                    nango = NangoClient(base_url=NANGO_BASE_URL)
-                    asyncio.create_task(_quickbooks_sync_run(nango, req))
+                    if _queue_backend() == 'arq':
+                        pool = await get_arq_pool()
+                        await pool.enqueue_job('quickbooks_sync', req.model_dump())
+                        JOBS_ENQUEUED.labels(provider=NANGO_QUICKBOOKS_INTEGRATION_ID, mode='incremental').inc()
+                    else:
+                        nango = NangoClient(base_url=NANGO_BASE_URL)
+                        asyncio.create_task(_quickbooks_sync_run(nango, req))
+                        JOBS_ENQUEUED.labels(provider=NANGO_QUICKBOOKS_INTEGRATION_ID, mode='incremental').inc()
                 elif provider == NANGO_XERO_INTEGRATION_ID:
                     req = ConnectorSyncRequest(
                         user_id=user_id,
                         connection_id=connection_id,
                         integration_id=NANGO_XERO_INTEGRATION_ID,
                         mode='incremental',
-                        max_results=100
+                        max_results=100,
+                        correlation_id=correlation_id
                     )
-                    nango = NangoClient(base_url=NANGO_BASE_URL)
-                    asyncio.create_task(_xero_sync_run(nango, req))
+                    if _queue_backend() == 'arq':
+                        pool = await get_arq_pool()
+                        await pool.enqueue_job('xero_sync', req.model_dump())
+                        JOBS_ENQUEUED.labels(provider=NANGO_XERO_INTEGRATION_ID, mode='incremental').inc()
+                    else:
+                        nango = NangoClient(base_url=NANGO_BASE_URL)
+                        asyncio.create_task(_xero_sync_run(nango, req))
+                        JOBS_ENQUEUED.labels(provider=NANGO_XERO_INTEGRATION_ID, mode='incremental').inc()
             except Exception as e:
                 logger.warning(f"Failed to trigger incremental sync from webhook: {e}")
 
@@ -8576,7 +9499,15 @@ async def run_scheduled_syncs(request: Request, provider: Optional[str] = None, 
                     mode='incremental',
                     max_results=100
                 )
-                if _use_celery() and task_gmail_sync:
+                if _queue_backend() == 'arq':
+                    try:
+                        pool = await get_arq_pool()
+                        await pool.enqueue_job('gmail_sync', req.model_dump())
+                    except Exception as e:
+                        logger.warning(f"ARQ dispatch failed in scheduler: {e}")
+                        nango = NangoClient(base_url=NANGO_BASE_URL)
+                        asyncio.create_task(_gmail_sync_run(nango, req))
+                elif _use_celery() and task_gmail_sync:
                     try:
                         task_gmail_sync.apply_async(args=[req.model_dump()])
                     except Exception as e:
@@ -8595,8 +9526,17 @@ async def run_scheduled_syncs(request: Request, provider: Optional[str] = None, 
                     mode='incremental',
                     max_results=500
                 )
-                nango = NangoClient(base_url=NANGO_BASE_URL)
-                asyncio.create_task(_dropbox_sync_run(nango, req))
+                if _queue_backend() == 'arq':
+                    try:
+                        pool = await get_arq_pool()
+                        await pool.enqueue_job('dropbox_sync', req.model_dump())
+                    except Exception as e:
+                        logger.warning(f"ARQ dispatch failed in scheduler: {e}")
+                        nango = NangoClient(base_url=NANGO_BASE_URL)
+                        asyncio.create_task(_dropbox_sync_run(nango, req))
+                else:
+                    nango = NangoClient(base_url=NANGO_BASE_URL)
+                    asyncio.create_task(_dropbox_sync_run(nango, req))
                 dispatched.append(row['nango_connection_id'])
             elif conn_provider == NANGO_GOOGLE_DRIVE_INTEGRATION_ID:
                 req = ConnectorSyncRequest(
@@ -8606,8 +9546,17 @@ async def run_scheduled_syncs(request: Request, provider: Optional[str] = None, 
                     mode='incremental',
                     max_results=500
                 )
-                nango = NangoClient(base_url=NANGO_BASE_URL)
-                asyncio.create_task(_gdrive_sync_run(nango, req))
+                if _queue_backend() == 'arq':
+                    try:
+                        pool = await get_arq_pool()
+                        await pool.enqueue_job('gdrive_sync', req.model_dump())
+                    except Exception as e:
+                        logger.warning(f"ARQ dispatch failed in scheduler: {e}")
+                        nango = NangoClient(base_url=NANGO_BASE_URL)
+                        asyncio.create_task(_gdrive_sync_run(nango, req))
+                else:
+                    nango = NangoClient(base_url=NANGO_BASE_URL)
+                    asyncio.create_task(_gdrive_sync_run(nango, req))
                 dispatched.append(row['nango_connection_id'])
             elif conn_provider == NANGO_ZOHO_MAIL_INTEGRATION_ID:
                 req = ConnectorSyncRequest(
@@ -8617,8 +9566,17 @@ async def run_scheduled_syncs(request: Request, provider: Optional[str] = None, 
                     mode='incremental',
                     max_results=100
                 )
-                nango = NangoClient(base_url=NANGO_BASE_URL)
-                asyncio.create_task(_zohomail_sync_run(nango, req))
+                if _queue_backend() == 'arq':
+                    try:
+                        pool = await get_arq_pool()
+                        await pool.enqueue_job('zoho_mail_sync', req.model_dump())
+                    except Exception as e:
+                        logger.warning(f"ARQ dispatch failed in scheduler: {e}")
+                        nango = NangoClient(base_url=NANGO_BASE_URL)
+                        asyncio.create_task(_zohomail_sync_run(nango, req))
+                else:
+                    nango = NangoClient(base_url=NANGO_BASE_URL)
+                    asyncio.create_task(_zohomail_sync_run(nango, req))
                 dispatched.append(row['nango_connection_id'])
             elif conn_provider == NANGO_QUICKBOOKS_INTEGRATION_ID:
                 req = ConnectorSyncRequest(
@@ -8628,8 +9586,17 @@ async def run_scheduled_syncs(request: Request, provider: Optional[str] = None, 
                     mode='incremental',
                     max_results=100
                 )
-                nango = NangoClient(base_url=NANGO_BASE_URL)
-                asyncio.create_task(_quickbooks_sync_run(nango, req))
+                if _queue_backend() == 'arq':
+                    try:
+                        pool = await get_arq_pool()
+                        await pool.enqueue_job('quickbooks_sync', req.model_dump())
+                    except Exception as e:
+                        logger.warning(f"ARQ dispatch failed in scheduler: {e}")
+                        nango = NangoClient(base_url=NANGO_BASE_URL)
+                        asyncio.create_task(_quickbooks_sync_run(nango, req))
+                else:
+                    nango = NangoClient(base_url=NANGO_BASE_URL)
+                    asyncio.create_task(_quickbooks_sync_run(nango, req))
                 dispatched.append(row['nango_connection_id'])
             elif conn_provider == NANGO_XERO_INTEGRATION_ID:
                 req = ConnectorSyncRequest(
@@ -8639,8 +9606,17 @@ async def run_scheduled_syncs(request: Request, provider: Optional[str] = None, 
                     mode='incremental',
                     max_results=100
                 )
-                nango = NangoClient(base_url=NANGO_BASE_URL)
-                asyncio.create_task(_xero_sync_run(nango, req))
+                if _queue_backend() == 'arq':
+                    try:
+                        pool = await get_arq_pool()
+                        await pool.enqueue_job('xero_sync', req.model_dump())
+                    except Exception as e:
+                        logger.warning(f"ARQ dispatch failed in scheduler: {e}")
+                        nango = NangoClient(base_url=NANGO_BASE_URL)
+                        asyncio.create_task(_xero_sync_run(nango, req))
+                else:
+                    nango = NangoClient(base_url=NANGO_BASE_URL)
+                    asyncio.create_task(_xero_sync_run(nango, req))
                 dispatched.append(row['nango_connection_id'])
 
         return {"status": "ok", "dispatched": dispatched, "count": len(dispatched)}
@@ -8652,9 +9628,34 @@ async def run_scheduled_syncs(request: Request, provider: Optional[str] = None, 
 # WEBSOCKET INTEGRATION FOR REAL-TIME UPDATES
 # ============================================================================
 
+async def _authorize_websocket_connection(websocket: WebSocket, job_id: str):
+    """Bind job_id to user_id; authorize before accepting the socket."""
+    try:
+        # Dev bypass
+        if os.environ.get("CONNECTORS_DEV_TRUST") == "1" or os.environ.get("SECURITY_DEV_TRUST") == "1":
+            return
+        qp = websocket.query_params
+        user_id = qp.get('user_id')
+        token = qp.get('session_token') or websocket.headers.get('authorization')
+        if not user_id or not token:
+            raise HTTPException(status_code=401, detail='Missing user credentials for WebSocket')
+        _require_security('websocket', user_id, token)
+        # Check job ownership if known
+        owner = (websocket_manager.job_status.get(job_id, {}) or {}).get('user_id')
+        if owner and owner != user_id:
+            raise HTTPException(status_code=403, detail='Forbidden: job does not belong to user')
+    except HTTPException as he:
+        # Close without accepting
+        await websocket.close()
+        raise
+    except Exception:
+        await websocket.close()
+        raise HTTPException(status_code=401, detail='Unauthorized WebSocket')
+
 @app.websocket("/ws/universal-components/{job_id}")
 async def universal_components_websocket(websocket: WebSocket, job_id: str):
     """WebSocket endpoint for real-time updates from universal components"""
+    await _authorize_websocket_connection(websocket, job_id)
     await websocket_manager.connect(websocket, job_id)
     try:
         # Keep connection alive and handle incoming messages
@@ -8684,6 +9685,7 @@ async def universal_components_websocket(websocket: WebSocket, job_id: str):
 @app.websocket("/ws/{job_id}")
 async def websocket_progress_endpoint(websocket: WebSocket, job_id: str):
     """Primary WebSocket endpoint for progress updates (UI expects /ws/{job_id})."""
+    await _authorize_websocket_connection(websocket, job_id)
     await websocket_manager.connect(websocket, job_id)
     try:
         # Keep-alive loop with simple ping/pong support
@@ -8711,11 +9713,13 @@ class WebSocketProgressManager:
         """Accept WebSocket connection and register job"""
         await websocket.accept()
         self.active_connections[job_id] = websocket
+        base = self.job_status.get(job_id, {})
         self.job_status[job_id] = {
+            **base,
             "status": "connected",
             "started_at": datetime.utcnow().isoformat(),
-            "components": {},
-            "progress": 0
+            "components": base.get("components", {}),
+            "progress": base.get("progress", 0)
         }
         logger.info(f"WebSocket connected for job {job_id}")
     
@@ -8849,6 +9853,14 @@ websocket_manager = WebSocketProgressManager()
 
 async def start_processing_job(user_id: str, job_id: str, storage_path: str, filename: str):
     try:
+        # Bind job to user for WebSocket authorization
+        base = websocket_manager.job_status.get(job_id, {})
+        websocket_manager.job_status[job_id] = {
+            **base,
+            "user_id": user_id,
+            "status": base.get("status", "queued"),
+            "started_at": base.get("started_at") or datetime.utcnow().isoformat(),
+        }
         def is_cancelled() -> bool:
             status = websocket_manager.job_status.get(job_id, {})
             return status.get("status") == "cancelled"

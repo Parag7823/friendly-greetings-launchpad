@@ -3,6 +3,9 @@ import base64
 from typing import Any, Dict, Optional
 
 import httpx
+import time
+import asyncio
+from prometheus_client import Counter, Histogram
 
 
 class NangoClient:
@@ -47,10 +50,24 @@ class NangoClient:
     # ------------------------- Gmail via Proxy -------------------------
     async def get_gmail_profile(self, provider_config_key: str, connection_id: str) -> Dict[str, Any]:
         url = f"{self.base_url}/proxy/gmail/v1/users/me/profile"
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            resp = await client.get(url, headers=self._headers(provider_config_key, connection_id))
-            resp.raise_for_status()
-            return resp.json()
+        _PROVIDER = 'gmail'
+        _METHOD = 'GET'
+        t0 = None
+        try:
+            t0 = time.time()
+        except Exception:
+            pass
+        resp = await self._request_with_retry(
+            'GET', url, timeout=30.0,
+            headers=self._headers(provider_config_key, connection_id)
+        )
+        try:
+            self.NANGO_API_CALLS.labels(provider=_PROVIDER, method=_METHOD, status=str(resp.status_code)).inc()
+            if t0 is not None:
+                self.NANGO_API_LATENCY.labels(provider=_PROVIDER, method=_METHOD).observe(time.time() - t0)
+        except Exception:
+            pass
+        return resp.json()
 
     async def list_gmail_messages(self, provider_config_key: str, connection_id: str, q: str,
                                   page_token: Optional[str] = None, max_results: int = 100) -> Dict[str, Any]:
@@ -62,36 +79,187 @@ class NangoClient:
         params = {"q": q, "maxResults": max_results}
         if page_token:
             params["pageToken"] = page_token
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            resp = await client.get(url, params=params, headers=self._headers(provider_config_key, connection_id))
-            resp.raise_for_status()
-            return resp.json()
+        _PROVIDER = 'gmail'
+        _METHOD = 'GET'
+        t0 = None
+        try:
+            t0 = time.time()
+        except Exception:
+            pass
+        resp = await self._request_with_retry(
+            'GET', url, timeout=60.0,
+            params=params, headers=self._headers(provider_config_key, connection_id)
+        )
+        try:
+            self.NANGO_API_CALLS.labels(provider=_PROVIDER, method=_METHOD, status=str(resp.status_code)).inc()
+            if t0 is not None:
+                self.NANGO_API_LATENCY.labels(provider=_PROVIDER, method=_METHOD).observe(time.time() - t0)
+        except Exception:
+            pass
+        return resp.json()
 
     async def get_gmail_message(self, provider_config_key: str, connection_id: str, message_id: str) -> Dict[str, Any]:
         """Get full Gmail message to locate attachment parts."""
         url = f"{self.base_url}/proxy/gmail/v1/users/me/messages/{message_id}"
         params = {"format": "full"}
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            resp = await client.get(url, params=params, headers=self._headers(provider_config_key, connection_id))
-            resp.raise_for_status()
-            return resp.json()
+        resp = await self._request_with_retry(
+            'GET', url, timeout=60.0,
+            params=params, headers=self._headers(provider_config_key, connection_id)
+        )
+        return resp.json()
 
     async def get_gmail_attachment(self, provider_config_key: str, connection_id: str,
                                    message_id: str, attachment_id: str) -> bytes:
         """Fetch a Gmail attachment as bytes (base64 decode)."""
         url = f"{self.base_url}/proxy/gmail/v1/users/me/messages/{message_id}/attachments/{attachment_id}"
-        async with httpx.AsyncClient(timeout=120.0) as client:
-            resp = await client.get(url, headers=self._headers(provider_config_key, connection_id))
-            resp.raise_for_status()
-            data = resp.json()
-            # Gmail returns base64url data under 'data'
-            b64 = data.get("data")
-            if not b64:
-                return b""
-            # Gmail API uses base64url; handle both
-            b64 = b64.replace("-", "+").replace("_", "/")
+        _PROVIDER = 'gmail'
+        _METHOD = 'GET'
+        t0 = None
+        try:
+            t0 = time.time()
+        except Exception:
+            pass
+        resp = await self._request_with_retry(
+            'GET', url, timeout=120.0,
+            headers=self._headers(provider_config_key, connection_id)
+        )
+        try:
+            self.NANGO_API_CALLS.labels(provider=_PROVIDER, method=_METHOD, status=str(resp.status_code)).inc()
+            if t0 is not None:
+                self.NANGO_API_LATENCY.labels(provider=_PROVIDER, method=_METHOD).observe(time.time() - t0)
+        except Exception:
+            pass
+        data = resp.json()
+        # Gmail returns base64url data under 'data'
+        b64 = data.get("data")
+        if not b64:
+            return b""
+        # Gmail API uses base64url; handle both
+        b64 = b64.replace("-", "+").replace("_", "/")
+        try:
+            return base64.b64decode(b64)
+        except Exception:
+            # Try urlsafe decode as fallback
+            return base64.urlsafe_b64decode(b64)
+
+    # ------------------------- Generic Proxy Helpers -------------------------
+    # Prometheus metrics
+    NANGO_API_CALLS = Counter('nango_api_calls_total', 'Nango proxy API calls', ['provider', 'method', 'status'])
+    NANGO_API_LATENCY = Histogram('nango_api_latency_seconds', 'Latency for Nango proxy API calls', ['provider', 'method'])
+
+    async def _request_with_retry(self, method: str, url: str, timeout: float, max_attempts: int = 3, backoff_base: float = 1.0, **kwargs) -> httpx.Response:
+        """Perform an HTTP request with simple exponential backoff on transient errors.
+
+        Retries on network errors and 429/5xx HTTP responses.
+        """
+        attempt = 0
+        last_exc: Exception | None = None
+        while attempt < max_attempts:
             try:
-                return base64.b64decode(b64)
-            except Exception:
-                # Try urlsafe decode as fallback
-                return base64.urlsafe_b64decode(b64)
+                async with httpx.AsyncClient(timeout=timeout) as client:
+                    resp = await client.request(method, url, **kwargs)
+                    try:
+                        resp.raise_for_status()
+                    except httpx.HTTPStatusError as e:
+                        code = e.response.status_code if e.response is not None else 0
+                        if code == 429 or 500 <= code < 600:
+                            raise
+                        # Non-retryable
+                        raise
+                    return resp
+            except httpx.HTTPStatusError as e:
+                last_exc = e
+            except httpx.RequestError as e:
+                # Includes timeouts, connection errors, read errors (e.g., wsarecv on Windows)
+                last_exc = e
+            except Exception as e:
+                last_exc = e
+            attempt += 1
+            # Exponential backoff with jitter
+            await asyncio.sleep(backoff_base * (2 ** (attempt - 1)) + (0.1 * attempt))
+        # Exhausted retries
+        if last_exc:
+            raise last_exc
+        raise RuntimeError("request failed with unknown error")
+
+    async def proxy_get(self, provider: str, path: str, params: dict | None = None,
+                        connection_id: str | None = None, provider_config_key: str | None = None,
+                        headers: dict | None = None) -> dict:
+        """Perform a GET via Nango Proxy and parse JSON response.
+
+        Example: await client.proxy_get('google-drive', 'drive/v3/files', params={...}, ...)
+        """
+        url = f"{self.base_url}/proxy/{provider}/{path.lstrip('/')}"
+        merged_headers = self._headers(provider_config_key, connection_id)
+        if headers:
+            merged_headers.update(headers)
+        t0 = None
+        try:
+            t0 = time.time()
+        except Exception:
+            pass
+        resp = await self._request_with_retry(
+            'GET', url, timeout=60.0,
+            params=params or {}, headers=merged_headers
+        )
+        try:
+            self.NANGO_API_CALLS.labels(provider=provider, method='GET', status=str(resp.status_code)).inc()
+            if t0 is not None:
+                self.NANGO_API_LATENCY.labels(provider=provider, method='GET').observe(time.time() - t0)
+        except Exception:
+            pass
+        return resp.json()
+
+    async def proxy_get_bytes(self, provider: str, path: str, params: dict | None = None,
+                              connection_id: str | None = None, provider_config_key: str | None = None) -> bytes:
+        """Perform a GET via Nango Proxy and return raw bytes (for media endpoints)."""
+        url = f"{self.base_url}/proxy/{provider}/{path.lstrip('/')}"
+        merged_headers = self._headers(provider_config_key, connection_id)
+        t0 = None
+        try:
+            t0 = time.time()
+        except Exception:
+            pass
+        resp = await self._request_with_retry(
+            'GET', url, timeout=120.0,
+            params=params or {}, headers=merged_headers
+        )
+        try:
+            self.NANGO_API_CALLS.labels(provider=provider, method='GET', status=str(resp.status_code)).inc()
+            if t0 is not None:
+                self.NANGO_API_LATENCY.labels(provider=provider, method='GET').observe(time.time() - t0)
+        except Exception:
+            pass
+        return resp.content
+
+    async def proxy_post(self, provider: str, path: str, json_body: dict | None = None,
+                         connection_id: str | None = None, provider_config_key: str | None = None,
+                         headers: dict | None = None) -> dict:
+        """Perform a POST via Nango Proxy.
+
+        If the response body is not JSON, return a dict with {'_raw': bytes}.
+        """
+        url = f"{self.base_url}/proxy/{provider}/{path.lstrip('/')}"
+        merged_headers = self._headers(provider_config_key, connection_id)
+        if headers:
+            merged_headers.update(headers)
+        t0 = None
+        try:
+            t0 = time.time()
+        except Exception:
+            pass
+        resp = await self._request_with_retry(
+            'POST', url, timeout=120.0,
+            json=json_body, headers=merged_headers
+        )
+        try:
+            self.NANGO_API_CALLS.labels(provider=provider, method='POST', status=str(resp.status_code)).inc()
+            if t0 is not None:
+                self.NANGO_API_LATENCY.labels(provider=provider, method='POST').observe(time.time() - t0)
+        except Exception:
+            pass
+        # Try JSON first
+        try:
+            return resp.json()
+        except Exception:
+            return {"_raw": resp.content}

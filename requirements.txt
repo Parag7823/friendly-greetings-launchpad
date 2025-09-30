@@ -30,6 +30,7 @@ rarfile==4.1
 # Job Orchestration and Performance Optimization Dependencies
 redis==5.0.1
 celery==5.3.4
+arq==0.26.1
 
 # Enhanced Data Processing
 sqlalchemy==2.0.23
