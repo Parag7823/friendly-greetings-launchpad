@@ -543,16 +543,30 @@ async def validate_critical_environment():
     logger.info("🔍 Validating environment configuration...")
     
     required_vars = {
-        "OPENAI_API_KEY": "OpenAI API access for AI classification",
-        "SUPABASE_URL": "Supabase project URL",
-        "SUPABASE_SERVICE_ROLE_KEY": "Supabase service role key for backend operations",
-        "NANGO_SECRET_KEY": "Nango API secret for connector integrations"
+        "OPENAI_API_KEY": {
+            "description": "OpenAI API access for AI classification",
+            "aliases": []
+        },
+        "SUPABASE_URL": {
+            "description": "Supabase project URL",
+            "aliases": []
+        },
+        "SUPABASE_SERVICE_ROLE_KEY": {
+            "description": "Supabase service role key for backend operations",
+            "aliases": ["SUPABASE_SERVICE_KEY"]
+        },
+        "NANGO_SECRET_KEY": {
+            "description": "Nango API secret for connector integrations",
+            "aliases": []
+        }
     }
     
     missing = []
-    for var, description in required_vars.items():
-        if not os.environ.get(var):
-            missing.append(f"  - {var}: {description}")
+    for var, meta in required_vars.items():
+        candidates = [var, *meta.get("aliases", [])]
+        if not any(os.environ.get(name) for name in candidates):
+            alias_text = f" (aliases: {', '.join(meta['aliases'])})" if meta.get("aliases") else ""
+            missing.append(f"  - {var}{alias_text}: {meta['description']}")
     
     if missing:
         error_msg = "🚨 CRITICAL: Missing required environment variables:\n" + "\n".join(missing)
