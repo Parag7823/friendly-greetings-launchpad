@@ -138,7 +138,7 @@ export default function ConnectorConfigModal({ open, onOpenChange, connectionId,
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-3xl p-0 border-0 bg-transparent">
         <div className="p-[1.25px] rounded-2xl bg-gradient-to-r from-sky-500 via-fuchsia-500 to-rose-500">
-          <div className="rounded-2xl bg-background">
+          <div className="rounded-2xl bg-background" aria-busy={loading}>
             <div className="p-5 border-b border-border">
               <DialogHeader>
                 <DialogTitle className="flex items-center justify-between">
@@ -174,7 +174,7 @@ export default function ConnectorConfigModal({ open, onOpenChange, connectionId,
                     <span className="text-muted-foreground">Frequency</span>
                     <div className="flex items-center gap-2">
                       <Select value={freqValue} onValueChange={setFreqValue}>
-                        <SelectTrigger className="w-40"><SelectValue placeholder={frequencyLabel} /></SelectTrigger>
+                        <SelectTrigger className="w-40" aria-label="Sync frequency"><SelectValue placeholder={frequencyLabel} /></SelectTrigger>
                         <SelectContent>
                           <SelectItem value="0">Real-time</SelectItem>
                           <SelectItem value="60">Hourly</SelectItem>
@@ -232,13 +232,13 @@ export default function ConnectorConfigModal({ open, onOpenChange, connectionId,
                     <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
                       {/* QuickBooks realmId */}
                       <div className="bg-muted/30 rounded-md px-3 py-2">
-                        <div className="text-muted-foreground mb-1">QuickBooks Realm ID</div>
-                        <input className="w-full bg-background border border-border rounded-md px-2 py-1 text-sm" value={realmId} onChange={(e) => setRealmId(e.target.value)} placeholder="realmId" />
+                        <label htmlFor="realmId" className="text-muted-foreground mb-1 block">QuickBooks Realm ID</label>
+                        <input id="realmId" aria-label="QuickBooks Realm ID" className="w-full bg-background border border-border rounded-md px-2 py-1 text-sm" value={realmId} onChange={(e) => setRealmId(e.target.value)} placeholder="realmId" />
                       </div>
                       {/* Xero tenantId */}
                       <div className="bg-muted/30 rounded-md px-3 py-2">
-                        <div className="text-muted-foreground mb-1">Xero Tenant ID</div>
-                        <input className="w-full bg-background border border-border rounded-md px-2 py-1 text-sm" value={tenantId} onChange={(e) => setTenantId(e.target.value)} placeholder="tenantId" />
+                        <label htmlFor="tenantId" className="text-muted-foreground mb-1 block">Xero Tenant ID</label>
+                        <input id="tenantId" aria-label="Xero Tenant ID" className="w-full bg-background border border-border rounded-md px-2 py-1 text-sm" value={tenantId} onChange={(e) => setTenantId(e.target.value)} placeholder="tenantId" />
                       </div>
                     </div>
                     <div className="mt-3">
@@ -297,20 +297,20 @@ export default function ConnectorConfigModal({ open, onOpenChange, connectionId,
                     <div className="text-xs text-muted-foreground">No runs yet.</div>
                   )}
                 </div>
-                {runs.length > 10 && (
-                  <div className="mt-3">
-                    <div className="flex items-center gap-2">
+                <div className="mt-3">
+                  <div className="flex items-center gap-2">
+                    {runs.length > 10 && (
                       <Button variant="secondary" onClick={() => setExpanded((v) => !v)} aria-label="Toggle history">
                         {expanded ? 'Show less' : 'Expand' }
                       </Button>
-                      {connectionId && (
-                        <Link to={`/connectors/${connectionId}/history`} className="inline-flex items-center text-sm underline">
-                          View full history <ExternalLink className="w-3.5 h-3.5 ml-1" />
-                        </Link>
-                      )}
-                    </div>
+                    )}
+                    {connectionId && (
+                      <Link to={`/connectors/${connectionId}/history`} className="inline-flex items-center text-sm underline" aria-label="View full history">
+                        View full history <ExternalLink className="w-3.5 h-3.5 ml-1" />
+                      </Link>
+                    )}
                   </div>
-                )}
+                </div>
               </section>
             </div>
           </div>
