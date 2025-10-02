@@ -233,9 +233,17 @@ class TransactionContext:
             # Add transaction_id to data
             data_with_tx = {**data, 'transaction_id': self.transaction_id}
             
-            result = self.manager.supabase.table(table).insert(data_with_tx).execute()
+            try:
+                result = self.manager.supabase.table(table).insert(data_with_tx).execute()
+            except Exception as e:
+                # Retry without transaction_id if the column is missing
+                msg = str(e).lower()
+                if 'transaction_id' in msg and ('does not exist' in msg or 'could not find' in msg or 'schema cache' in msg):
+                    result = self.manager.supabase.table(table).insert(data).execute()
+                else:
+                    raise
             
-            if not result.data:
+            if not result or not result.data:
                 raise Exception(f"Insert failed for table {table}")
             
             # Track operation for rollback
@@ -266,7 +274,15 @@ class TransactionContext:
             # Add transaction_id to update data
             data_with_tx = {**data, 'transaction_id': self.transaction_id}
             
-            result = self.manager.supabase.table(table).update(data_with_tx).eq(filter_key, filter_value).execute()
+            try:
+                result = self.manager.supabase.table(table).update(data_with_tx).eq(filter_key, filter_value).execute()
+            except Exception as e:
+                # Retry without transaction_id if column missing
+                msg = str(e).lower()
+                if 'transaction_id' in msg and ('does not exist' in msg or 'could not find' in msg or 'schema cache' in msg):
+                    result = self.manager.supabase.table(table).update(data).eq(filter_key, filter_value).execute()
+                else:
+                    raise
             
             # Track operation for rollback
             operation = TransactionOperation(
@@ -293,9 +309,16 @@ class TransactionContext:
                 for data in data_list
             ]
             
-            result = self.manager.supabase.table(table).insert(data_with_tx).execute()
+            try:
+                result = self.manager.supabase.table(table).insert(data_with_tx).execute()
+            except Exception as e:
+                msg = str(e).lower()
+                if 'transaction_id' in msg and ('does not exist' in msg or 'could not find' in msg or 'schema cache' in msg):
+                    result = self.manager.supabase.table(table).insert(data_list).execute()
+                else:
+                    raise
             
-            if not result.data:
+            if not result or not result.data:
                 raise Exception(f"Batch insert failed for table {table}")
             
             # Track operation for rollback

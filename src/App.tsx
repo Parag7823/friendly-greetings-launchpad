@@ -20,6 +20,9 @@ const App = () => (
         <BrowserRouter>
           <Routes>
             <Route path="/" element={<Index />} />
+            <Route path="/chat" element={<Index />} />
+            <Route path="/connectors" element={<Index />} />
+            <Route path="/upload" element={<Index />} />
             <Route path="/integrations" element={<Integrations />} />
             <Route path="/test" element={<IntegrationTest />} />
             {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}

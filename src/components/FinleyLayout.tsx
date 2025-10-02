@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Menu, X } from 'lucide-react';
+import { Menu } from 'lucide-react';
 import { FinleySidebar } from './FinleySidebar';
 import { ChatInterface } from './ChatInterface';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from './AuthProvider';
 import { Button } from './ui/button';
 
@@ -12,6 +13,8 @@ export const FinleyLayout = () => {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(true);
   const [currentView, setCurrentView] = useState('chat');
   const [currentChatId, setCurrentChatId] = useState<string | null>(null);
+  const location = useLocation();
+  const navigate = useNavigate();
 
   // Listen for chat events
   useEffect(() => {
@@ -37,6 +40,38 @@ export const FinleyLayout = () => {
       window.removeEventListener('new-chat-requested', handleNewChatRequested);
     };
   }, []);
+
+  // Sync view with route path
+  useEffect(() => {
+    const path = location.pathname || '/';
+    if (path.startsWith('/connectors')) {
+      setCurrentView('marketplace');
+    } else if (path.startsWith('/upload')) {
+      setCurrentView('upload');
+    } else {
+      setCurrentView('chat');
+    }
+  }, [location.pathname]);
+
+  const routeForView = (view: string) => {
+    switch (view) {
+      case 'marketplace':
+        return '/connectors';
+      case 'upload':
+        return '/upload';
+      case 'chat':
+      default:
+        return '/chat';
+    }
+  };
+
+  const handleNavigate = (view: string) => {
+    setCurrentView(view);
+    const target = routeForView(view);
+    if (location.pathname !== target) {
+      navigate(target);
+    }
+  };
 
   if (loading) {
     return (
@@ -101,7 +136,7 @@ export const FinleyLayout = () => {
           >
             <FinleySidebar 
               onClose={() => setIsSidebarOpen(false)} 
-              onNavigate={setCurrentView}
+              onNavigate={handleNavigate}
               currentView={currentView}
               currentChatId={currentChatId}
             />
@@ -110,13 +145,13 @@ export const FinleyLayout = () => {
       </AnimatePresence>
 
       {/* Desktop Sidebar - Collapsible on large screens */}
-      <motion.div 
+      <motion.div
         className="hidden lg:block bg-muted/30 border-r border-border flex-shrink-0"
         animate={{ width: isSidebarCollapsed ? "72px" : "280px" }}
         transition={{ type: "spring", damping: 20, stiffness: 300 }}
       >
         <FinleySidebar 
-          onNavigate={setCurrentView}
+          onNavigate={handleNavigate}
           currentView={currentView}
           isCollapsed={isSidebarCollapsed}
           currentChatId={currentChatId}
@@ -124,12 +159,12 @@ export const FinleyLayout = () => {
       </motion.div>
       
       {/* Main Content */}
-      <div className="flex-1 flex flex-col">
+      <div className="flex-1 flex flex-col min-h-0">
         {/* Chat Interface */}
-        <div className="flex-1">
+        <div className="flex-1 min-h-0">
           <ChatInterface 
             currentView={currentView}
-            onNavigate={setCurrentView}
+            onNavigate={handleNavigate}
           />
         </div>
       </div>
