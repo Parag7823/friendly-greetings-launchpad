@@ -286,6 +286,24 @@ def get_ai_cache() -> AIClassificationCache:
         raise RuntimeError("AI cache not initialized. Call initialize_ai_cache() first.")
     return _ai_cache
 
+# Safe accessor that never raises, returns a no-op cache if uninitialized
+class NullAIClassificationCache:
+    """No-op cache to safely operate in degraded mode"""
+    async def get_cached_classification(self, content: Any, classification_type: str = "row_classification"):
+        return None
+
+    async def store_classification(self, content: Any, classification_result: Dict[str, Any],
+                                   classification_type: str = "row_classification", ttl_hours: Optional[int] = None,
+                                   confidence_score: float = 0.0, model_version: str = "") -> bool:
+        return False
+
+def safe_get_ai_cache():
+    """Return AI cache if initialized; otherwise return a no-op cache to avoid crashes."""
+    try:
+        return get_ai_cache()
+    except Exception:
+        return NullAIClassificationCache()
+
 # Decorator for automatic caching
 def cache_ai_classification(classification_type: str = "row_classification", 
                           ttl_hours: Optional[int] = None):

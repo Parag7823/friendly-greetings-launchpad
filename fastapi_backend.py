@@ -70,15 +70,34 @@ def _queue_backend() -> str:
     """Return the queue backend mode: 'sync' (default) or 'arq'."""
     return (os.environ.get("QUEUE_BACKEND") or "sync").lower()
 
+# Global ARQ pool (singleton pattern for connection reuse)
+_arq_pool = None
+_arq_pool_lock = asyncio.Lock()
+
 async def get_arq_pool():
-    """Create and return an ARQ Redis pool using ARQ_REDIS_URL (or REDIS_URL)."""
-    # Import inside function to avoid import overhead when not using ARQ
-    from arq import create_pool
-    from arq.connections import RedisSettings
-    url = os.environ.get("ARQ_REDIS_URL") or os.environ.get("REDIS_URL")
-    if not url:
-        raise RuntimeError("ARQ_REDIS_URL (or REDIS_URL) not set for QUEUE_BACKEND=arq")
-    return await create_pool(RedisSettings.from_dsn(url))
+    """Get or create a singleton ARQ Redis pool using ARQ_REDIS_URL (or REDIS_URL)."""
+    global _arq_pool
+    
+    # Fast path: pool already exists
+    if _arq_pool is not None:
+        return _arq_pool
+    
+    # Slow path: acquire lock and create pool
+    async with _arq_pool_lock:
+        # Double-check after acquiring lock (another thread might have created it)
+        if _arq_pool is not None:
+            return _arq_pool
+        
+        # Import inside function to avoid import overhead when not using ARQ
+        from arq import create_pool
+        from arq.connections import RedisSettings
+        url = os.environ.get("ARQ_REDIS_URL") or os.environ.get("REDIS_URL")
+        if not url:
+            raise RuntimeError("ARQ_REDIS_URL (or REDIS_URL) not set for QUEUE_BACKEND=arq")
+        
+        _arq_pool = await create_pool(RedisSettings.from_dsn(url))
+        logger.info(f"✅ ARQ connection pool created and cached for reuse")
+        return _arq_pool
 
 from openai import OpenAI
 try:
@@ -226,7 +245,7 @@ from database_optimization_utils import OptimizedDatabaseQueries, create_optimiz
 optimized_db: Optional[OptimizedDatabaseQueries] = None
 
 # Import AI caching system for 90% cost reduction
-from ai_cache_system import initialize_ai_cache, get_ai_cache, cache_ai_classification
+from ai_cache_system import initialize_ai_cache, get_ai_cache, cache_ai_classification, safe_get_ai_cache
 
 # Import batch optimizer for 5x performance improvement
 from batch_optimizer import batch_optimizer
@@ -283,27 +302,6 @@ def _db_update(table: str, updates: dict, eq_col: str, eq_val):
         DB_WRITES.labels(table=table, op='update', status='error').inc()
         DB_WRITE_LATENCY.labels(table=table, op='update').observe(max(0.0, time.time() - t0))
         raise
-
-def _db_insert_many_external_items(items: list) -> int:
-    """Best-effort batch insert for external_items. Falls back to per-row on conflict."""
-    if not items:
-        return 0
-    try:
-        _db_insert('external_items', items)
-        return len(items)
-    except Exception as e:
-        # On duplicate conflicts or other errors, try per-row to salvage progress
-        inserted = 0
-        for it in items:
-            try:
-                _db_insert('external_items', it)
-                inserted += 1
-            except Exception as ie:
-                # Ignore duplicates; log other errors
-                if 'duplicate key value' in str(ie) or 'Unique' in str(ie):
-                    continue
-                logger.warning(f"external_items insert failed for provider_id={it.get('provider_id')}: {ie}")
-        return inserted
 
 # Import production duplicate detection service
 try:
@@ -1117,17 +1115,25 @@ async def _zohomail_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> D
         except Exception:
             uc_meta = {}
 
-    # Start sync run
+    # Start sync run (transaction)
     sync_run_id = str(uuid.uuid4())
-    supabase.table('sync_runs').insert({
-        'id': sync_run_id,
-        'user_id': user_id,
-        'user_connection_id': user_connection_id,
-        'type': req.mode,
-        'status': 'running',
-        'started_at': datetime.utcnow().isoformat(),
-        'stats': json.dumps(stats)
-    }).execute()
+    try:
+        transaction_manager = get_transaction_manager()
+        async with transaction_manager.transaction(
+            user_id=user_id,
+            operation_type="connector_sync_start"
+        ) as tx:
+            await tx.insert('sync_runs', {
+                'id': sync_run_id,
+                'user_id': user_id,
+                'user_connection_id': user_connection_id,
+                'type': req.mode,
+                'status': 'running',
+                'started_at': datetime.utcnow().isoformat(),
+                'stats': json.dumps(stats)
+            })
+    except Exception:
+        pass
 
     try:
         # Resolve Zoho accountId
@@ -1237,17 +1243,49 @@ async def _zohomail_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> D
 
                 # Batch insert for this message's attachments
                 if batch_items:
-                    inserted = _db_insert_many_external_items(batch_items)
-                    stats['records_fetched'] += inserted
+                    try:
+                        transaction_manager = get_transaction_manager()
+                        async with transaction_manager.transaction(
+                            user_id=user_id,
+                            operation_type="connector_sync_batch"
+                        ) as tx:
+                            for item in batch_items:
+                                try:
+                                    await tx.insert('external_items', item)
+                                    stats['records_fetched'] += 1
+                                except Exception as insert_err:
+                                    if 'duplicate key' in str(insert_err).lower() or 'unique' in str(insert_err).lower():
+                                        pass
+                                    else:
+                                        logger.error(f"Zoho item insert failed: {insert_err}")
+                    except Exception as batch_err:
+                        logger.error(f"Zoho batch insert transaction failed: {batch_err}")
                 fetched += 1
                 if fetched >= max_total:
                     break
             if fetched >= max_total:
                 break
-
-        supabase.table('sync_runs').update({'status': 'succeeded', 'finished_at': datetime.utcnow().isoformat(), 'stats': json.dumps(stats)}).eq('id', sync_run_id).execute()
-        JOBS_PROCESSED.labels(provider=provider_key, status='succeeded').inc()
-        supabase.table('user_connections').update({'last_synced_at': datetime.utcnow().isoformat()}).eq('nango_connection_id', connection_id).execute()
+        # Complete Zoho sync in transaction
+        try:
+            transaction_manager = get_transaction_manager()
+            async with transaction_manager.transaction(
+                user_id=user_id,
+                operation_type="connector_sync_completion"
+            ) as tx:
+                await tx.update('sync_runs', {
+                    'status': 'succeeded',
+                    'finished_at': datetime.utcnow().isoformat(),
+                    'stats': json.dumps(stats)
+                }, {'id': sync_run_id})
+                await tx.update('user_connections', {
+                    'last_synced_at': datetime.utcnow().isoformat()
+                }, {'nango_connection_id': connection_id})
+        except Exception as completion_err:
+            logger.error(f"Failed to update Zoho sync completion status: {completion_err}")
+        try:
+            JOBS_PROCESSED.labels(provider=provider_key, status='succeeded').inc()
+        except Exception:
+            pass
         return {'status': 'succeeded', 'sync_run_id': sync_run_id, 'stats': stats}
     except HTTPException:
         supabase.table('sync_runs').update({'status': 'failed', 'finished_at': datetime.utcnow().isoformat(), 'stats': json.dumps(stats)}).eq('id', sync_run_id).execute()
@@ -1320,17 +1358,25 @@ async def _quickbooks_sync_run(nango: NangoClient, req: ConnectorSyncRequest) ->
         except Exception:
             uc_meta = {}
 
-    # Start sync run
+    # Start sync run (transaction)
     sync_run_id = str(uuid.uuid4())
-    supabase.table('sync_runs').insert({
-        'id': sync_run_id,
-        'user_id': user_id,
-        'user_connection_id': user_connection_id,
-        'type': req.mode,
-        'status': 'running',
-        'started_at': datetime.utcnow().isoformat(),
-        'stats': json.dumps(stats)
-    }).execute()
+    try:
+        transaction_manager = get_transaction_manager()
+        async with transaction_manager.transaction(
+            user_id=user_id,
+            operation_type="connector_sync_start"
+        ) as tx:
+            await tx.insert('sync_runs', {
+                'id': sync_run_id,
+                'user_id': user_id,
+                'user_connection_id': user_connection_id,
+                'type': req.mode,
+                'status': 'running',
+                'started_at': datetime.utcnow().isoformat(),
+                'stats': json.dumps(stats)
+            })
+    except Exception:
+        pass
 
     try:
         # Discover realmId
@@ -1376,9 +1422,24 @@ async def _quickbooks_sync_run(nango: NangoClient, req: ConnectorSyncRequest) ->
             }
             batch_items.append(item)
         if batch_items:
-            inserted = _db_insert_many_external_items(batch_items)
-            stats['records_fetched'] += inserted
-            stats['skipped'] += max(0, len(batch_items) - inserted)
+            try:
+                transaction_manager = get_transaction_manager()
+                async with transaction_manager.transaction(
+                    user_id=user_id,
+                    operation_type="connector_sync_batch"
+                ) as tx:
+                    for item in batch_items:
+                        try:
+                            await tx.insert('external_items', item)
+                            stats['records_fetched'] += 1
+                        except Exception as insert_err:
+                            if 'duplicate key' in str(insert_err).lower() or 'unique' in str(insert_err).lower():
+                                stats['skipped'] += 1
+                            else:
+                                logger.error(f"QuickBooks invoice insert failed: {insert_err}")
+                                stats['skipped'] += 1
+            except Exception as batch_err:
+                logger.error(f"QuickBooks invoice batch transaction failed: {batch_err}")
 
         # Fetch Bills
         bill_sql = f"SELECT Id, TxnDate, TotalAmt, DocNumber FROM Bill ORDER BY TxnDate DESC STARTPOSITION 1 MAXRESULTS {limit}"
@@ -1410,9 +1471,24 @@ async def _quickbooks_sync_run(nango: NangoClient, req: ConnectorSyncRequest) ->
             }
             batch_items.append(item)
         if batch_items:
-            inserted = _db_insert_many_external_items(batch_items)
-            stats['records_fetched'] += inserted
-            stats['skipped'] += max(0, len(batch_items) - inserted)
+            try:
+                transaction_manager = get_transaction_manager()
+                async with transaction_manager.transaction(
+                    user_id=user_id,
+                    operation_type="connector_sync_batch"
+                ) as tx:
+                    for item in batch_items:
+                        try:
+                            await tx.insert('external_items', item)
+                            stats['records_fetched'] += 1
+                        except Exception as insert_err:
+                            if 'duplicate key' in str(insert_err).lower() or 'unique' in str(insert_err).lower():
+                                stats['skipped'] += 1
+                            else:
+                                logger.error(f"QuickBooks bill insert failed: {insert_err}")
+                                stats['skipped'] += 1
+            except Exception as batch_err:
+                logger.error(f"QuickBooks bill batch transaction failed: {batch_err}")
 
         # Fetch Payments
         pay_sql = f"SELECT Id, TxnDate, TotalAmt FROM Payment ORDER BY TxnDate DESC STARTPOSITION 1 MAXRESULTS {limit}"
@@ -1443,13 +1519,46 @@ async def _quickbooks_sync_run(nango: NangoClient, req: ConnectorSyncRequest) ->
             }
             batch_items.append(item)
         if batch_items:
-            inserted = _db_insert_many_external_items(batch_items)
-            stats['records_fetched'] += inserted
-            stats['skipped'] += max(0, len(batch_items) - inserted)
+            try:
+                transaction_manager = get_transaction_manager()
+                async with transaction_manager.transaction(
+                    user_id=user_id,
+                    operation_type="connector_sync_batch"
+                ) as tx:
+                    for item in batch_items:
+                        try:
+                            await tx.insert('external_items', item)
+                            stats['records_fetched'] += 1
+                        except Exception as insert_err:
+                            if 'duplicate key' in str(insert_err).lower() or 'unique' in str(insert_err).lower():
+                                stats['skipped'] += 1
+                            else:
+                                logger.error(f"QuickBooks payment insert failed: {insert_err}")
+                                stats['skipped'] += 1
+            except Exception as batch_err:
+                logger.error(f"QuickBooks payment batch transaction failed: {batch_err}")
 
-        supabase.table('sync_runs').update({'status': 'succeeded', 'finished_at': datetime.utcnow().isoformat(), 'stats': json.dumps(stats)}).eq('id', sync_run_id).execute()
-        JOBS_PROCESSED.labels(provider=provider_key, status='succeeded').inc()
-        supabase.table('user_connections').update({'last_synced_at': datetime.utcnow().isoformat()}).eq('nango_connection_id', connection_id).execute()
+        # Complete QuickBooks sync in transaction
+        try:
+            transaction_manager = get_transaction_manager()
+            async with transaction_manager.transaction(
+                user_id=user_id,
+                operation_type="connector_sync_completion"
+            ) as tx:
+                await tx.update('sync_runs', {
+                    'status': 'succeeded',
+                    'finished_at': datetime.utcnow().isoformat(),
+                    'stats': json.dumps(stats)
+                }, {'id': sync_run_id})
+                await tx.update('user_connections', {
+                    'last_synced_at': datetime.utcnow().isoformat()
+                }, {'nango_connection_id': connection_id})
+        except Exception as completion_err:
+            logger.error(f"Failed to update QuickBooks sync completion status: {completion_err}")
+        try:
+            JOBS_PROCESSED.labels(provider=provider_key, status='succeeded').inc()
+        except Exception:
+            pass
         return {'status': 'succeeded', 'sync_run_id': sync_run_id, 'stats': stats}
     except HTTPException:
         supabase.table('sync_runs').update({'status': 'failed', 'finished_at': datetime.utcnow().isoformat(), 'stats': json.dumps(stats)}).eq('id', sync_run_id).execute()
@@ -1525,17 +1634,25 @@ async def _xero_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> Dict[
         except Exception:
             uc_meta = {}
 
-    # Start sync run
+    # Start sync run (transaction)
     sync_run_id = str(uuid.uuid4())
-    supabase.table('sync_runs').insert({
-        'id': sync_run_id,
-        'user_id': user_id,
-        'user_connection_id': user_connection_id,
-        'type': req.mode,
-        'status': 'running',
-        'started_at': datetime.utcnow().isoformat(),
-        'stats': json.dumps(stats)
-    }).execute()
+    try:
+        transaction_manager = get_transaction_manager()
+        async with transaction_manager.transaction(
+            user_id=user_id,
+            operation_type="connector_sync_start"
+        ) as tx:
+            await tx.insert('sync_runs', {
+                'id': sync_run_id,
+                'user_id': user_id,
+                'user_connection_id': user_connection_id,
+                'type': req.mode,
+                'status': 'running',
+                'started_at': datetime.utcnow().isoformat(),
+                'stats': json.dumps(stats)
+            })
+    except Exception:
+        pass
 
     try:
         # Resolve tenantId
@@ -1603,9 +1720,24 @@ async def _xero_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> Dict[
                 if fetched >= limit:
                     break
             if batch_items:
-                inserted = _db_insert_many_external_items(batch_items)
-                stats['records_fetched'] += inserted
-                stats['skipped'] += max(0, len(batch_items) - inserted)
+                try:
+                    transaction_manager = get_transaction_manager()
+                    async with transaction_manager.transaction(
+                        user_id=user_id,
+                        operation_type="connector_sync_batch"
+                    ) as tx:
+                        for item in batch_items:
+                            try:
+                                await tx.insert('external_items', item)
+                                stats['records_fetched'] += 1
+                            except Exception as insert_err:
+                                if 'duplicate key' in str(insert_err).lower() or 'unique' in str(insert_err).lower():
+                                    stats['skipped'] += 1
+                                else:
+                                    logger.error(f"Xero invoice insert failed: {insert_err}")
+                                    stats['skipped'] += 1
+                except Exception as batch_err:
+                    logger.error(f"Xero invoice batch transaction failed: {batch_err}")
             if fetched >= limit:
                 break
             page_no += 1
@@ -1647,9 +1779,24 @@ async def _xero_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> Dict[
                 if fetched_c >= limit:
                     break
             if batch_items:
-                inserted = _db_insert_many_external_items(batch_items)
-                stats['records_fetched'] += inserted
-                stats['skipped'] += max(0, len(batch_items) - inserted)
+                try:
+                    transaction_manager = get_transaction_manager()
+                    async with transaction_manager.transaction(
+                        user_id=user_id,
+                        operation_type="connector_sync_batch"
+                    ) as tx:
+                        for item in batch_items:
+                            try:
+                                await tx.insert('external_items', item)
+                                stats['records_fetched'] += 1
+                            except Exception as insert_err:
+                                if 'duplicate key' in str(insert_err).lower() or 'unique' in str(insert_err).lower():
+                                    stats['skipped'] += 1
+                                else:
+                                    logger.error(f"Xero contact insert failed: {insert_err}")
+                                    stats['skipped'] += 1
+                except Exception as batch_err:
+                    logger.error(f"Xero contact batch transaction failed: {batch_err}")
             if fetched_c >= limit:
                 break
             page_c += 1
@@ -1691,16 +1838,49 @@ async def _xero_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> Dict[
                 if fetched_p >= limit:
                     break
             if batch_items:
-                inserted = _db_insert_many_external_items(batch_items)
-                stats['records_fetched'] += inserted
-                stats['skipped'] += max(0, len(batch_items) - inserted)
+                try:
+                    transaction_manager = get_transaction_manager()
+                    async with transaction_manager.transaction(
+                        user_id=user_id,
+                        operation_type="connector_sync_batch"
+                    ) as tx:
+                        for item in batch_items:
+                            try:
+                                await tx.insert('external_items', item)
+                                stats['records_fetched'] += 1
+                            except Exception as insert_err:
+                                if 'duplicate key' in str(insert_err).lower() or 'unique' in str(insert_err).lower():
+                                    stats['skipped'] += 1
+                                else:
+                                    logger.error(f"Xero payment insert failed: {insert_err}")
+                                    stats['skipped'] += 1
+                except Exception as batch_err:
+                    logger.error(f"Xero payment batch transaction failed: {batch_err}")
             if fetched_p >= limit:
                 break
             page_p += 1
 
-        supabase.table('sync_runs').update({'status': 'succeeded', 'finished_at': datetime.utcnow().isoformat(), 'stats': json.dumps(stats)}).eq('id', sync_run_id).execute()
-        JOBS_PROCESSED.labels(provider=provider_key, status='succeeded').inc()
-        supabase.table('user_connections').update({'last_synced_at': datetime.utcnow().isoformat()}).eq('nango_connection_id', connection_id).execute()
+        # Complete Xero sync in transaction
+        try:
+            transaction_manager = get_transaction_manager()
+            async with transaction_manager.transaction(
+                user_id=user_id,
+                operation_type="connector_sync_completion"
+            ) as tx:
+                await tx.update('sync_runs', {
+                    'status': 'succeeded',
+                    'finished_at': datetime.utcnow().isoformat(),
+                    'stats': json.dumps(stats)
+                }, {'id': sync_run_id})
+                await tx.update('user_connections', {
+                    'last_synced_at': datetime.utcnow().isoformat()
+                }, {'nango_connection_id': connection_id})
+        except Exception as completion_err:
+            logger.error(f"Failed to update Xero sync completion status: {completion_err}")
+        try:
+            JOBS_PROCESSED.labels(provider=provider_key, status='succeeded').inc()
+        except Exception:
+            pass
         return {'status': 'succeeded', 'sync_run_id': sync_run_id, 'stats': stats}
     except HTTPException:
         supabase.table('sync_runs').update({'status': 'failed', 'finished_at': datetime.utcnow().isoformat(), 'stats': json.dumps(stats)}).eq('id', sync_run_id).execute()
@@ -3079,7 +3259,7 @@ class DataEnrichmentProcessor:
             self.platform_id_extractor = PlatformIDExtractor()
             self.universal_extractors = UniversalExtractors()
             self.universal_platform_detector = UniversalPlatformDetector(openai_client)
-            self.universal_document_classifier = UniversalDocumentClassifier(openai_client)
+            self.universal_document_classifier = UniversalDocumentClassifier(openai_client, cache_client=safe_get_ai_cache())
         except Exception as e:
             logger.error(f"Failed to initialize enrichment components: {e}")
             raise
@@ -4807,7 +4987,7 @@ class ExcelProcessor:
         # Initialize universal components
         self.universal_field_detector = UniversalFieldDetector()
         self.universal_platform_detector = UniversalPlatformDetector(self.openai)
-        self.universal_document_classifier = UniversalDocumentClassifier(self.openai)
+        self.universal_document_classifier = UniversalDocumentClassifier(self.openai, cache_client=safe_get_ai_cache())
         self.universal_extractors = UniversalExtractors()
         
         # Entity resolver and AI classifier will be initialized per request with Supabase client
@@ -5067,7 +5247,7 @@ class ExcelProcessor:
             }
             
             # Try to get from AI cache first
-            ai_cache = get_ai_cache()
+            ai_cache = safe_get_ai_cache()
             cached_result = await ai_cache.get_cached_classification(row_content, "row_classification")
             
             if cached_result:
@@ -5489,8 +5669,21 @@ class ExcelProcessor:
         # Use first sheet for detection
         first_sheet = list(sheets.values())[0]
         
-        # Fast pattern-based platform detection first
-        platform_info = self.platform_detector.detect_platform(first_sheet, filename)
+        # Fast pattern-based platform detection first (with AI cache)
+        ai_cache = safe_get_ai_cache()
+        platform_cache_key = {
+            'columns': list(first_sheet.columns),
+            'filename': filename
+        }
+        cached_platform = await ai_cache.get_cached_classification(platform_cache_key, "platform_detection")
+        if cached_platform:
+            platform_info = cached_platform
+        else:
+            platform_info = self.platform_detector.detect_platform(first_sheet, filename)
+            try:
+                await ai_cache.store_classification(platform_cache_key, platform_info, "platform_detection", ttl_hours=48)
+            except Exception as cache_err:
+                logger.warning(f"Platform detection cache store failed: {cache_err}")
         
         # Fast document classification using patterns
         doc_analysis = {
@@ -5533,6 +5726,15 @@ class ExcelProcessor:
             # Calculate content fingerprint for row-level deduplication
             content_fingerprint = duplicate_service.calculate_content_fingerprint(sheets)
             
+            # Attempt to resolve originating external_item_id via file hash
+            external_item_id = None
+            try:
+                ext_res = tx.manager.supabase.table('external_items').select('id').eq('user_id', user_id).eq('hash', file_hash).limit(1).execute()
+                if ext_res and getattr(ext_res, 'data', None):
+                    external_item_id = ext_res.data[0].get('id')
+            except Exception as e:
+                logger.warning(f"external_item lookup failed for raw_records link: {e}")
+            
             # Store in raw_records using transaction
             raw_record_data = {
                 'user_id': user_id,
@@ -5551,7 +5753,9 @@ class ExcelProcessor:
                     'duplicate_analysis': duplicate_analysis
                 },
                 'status': 'processing',
-                'classification_status': 'processing'
+                'classification_status': 'processing',
+                # Link back to originating external_items row when applicable
+                'external_item_id': external_item_id
             }
             
             raw_record_result = await tx.insert('raw_records', raw_record_data)
@@ -5750,20 +5954,28 @@ class ExcelProcessor:
             "progress": 90
         })
         
-        supabase.table('raw_records').update({
-            'status': 'completed',
-            'classification_status': 'completed',
-            'content': {
-                'sheets': list(sheets.keys()),
-                'platform_detection': platform_info,
-                'document_analysis': doc_analysis,
-                'file_hash': file_hash,
-                'total_rows': total_rows,
-                'events_created': events_created,
-                'errors': errors,
-                'processed_at': datetime.utcnow().isoformat()
-            }
-        }).eq('id', file_id).execute()
+        try:
+            transaction_manager = get_transaction_manager()
+            async with transaction_manager.transaction(
+                user_id=user_id,
+                operation_type="file_processing_completion"
+            ) as tx:
+                await tx.update('raw_records', {
+                    'status': 'completed',
+                    'classification_status': 'completed',
+                    'content': {
+                        'sheets': list(sheets.keys()),
+                        'platform_detection': platform_info,
+                        'document_analysis': doc_analysis,
+                        'file_hash': file_hash,
+                        'total_rows': total_rows,
+                        'events_created': events_created,
+                        'errors': errors,
+                        'processed_at': datetime.utcnow().isoformat()
+                    }
+                }, {'id': file_id})
+        except Exception as e:
+            logger.error(f"Failed to update raw_records completion in transaction: {e}")
         
         # Step 7: Generate insights
         await manager.send_update(job_id, {
@@ -6351,7 +6563,7 @@ async def get_performance_optimization_status():
         
         # Test 2: AI Caching System
         try:
-            ai_cache = get_ai_cache()
+            ai_cache = safe_get_ai_cache()
             cache_stats = ai_cache.get_cache_stats()
             
             status["optimizations"]["ai_caching"] = {
@@ -7101,15 +7313,20 @@ async def handle_duplicate_decision(request: DuplicateDecisionRequest):
                 progress=100
             )
 
-            # Persist job status in DB (best-effort)
+            # Persist job status in DB (transactional)
             try:
-                supabase.table('ingestion_jobs').update({
-                    'status': 'cancelled',
-                    'updated_at': datetime.utcnow().isoformat(),
-                    'error_message': 'Skipped due to duplicate'
-                }).eq('id', request.job_id).execute()
+                transaction_manager = get_transaction_manager()
+                async with transaction_manager.transaction(
+                    user_id=request.user_id,
+                    operation_type="ingestion_job_skip"
+                ) as tx:
+                    await tx.update('ingestion_jobs', {
+                        'status': 'cancelled',
+                        'updated_at': datetime.utcnow().isoformat(),
+                        'error_message': 'Skipped due to duplicate'
+                    }, {'id': request.job_id})
             except Exception as e:
-                logger.warning(f"Failed to update ingestion_jobs on skip for job {request.job_id}: {e}")
+                logger.warning(f"Failed to transactionally update ingestion_jobs on skip for job {request.job_id}: {e}")
 
             return {"status": "success", "message": "Duplicate decision processed: skipped"}
 
@@ -7695,7 +7912,7 @@ async def classify_document_endpoint(request: DocumentClassificationRequest):
     """Classify document using UniversalDocumentClassifier"""
     try:
         # Initialize document classifier
-        document_classifier = UniversalDocumentClassifier()
+        document_classifier = UniversalDocumentClassifier(cache_client=safe_get_ai_cache())
         
         # Classify document
         result = await document_classifier.classify_document_universal(
@@ -7958,7 +8175,7 @@ async def process_excel_universal_endpoint(
         excel_processor = ExcelProcessor()
         field_detector = UniversalFieldDetector()
         platform_detector = UniversalPlatformDetector()
-        document_classifier = UniversalDocumentClassifier()
+        document_classifier = UniversalDocumentClassifier(cache_client=safe_get_ai_cache())
         data_extractor = UniversalExtractors()
         
         # Initialize Supabase client
@@ -8034,7 +8251,7 @@ async def get_component_metrics():
         # Initialize components
         field_detector = UniversalFieldDetector()
         platform_detector = UniversalPlatformDetector()
-        document_classifier = UniversalDocumentClassifier()
+        document_classifier = UniversalDocumentClassifier(cache_client=safe_get_ai_cache())
         data_extractor = UniversalExtractors()
         
         # Get metrics from each component
@@ -8116,6 +8333,10 @@ class ConnectorSyncRequest(BaseModel):
             if v not in allowed:
                 raise ValueError('mode must be one of historical, incremental')
             return v
+
+class UserConnectionsRequest(BaseModel):
+    user_id: str
+    session_token: Optional[str] = None
 
 def _require_security(endpoint: str, user_id: str, session_token: Optional[str]):
     try:
@@ -8382,28 +8603,41 @@ async def start_pdf_processing_job(user_id: str, job_id: str, storage_path: str,
             'status': 'completed',
             'classification_status': 'pending'
         }
+        # Try to link to external_items by file hash
         try:
-            supabase.table('raw_records').insert(record).execute()
+            ext_res = supabase.table('external_items').select('id').eq('user_id', user_id).eq('hash', file_hash).limit(1).execute()
+            if ext_res and getattr(ext_res, 'data', None):
+                record['external_item_id'] = ext_res.data[0].get('id')
         except Exception as e:
-            logger.warning(f"Failed to insert raw_records for PDF {filename}: {e}")
-
-        # Mark job as completed
+            logger.warning(f"external_item lookup failed for PDF raw_records link: {e}")
+        # Persist raw_records and mark job completed atomically
         try:
-            supabase.table('ingestion_jobs').update({
-                'status': 'completed',
-                'updated_at': datetime.utcnow().isoformat()
-            }).eq('id', job_id).execute()
-        except Exception:
-            pass
+            transaction_manager = get_transaction_manager()
+            async with transaction_manager.transaction(
+                user_id=user_id,
+                operation_type="pdf_processing_persist"
+            ) as tx:
+                await tx.insert('raw_records', record)
+                await tx.update('ingestion_jobs', {
+                    'status': 'completed',
+                    'updated_at': datetime.utcnow().isoformat()
+                }, {'id': job_id})
+        except Exception as e:
+            logger.error(f"Failed to persist PDF processing results transactionally: {e}")
 
     except Exception as e:
         logger.error(f"PDF processing job failed for {filename}: {e}")
         try:
-            supabase.table('ingestion_jobs').update({
-                'status': 'failed',
-                'error_message': str(e),
-                'updated_at': datetime.utcnow().isoformat()
-            }).eq('id', job_id).execute()
+            transaction_manager = get_transaction_manager()
+            async with transaction_manager.transaction(
+                user_id=user_id,
+                operation_type="pdf_processing_fail_update"
+            ) as tx:
+                await tx.update('ingestion_jobs', {
+                    'status': 'failed',
+                    'error_message': str(e),
+                    'updated_at': datetime.utcnow().isoformat()
+                }, {'id': job_id})
         except Exception:
             pass
 
@@ -8450,15 +8684,20 @@ async def _gmail_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> Dict
     # Start sync_run
     sync_run_id = str(uuid.uuid4())
     try:
-        supabase.table('sync_runs').insert({
-            'id': sync_run_id,
-            'user_id': user_id,
-            'user_connection_id': user_connection_id,
-            'type': req.mode,
-            'status': 'running',
-            'started_at': datetime.utcnow().isoformat(),
-            'stats': json.dumps({'records_fetched': 0, 'actions_used': 0})
-        }).execute()
+        transaction_manager = get_transaction_manager()
+        async with transaction_manager.transaction(
+            user_id=user_id,
+            operation_type="connector_sync_start"
+        ) as tx:
+            await tx.insert('sync_runs', {
+                'id': sync_run_id,
+                'user_id': user_id,
+                'user_connection_id': user_connection_id,
+                'type': req.mode,
+                'status': 'running',
+                'started_at': datetime.utcnow().isoformat(),
+                'stats': json.dumps({'records_fetched': 0, 'actions_used': 0})
+            })
     except Exception:
         pass
 
@@ -8609,50 +8848,87 @@ async def _gmail_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> Dict
                     logger.warning(f"Failed to process message {mid}: {item_e}")
                     errors.append(str(item_e))
 
-            # Batch insert all items from this page
+            # Batch insert all items from this page using transaction
             if page_batch_items:
-                inserted = _db_insert_many_external_items(page_batch_items)
-                stats['records_fetched'] += inserted
-                stats['skipped'] += max(0, len(page_batch_items) - inserted)
+                try:
+                    transaction_manager = get_transaction_manager()
+                    async with transaction_manager.transaction(
+                        user_id=user_id,
+                        operation_type="connector_sync_batch"
+                    ) as tx:
+                        # Insert all items in batch within transaction
+                        for item in page_batch_items:
+                            try:
+                                await tx.insert('external_items', item)
+                                stats['records_fetched'] += 1
+                            except Exception as insert_err:
+                                # Handle duplicate key conflicts gracefully
+                                if 'duplicate key' in str(insert_err).lower() or 'unique' in str(insert_err).lower():
+                                    stats['skipped'] += 1
+                                else:
+                                    logger.error(f"Failed to insert external_item: {insert_err}")
+                                    stats['skipped'] += 1
+                    # Transaction committed successfully
+                except Exception as batch_err:
+                    logger.error(f"Batch insert transaction failed: {batch_err}")
+                    errors.append(f"Batch insert failed: {str(batch_err)[:100]}")
 
             page_token = page.get('nextPageToken')
             if not page_token:
                 break
 
         run_status = 'succeeded' if not errors else ('partial' if stats['records_fetched'] > 0 else 'failed')
+        
+        # Update sync_runs, user_connections, and sync_cursors atomically in transaction
         try:
-            supabase.table('sync_runs').update({
-                'status': run_status,
-                'finished_at': datetime.utcnow().isoformat(),
-                'stats': json.dumps(stats),
-                'error': '; '.join(errors)[:500]
-            }).eq('id', sync_run_id).execute()
-            # Update last_synced_at on connection
-            supabase.table('user_connections').update({
-                'last_synced_at': datetime.utcnow().isoformat()
-            }).eq('nango_connection_id', connection_id).execute()
-            # Upsert sync cursor
-            try:
-                supabase.table('sync_cursors').insert({
+            transaction_manager = get_transaction_manager()
+            async with transaction_manager.transaction(
+                user_id=user_id,
+                operation_type="connector_sync_completion"
+            ) as tx:
+                # Update sync_run status
+                await tx.update('sync_runs', {
+                    'status': run_status,
+                    'finished_at': datetime.utcnow().isoformat(),
+                    'stats': json.dumps(stats),
+                    'error': '; '.join(errors)[:500] if errors else None
+                }, {'id': sync_run_id})
+                
+                # Update last_synced_at on connection
+                await tx.update('user_connections', {
+                    'last_synced_at': datetime.utcnow().isoformat()
+                }, {'nango_connection_id': connection_id})
+                
+                # Upsert sync cursor
+                cursor_data = {
                     'user_id': user_id,
                     'user_connection_id': user_connection_id,
                     'resource': 'emails',
                     'cursor_type': 'time',
                     'value': datetime.utcnow().isoformat()
-                }).execute()
-            except Exception:
+                }
                 try:
-                    supabase.table('sync_cursors').update({
+                    await tx.insert('sync_cursors', cursor_data)
+                except Exception:
+                    # If insert fails (duplicate), update instead
+                    await tx.update('sync_cursors', {
                         'value': datetime.utcnow().isoformat(),
                         'updated_at': datetime.utcnow().isoformat()
-                    }).eq('user_connection_id', user_connection_id).eq('resource', 'emails').eq('cursor_type', 'time').execute()
-                except Exception:
-                    pass
-            # Metrics: mark job processed
-            try:
-                JOBS_PROCESSED.labels(provider=provider_key, status=run_status).inc()
-            except Exception:
-                pass
+                    }, {
+                        'user_connection_id': user_connection_id,
+                        'resource': 'emails',
+                        'cursor_type': 'time'
+                    })
+                
+                # Transaction will commit automatically when context exits
+                logger.info(f"✅ Gmail sync completed in transaction: {stats['records_fetched']} items, status={run_status}")
+        except Exception as completion_err:
+            logger.error(f"Failed to update sync completion status: {completion_err}")
+            # Don't fail the entire sync just because status update failed
+        
+        # Metrics: mark job processed (outside transaction, fire-and-forget)
+        try:
+            JOBS_PROCESSED.labels(provider=provider_key, status=run_status).inc()
         except Exception:
             pass
 
@@ -8737,15 +9013,20 @@ async def _dropbox_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> Di
 
     sync_run_id = str(uuid.uuid4())
     try:
-        supabase.table('sync_runs').insert({
-            'id': sync_run_id,
-            'user_id': user_id,
-            'user_connection_id': user_connection_id,
-            'type': req.mode,
-            'status': 'running',
-            'started_at': datetime.utcnow().isoformat(),
-            'stats': json.dumps(stats)
-        }).execute()
+        transaction_manager = get_transaction_manager()
+        async with transaction_manager.transaction(
+            user_id=user_id,
+            operation_type="connector_sync_start"
+        ) as tx:
+            await tx.insert('sync_runs', {
+                'id': sync_run_id,
+                'user_id': user_id,
+                'user_connection_id': user_connection_id,
+                'type': req.mode,
+                'status': 'running',
+                'started_at': datetime.utcnow().isoformat(),
+                'stats': json.dumps(stats)
+            })
     except Exception:
         pass
 
@@ -8832,45 +9113,91 @@ async def _dropbox_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> Di
                 tasks = [asyncio.create_task(process_entry(ent)) for ent in entries]
                 if tasks:
                     results = await asyncio.gather(*tasks, return_exceptions=True)
-                    # Collect valid items for batch insert
+                    # Collect valid items for batch insert using transaction
                     batch_items = [r for r in results if r and isinstance(r, dict) and not isinstance(r, Exception)]
                     if batch_items:
-                        inserted = _db_insert_many_external_items(batch_items)
-                        stats['records_fetched'] += inserted
-                        stats['skipped'] += max(0, len(batch_items) - inserted)
+                        try:
+                            transaction_manager = get_transaction_manager()
+                            async with transaction_manager.transaction(
+                                user_id=user_id,
+                                operation_type="connector_sync_batch"
+                            ) as tx:
+                                for item in batch_items:
+                                    try:
+                                        await tx.insert('external_items', item)
+                                        stats['records_fetched'] += 1
+                                    except Exception as insert_err:
+                                        if 'duplicate key' in str(insert_err).lower() or 'unique' in str(insert_err).lower():
+                                            stats['skipped'] += 1
+                                        else:
+                                            logger.error(f"Dropbox item insert failed: {insert_err}")
+                                            stats['skipped'] += 1
+                        except Exception as batch_err:
+                            logger.error(f"Dropbox batch insert transaction failed: {batch_err}")
+                            errors.append(f"Batch insert failed: {str(batch_err)[:100]}")
             # Always carry forward the latest cursor
             cursor = page.get('cursor') or cursor
             if not page.get('has_more'):
                 break
 
-        # Save cursor for incremental runs
+        # Save cursor for incremental runs using transaction
         if cursor:
             try:
-                supabase.table('sync_cursors').insert({
-                    'user_id': user_id,
-                    'user_connection_id': user_connection_id,
-                    'resource': 'dropbox',
-                    'cursor_type': 'opaque',
-                    'value': cursor
-                }).execute()
-            except Exception:
-                try:
-                    supabase.table('sync_cursors').update({
-                        'value': cursor,
-                        'updated_at': datetime.utcnow().isoformat()
-                    }).eq('user_connection_id', user_connection_id).eq('resource', 'dropbox').eq('cursor_type', 'opaque').execute()
-                except Exception:
-                    pass
+                transaction_manager = get_transaction_manager()
+                async with transaction_manager.transaction(
+                    user_id=user_id,
+                    operation_type="connector_sync_cursor"
+                ) as tx:
+                    cursor_data = {
+                        'user_id': user_id,
+                        'user_connection_id': user_connection_id,
+                        'resource': 'dropbox',
+                        'cursor_type': 'opaque',
+                        'value': cursor
+                    }
+                    try:
+                        await tx.insert('sync_cursors', cursor_data)
+                    except Exception:
+                        await tx.update('sync_cursors', {
+                            'value': cursor,
+                            'updated_at': datetime.utcnow().isoformat()
+                        }, {
+                            'user_connection_id': user_connection_id,
+                            'resource': 'dropbox',
+                            'cursor_type': 'opaque'
+                        })
+            except Exception as cursor_err:
+                logger.error(f"Failed to save Dropbox cursor: {cursor_err}")
         run_status = 'succeeded' if not errors else ('partial' if stats['records_fetched'] > 0 else 'failed')
+        
+        # Update sync completion in transaction
         try:
-            supabase.table('sync_runs').update({'status': run_status, 'finished_at': datetime.utcnow().isoformat(), 'stats': json.dumps(stats), 'error': '; '.join(errors)[:500]}).eq('id', sync_run_id).execute()
-            supabase.table('user_connections').update({'last_synced_at': datetime.utcnow().isoformat()}).eq('nango_connection_id', connection_id).execute()
-            try:
-                JOBS_PROCESSED.labels(provider=provider_key, status=run_status).inc()
-            except Exception:
-                pass
+            transaction_manager = get_transaction_manager()
+            async with transaction_manager.transaction(
+                user_id=user_id,
+                operation_type="connector_sync_completion"
+            ) as tx:
+                await tx.update('sync_runs', {
+                    'status': run_status,
+                    'finished_at': datetime.utcnow().isoformat(),
+                    'stats': json.dumps(stats),
+                    'error': '; '.join(errors)[:500] if errors else None
+                }, {'id': sync_run_id})
+                
+                await tx.update('user_connections', {
+                    'last_synced_at': datetime.utcnow().isoformat()
+                }, {'nango_connection_id': connection_id})
+                
+                logger.info(f"✅ Dropbox sync completed in transaction: {stats['records_fetched']} items, status={run_status}")
+        except Exception as completion_err:
+            logger.error(f"Failed to update Dropbox sync completion status: {completion_err}")
+        
+        # Metrics (fire-and-forget)
+        try:
+            JOBS_PROCESSED.labels(provider=provider_key, status=run_status).inc()
         except Exception:
             pass
+            
         return {'status': run_status, 'sync_run_id': sync_run_id, 'stats': stats, 'errors': errors[:5]}
     except Exception as e:
         logger.error(f"Dropbox sync failed: {e}")
@@ -8945,15 +9272,20 @@ async def _gdrive_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> Dic
 
     sync_run_id = str(uuid.uuid4())
     try:
-        supabase.table('sync_runs').insert({
-            'id': sync_run_id,
-            'user_id': user_id,
-            'user_connection_id': user_connection_id,
-            'type': req.mode,
-            'status': 'running',
-            'started_at': datetime.utcnow().isoformat(),
-            'stats': json.dumps(stats)
-        }).execute()
+        transaction_manager = get_transaction_manager()
+        async with transaction_manager.transaction(
+            user_id=user_id,
+            operation_type="connector_sync_start"
+        ) as tx:
+            await tx.insert('sync_runs', {
+                'id': sync_run_id,
+                'user_id': user_id,
+                'user_connection_id': user_connection_id,
+                'type': req.mode,
+                'status': 'running',
+                'started_at': datetime.utcnow().isoformat(),
+                'stats': json.dumps(stats)
+            })
     except Exception:
         pass
 
@@ -9041,20 +9373,49 @@ async def _gdrive_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> Dic
                 # Collect valid items for batch insert
                 batch_items = [r for r in results if r and isinstance(r, dict) and not isinstance(r, Exception)]
                 if batch_items:
-                    inserted = _db_insert_many_external_items(batch_items)
-                    stats['records_fetched'] += inserted
-                    stats['skipped'] += max(0, len(batch_items) - inserted)
+                    try:
+                        transaction_manager = get_transaction_manager()
+                        async with transaction_manager.transaction(
+                            user_id=user_id,
+                            operation_type="connector_sync_batch"
+                        ) as tx:
+                            for item in batch_items:
+                                try:
+                                    await tx.insert('external_items', item)
+                                    stats['records_fetched'] += 1
+                                except Exception as insert_err:
+                                    if 'duplicate key' in str(insert_err).lower() or 'unique' in str(insert_err).lower():
+                                        stats['skipped'] += 1
+                                    else:
+                                        logger.error(f"GDrive item insert failed: {insert_err}")
+                                        stats['skipped'] += 1
+                    except Exception as batch_err:
+                        logger.error(f"GDrive batch insert transaction failed: {batch_err}")
+                        errors.append(f"Batch insert failed: {str(batch_err)[:100]}")
             page_token = page.get('nextPageToken')
             if not page_token:
                 break
         run_status = 'succeeded' if not errors else ('partial' if stats['records_fetched'] > 0 else 'failed')
+        # Update sync completion in transaction
         try:
-            supabase.table('sync_runs').update({'status': run_status, 'finished_at': datetime.utcnow().isoformat(), 'stats': json.dumps(stats), 'error': '; '.join(errors)[:500]}).eq('id', sync_run_id).execute()
-            supabase.table('user_connections').update({'last_synced_at': datetime.utcnow().isoformat()}).eq('nango_connection_id', connection_id).execute()
-            try:
-                JOBS_PROCESSED.labels(provider=provider_key, status=run_status).inc()
-            except Exception:
-                pass
+            transaction_manager = get_transaction_manager()
+            async with transaction_manager.transaction(
+                user_id=user_id,
+                operation_type="connector_sync_completion"
+            ) as tx:
+                await tx.update('sync_runs', {
+                    'status': run_status,
+                    'finished_at': datetime.utcnow().isoformat(),
+                    'stats': json.dumps(stats),
+                    'error': '; '.join(errors)[:500] if errors else None
+                }, {'id': sync_run_id})
+                await tx.update('user_connections', {
+                    'last_synced_at': datetime.utcnow().isoformat()
+                }, {'nango_connection_id': connection_id})
+        except Exception as completion_err:
+            logger.error(f"Failed to update GDrive sync completion status: {completion_err}")
+        try:
+            JOBS_PROCESSED.labels(provider=provider_key, status=run_status).inc()
         except Exception:
             pass
         return {'status': run_status, 'sync_run_id': sync_run_id, 'stats': stats, 'errors': errors[:5]}
@@ -9260,6 +9621,33 @@ async def connectors_status(connection_id: str, user_id: str, session_token: Opt
         return {'connection': uc.data[0] if uc.data else None, 'recent_runs': runs}
     except Exception as e:
         logger.error(f"Connectors status failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/connectors/user-connections")
+async def list_user_connections(req: UserConnectionsRequest):
+    """List the current user's Nango connections with integration IDs for UI rendering."""
+    _require_security('connectors-user-connections', req.user_id, req.session_token)
+    try:
+        res = supabase.table('user_connections').select('id, user_id, nango_connection_id, connector_id, status, last_synced_at, created_at').eq('user_id', req.user_id).limit(1000).execute()
+        items = []
+        for row in (res.data or []):
+            integ = None
+            try:
+                if row.get('connector_id'):
+                    c = supabase.table('connectors').select('integration_id, provider').eq('id', row['connector_id']).limit(1).execute()
+                    integ = (c.data[0]['integration_id'] if c.data else None)
+            except Exception:
+                integ = None
+            items.append({
+                'connection_id': row.get('nango_connection_id') or row.get('id'),
+                'integration_id': integ,
+                'status': row.get('status'),
+                'last_synced_at': row.get('last_synced_at'),
+                'created_at': row.get('created_at'),
+            })
+        return {'connections': items}
+    except Exception as e:
+        logger.error(f"List user connections failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/webhooks/nango")
@@ -9990,7 +10378,7 @@ async def process_with_websocket_endpoint(
         excel_processor = ExcelProcessor()
         field_detector = UniversalFieldDetector()
         platform_detector = UniversalPlatformDetector()
-        document_classifier = UniversalDocumentClassifier()
+        document_classifier = UniversalDocumentClassifier(cache_client=safe_get_ai_cache())
         data_extractor = UniversalExtractors()
         
         results = {}
@@ -10523,7 +10911,7 @@ class UniversalComponentTestSuite:
     async def test_document_classifier(self):
         """Test UniversalDocumentClassifier component"""
         try:
-            document_classifier = UniversalDocumentClassifier()
+            document_classifier = UniversalDocumentClassifier(cache_client=safe_get_ai_cache())
             
             # Test universal document classification
             result = await document_classifier.classify_document_universal(
@@ -10625,7 +11013,7 @@ class UniversalComponentTestSuite:
             excel_processor = ExcelProcessor()
             field_detector = UniversalFieldDetector()
             platform_detector = UniversalPlatformDetector()
-            document_classifier = UniversalDocumentClassifier()
+            document_classifier = UniversalDocumentClassifier(cache_client=safe_get_ai_cache())
             data_extractor = UniversalExtractors()
             
             # Step 1: Process Excel
@@ -11078,7 +11466,7 @@ async def get_health_status():
                     test_instance = UniversalPlatformDetector()
                     monitoring_system.update_health_status(component, 'healthy', {'initialized': True})
                 elif component == 'UniversalDocumentClassifier':
-                    test_instance = UniversalDocumentClassifier()
+                    test_instance = UniversalDocumentClassifier(cache_client=safe_get_ai_cache())
                     monitoring_system.update_health_status(component, 'healthy', {'initialized': True})
                 elif component == 'UniversalExtractors':
                     test_instance = UniversalExtractors()

@@ -1,8 +1,10 @@
-import { MessageCircle, Send, Upload, Plug } from 'lucide-react';
+import { MessageCircle, Send, Upload, Plug, FileSpreadsheet, Receipt, Database } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { EnhancedFileUpload } from './EnhancedFileUpload';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { useAuth } from './AuthProvider';
+import IntegrationCard from './IntegrationCard';
+import { supabase } from '@/integrations/supabase/client';
 
 interface ChatInterfaceProps {
   currentView?: string;
@@ -15,6 +17,144 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
   const [messages, setMessages] = useState<Array<{ id: string; text: string; isUser: boolean; timestamp: Date }>>([]);
   const [currentChatId, setCurrentChatId] = useState<string | null>(null);
   const [isNewChat, setIsNewChat] = useState(true);
+  const [providers, setProviders] = useState<any[]>([]);
+  const [loadingProviders, setLoadingProviders] = useState(false);
+  const [connecting, setConnecting] = useState<string | null>(null);
+  const [connections, setConnections] = useState<any[]>([]);
+  const [loadingConnections, setLoadingConnections] = useState(false);
+  const [syncing, setSyncing] = useState<string | null>(null);
+
+  // Load connector providers when opening marketplace
+  useEffect(() => {
+    const loadProviders = async () => {
+      if (currentView !== 'marketplace') return;
+      try {
+        setLoadingProviders(true);
+        const { data: sessionData } = await supabase.auth.getSession();
+        const sessionToken = sessionData?.session?.access_token;
+        const resp = await fetch('/api/connectors/providers', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ user_id: user?.id || '', session_token: sessionToken })
+        });
+        if (resp.ok) {
+          const data = await resp.json();
+          setProviders(data?.providers || []);
+        }
+      } catch (e) {
+        console.error('Failed to load providers', e);
+      } finally {
+        setLoadingProviders(false);
+      }
+    };
+    loadProviders();
+  }, [currentView, user?.id]);
+
+  const handleConnect = async (providerKey: string) => {
+    try {
+      setConnecting(providerKey);
+      const { data: sessionData } = await supabase.auth.getSession();
+      const sessionToken = sessionData?.session?.access_token;
+      const resp = await fetch('/api/connectors/initiate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ provider: providerKey, user_id: user?.id || '', session_token: sessionToken })
+      });
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}));
+        throw new Error(err?.detail || 'Failed to initiate connector');
+      }
+      const data = await resp.json();
+      const s = data?.connect_session || {};
+      // Try common URL fields returned by Nango
+      const url = s.connect_url || s.url || s.authorization_url || s.hosted_url || (s.data && (s.data.connect_url || s.data.url));
+      if (url) {
+        window.open(url as string, '_blank', 'noopener,noreferrer');
+      } else {
+        alert('Connect session created but no URL was provided. Please check backend logs.');
+      }
+    } catch (e) {
+      console.error('Connect failed', e);
+      alert('Unable to start the connector authorization flow.');
+    } finally {
+      setConnecting(null);
+    }
+  };
+
+  // Helpers for marketplace rendering
+  const providerSet = new Set((providers || []).map((p: any) => p.provider));
+  const isAvailable = (slug: string) => providerSet.size === 0 || providerSet.has(slug);
+  const brandIcon = (slug: string, colorHex: string, alt: string) => (
+    <img
+      src={`https://cdn.simpleicons.org/${slug}/${colorHex.replace('#', '')}`}
+      alt={alt}
+      className="w-8 h-8"
+      loading="lazy"
+      width={32}
+      height={32}
+    />
+  );
+
+  // Fetch user's existing connections for the marketplace
+  const fetchConnections = async () => {
+    try {
+      setLoadingConnections(true);
+      const { data: sessionData } = await supabase.auth.getSession();
+      const sessionToken = sessionData?.session?.access_token;
+      const resp = await fetch('/api/connectors/user-connections', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_id: user?.id || '', session_token: sessionToken }),
+      });
+      if (resp.ok) {
+        const data = await resp.json();
+        setConnections(Array.isArray(data?.connections) ? data.connections : []);
+      }
+    } catch (e) {
+      console.error('Failed to load user connections', e);
+    } finally {
+      setLoadingConnections(false);
+    }
+  };
+
+  useEffect(() => {
+    if (currentView !== 'marketplace') return;
+    fetchConnections();
+    const id = window.setInterval(fetchConnections, 15000);
+    return () => window.clearInterval(id);
+  }, [currentView, user?.id]);
+
+  const handleSyncNow = async (integrationId: string | null | undefined, connectionId: string) => {
+    if (!integrationId) return;
+    try {
+      setSyncing(connectionId);
+      const { data: sessionData } = await supabase.auth.getSession();
+      const sessionToken = sessionData?.session?.access_token;
+      const resp = await fetch('/api/connectors/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          user_id: user?.id || '',
+          connection_id: connectionId,
+          integration_id: integrationId,
+          mode: 'incremental',
+          session_token: sessionToken,
+        }),
+      });
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}));
+        throw new Error(err?.detail || 'Failed to trigger sync');
+      }
+      // Refresh connections to update last_synced_at/status
+      await fetchConnections();
+      alert('Sync started. It may take a moment to appear in Recent Runs.');
+    } catch (e) {
+      console.error('Sync failed', e);
+      alert('Unable to start sync. Please try again.');
+    } finally {
+      setSyncing(null);
+    }
+  };
 
   // Function to reset chat for new conversation
   const resetChat = () => {
@@ -149,29 +289,133 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
       
       case 'marketplace':
         return (
-          <div className="h-full flex items-center justify-center p-6">
-            <Card className="max-w-md w-full">
-              <CardHeader className="text-center">
-                <div className="mx-auto w-10 h-10 bg-primary/10 rounded-full flex items-center justify-center mb-3">
-                  <Plug className="w-5 h-5 text-primary" />
+          <div className="h-full overflow-y-auto">
+            <div className="px-6 pt-6">
+              <h1 className="text-2xl font-semibold text-primary tracking-tight">
+                Autonomous, zero-effort ingestion from anywhere.
+              </h1>
+              <p className="text-sm text-muted-foreground mt-1">Connect cloud storage, email, and accounting platforms in seconds.</p>
+            </div>
+
+            <div className="p-6 space-y-8">
+              <div className="finley-card rounded-md border border-border bg-card text-card-foreground p-3 text-xs text-muted-foreground">
+                Click Connect. A secure window opens to authorize the provider. After completing authorization, sync starts automatically (handled by the backend webhook).
+              </div>
+              {/* My Connections */}
+              <section>
+                <h2 className="text-sm font-medium text-muted-foreground mb-3">My Connections</h2>
+                {loadingConnections && (
+                  <div className="text-xs text-muted-foreground">Loading your connections…</div>
+                )}
+                {!loadingConnections && connections.length === 0 && (
+                  <div className="text-xs text-muted-foreground">No connections yet — connect a provider below to get started.</div>
+                )}
+                {connections.length > 0 && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {connections.map((c) => {
+                      const integ = (c.integration_id || '').toString();
+                      const map: Record<string, { slug: string; color: string; name: string }> = {
+                        'google-mail': { slug: 'gmail', color: 'EA4335', name: 'Gmail' },
+                        'zoho-mail': { slug: 'zoho', color: 'C8202F', name: 'Zoho Mail' },
+                        'dropbox': { slug: 'dropbox', color: '0061FF', name: 'Dropbox' },
+                        'google-drive': { slug: 'googledrive', color: '1A73E8', name: 'Google Drive' },
+                        'quickbooks': { slug: 'intuitquickbooks', color: '2CA01C', name: 'QuickBooks' },
+                        'quickbooks-sandbox': { slug: 'intuitquickbooks', color: '2CA01C', name: 'QuickBooks (Sandbox)' },
+                        'xero': { slug: 'xero', color: '13B5EA', name: 'Xero' },
+                      };
+                      const meta = map[integ] || { slug: 'cloud', color: '6B7280', name: integ || 'Connection' };
+                      const last = c.last_synced_at ? new Date(c.last_synced_at).toLocaleString() : 'Never';
+                      return (
+                        <IntegrationCard
+                          key={c.connection_id}
+                          icon={brandIcon(meta.slug, meta.color, meta.name)}
+                          title={meta.name}
+                          description={`Status: ${c.status || 'unknown'} • Last synced: ${last}`}
+                          actionLabel={syncing === c.connection_id ? 'Syncing…' : 'Sync Now'}
+                          onAction={() => handleSyncNow(integ, c.connection_id)}
+                          disabled={!!(syncing === c.connection_id)}
+                        />
+                      );
+                    })}
+                  </div>
+                )}
+              </section>
+              {/* Cloud & Storage */}
+              <section>
+                <h2 className="text-sm font-medium text-muted-foreground mb-3">Cloud & Storage</h2>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                  <IntegrationCard
+                    icon={brandIcon('googledrive', '1A73E8', 'Google Drive')}
+                    title="Google Drive"
+                    description="Ingest spreadsheets and documents directly from your Drive."
+                    actionLabel={connecting === 'google-drive' ? 'Connecting…' : (loadingProviders ? 'Loading…' : 'Connect')}
+                    onAction={() => handleConnect('google-drive')}
+                    disabled={loadingProviders || !isAvailable('google-drive') || connecting === 'google-drive'}
+                  />
+                  <IntegrationCard
+                    icon={brandIcon('dropbox', '0061FF', 'Dropbox')}
+                    title="Dropbox"
+                    description="Sync shared folders and financial files at scale."
+                    actionLabel={connecting === 'dropbox' ? 'Connecting…' : (loadingProviders ? 'Loading…' : 'Connect')}
+                    onAction={() => handleConnect('dropbox')}
+                    disabled={loadingProviders || !isAvailable('dropbox') || connecting === 'dropbox'}
+                  />
+                  <IntegrationCard
+                    icon={brandIcon('gmail', 'EA4335', 'Gmail')}
+                    title="Gmail"
+                    description="Autofetch statements and invoices from email attachments."
+                    actionLabel={connecting === 'google-mail' ? 'Connecting…' : (loadingProviders ? 'Loading…' : 'Connect')}
+                    onAction={() => handleConnect('google-mail')}
+                    disabled={loadingProviders || !isAvailable('google-mail') || connecting === 'google-mail'}
+                  />
+                  <IntegrationCard
+                    icon={brandIcon('zoho', 'C8202F', 'Zoho Mail')}
+                    title="Zoho Mail"
+                    description="Pull financial documents from Zoho Mail attachments."
+                    actionLabel={connecting === 'zoho-mail' ? 'Connecting…' : (loadingProviders ? 'Loading…' : 'Connect')}
+                    onAction={() => handleConnect('zoho-mail')}
+                    disabled={loadingProviders || !isAvailable('zoho-mail') || connecting === 'zoho-mail'}
+                  />
                 </div>
-                <CardTitle className="text-base">Connector Marketplace</CardTitle>
-                <CardDescription className="text-xs">
-                  Connect with your favorite financial platforms and services
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="text-center">
-                <p className="text-xs text-muted-foreground mb-3">
-                  Coming Soon! We're working on integrations with popular financial platforms.
-                </p>
-                <div className="space-y-1 text-xs text-muted-foreground">
-                  <p>• QuickBooks Integration</p>
-                  <p>• Stripe Payment Processing</p>
-                  <p>• Bank API Connections</p>
-                  <p>• And many more...</p>
+              </section>
+
+              {/* Accounting Platforms */}
+              <section>
+                <h2 className="text-sm font-medium text-muted-foreground mb-3">Accounting Platforms</h2>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                  <IntegrationCard
+                    icon={brandIcon('intuitquickbooks', '2CA01C', 'QuickBooks')}
+                    title="QuickBooks (Sandbox)"
+                    description="Historic and incremental sync of accounting data."
+                    actionLabel={connecting === 'quickbooks-sandbox' ? 'Connecting…' : (loadingProviders ? 'Loading…' : 'Connect')}
+                    onAction={() => handleConnect('quickbooks-sandbox')}
+                    disabled={loadingProviders || !isAvailable('quickbooks-sandbox') || connecting === 'quickbooks-sandbox'}
+                  />
+                  <IntegrationCard
+                    icon={brandIcon('xero', '13B5EA', 'Xero')}
+                    title="Xero"
+                    description="Sync contacts, invoices, and payments securely."
+                    actionLabel={connecting === 'xero' ? 'Connecting…' : (loadingProviders ? 'Loading…' : 'Connect')}
+                    onAction={() => handleConnect('xero')}
+                    disabled={loadingProviders || !isAvailable('xero') || connecting === 'xero'}
+                  />
                 </div>
-              </CardContent>
-            </Card>
+              </section>
+
+              {/* Future Categories */}
+              <section>
+                <h2 className="text-sm font-medium text-muted-foreground mb-3">Coming Next</h2>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                  <IntegrationCard
+                    icon={<Database className="w-8 h-8 text-muted-foreground" aria-hidden />}
+                    title="Banking APIs"
+                    description="Direct bank feeds and transaction sync."
+                    statusLabel="Coming Soon"
+                    disabled
+                  />
+                </div>
+              </section>
+            </div>
           </div>
         );
       

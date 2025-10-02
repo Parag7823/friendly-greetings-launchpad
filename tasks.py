@@ -45,13 +45,26 @@ def task_pdf_processing(self, user_id: str, filename: str, storage_path: str, jo
 
     # Insert/ensure ingestion_jobs entry
     try:
-        supabase.table('ingestion_jobs').insert({
-            'id': job_id,
-            'user_id': user_id,
-            'file_name': filename,
-            'status': 'queued',
-            'storage_path': storage_path
-        }).execute()
+        # Use transaction manager when available; initialize if needed
+        from transaction_manager import get_transaction_manager, initialize_transaction_manager
+        try:
+            tm = get_transaction_manager()
+        except Exception:
+            # Initialize with backend supabase client
+            initialize_transaction_manager(supabase)
+            tm = get_transaction_manager()
+
+        async def _tx_create_job():
+            async with tm.transaction(user_id=user_id, operation_type="ingestion_job_create") as tx:
+                await tx.insert('ingestion_jobs', {
+                    'id': job_id,
+                    'user_id': user_id,
+                    'file_name': filename,
+                    'status': 'queued',
+                    'storage_path': storage_path
+                })
+
+        asyncio.run(_tx_create_job())
     except Exception:
         pass
 
@@ -74,13 +87,25 @@ def task_spreadsheet_processing(self, user_id: str, filename: str, storage_path:
         job_id = str(uuid.uuid4())
 
     try:
-        supabase.table('ingestion_jobs').insert({
-            'id': job_id,
-            'user_id': user_id,
-            'file_name': filename,
-            'status': 'queued',
-            'storage_path': storage_path
-        }).execute()
+        # Use transaction manager when available; initialize if needed
+        from transaction_manager import get_transaction_manager, initialize_transaction_manager
+        try:
+            tm = get_transaction_manager()
+        except Exception:
+            initialize_transaction_manager(supabase)
+            tm = get_transaction_manager()
+
+        async def _tx_create_job():
+            async with tm.transaction(user_id=user_id, operation_type="ingestion_job_create") as tx:
+                await tx.insert('ingestion_jobs', {
+                    'id': job_id,
+                    'user_id': user_id,
+                    'file_name': filename,
+                    'status': 'queued',
+                    'storage_path': storage_path
+                })
+
+        asyncio.run(_tx_create_job())
     except Exception:
         pass
 

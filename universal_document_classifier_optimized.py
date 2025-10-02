@@ -349,10 +349,26 @@ class UniversalDocumentClassifierOptimized:
         start_time = time.time()
         classification_id = self._generate_classification_id(payload, filename, user_id)
         
+        # Build deterministic cache content for AI cache integration (safe for non-JSON payloads)
+        try:
+            file_hash = hashlib.sha256(file_content).hexdigest() if file_content else None
+        except Exception:
+            file_hash = None
+        try:
+            payload_keys = sorted(list(payload.keys())) if isinstance(payload, dict) else []
+        except Exception:
+            payload_keys = []
+        cache_content = {
+            'user_id': user_id,
+            'filename': filename,
+            'payload_keys': payload_keys,
+            'file_hash': file_hash
+        }
+        
         try:
             # 1. Check cache for existing classification
             if self.config['enable_caching'] and self.cache:
-                cached_result = await self._get_cached_classification(classification_id)
+                cached_result = await self._get_cached_classification(classification_id, cache_content)
                 if cached_result:
                     self.metrics['cache_hits'] += 1
                     logger.debug(f"Cache hit for document classification {classification_id}")
@@ -422,7 +438,7 @@ class UniversalDocumentClassifierOptimized:
             
             # 7. Cache the result
             if self.config['enable_caching'] and self.cache:
-                await self._cache_classification_result(classification_id, final_result)
+                await self._cache_classification_result(classification_id, final_result, cache_content)
             
             # 8. Update metrics and learning
             self._update_classification_metrics(final_result)
@@ -705,11 +721,15 @@ class UniversalDocumentClassifierOptimized:
     
     # Helper methods
     def _generate_classification_id(self, payload: Dict, filename: str, user_id: str) -> str:
-        """Generate unique classification ID"""
-        payload_str = str(sorted(payload.items())) if isinstance(payload, dict) else str(payload)
+        """Generate deterministic classification ID (no timestamp)"""
+        try:
+            payload_str = str(sorted(payload.items())) if isinstance(payload, dict) else str(payload)
+        except Exception:
+            payload_str = str(payload)
         content_hash = hashlib.md5(payload_str.encode()).hexdigest()[:8]
-        timestamp = int(time.time())
-        return f"classify_{user_id}_{timestamp}_{content_hash}"
+        filename_part = hashlib.md5((filename or "-").encode()).hexdigest()[:6]
+        user_part = (user_id or "anon")[:12]
+        return f"classify_{user_part}_{filename_part}_{content_hash}"
     
     async def _safe_openai_call(self, client, model: str, messages: List[Dict], 
                                temperature: float, max_tokens: int) -> str:
@@ -746,26 +766,50 @@ class UniversalDocumentClassifierOptimized:
             logger.error(f"Raw AI response: {response_text}")
             return None
     
-    async def _get_cached_classification(self, classification_id: str) -> Optional[Dict[str, Any]]:
-        """Get cached classification result"""
+    async def _get_cached_classification(self, classification_id: str, cache_content: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
+        """Get cached classification result using AIClassificationCache if available."""
         if not self.cache:
             return None
-        
         try:
+            # Prefer AIClassificationCache API
+            if hasattr(self.cache, 'get_cached_classification'):
+                return await self.cache.get_cached_classification(
+                    cache_content or classification_id,
+                    classification_type='document_classification'
+                )
+            # Fallback to simple get(key)
             cache_key = f"document_classification:{classification_id}"
-            return await self.cache.get(cache_key)
+            get_fn = getattr(self.cache, 'get', None)
+            if get_fn:
+                return await get_fn(cache_key)
+            return None
         except Exception as e:
             logger.warning(f"Cache retrieval failed: {e}")
             return None
     
-    async def _cache_classification_result(self, classification_id: str, result: Dict[str, Any]):
-        """Cache classification result"""
+    async def _cache_classification_result(self, classification_id: str, result: Dict[str, Any], cache_content: Optional[Dict[str, Any]] = None):
+        """Cache classification result using AIClassificationCache if available."""
         if not self.cache:
             return
-        
         try:
+            # Prefer AIClassificationCache API
+            if hasattr(self.cache, 'store_classification'):
+                ttl_seconds = self.config.get('cache_ttl', 7200)
+                ttl_hours = max(1, int(ttl_seconds / 3600))
+                await self.cache.store_classification(
+                    cache_content or classification_id,
+                    result,
+                    classification_type='document_classification',
+                    ttl_hours=ttl_hours,
+                    confidence_score=float(result.get('confidence', 0.0)) if isinstance(result, dict) else 0.0,
+                    model_version=str(self.config.get('ai_model', 'gpt-4o-mini'))
+                )
+                return
+            # Fallback to simple set(key, value, ttl)
             cache_key = f"document_classification:{classification_id}"
-            await self.cache.set(cache_key, result, self.config['cache_ttl'])
+            set_fn = getattr(self.cache, 'set', None)
+            if set_fn:
+                await set_fn(cache_key, result, self.config.get('cache_ttl', 7200))
         except Exception as e:
             logger.warning(f"Cache storage failed: {e}")
     
