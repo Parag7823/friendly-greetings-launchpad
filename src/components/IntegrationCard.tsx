@@ -14,9 +14,12 @@ type IntegrationCardProps = {
   variant?: 'grid' | 'list';
   className?: string;
   actionAriaLabel?: string;
+  secondaryActionLabel?: string;
+  onSecondaryAction?: () => void;
+  secondaryAriaLabel?: string;
 };
 
-export const IntegrationCard = ({ icon, title, description, actionLabel, onAction, statusLabel, disabled, variant = 'grid', className = '', actionAriaLabel }: IntegrationCardProps) => {
+export const IntegrationCard = ({ icon, title, description, actionLabel, onAction, statusLabel, disabled, variant = 'grid', className = '', actionAriaLabel, secondaryActionLabel, onSecondaryAction, secondaryAriaLabel }: IntegrationCardProps) => {
   if (variant === 'list') {
     return (
       <Card
@@ -31,9 +34,14 @@ export const IntegrationCard = ({ icon, title, description, actionLabel, onActio
             <div className="text-base font-semibold text-foreground truncate">{title}</div>
             <div className="text-sm text-muted-foreground leading-snug mt-0.5 line-clamp-2">{description}</div>
           </div>
-          <div className="sm:ml-auto">
+          <div className="sm:ml-auto flex items-center gap-2">
+            {secondaryActionLabel && onSecondaryAction && (
+              <Button variant="secondary" onClick={onSecondaryAction} aria-label={secondaryAriaLabel || secondaryActionLabel}>
+                {secondaryActionLabel}
+              </Button>
+            )}
             {actionLabel && !disabled ? (
-              <Button onClick={onAction} className="min-w-32" aria-label={actionAriaLabel || actionLabel}>
+              <Button onClick={onAction} className="min-w-28" aria-label={actionAriaLabel || actionLabel}>
                 {actionLabel}
               </Button>
             ) : statusLabel ? (
@@ -61,7 +69,12 @@ export const IntegrationCard = ({ icon, title, description, actionLabel, onActio
       <CardContent>
         {/* reserved for future details */}
       </CardContent>
-      <CardFooter className="pt-0">
+      <CardFooter className="pt-0 flex items-center gap-2">
+        {secondaryActionLabel && onSecondaryAction && (
+          <Button variant="secondary" onClick={onSecondaryAction} aria-label={secondaryAriaLabel || secondaryActionLabel}>
+            {secondaryActionLabel}
+          </Button>
+        )}
         {actionLabel && !disabled ? (
           <Button onClick={onAction} className="min-w-36" aria-label={actionAriaLabel || actionLabel}>
             {actionLabel}

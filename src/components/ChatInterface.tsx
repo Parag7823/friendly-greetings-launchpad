@@ -6,6 +6,8 @@ import { useAuth } from './AuthProvider';
 import IntegrationCard from './IntegrationCard';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/components/ui/use-toast';
+import ConnectorConfigModal from './ConnectorConfigModal';
+import { useSearchParams } from 'react-router-dom';
 
 interface ChatInterfaceProps {
   currentView?: string;
@@ -15,6 +17,7 @@ interface ChatInterfaceProps {
 export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfaceProps) => {
   const { user } = useAuth();
   const { toast } = useToast();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [message, setMessage] = useState('');
   const [messages, setMessages] = useState<Array<{ id: string; text: string; isUser: boolean; timestamp: Date }>>([]);
   const [currentChatId, setCurrentChatId] = useState<string | null>(null);
@@ -25,6 +28,8 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
   const [connections, setConnections] = useState<any[]>([]);
   const [loadingConnections, setLoadingConnections] = useState(false);
   const [syncing, setSyncing] = useState<string | null>(null);
+  const [configOpen, setConfigOpen] = useState(false);
+  const [configConnId, setConfigConnId] = useState<string | null>(null);
 
   // Load connector providers when opening marketplace
   useEffect(() => {
@@ -125,6 +130,35 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
     const id = window.setInterval(fetchConnections, 15000);
     return () => window.clearInterval(id);
   }, [currentView, user?.id]);
+
+  // Open modal from query param for persistence on refresh
+  useEffect(() => {
+    if (currentView !== 'marketplace') return;
+    const q = searchParams.get('connection');
+    if (q) {
+      setConfigConnId(q);
+      setConfigOpen(true);
+    }
+  }, [currentView, searchParams]);
+
+  const openConfig = (connectionId: string) => {
+    setConfigConnId(connectionId);
+    setConfigOpen(true);
+    const next = new URLSearchParams(searchParams);
+    next.set('connection', connectionId);
+    setSearchParams(next, { replace: true });
+  };
+
+  const closeConfig = (open: boolean) => {
+    setConfigOpen(open);
+    if (!open) {
+      const next = new URLSearchParams(searchParams);
+      next.delete('connection');
+      setSearchParams(next, { replace: true });
+      // Refresh connections to reflect any changes after closing
+      fetchConnections();
+    }
+  };
 
   const handleSyncNow = async (integrationId: string | null | undefined, connectionId: string) => {
     if (!integrationId) return;
@@ -293,7 +327,7 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
         return (
           <div className="h-full overflow-y-auto">
             <div className="sticky top-0 z-10 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 border-b">
-              <div className="max-w-4xl mx-auto px-6 py-4">
+              <div className="max-w-5xl mx-auto px-6 py-4">
                 <h1 className="text-2xl font-semibold text-primary tracking-tight">
                   Autonomous, zero-effort ingestion from anywhere.
                 </h1>
@@ -301,7 +335,7 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
               </div>
             </div>
 
-            <div className="max-w-4xl mx-auto p-6 space-y-8">
+            <div className="max-w-5xl mx-auto p-6 space-y-8">
               <div className="finley-card rounded-md border border-border bg-card text-card-foreground p-3 text-xs text-muted-foreground">
                 Click Connect. A secure window opens to authorize the provider. After completing authorization, sync starts automatically (handled by the backend webhook).
               </div>
@@ -339,6 +373,9 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
                           actionLabel={syncing === c.connection_id ? 'Syncing…' : 'Sync Now'}
                           actionAriaLabel={`Sync ${meta.name} Now`}
                           onAction={() => handleSyncNow(integ, c.connection_id)}
+                          secondaryActionLabel="Configure"
+                          secondaryAriaLabel={`Configure ${meta.name}`}
+                          onSecondaryAction={() => openConfig(c.connection_id)}
                           disabled={!!(syncing === c.connection_id)}
                         />
                       );

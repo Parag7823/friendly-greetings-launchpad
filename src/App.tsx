@@ -8,6 +8,7 @@ import Index from "./pages/Index";
 import IntegrationTest from "./pages/IntegrationTest";
 import NotFound from "./pages/NotFound";
 import Integrations from "./pages/Integrations";
+import SyncHistory from "./pages/SyncHistory";
 
 const queryClient = new QueryClient();
 
@@ -22,6 +23,7 @@ const App = () => (
             <Route path="/" element={<Index />} />
             <Route path="/chat" element={<Index />} />
             <Route path="/connectors" element={<Index />} />
+            <Route path="/connectors/:connectionId/history" element={<SyncHistory />} />
             <Route path="/upload" element={<Index />} />
             <Route path="/integrations" element={<Integrations />} />
             <Route path="/test" element={<IntegrationTest />} />

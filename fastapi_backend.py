@@ -7368,6 +7368,66 @@ async def handle_duplicate_decision(request: DuplicateDecisionRequest):
         logger.error(f"Error handling duplicate decision: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/api/connectors/history")
+async def connectors_history(connection_id: str, user_id: str, page: int = 1, page_size: int = 20, session_token: Optional[str] = None):
+    """Paginated sync_runs for a connection. Returns {runs, page, page_size, has_more}."""
+    _require_security('connectors-history', user_id, session_token)
+    try:
+        if page < 1:
+            page = 1
+        if page_size < 1:
+            page_size = 20
+        page_size = min(page_size, 100)
+        # Resolve user_connection id
+        uc_res = supabase.table('user_connections').select('id').eq('nango_connection_id', connection_id).limit(1).execute()
+        if not uc_res.data:
+            return {"runs": [], "page": page, "page_size": page_size, "has_more": False}
+        uc_id = uc_res.data[0]['id']
+        offset = (page - 1) * page_size
+        # Fetch page_size + 1 to compute has_more
+        runs_res = (
+            supabase
+            .table('sync_runs')
+            .select('id, type, status, started_at, finished_at, stats, error')
+            .eq('user_connection_id', uc_id)
+            .order('started_at', desc=True)
+            .range(offset, offset + page_size - 1)  # inclusive range
+            .execute()
+        )
+        # Supabase range is inclusive; to compute has_more, query next item
+        next_res = (
+            supabase
+            .table('sync_runs')
+            .select('id')
+            .eq('user_connection_id', uc_id)
+            .order('started_at', desc=True)
+            .range(offset + page_size, offset + page_size)
+            .execute()
+        )
+        runs = runs_res.data or []
+        has_more = bool(next_res.data)
+        return {"runs": runs, "page": page, "page_size": page_size, "has_more": has_more}
+    except Exception as e:
+        logger.error(f"Connectors history failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post('/api/connectors/frequency')
+async def update_sync_frequency(request: Request):
+    """Update sync frequency in minutes for a connection."""
+    try:
+        payload = await request.json()
+        user_id = (payload or {}).get('user_id')
+        session_token = (payload or {}).get('session_token')
+        connection_id = (payload or {}).get('connection_id')
+        minutes = (payload or {}).get('minutes', 60)
+        _require_security('connectors-frequency', user_id, session_token)
+        minutes = max(0, int(minutes))
+        supabase.table('user_connections').update({'sync_frequency_minutes': minutes}).eq('nango_connection_id', connection_id).execute()
+        return {"status": "ok", "minutes": minutes}
+    except Exception as e:
+        logger.error(f"Update frequency failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 # ============================================================================
 # VERSION RECOMMENDATION ENDPOINTS
 # ============================================================================
@@ -8336,6 +8396,12 @@ class ConnectorSyncRequest(BaseModel):
 
 class UserConnectionsRequest(BaseModel):
     user_id: str
+    session_token: Optional[str] = None
+
+class UpdateFrequencyRequest(BaseModel):
+    user_id: str
+    connection_id: str  # nango connection id
+    minutes: int
     session_token: Optional[str] = None
 
 def _require_security(endpoint: str, user_id: str, session_token: Optional[str]):
@@ -9612,13 +9678,21 @@ async def connectors_status(connection_id: str, user_id: str, session_token: Opt
     _require_security('connectors-status', user_id, session_token)
     try:
         # Fetch user_connection and recent runs
-        uc = supabase.table('user_connections').select('id, status, last_synced_at, created_at').eq('nango_connection_id', connection_id).limit(1).execute()
-        uc_id = uc.data[0]['id'] if uc.data else None
+        uc_res = supabase.table('user_connections').select('id, user_id, nango_connection_id, connector_id, status, last_synced_at, created_at, provider_account_id, metadata, sync_frequency_minutes').eq('nango_connection_id', connection_id).limit(1).execute()
+        uc = uc_res.data[0] if uc_res.data else None
+        integration_id = None
+        if uc and uc.get('connector_id'):
+            try:
+                conn_res = supabase.table('connectors').select('integration_id').eq('id', uc['connector_id']).limit(1).execute()
+                integration_id = conn_res.data[0]['integration_id'] if conn_res.data else None
+            except Exception:
+                integration_id = None
         runs = []
-        if uc_id:
-            runs_res = supabase.table('sync_runs').select('id, type, status, started_at, finished_at, stats, error').eq('user_connection_id', uc_id).order('started_at', desc=True).limit(10).execute()
+        if uc:
+            runs_res = supabase.table('sync_runs').select('id, type, status, started_at, finished_at, stats, error').eq('user_connection_id', uc['id']).order('started_at', desc=True).limit(50).execute()
             runs = runs_res.data or []
-        return {'connection': uc.data[0] if uc.data else None, 'recent_runs': runs}
+        payload = {'connection': {**uc, 'integration_id': integration_id} if uc else None, 'recent_runs': runs}
+        return payload
     except Exception as e:
         logger.error(f"Connectors status failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
