@@ -11,12 +11,44 @@ type IntegrationCardProps = {
   onAction?: () => void;
   statusLabel?: string;
   disabled?: boolean;
+  variant?: 'grid' | 'list';
+  className?: string;
+  actionAriaLabel?: string;
 };
 
-export const IntegrationCard = ({ icon, title, description, actionLabel, onAction, statusLabel, disabled }: IntegrationCardProps) => {
+export const IntegrationCard = ({ icon, title, description, actionLabel, onAction, statusLabel, disabled, variant = 'grid', className = '', actionAriaLabel }: IntegrationCardProps) => {
+  if (variant === 'list') {
+    return (
+      <Card
+        className={`w-full rounded-2xl shadow-sm ${disabled ? 'opacity-70 cursor-not-allowed' : ''} ${className}`}
+        aria-disabled={disabled}
+      >
+        <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 p-4">
+          <div className="shrink-0 w-10 h-10 rounded-full bg-muted flex items-center justify-center overflow-hidden">
+            {icon}
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="text-base font-semibold text-foreground truncate">{title}</div>
+            <div className="text-sm text-muted-foreground leading-snug mt-0.5 line-clamp-2">{description}</div>
+          </div>
+          <div className="sm:ml-auto">
+            {actionLabel && !disabled ? (
+              <Button onClick={onAction} className="min-w-32" aria-label={actionAriaLabel || actionLabel}>
+                {actionLabel}
+              </Button>
+            ) : statusLabel ? (
+              <Badge variant="secondary">{statusLabel}</Badge>
+            ) : null}
+          </div>
+        </div>
+      </Card>
+    );
+  }
+
+  // default grid card for backward compatibility
   return (
     <Card
-      className={`rounded-lg shadow-sm ${disabled ? 'opacity-70 cursor-not-allowed' : 'transition-transform duration-200 hover:shadow-md hover:scale-[1.01]'} `}
+      className={`rounded-lg shadow-sm ${disabled ? 'opacity-70 cursor-not-allowed' : 'transition-transform duration-200 hover:shadow-md hover:scale-[1.01]'} ${className}`}
       aria-disabled={disabled}
     >
       <CardHeader>
@@ -31,7 +63,7 @@ export const IntegrationCard = ({ icon, title, description, actionLabel, onActio
       </CardContent>
       <CardFooter className="pt-0">
         {actionLabel && !disabled ? (
-          <Button onClick={onAction} className="min-w-36">
+          <Button onClick={onAction} className="min-w-36" aria-label={actionAriaLabel || actionLabel}>
             {actionLabel}
           </Button>
         ) : statusLabel ? (

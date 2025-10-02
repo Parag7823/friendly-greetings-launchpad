@@ -5,6 +5,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/
 import { useAuth } from './AuthProvider';
 import IntegrationCard from './IntegrationCard';
 import { supabase } from '@/integrations/supabase/client';
+import { useToast } from '@/components/ui/use-toast';
 
 interface ChatInterfaceProps {
   currentView?: string;
@@ -13,6 +14,7 @@ interface ChatInterfaceProps {
 
 export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfaceProps) => {
   const { user } = useAuth();
+  const { toast } = useToast();
   const [message, setMessage] = useState('');
   const [messages, setMessages] = useState<Array<{ id: string; text: string; isUser: boolean; timestamp: Date }>>([]);
   const [currentChatId, setCurrentChatId] = useState<string | null>(null);
@@ -71,11 +73,11 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
       if (url) {
         window.open(url as string, '_blank', 'noopener,noreferrer');
       } else {
-        alert('Connect session created but no URL was provided. Please check backend logs.');
+        toast({ title: 'Connection created', description: 'Session created but no URL returned. Check backend logs.', variant: 'destructive' });
       }
     } catch (e) {
       console.error('Connect failed', e);
-      alert('Unable to start the connector authorization flow.');
+      toast({ title: 'Connect failed', description: 'Unable to start the connector authorization flow.', variant: 'destructive' });
     } finally {
       setConnecting(null);
     }
@@ -147,10 +149,10 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
       }
       // Refresh connections to update last_synced_at/status
       await fetchConnections();
-      alert('Sync started. It may take a moment to appear in Recent Runs.');
+      toast({ title: 'Sync started', description: 'It may take a moment to appear in Recent Runs.' });
     } catch (e) {
       console.error('Sync failed', e);
-      alert('Unable to start sync. Please try again.');
+      toast({ title: 'Sync failed', description: 'Unable to start sync. Please try again.', variant: 'destructive' });
     } finally {
       setSyncing(null);
     }
@@ -290,14 +292,16 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
       case 'marketplace':
         return (
           <div className="h-full overflow-y-auto">
-            <div className="px-6 pt-6">
-              <h1 className="text-2xl font-semibold text-primary tracking-tight">
-                Autonomous, zero-effort ingestion from anywhere.
-              </h1>
-              <p className="text-sm text-muted-foreground mt-1">Connect cloud storage, email, and accounting platforms in seconds.</p>
+            <div className="sticky top-0 z-10 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 border-b">
+              <div className="max-w-4xl mx-auto px-6 py-4">
+                <h1 className="text-2xl font-semibold text-primary tracking-tight">
+                  Autonomous, zero-effort ingestion from anywhere.
+                </h1>
+                <p className="text-sm text-muted-foreground mt-1">Connect cloud storage, email, and accounting platforms in seconds.</p>
+              </div>
             </div>
 
-            <div className="p-6 space-y-8">
+            <div className="max-w-4xl mx-auto p-6 space-y-8">
               <div className="finley-card rounded-md border border-border bg-card text-card-foreground p-3 text-xs text-muted-foreground">
                 Click Connect. A secure window opens to authorize the provider. After completing authorization, sync starts automatically (handled by the backend webhook).
               </div>
@@ -311,7 +315,7 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
                   <div className="text-xs text-muted-foreground">No connections yet — connect a provider below to get started.</div>
                 )}
                 {connections.length > 0 && (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                  <div className="space-y-3">
                     {connections.map((c) => {
                       const integ = (c.integration_id || '').toString();
                       const map: Record<string, { slug: string; color: string; name: string }> = {
@@ -328,10 +332,12 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
                       return (
                         <IntegrationCard
                           key={c.connection_id}
+                          variant="list"
                           icon={brandIcon(meta.slug, meta.color, meta.name)}
                           title={meta.name}
                           description={`Status: ${c.status || 'unknown'} • Last synced: ${last}`}
                           actionLabel={syncing === c.connection_id ? 'Syncing…' : 'Sync Now'}
+                          actionAriaLabel={`Sync ${meta.name} Now`}
                           onAction={() => handleSyncNow(integ, c.connection_id)}
                           disabled={!!(syncing === c.connection_id)}
                         />
@@ -343,36 +349,44 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
               {/* Cloud & Storage */}
               <section>
                 <h2 className="text-sm font-medium text-muted-foreground mb-3">Cloud & Storage</h2>
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                <div className="space-y-3">
                   <IntegrationCard
+                    variant="list"
                     icon={brandIcon('googledrive', '1A73E8', 'Google Drive')}
                     title="Google Drive"
                     description="Ingest spreadsheets and documents directly from your Drive."
                     actionLabel={connecting === 'google-drive' ? 'Connecting…' : (loadingProviders ? 'Loading…' : 'Connect')}
+                    actionAriaLabel="Connect to Google Drive"
                     onAction={() => handleConnect('google-drive')}
                     disabled={loadingProviders || !isAvailable('google-drive') || connecting === 'google-drive'}
                   />
                   <IntegrationCard
+                    variant="list"
                     icon={brandIcon('dropbox', '0061FF', 'Dropbox')}
                     title="Dropbox"
                     description="Sync shared folders and financial files at scale."
                     actionLabel={connecting === 'dropbox' ? 'Connecting…' : (loadingProviders ? 'Loading…' : 'Connect')}
+                    actionAriaLabel="Connect to Dropbox"
                     onAction={() => handleConnect('dropbox')}
                     disabled={loadingProviders || !isAvailable('dropbox') || connecting === 'dropbox'}
                   />
                   <IntegrationCard
+                    variant="list"
                     icon={brandIcon('gmail', 'EA4335', 'Gmail')}
                     title="Gmail"
                     description="Autofetch statements and invoices from email attachments."
                     actionLabel={connecting === 'google-mail' ? 'Connecting…' : (loadingProviders ? 'Loading…' : 'Connect')}
+                    actionAriaLabel="Connect to Gmail"
                     onAction={() => handleConnect('google-mail')}
                     disabled={loadingProviders || !isAvailable('google-mail') || connecting === 'google-mail'}
                   />
                   <IntegrationCard
+                    variant="list"
                     icon={brandIcon('zoho', 'C8202F', 'Zoho Mail')}
                     title="Zoho Mail"
                     description="Pull financial documents from Zoho Mail attachments."
                     actionLabel={connecting === 'zoho-mail' ? 'Connecting…' : (loadingProviders ? 'Loading…' : 'Connect')}
+                    actionAriaLabel="Connect to Zoho Mail"
                     onAction={() => handleConnect('zoho-mail')}
                     disabled={loadingProviders || !isAvailable('zoho-mail') || connecting === 'zoho-mail'}
                   />
@@ -382,20 +396,24 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
               {/* Accounting Platforms */}
               <section>
                 <h2 className="text-sm font-medium text-muted-foreground mb-3">Accounting Platforms</h2>
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                <div className="space-y-3">
                   <IntegrationCard
+                    variant="list"
                     icon={brandIcon('intuitquickbooks', '2CA01C', 'QuickBooks')}
                     title="QuickBooks (Sandbox)"
                     description="Historic and incremental sync of accounting data."
                     actionLabel={connecting === 'quickbooks-sandbox' ? 'Connecting…' : (loadingProviders ? 'Loading…' : 'Connect')}
+                    actionAriaLabel="Connect to QuickBooks Sandbox"
                     onAction={() => handleConnect('quickbooks-sandbox')}
                     disabled={loadingProviders || !isAvailable('quickbooks-sandbox') || connecting === 'quickbooks-sandbox'}
                   />
                   <IntegrationCard
+                    variant="list"
                     icon={brandIcon('xero', '13B5EA', 'Xero')}
                     title="Xero"
                     description="Sync contacts, invoices, and payments securely."
                     actionLabel={connecting === 'xero' ? 'Connecting…' : (loadingProviders ? 'Loading…' : 'Connect')}
+                    actionAriaLabel="Connect to Xero"
                     onAction={() => handleConnect('xero')}
                     disabled={loadingProviders || !isAvailable('xero') || connecting === 'xero'}
                   />
@@ -405,8 +423,9 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
               {/* Future Categories */}
               <section>
                 <h2 className="text-sm font-medium text-muted-foreground mb-3">Coming Next</h2>
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                <div className="space-y-3">
                   <IntegrationCard
+                    variant="list"
                     icon={<Database className="w-8 h-8 text-muted-foreground" aria-hidden />}
                     title="Banking APIs"
                     description="Direct bank feeds and transaction sync."
