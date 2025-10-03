@@ -1386,6 +1386,100 @@ async def _quickbooks_sync_run(nango: NangoClient, req: ConnectorSyncRequest) ->
 
         limit = max(1, min(req.max_results or 100, 500))
 
+        async def _normalize_new_items_qbo():
+            try:
+                res = supabase.table('external_items').select(
+                    'id, provider_id, kind, metadata, source_ts'
+                ).eq('user_connection_id', user_connection_id).eq('status', 'fetched').limit(1000).execute()
+                items = res.data or []
+                # Filter by correlation id when present
+                if req.correlation_id:
+                    filtered = []
+                    for it in items:
+                        meta = it.get('metadata') or {}
+                        if isinstance(meta, str):
+                            try:
+                                meta = json.loads(meta)
+                            except Exception:
+                                meta = {}
+                        if meta.get('correlation_id') == req.correlation_id:
+                            it['metadata'] = meta
+                            filtered.append(it)
+                    items = filtered
+                if not items:
+                    return {'normalized_events': 0}
+                events_batch = []
+                row_idx = 0
+                for it in items:
+                    meta = it.get('metadata') or {}
+                    if isinstance(meta, str):
+                        try:
+                            meta = json.loads(meta)
+                        except Exception:
+                            meta = {}
+                    txn_type = meta.get('TxnType') or 'Txn'
+                    kind = 'txn'
+                    lt = str(txn_type).lower()
+                    if lt == 'invoice':
+                        kind = 'invoice'
+                    elif lt == 'bill':
+                        kind = 'bill'
+                    elif lt == 'payment':
+                        kind = 'payment'
+                    payload = {
+                        'txn_id': it.get('provider_id'),
+                        'txn_type': txn_type,
+                        'doc_number': meta.get('DocNumber'),
+                        'txn_date': meta.get('TxnDate'),
+                        'total_amount': meta.get('TotalAmt'),
+                    }
+                    event = {
+                        'user_id': user_id,
+                        'file_id': None,
+                        'job_id': None,
+                        'provider': 'quickbooks',
+                        'kind': kind,
+                        'source_platform': 'QuickBooks',
+                        'payload': payload,
+                        'row_index': row_idx,
+                        'sheet_name': None,
+                        'source_filename': f"quickbooks:{it.get('provider_id')}",
+                        'uploader': user_id,
+                        'ingest_ts': (it.get('source_ts') or datetime.utcnow().isoformat()),
+                        'status': 'processed',
+                        'confidence_score': 0.95,
+                        'classification_metadata': {
+                            'category': 'financial_data',
+                            'subcategory': kind,
+                            'provider_id': it.get('provider_id')
+                        },
+                        'entities': {},
+                        'relationships': {}
+                    }
+                    events_batch.append(event)
+                    row_idx += 1
+                transaction_manager = get_transaction_manager()
+                async with transaction_manager.transaction(
+                    user_id=user_id,
+                    operation_type="accounting_normalization"
+                ) as tx:
+                    if events_batch:
+                        await tx.insert_batch('raw_events', events_batch)
+                    # Mark external_items as normalized with timestamp
+                    for it in items:
+                        meta = it.get('metadata') or {}
+                        if isinstance(meta, str):
+                            try:
+                                meta = json.loads(meta)
+                            except Exception:
+                                meta = {}
+                        meta['normalized_at'] = datetime.utcnow().isoformat()
+                        await tx.update('external_items', {'status': 'normalized', 'metadata': meta}, {'id': it['id']})
+                return {'normalized_events': len(events_batch)}
+            except Exception as e:
+                logger.error(f"QuickBooks normalization failed: {e}")
+                return {'normalized_events': 0}
+
         async def qbo_query(sql: str) -> Dict[str, Any]:
             params = {"query": sql}
             page = await nango.proxy_get('quickbooks', f'v3/company/{realm_id}/query', params=params, connection_id=connection_id, provider_config_key=provider_key)
@@ -1537,6 +1631,13 @@ async def _quickbooks_sync_run(nango: NangoClient, req: ConnectorSyncRequest) ->
                                 stats['skipped'] += 1
             except Exception as batch_err:
                 logger.error(f"QuickBooks payment batch transaction failed: {batch_err}")
+        
+        # Normalize accounting items into raw_events
+        try:
+            norm = await _normalize_new_items_qbo()
+            stats['normalized_events'] = norm.get('normalized_events', 0)
+        except Exception as e:
+            logger.warning(f"QuickBooks normalization skipped due to error: {e}")
 
         # Complete QuickBooks sync in transaction
         try:
@@ -1676,6 +1777,103 @@ async def _xero_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> Dict[
 
         headers = {"xero-tenant-id": tenant_id}
         limit = max(1, min(req.max_results or 100, 500))
+
+        async def _normalize_new_items_xero():
+            try:
+                res = supabase.table('external_items').select(
+                    'id, provider_id, kind, metadata, source_ts'
+                ).eq('user_connection_id', user_connection_id).eq('status', 'fetched').limit(1000).execute()
+                items = res.data or []
+                # Filter by correlation id when present
+                if req.correlation_id:
+                    filtered = []
+                    for it in items:
+                        meta = it.get('metadata') or {}
+                        if isinstance(meta, str):
+                            try:
+                                meta = json.loads(meta)
+                            except Exception:
+                                meta = {}
+                        if meta.get('correlation_id') == req.correlation_id:
+                            it['metadata'] = meta
+                            filtered.append(it)
+                    items = filtered
+                if not items:
+                    return {'normalized_events': 0}
+                events_batch = []
+                row_idx = 0
+                for it in items:
+                    meta = it.get('metadata') or {}
+                    if isinstance(meta, str):
+                        try:
+                            meta = json.loads(meta)
+                        except Exception:
+                            meta = {}
+                    txn_type = meta.get('TxnType') or meta.get('type') or 'Txn'
+                    lt = str(txn_type).lower()
+                    if lt == 'invoice':
+                        kind = 'invoice'
+                    elif lt == 'payment':
+                        kind = 'payment'
+                    elif lt == 'contact':
+                        kind = 'contact'
+                    else:
+                        kind = 'txn'
+                    payload = {
+                        'txn_id': it.get('provider_id'),
+                        'txn_type': txn_type,
+                        'doc_number': meta.get('InvoiceNumber') or meta.get('DocNumber'),
+                        'txn_date': meta.get('Date') or meta.get('UpdatedDateUTC'),
+                        'total_amount': meta.get('Total') or meta.get('Amount'),
+                        'name': meta.get('Name'),
+                        'email': meta.get('EmailAddress')
+                    }
+                    event = {
+                        'user_id': user_id,
+                        'file_id': None,
+                        'job_id': None,
+                        'provider': 'xero',
+                        'kind': kind,
+                        'source_platform': 'Xero',
+                        'payload': payload,
+                        'row_index': row_idx,
+                        'sheet_name': None,
+                        'source_filename': f"xero:{it.get('provider_id')}",
+                        'uploader': user_id,
+                        'ingest_ts': (it.get('source_ts') or datetime.utcnow().isoformat()),
+                        'status': 'processed',
+                        'confidence_score': 0.95,
+                        'classification_metadata': {
+                            'category': 'financial_data',
+                            'subcategory': kind,
+                            'provider_id': it.get('provider_id')
+                        },
+                        'entities': {},
+                        'relationships': {}
+                    }
+                    events_batch.append(event)
+                    row_idx += 1
+                transaction_manager = get_transaction_manager()
+                async with transaction_manager.transaction(
+                    user_id=user_id,
+                    operation_type="accounting_normalization"
+                ) as tx:
+                    if events_batch:
+                        await tx.insert_batch('raw_events', events_batch)
+                    # Mark external_items as normalized with timestamp
+                    for it in items:
+                        meta = it.get('metadata') or {}
+                        if isinstance(meta, str):
+                            try:
+                                meta = json.loads(meta)
+                            except Exception:
+                                meta = {}
+                        meta['normalized_at'] = datetime.utcnow().isoformat()
+                        await tx.update('external_items', {'status': 'normalized', 'metadata': meta}, {'id': it['id']})
+                return {'normalized_events': len(events_batch)}
+            except Exception as e:
+                logger.error(f"Xero normalization failed: {e}")
+                return {'normalized_events': 0}
 
         async def xero_get(path: str, params: Dict[str, Any] | None = None) -> Dict[str, Any]:
             page = await nango.proxy_get('xero', path, params=params or {}, connection_id=connection_id, provider_config_key=provider_key, headers=headers)
@@ -1859,6 +2057,13 @@ async def _xero_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> Dict[
             if fetched_p >= limit:
                 break
             page_p += 1
+
+        # Normalize accounting items into raw_events
+        try:
+            norm = await _normalize_new_items_xero()
+            stats['normalized_events'] = norm.get('normalized_events', 0)
+        except Exception as e:
+            logger.warning(f"Xero normalization skipped due to error: {e}")
 
         # Complete Xero sync in transaction
         try:
@@ -9671,6 +9876,24 @@ async def update_connection_metadata(req: ConnectorMetadataUpdate):
         return {'status': 'ok', 'metadata': new_meta}
     except Exception as e:
         logger.error(f"Metadata update failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+class ConnectorFrequencyUpdate(BaseModel):
+    user_id: str
+    connection_id: str
+    minutes: int
+    session_token: Optional[str] = None
+
+@app.post('/api/connectors/frequency')
+async def update_connection_frequency(req: ConnectorFrequencyUpdate):
+    """Update sync frequency in minutes for a user connection."""
+    _require_security('connectors-frequency', req.user_id, req.session_token)
+    try:
+        minutes = max(0, min(int(req.minutes), 7 * 24 * 60))  # clamp to [0, 10080]
+        supabase.table('user_connections').update({'sync_frequency_minutes': minutes}).eq('nango_connection_id', req.connection_id).execute()
+        return {'status': 'ok', 'sync_frequency_minutes': minutes}
+    except Exception as e:
+        logger.error(f"Frequency update failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/connectors/status")
