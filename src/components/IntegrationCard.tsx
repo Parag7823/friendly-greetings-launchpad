@@ -2,7 +2,6 @@ import { ReactNode } from "react";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import GradientCircleButton from "@/components/ui/GradientCircleButton";
 
 type IntegrationCardProps = {
   icon: ReactNode;
@@ -18,11 +17,9 @@ type IntegrationCardProps = {
   secondaryActionLabel?: string;
   onSecondaryAction?: () => void;
   secondaryAriaLabel?: string;
-  connected?: boolean; // dynamic connection state from backend
-  connectedAriaLabel?: string;
 };
 
-export const IntegrationCard = ({ icon, title, description, actionLabel, onAction, statusLabel, disabled, variant = 'grid', className = '', actionAriaLabel, secondaryActionLabel, onSecondaryAction, secondaryAriaLabel, connected = false, connectedAriaLabel }: IntegrationCardProps) => {
+export const IntegrationCard = ({ icon, title, description, actionLabel, onAction, statusLabel, disabled, variant = 'grid', className = '', actionAriaLabel, secondaryActionLabel, onSecondaryAction, secondaryAriaLabel }: IntegrationCardProps) => {
   if (variant === 'list') {
     return (
       <Card
@@ -37,34 +34,19 @@ export const IntegrationCard = ({ icon, title, description, actionLabel, onActio
             <div className="text-base font-semibold text-foreground truncate">{title}</div>
             <div className="text-sm text-muted-foreground leading-snug mt-0.5 line-clamp-2">{description}</div>
           </div>
-          <div className="sm:ml-auto flex items-center gap-3">
-            {connected ? (
-              <>
-                <GradientCircleButton
-                  state="connected"
-                  ariaLabel={connectedAriaLabel || `Connected — configure ${title}`}
-                  onClick={onSecondaryAction}
-                  className="hover-lift"
-                />
-                {onSecondaryAction && (
-                  <Button variant="secondary" onClick={onSecondaryAction} aria-label={secondaryAriaLabel || `Configure ${title}`}>
-                    Configure
-                  </Button>
-                )}
-              </>
-            ) : (
-              <>
-                <GradientCircleButton
-                  state="connect"
-                  ariaLabel={actionAriaLabel || `Connect to ${title}`}
-                  onClick={onAction}
-                  className="hover-lift"
-                />
-                {statusLabel ? (
-                  <Badge variant="secondary">{statusLabel}</Badge>
-                ) : null}
-              </>
+          <div className="sm:ml-auto flex items-center gap-2">
+            {secondaryActionLabel && onSecondaryAction && (
+              <Button variant="secondary" onClick={onSecondaryAction} aria-label={secondaryAriaLabel || secondaryActionLabel}>
+                {secondaryActionLabel}
+              </Button>
             )}
+            {actionLabel && !disabled ? (
+              <Button onClick={onAction} className="min-w-28" aria-label={actionAriaLabel || actionLabel}>
+                {actionLabel}
+              </Button>
+            ) : statusLabel ? (
+              <Badge variant="secondary">{statusLabel}</Badge>
+            ) : null}
           </div>
         </div>
       </Card>

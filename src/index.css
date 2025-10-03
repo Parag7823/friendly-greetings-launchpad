@@ -166,6 +166,7 @@
       transform: scale(1);
     }
   }
+  
   /* Hover effects */
   .hover-lift {
     @apply transition-transform duration-200 ease-in-out hover:scale-105;
@@ -174,29 +175,8 @@
   .hover-glow {
     @apply transition-shadow duration-200 ease-in-out;
   }
-
+  
   .hover-glow:hover {
     box-shadow: 0 0 20px rgba(160, 160, 160, 0.3);
-  }
-
-  /* Animated gradient ring for circular connector buttons */
-  @keyframes spinSlow {
-    to {
-      transform: rotate(360deg);
-    }
-  }
-
-  .animate-spin-slow {
-    animation: spinSlow 6s linear infinite;
-  }
-
-  /* Electric blue glow utility */
-  .glow-electric {
-    box-shadow: 0 0 10px rgba(0, 255, 255, 0.25), 0 0 24px rgba(0, 255, 255, 0.12);
-  }
-
-  .glow-electric:hover,
-  .glow-electric:focus-visible {
-    box-shadow: 0 0 14px rgba(0, 255, 255, 0.35), 0 0 30px rgba(0, 255, 255, 0.2);
   }
 }
