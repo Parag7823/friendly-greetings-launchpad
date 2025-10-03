@@ -91,6 +91,10 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
   // Helpers for marketplace rendering
   const providerSet = new Set((providers || []).map((p: any) => p.provider));
   const isAvailable = (slug: string) => providerSet.size === 0 || providerSet.has(slug);
+  const isConnected = (integrationId: string) =>
+    (connections || []).some((c) => c.integration_id === integrationId && c.status === 'active');
+  const getConnectionId = (integrationId: string) =>
+    (connections || []).find((c) => c.integration_id === integrationId)?.connection_id as string | undefined;
   const brandIcon = (slug: string, colorHex: string, alt: string) => (
     <img
       src={`https://cdn.simpleicons.org/${slug}/${colorHex.replace('#', '')}`}
@@ -339,50 +343,7 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
               <div className="finley-card rounded-md border border-border bg-card text-card-foreground p-3 text-xs text-muted-foreground">
                 Click Connect. A secure window opens to authorize the provider. After completing authorization, sync starts automatically (handled by the backend webhook).
               </div>
-              {/* My Connections */}
-              <section>
-                <h2 className="text-sm font-medium text-muted-foreground mb-3">My Connections</h2>
-                {loadingConnections && (
-                  <div className="text-xs text-muted-foreground">Loading your connections…</div>
-                )}
-                {!loadingConnections && connections.length === 0 && (
-                  <div className="text-xs text-muted-foreground">No connections yet — connect a provider below to get started.</div>
-                )}
-                {connections.length > 0 && (
-                  <div className="space-y-3">
-                    {connections.map((c) => {
-                      const integ = (c.integration_id || '').toString();
-                      const map: Record<string, { slug: string; color: string; name: string }> = {
-                        'google-mail': { slug: 'gmail', color: 'EA4335', name: 'Gmail' },
-                        'zoho-mail': { slug: 'zoho', color: 'C8202F', name: 'Zoho Mail' },
-                        'dropbox': { slug: 'dropbox', color: '0061FF', name: 'Dropbox' },
-                        'google-drive': { slug: 'googledrive', color: '1A73E8', name: 'Google Drive' },
-                        'quickbooks': { slug: 'intuitquickbooks', color: '2CA01C', name: 'QuickBooks' },
-                        'quickbooks-sandbox': { slug: 'intuitquickbooks', color: '2CA01C', name: 'QuickBooks (Sandbox)' },
-                        'xero': { slug: 'xero', color: '13B5EA', name: 'Xero' },
-                      };
-                      const meta = map[integ] || { slug: 'cloud', color: '6B7280', name: integ || 'Connection' };
-                      const last = c.last_synced_at ? new Date(c.last_synced_at).toLocaleString() : 'Never';
-                      return (
-                        <IntegrationCard
-                          key={c.connection_id}
-                          variant="list"
-                          icon={brandIcon(meta.slug, meta.color, meta.name)}
-                          title={meta.name}
-                          description={`Status: ${c.status || 'unknown'} • Last synced: ${last}`}
-                          actionLabel={syncing === c.connection_id ? 'Syncing…' : 'Sync Now'}
-                          actionAriaLabel={`Sync ${meta.name} Now`}
-                          onAction={() => handleSyncNow(integ, c.connection_id)}
-                          secondaryActionLabel="Configure"
-                          secondaryAriaLabel={`Configure ${meta.name}`}
-                          onSecondaryAction={() => openConfig(c.connection_id)}
-                          disabled={!!(syncing === c.connection_id)}
-                        />
-                      );
-                    })}
-                  </div>
-                )}
-              </section>
+              {/* My Connections section removed per requirement: show dynamic state on provider cards instead */}
               {/* Cloud & Storage */}
               <section>
                 <h2 className="text-sm font-medium text-muted-foreground mb-3">Cloud & Storage</h2>
@@ -392,9 +353,14 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
                     icon={brandIcon('googledrive', '1A73E8', 'Google Drive')}
                     title="Google Drive"
                     description="Ingest spreadsheets and documents directly from your Drive."
+                    connected={isConnected('google-drive')}
                     actionLabel={connecting === 'google-drive' ? 'Connecting…' : (loadingProviders ? 'Loading…' : 'Connect')}
-                    actionAriaLabel="Connect to Google Drive"
+                    actionAriaLabel={isConnected('google-drive') ? 'Connected to Google Drive' : 'Connect to Google Drive'}
                     onAction={() => handleConnect('google-drive')}
+                    onSecondaryAction={() => {
+                      const id = getConnectionId('google-drive');
+                      if (id) openConfig(id);
+                    }}
                     disabled={loadingProviders || !isAvailable('google-drive') || connecting === 'google-drive'}
                   />
                   <IntegrationCard
@@ -402,9 +368,14 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
                     icon={brandIcon('dropbox', '0061FF', 'Dropbox')}
                     title="Dropbox"
                     description="Sync shared folders and financial files at scale."
+                    connected={isConnected('dropbox')}
                     actionLabel={connecting === 'dropbox' ? 'Connecting…' : (loadingProviders ? 'Loading…' : 'Connect')}
-                    actionAriaLabel="Connect to Dropbox"
+                    actionAriaLabel={isConnected('dropbox') ? 'Connected to Dropbox' : 'Connect to Dropbox'}
                     onAction={() => handleConnect('dropbox')}
+                    onSecondaryAction={() => {
+                      const id = getConnectionId('dropbox');
+                      if (id) openConfig(id);
+                    }}
                     disabled={loadingProviders || !isAvailable('dropbox') || connecting === 'dropbox'}
                   />
                   <IntegrationCard
@@ -412,9 +383,14 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
                     icon={brandIcon('gmail', 'EA4335', 'Gmail')}
                     title="Gmail"
                     description="Autofetch statements and invoices from email attachments."
+                    connected={isConnected('google-mail')}
                     actionLabel={connecting === 'google-mail' ? 'Connecting…' : (loadingProviders ? 'Loading…' : 'Connect')}
-                    actionAriaLabel="Connect to Gmail"
+                    actionAriaLabel={isConnected('google-mail') ? 'Connected to Gmail' : 'Connect to Gmail'}
                     onAction={() => handleConnect('google-mail')}
+                    onSecondaryAction={() => {
+                      const id = getConnectionId('google-mail');
+                      if (id) openConfig(id);
+                    }}
                     disabled={loadingProviders || !isAvailable('google-mail') || connecting === 'google-mail'}
                   />
                   <IntegrationCard
@@ -422,9 +398,14 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
                     icon={brandIcon('zoho', 'C8202F', 'Zoho Mail')}
                     title="Zoho Mail"
                     description="Pull financial documents from Zoho Mail attachments."
+                    connected={isConnected('zoho-mail')}
                     actionLabel={connecting === 'zoho-mail' ? 'Connecting…' : (loadingProviders ? 'Loading…' : 'Connect')}
-                    actionAriaLabel="Connect to Zoho Mail"
+                    actionAriaLabel={isConnected('zoho-mail') ? 'Connected to Zoho Mail' : 'Connect to Zoho Mail'}
                     onAction={() => handleConnect('zoho-mail')}
+                    onSecondaryAction={() => {
+                      const id = getConnectionId('zoho-mail');
+                      if (id) openConfig(id);
+                    }}
                     disabled={loadingProviders || !isAvailable('zoho-mail') || connecting === 'zoho-mail'}
                   />
                 </div>
@@ -439,9 +420,14 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
                     icon={brandIcon('intuitquickbooks', '2CA01C', 'QuickBooks')}
                     title="QuickBooks (Sandbox)"
                     description="Historic and incremental sync of accounting data."
+                    connected={isConnected('quickbooks-sandbox') || isConnected('quickbooks')}
                     actionLabel={connecting === 'quickbooks-sandbox' ? 'Connecting…' : (loadingProviders ? 'Loading…' : 'Connect')}
-                    actionAriaLabel="Connect to QuickBooks Sandbox"
+                    actionAriaLabel={isConnected('quickbooks-sandbox') || isConnected('quickbooks') ? 'Connected to QuickBooks' : 'Connect to QuickBooks Sandbox'}
                     onAction={() => handleConnect('quickbooks-sandbox')}
+                    onSecondaryAction={() => {
+                      const id = getConnectionId('quickbooks-sandbox') || getConnectionId('quickbooks');
+                      if (id) openConfig(id);
+                    }}
                     disabled={loadingProviders || !isAvailable('quickbooks-sandbox') || connecting === 'quickbooks-sandbox'}
                   />
                   <IntegrationCard
@@ -449,9 +435,14 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
                     icon={brandIcon('xero', '13B5EA', 'Xero')}
                     title="Xero"
                     description="Sync contacts, invoices, and payments securely."
+                    connected={isConnected('xero')}
                     actionLabel={connecting === 'xero' ? 'Connecting…' : (loadingProviders ? 'Loading…' : 'Connect')}
-                    actionAriaLabel="Connect to Xero"
+                    actionAriaLabel={isConnected('xero') ? 'Connected to Xero' : 'Connect to Xero'}
                     onAction={() => handleConnect('xero')}
+                    onSecondaryAction={() => {
+                      const id = getConnectionId('xero');
+                      if (id) openConfig(id);
+                    }}
                     disabled={loadingProviders || !isAvailable('xero') || connecting === 'xero'}
                   />
                 </div>
