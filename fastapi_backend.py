@@ -5646,7 +5646,10 @@ class ExcelProcessor:
             raise HTTPException(status_code=400, detail=f"Error reading file {filename}: {str(e)}")
     
     async def process_file(self, job_id: str, file_content: bytes, filename: str,
-                          user_id: str, supabase: Client) -> Dict[str, Any]:
+                          user_id: str, supabase: Client,
+                          duplicate_decision: Optional[str] = None,
+                          existing_file_id: Optional[str] = None,
+                          original_file_hash: Optional[str] = None) -> Dict[str, Any]:
         """Optimized processing pipeline with duplicate detection and batch AI classification"""
 
         # Initialize duplicate detection service (always use production version)
@@ -5724,145 +5727,201 @@ class ExcelProcessor:
             "progress": 15
         })
 
-        try:
-            # Compute file hash for exact duplicate detection
-            file_hash_for_check = hashlib.sha256(file_content).hexdigest()
+        file_hash_for_check = original_file_hash or hashlib.sha256(file_content).hexdigest()
 
-            file_metadata = FileMetadata(
-                user_id=user_id,
-                file_hash=file_hash_for_check,
-                filename=filename,
-                file_size=len(file_content),
-                content_type='application/octet-stream',
-                upload_timestamp=datetime.utcnow()
-            )
+        duplicate_analysis = {
+            'is_duplicate': False,
+            'duplicate_files': [],
+            'similarity_score': 0.0,
+            'status': 'none',
+            'requires_user_decision': False,
+            'decision': duplicate_decision,
+            'existing_file_id': existing_file_id
+        }
 
-            dup_result = await duplicate_service.detect_duplicates(
-                file_content, file_metadata, enable_near_duplicate=True
-            )
-
-            # Exact duplicate handling
-            dup_type_val = getattr(getattr(dup_result, 'duplicate_type', None), 'value', None)
-            if getattr(dup_result, 'is_duplicate', False) and dup_type_val == 'exact':
-                duplicate_analysis = {
-                    'is_duplicate': True,
-                    'duplicate_files': dup_result.duplicate_files,
-                    'similarity_score': dup_result.similarity_score,
-                    'status': 'exact_duplicate',
-                    'requires_user_decision': True
-                }
-                await manager.send_update(job_id, {
-                    "step": "duplicate_found",
-                    "message": "⚠️ Identical file detected! User decision required.",
-                    "progress": 20,
-                    "duplicate_info": duplicate_analysis,
-                    "requires_user_decision": True
-                })
-                return {
-                    "status": "duplicate_detected",
-                    "duplicate_analysis": duplicate_analysis,
-                    "job_id": job_id,
-                    "requires_user_decision": True
-                }
-
-            # Near-duplicate handling
-            if getattr(dup_result, 'is_duplicate', False) and dup_type_val == 'near':
-                near_duplicate_analysis = {
-                    'is_near_duplicate': True,
-                    'similarity_score': dup_result.similarity_score,
-                    'duplicate_files': dup_result.duplicate_files
-                }
-                await manager.send_update(job_id, {
-                    "step": "near_duplicate_found",
-                    "message": f"🔍 Similar file detected ({dup_result.similarity_score:.1%} similarity). Consider delta ingestion.",
-                    "progress": 35,
-                    "near_duplicate_info": near_duplicate_analysis,
-                    "requires_user_decision": True
-                })
-                return {
-                    "status": "near_duplicate_detected",
-                    "near_duplicate_analysis": near_duplicate_analysis,
-                    "job_id": job_id,
-                    "requires_user_decision": True
-                }
-
-            # Step 3: Content-level duplicate detection (row-level overlap)
-            # Compute content fingerprint locally from sheets
+        if duplicate_decision:
             try:
-                content_text_parts = []
-                for df in sheets.values():
-                    try:
-                        content_text_parts.append(df.astype(str).to_csv(index=False))
-                    except Exception:
-                        continue
-                combined_text = "\n".join(content_text_parts)
-                content_fingerprint = hashlib.sha256(combined_text.encode('utf-8', errors='ignore')).hexdigest()
-            except Exception:
-                content_fingerprint = ""
+                decision_result = await duplicate_service.handle_duplicate_decision(
+                    user_id=user_id,
+                    file_hash=file_hash_for_check,
+                    decision=duplicate_decision,
+                    existing_file_id=existing_file_id
+                )
+                duplicate_analysis['decision_result'] = decision_result
+                if decision_result.get('action') == 'delta_merge':
+                    duplicate_analysis['status'] = 'delta_merge_applied'
+                    duplicate_analysis['merged_events'] = decision_result.get('delta_result', {}).get('merged_events', 0)
+                    if decision_result.get('delta_result', {}).get('existing_file_id'):
+                        duplicate_analysis['existing_file_id'] = decision_result['delta_result']['existing_file_id']
+            except Exception as decision_error:
+                logger.warning(f"Duplicate decision handling failed for job {job_id}: {decision_error}")
 
-            content_duplicate_analysis = await duplicate_service.check_content_duplicate(
-                user_id, content_fingerprint, filename
-            )
-            if content_duplicate_analysis.get('is_content_duplicate', False):
-                await manager.send_update(job_id, {
-                    "step": "content_duplicate_found",
-                    "message": "🔄 Content overlap detected! Analyzing for delta ingestion...",
-                    "progress": 25,
-                    "content_duplicate_info": content_duplicate_analysis,
-                    "requires_user_decision": True
-                })
+        if not duplicate_decision:
+            try:
+                file_metadata = FileMetadata(
+{{ ... }}
+                    user_id=user_id,
+                    file_hash=file_hash_for_check,
+                    filename=filename,
+                    file_size=len(file_content),
+                    content_type='application/octet-stream',
+                    upload_timestamp=datetime.utcnow()
+                )
 
-                # Analyze delta ingestion possibilities
-                delta_analysis = None
-                if content_duplicate_analysis.get('overlapping_files'):
-                    existing_file_id = content_duplicate_analysis['overlapping_files'][0]['id']
-                    delta_analysis = await duplicate_service.analyze_delta_ingestion(
-                        user_id, sheets, existing_file_id
-                    )
+                dup_result = await duplicate_service.detect_duplicates(
+                    file_content, file_metadata, enable_near_duplicate=True
+                )
 
+                dup_type_val = getattr(getattr(dup_result, 'duplicate_type', None), 'value', None)
+                if getattr(dup_result, 'is_duplicate', False) and dup_type_val == 'exact':
+                    duplicate_analysis = {
+                        'is_duplicate': True,
+                        'duplicate_files': dup_result.duplicate_files,
+                        'similarity_score': dup_result.similarity_score,
+                        'status': 'exact_duplicate',
+                        'requires_user_decision': True
+                    }
                     await manager.send_update(job_id, {
-                        "step": "delta_analysis_complete",
-                        "message": f"📊 Delta analysis: {delta_analysis['delta_analysis']['new_rows']} new rows, {delta_analysis['delta_analysis']['existing_rows']} existing rows",
-                        "progress": 30,
-                        "delta_analysis": delta_analysis,
+                        "step": "duplicate_found",
+                        "message": "⚠️ Identical file detected! User decision required.",
+                        "progress": 20,
+                        "duplicate_info": duplicate_analysis,
+                        "requires_user_decision": True
+                    })
+                    try:
+                        supabase.table('ingestion_jobs').update({
+                            'status': 'waiting_user_decision',
+                            'updated_at': datetime.utcnow().isoformat(),
+                            'progress': 20,
+                            'result': {
+                                'status': 'duplicate_detected',
+                                'duplicate_files': dup_result.duplicate_files
+                            }
+                        }).eq('id', job_id).execute()
+                    except Exception as db_err:
+                        logger.warning(f"Failed to persist waiting_user_decision state: {db_err}")
+                    return {
+                        "status": "duplicate_detected",
+                        "duplicate_analysis": duplicate_analysis,
+                        "job_id": job_id,
+                        "requires_user_decision": True,
+                        "file_hash": file_hash_for_check,
+                        "existing_file_id": (dup_result.duplicate_files or [{}])[0].get('id') if getattr(dup_result, 'duplicate_files', None) else None
+                    }
+
+                if getattr(dup_result, 'is_duplicate', False) and dup_type_val == 'near':
+                    near_duplicate_analysis = {
+                        'is_near_duplicate': True,
+                        'similarity_score': dup_result.similarity_score,
+                        'duplicate_files': dup_result.duplicate_files
+                    }
+                    await manager.send_update(job_id, {
+                        "step": "near_duplicate_found",
+                        "message": f"🔍 Similar file detected ({dup_result.similarity_score:.1%} similarity). Consider delta ingestion.",
+                        "progress": 35,
+                        "near_duplicate_info": near_duplicate_analysis,
+                        "requires_user_decision": True
+                    })
+                    try:
+                        supabase.table('ingestion_jobs').update({
+                            'status': 'waiting_user_decision',
+                            'updated_at': datetime.utcnow().isoformat(),
+                            'progress': 35,
+                            'result': {
+                                'status': 'near_duplicate_detected',
+                                'duplicate_files': dup_result.duplicate_files,
+                                'similarity_score': dup_result.similarity_score
+                            }
+                        }).eq('id', job_id).execute()
+                    except Exception as db_err:
+                        logger.warning(f"Failed to persist near duplicate state: {db_err}")
+                    return {
+                        "status": "near_duplicate_detected",
+                        "near_duplicate_analysis": near_duplicate_analysis,
+                        "job_id": job_id,
+                        "requires_user_decision": True,
+                        "file_hash": file_hash_for_check,
+                        "existing_file_id": (dup_result.duplicate_files or [{}])[0].get('id') if getattr(dup_result, 'duplicate_files', None) else None
+                    }
+
+                try:
+                    content_text_parts = []
+                    for df in sheets.values():
+                        try:
+                            content_text_parts.append(df.astype(str).to_csv(index=False))
+                        except Exception:
+                            continue
+                    combined_text = "\n".join(content_text_parts)
+                    content_fingerprint = hashlib.sha256(combined_text.encode('utf-8', errors='ignore')).hexdigest()
+                except Exception:
+                    content_fingerprint = ""
+
+                content_duplicate_analysis = await duplicate_service.check_content_duplicate(
+                    user_id, content_fingerprint, filename
+                )
+                if content_duplicate_analysis.get('is_content_duplicate', False):
+                    await manager.send_update(job_id, {
+                        "step": "content_duplicate_found",
+                        "message": "🔄 Content overlap detected! Analyzing for delta ingestion...",
+                        "progress": 25,
+                        "content_duplicate_info": content_duplicate_analysis,
                         "requires_user_decision": True
                     })
 
-                return {
-                    "status": "content_duplicate_detected",
-                    "content_duplicate_analysis": content_duplicate_analysis,
-                    "delta_analysis": delta_analysis,
-                    "job_id": job_id,
-                    "requires_user_decision": True
-                }
+                    delta_analysis = None
+                    if content_duplicate_analysis.get('overlapping_files'):
+                        existing_file_id = content_duplicate_analysis['overlapping_files'][0]['id']
+                        delta_analysis = await duplicate_service.analyze_delta_ingestion(
+                            user_id, sheets, existing_file_id
+                        )
 
-        except Exception as e:
-            # Handle duplicate detection errors
-            error_recovery = get_error_recovery_system()
-            error_context = ErrorContext(
-                error_id=str(uuid.uuid4()),
-                user_id=user_id,
-                job_id=job_id,
-                transaction_id=None,
-                operation_type="duplicate_detection",
-                error_message=str(e),
-                error_details={"filename": filename},
-                severity=ErrorSeverity.MEDIUM,
-                occurred_at=datetime.utcnow()
-            )
-            await error_recovery.handle_processing_error(error_context)
-            # Continue with processing despite duplicate detection error
-            logger.warning(f"Duplicate detection failed, continuing with processing: {e}")
+                        await manager.send_update(job_id, {
+                            "step": "delta_analysis_complete",
+                            "message": f"📊 Delta analysis: {delta_analysis['delta_analysis']['new_rows']} new rows, {delta_analysis['delta_analysis']['existing_rows']} existing rows",
+                            "progress": 30,
+                            "delta_analysis": delta_analysis,
+                            "requires_user_decision": True
+                        })
 
-        # Ensure duplicate_analysis is defined for downstream usage
-        if 'duplicate_analysis' not in locals():
-            duplicate_analysis = {
-                'is_duplicate': False,
-                'duplicate_files': [],
-                'similarity_score': 0.0,
-                'status': 'none',
-                'requires_user_decision': False
-            }
+                    try:
+                        supabase.table('ingestion_jobs').update({
+                            'status': 'waiting_user_decision',
+                            'updated_at': datetime.utcnow().isoformat(),
+                            'progress': 30,
+                            'result': {
+                                'status': 'content_duplicate_detected',
+                                'delta_analysis': delta_analysis,
+                                'content_duplicate': content_duplicate_analysis
+                            }
+                        }).eq('id', job_id).execute()
+                    except Exception as db_err:
+                        logger.warning(f"Failed to persist content duplicate state: {db_err}")
+
+                    return {
+                        "status": "content_duplicate_detected",
+                        "content_duplicate_analysis": content_duplicate_analysis,
+                        "delta_analysis": delta_analysis,
+                        "job_id": job_id,
+                        "requires_user_decision": True,
+                        "file_hash": file_hash_for_check,
+                        "existing_file_id": content_duplicate_analysis['overlapping_files'][0]['id'] if content_duplicate_analysis.get('overlapping_files') else None
+                    }
+
+            except Exception as e:
+                error_recovery = get_error_recovery_system()
+                error_context = ErrorContext(
+                    error_id=str(uuid.uuid4()),
+                    user_id=user_id,
+                    job_id=job_id,
+                    transaction_id=None,
+                    operation_type="duplicate_detection",
+                    error_message=str(e),
+                    error_details={"filename": filename},
+                    severity=ErrorSeverity.MEDIUM,
+                    occurred_at=datetime.utcnow()
+                )
+                await error_recovery.handle_processing_error(error_context)
+                logger.warning(f"Duplicate detection failed, continuing with processing: {e}")
 
         # Step 2: Fast Platform Detection and Document Classification
         await manager.send_update(job_id, {
@@ -6431,6 +6490,9 @@ class ExcelProcessor:
             "progress": 100
         })
         
+        insights['raw_record_id'] = file_id
+        insights['file_hash'] = file_hash_for_check
+        insights['duplicate_analysis'] = duplicate_analysis
         return insights
 
 # ============================================================================
@@ -7471,8 +7533,9 @@ class EntityResolver:
 class DuplicateDecisionRequest(BaseModel):
     job_id: str
     user_id: str
-    decision: str  # 'replace', 'keep_both', 'skip'
+    decision: str  # 'replace', 'keep_both', 'skip', 'delta_merge'
     file_hash: str
+    existing_file_id: Optional[str] = None
     session_token: Optional[str] = None
 
 @app.post("/handle-duplicate-decision")
@@ -7536,13 +7599,19 @@ async def handle_duplicate_decision(request: DuplicateDecisionRequest):
             return {"status": "success", "message": "Duplicate decision processed: skipped"}
 
         # For 'replace' or 'keep_both' we resume processing with the saved request
-        if decision in ('replace', 'keep_both'):
+        if decision in ('replace', 'keep_both', 'delta_merge'):
             pending = job_state.get('pending_request') or {}
             user_id = pending.get('user_id')
             storage_path = pending.get('storage_path')
             filename = pending.get('filename') or 'uploaded_file'
             if not user_id or not storage_path:
                 raise HTTPException(status_code=400, detail="Pending request not found for this job")
+
+            existing_file_id = (
+                request.existing_file_id
+                or pending.get('existing_file_id')
+                or (pending.get('duplicate_files') or [{}])[0].get('id')
+            )
 
             # Update status and resume processing asynchronously
             websocket_manager.job_status[request.job_id] = {
@@ -7563,7 +7632,10 @@ async def handle_duplicate_decision(request: DuplicateDecisionRequest):
                 user_id=user_id,
                 job_id=request.job_id,
                 storage_path=storage_path,
-                filename=filename
+                filename=filename,
+                duplicate_decision=decision,
+                existing_file_id=existing_file_id,
+                original_file_hash=request.file_hash
             ))
 
             return {"status": "success", "message": "Duplicate decision processed: resuming"}
@@ -7840,287 +7912,6 @@ async def delete_chat(request: dict):
         structured_logger.error("Chat delete error", error=e)
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/test-simple")
-async def test_simple():
-    """Simple test endpoint"""
-    return {"status": "success", "message": "FastAPI backend is running"}
-
-@app.get("/test-database")
-async def test_database():
-    """Test database connection and basic queries"""
-    try:
-        # Initialize Supabase client
-        supabase_url = os.environ.get("SUPABASE_URL")
-        supabase_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
-        if supabase_key:
-            supabase_key = clean_jwt_token(supabase_key)
-
-        if not supabase_url or not supabase_key:
-            raise HTTPException(status_code=500, detail="Supabase credentials not configured")
-
-        supabase = create_client(supabase_url, supabase_key)
-        
-        # Test user ID for queries
-        test_user_id = "test-user-123"
-        
-        # Test raw_events table
-        events_count = supabase.table('raw_events').select('id', count='exact').eq('user_id', test_user_id).execute()
-        
-        # Test ingestion_jobs table
-        jobs_count = supabase.table('ingestion_jobs').select('id', count='exact').eq('user_id', test_user_id).execute()
-        
-        # Test raw_records table
-        records_count = supabase.table('raw_records').select('id', count='exact').eq('user_id', test_user_id).execute()
-        
-        return {
-            "status": "success",
-            "database_connection": "working",
-            "tables": {
-                "raw_events": events_count.count if hasattr(events_count, 'count') else 0,
-                "ingestion_jobs": jobs_count.count if hasattr(jobs_count, 'count') else 0,
-                "raw_records": records_count.count if hasattr(records_count, 'count') else 0
-            },
-            "message": "Database connection and queries working"
-        }
-        
-    except Exception as e:
-        logger.error(f"Database test error: {e}")
-        return {"error": f"Database test failed: {str(e)}"}
-
-@app.get("/test-platform-detection")
-async def test_platform_detection():
-    """Test endpoint for enhanced platform detection"""
-    try:
-        # Create sample data for different platforms
-        test_cases = {
-            'quickbooks': pd.DataFrame({
-                'TxnID': ['1', '2'],
-                'Customer': ['Client A', 'Client B'],
-                'Amount': [1000, 2000],
-                'Date': ['2024-01-01', '2024-01-02'],
-                'Account': ['Accounts Receivable', 'Accounts Receivable'],
-                'Memo': ['Invoice payment', 'Invoice payment']
-            }),
-            'stripe': pd.DataFrame({
-                'Charge ID': ['ch_001', 'ch_002'],
-                'Customer ID': ['cus_001', 'cus_002'],
-                'Amount': [1000, 2000],
-                'Status': ['succeeded', 'succeeded'],
-                'Created': ['2024-01-01', '2024-01-02'],
-                'Currency': ['usd', 'usd']
-            }),
-            'xero': pd.DataFrame({
-                'Contact Name': ['Client A', 'Client B'],
-                'Invoice Number': ['INV001', 'INV002'],
-                'Amount': [1500, 2500],
-                'Date': ['2024-01-01', '2024-01-02'],
-                'Reference': ['REF001', 'REF002'],
-                'Tracking': ['Project A', 'Project B']
-            })
-        }
-        
-        results = {}
-        platform_detector = PlatformDetector()
-        
-        for platform_name, df in test_cases.items():
-            filename = f"{platform_name}_sample.xlsx"
-            detection_result = platform_detector.detect_platform(df, filename)
-            platform_info = platform_detector.get_platform_info(detection_result['platform'])
-            
-            results[platform_name] = {
-                'detection_result': detection_result,
-                'platform_info': platform_info,
-                'sample_columns': list(df.columns),
-                'sample_data_shape': df.shape
-            }
-        
-        return {
-            "status": "success",
-            "message": "Enhanced platform detection test completed",
-            "test_cases": results,
-            "summary": {
-                "total_platforms_tested": len(test_cases),
-                "detection_accuracy": sum(1 for r in results.values() 
-                                        if r['detection_result']['platform'] != 'unknown') / len(results)
-            }
-        }
-        
-    except Exception as e:
-        logger.error(f"Platform detection test failed: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Platform detection test failed: {str(e)}")
-
-@app.get("/test-ai-row-classification")
-async def test_ai_row_classification():
-    """Test AI-powered row classification with sample data"""
-    
-    # Sample test cases
-    test_cases = [
-        {
-            "test_case": "Payroll Transaction",
-            "description": "Employee salary payment",
-            "row_data": {"Description": "Salary payment to John Smith", "Amount": 5000, "Date": "2024-01-15"}
-        },
-        {
-            "test_case": "Revenue Transaction", 
-            "description": "Client payment received",
-            "row_data": {"Description": "Payment from ABC Corp", "Amount": 15000, "Date": "2024-01-20"}
-        },
-        {
-            "test_case": "Expense Transaction",
-            "description": "Office rent payment",
-            "row_data": {"Description": "Office rent - Downtown Plaza", "Amount": 2500, "Date": "2024-01-01"}
-        }
-    ]
-    
-    results = []
-    
-    for test_case in test_cases:
-        try:
-            # Create AIRowClassifier instance
-            ai_classifier = AIRowClassifier()
-            
-            # Classify the row
-            classification_result = ai_classifier.classify_row(
-                test_case["row_data"], 
-                platform="quickbooks",
-                user_id="test-user"
-            )
-            
-            results.append({
-                "test_case": test_case["test_case"],
-                "description": test_case["description"],
-                "row_data": test_case["row_data"],
-                "classification": classification_result
-            })
-            
-        except Exception as e:
-            results.append({
-                "test_case": test_case["test_case"],
-                "description": test_case["description"],
-                "row_data": test_case["row_data"],
-                "error": str(e)
-            })
-    
-    return {
-        "status": "success",
-        "message": "AI row classification test completed",
-        "test_results": results,
-        "summary": {
-            "total_tests": len(test_cases),
-            "successful_classifications": len([r for r in results if "error" not in r]),
-            "failed_classifications": len([r for r in results if "error" in r])
-        }
-    }
-
-@app.get("/test-batch-processing")
-async def test_batch_processing():
-    """Test the optimized batch processing performance"""
-    
-    # Create sample data for batch testing
-    sample_rows = []
-    for i in range(25):  # Test with 25 rows
-        if i < 8:
-            # Payroll rows
-            row_data = {"Description": f"Salary payment to Employee {i+1}", "Amount": 5000 + i*100, "Date": "2024-01-15"}
-        elif i < 16:
-            # Revenue rows
-            row_data = {"Description": f"Payment from Client {i-7}", "Amount": 10000 + i*500, "Date": "2024-01-20"}
-        elif i < 20:
-            # Expense rows
-            row_data = {"Description": f"Office expense {i-15}", "Amount": -(1000 + i*50), "Date": "2024-01-10"}
-        else:
-            # Other transactions
-            row_data = {"Description": f"Transaction {i-19}", "Amount": 500 + i*25, "Date": "2024-01-25"}
-        
-        sample_rows.append(pd.Series(row_data))
-    
-    # Test batch processing
-    start_time = time.time()
-    
-    try:
-        # Initialize batch classifier
-        batch_classifier = BatchAIRowClassifier(openai)
-        platform_info = {"platform": "quickbooks", "confidence": 0.8}
-        column_names = ["Description", "Amount", "Date"]
-        
-        # Process in batches
-        batch_size = 10
-        all_classifications = []
-        
-        for i in range(0, len(sample_rows), batch_size):
-            batch = sample_rows[i:i+batch_size]
-            batch_classifications = await batch_classifier.classify_rows_batch(batch, platform_info, column_names)
-            all_classifications.extend(batch_classifications or [])
-        
-        end_time = time.time()
-        processing_time = end_time - start_time
-        
-        # Analyze results
-        successful_classifications = len([c for c in all_classifications if c and 'category' in c])
-        
-        return {
-            "status": "success",
-            "message": "Batch processing test completed",
-            "performance_metrics": {
-                "total_rows": len(sample_rows),
-                "batch_size": batch_size,
-                "processing_time_seconds": round(processing_time, 2),
-                "rows_per_second": round(len(sample_rows) / processing_time, 2),
-                "successful_classifications": successful_classifications,
-                "classification_rate": round(successful_classifications / len(sample_rows), 2)
-            },
-            "sample_classifications": all_classifications[:5]  # Show first 5 results
-        }
-        
-    except Exception as e:
-        logger.error(f"Batch processing test failed: {e}")
-        return {
-            "status": "error",
-            "message": f"Batch processing test failed: {str(e)}",
-            "performance_metrics": {
-                "total_rows": len(sample_rows),
-                "processing_time_seconds": round(time.time() - start_time, 2),
-                "error": str(e)
-            }
-        }
-
-# ============================================================================
-# UNIVERSAL COMPONENT API ENDPOINTS
-# ============================================================================
-
-class FieldDetectionRequest(BaseModel):
-    """Request model for field detection"""
-    data: Dict[str, Any]
-    filename: Optional[str] = None
-    user_id: str
-
-class PlatformDetectionRequest(BaseModel):
-    """Request model for platform detection"""
-    file_content: bytes
-    filename: str
-    user_id: str
-
-class DocumentClassificationRequest(BaseModel):
-    """Request model for document classification"""
-    payload: Dict[str, Any]
-    filename: str
-    user_id: str
-
-class DataExtractionRequest(BaseModel):
-    """Request model for data extraction"""
-    file_content: bytes
-    filename: str
-    user_id: str
-
-class EntityResolutionRequest(BaseModel):
-    """Request model for entity resolution"""
-    entities: Dict[str, List[str]]
-    platform: str
-    user_id: str
-    row_data: Dict[str, Any]
-    column_names: List[str]
-    source_file: str
-    row_id: str
 
 @app.post("/api/detect-fields")
 async def detect_fields_endpoint(request: FieldDetectionRequest):
@@ -8181,77 +7972,6 @@ async def classify_document_endpoint(request: DocumentClassificationRequest):
         
         # Classify document
         result = await document_classifier.classify_document_universal(
-            payload=request.payload,
-            filename=request.filename,
-            user_id=request.user_id
-        )
-        
-        return {
-            "status": "success",
-            "result": result,
-            "user_id": request.user_id,
-            "filename": request.filename
-        }
-        
-    except Exception as e:
-        logger.error(f"Document classification error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/api/extract-data")
-async def extract_data_endpoint(request: DataExtractionRequest):
-    """Extract data using UniversalExtractors"""
-    try:
-        # Initialize data extractor
-        data_extractor = UniversalExtractors()
-        
-        # Extract data
-        result = await data_extractor.extract_data_universal(
-            file_content=request.file_content,
-            filename=request.filename,
-            user_id=request.user_id
-        )
-        
-        return {
-            "status": "success",
-            "result": result,
-            "user_id": request.user_id,
-            "filename": request.filename
-        }
-        
-    except Exception as e:
-        logger.error(f"Data extraction error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/api/resolve-entities")
-async def resolve_entities_endpoint(request: EntityResolutionRequest):
-    """Resolve entities using EntityResolver"""
-    try:
-        # Initialize Supabase client
-        supabase_url = os.environ.get("SUPABASE_URL")
-        supabase_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
-        if supabase_key:
-            supabase_key = clean_jwt_token(supabase_key)
-        
-        if not supabase_url or not supabase_key:
-            raise HTTPException(status_code=500, detail="Supabase credentials not configured")
-        
-        supabase = create_client(supabase_url, supabase_key)
-        
-        # Initialize entity resolver
-        entity_resolver = EntityResolver(supabase_client=supabase)
-        
-        # Resolve entities
-        result = await entity_resolver.resolve_entities_batch(
-            entities=request.entities,
-            platform=request.platform,
-            user_id=request.user_id,
-            row_data=request.row_data,
-            column_names=request.column_names,
-            source_file=request.source_file,
-            row_id=request.row_id
-        )
-        
-        return {
             "status": "success",
             "result": result,
             "user_id": request.user_id,
@@ -8328,13 +8048,16 @@ async def process_excel_endpoint(request: dict):
                             "user_id": user_id,
                             "storage_path": storage_path,
                             "filename": filename,
-                            "file_hash": file_hash
+                            "file_hash": file_hash,
+                            "existing_file_id": duplicate_files[0]['id'] if duplicate_files else None,
+                            "duplicate_files": duplicate_files
                         }
                     }
                     return {
                         "status": "duplicate_detected",
                         "job_id": job_id,
                         "file_hash": file_hash,
+                        "existing_file_id": duplicate_files[0]['id'] if duplicate_files else None,
                         "duplicate_analysis": {
                             "duplicate_files": duplicate_files,
                             "recommendation": "replace_or_skip"
@@ -10550,7 +10273,10 @@ class WebSocketProgressManager:
 websocket_manager = WebSocketProgressManager()
 
 
-async def start_processing_job(user_id: str, job_id: str, storage_path: str, filename: str):
+async def start_processing_job(user_id: str, job_id: str, storage_path: str, filename: str,
+                               duplicate_decision: Optional[str] = None,
+                               existing_file_id: Optional[str] = None,
+                               original_file_hash: Optional[str] = None):
     try:
         # Bind job to user for WebSocket authorization
         base = websocket_manager.job_status.get(job_id, {})
@@ -10601,7 +10327,8 @@ async def start_processing_job(user_id: str, job_id: str, storage_path: str, fil
             file_content=file_bytes,
             filename=filename,
             user_id=user_id,
-            supabase=supabase
+            supabase=supabase,
+            duplicate_decision=duplicate_decision
         )
     except Exception as e:
         logger.error(f"Processing job failed (resume path): {e}")
@@ -11404,54 +11131,6 @@ class UniversalComponentTestSuite:
             logger.error(f"Performance test failed: {e}")
             return {'status': 'failed', 'error': str(e)}
 
-@app.get("/api/run-comprehensive-tests")
-async def run_comprehensive_tests():
-    """Run comprehensive test suite for all universal components"""
-    try:
-        test_suite = UniversalComponentTestSuite()
-        
-        # Run all test types
-        unit_results = await test_suite.run_unit_tests()
-        integration_results = await test_suite.run_integration_tests()
-        performance_results = await test_suite.run_performance_tests()
-        
-        # Calculate overall success rate
-        total_tests = 0
-        passed_tests = 0
-        
-        for component, result in unit_results.items():
-            if result.get('status') == 'passed':
-                passed_tests += 1
-            total_tests += 1
-        
-        if integration_results.get('status') == 'passed':
-            passed_tests += 1
-        total_tests += 1
-        
-        if performance_results.get('status') == 'passed':
-            passed_tests += 1
-        total_tests += 1
-        
-        success_rate = (passed_tests / total_tests) * 100 if total_tests > 0 else 0
-        
-        return {
-            'status': 'success',
-            'test_summary': {
-                'total_tests': total_tests,
-                'passed_tests': passed_tests,
-                'failed_tests': total_tests - passed_tests,
-                'success_rate': success_rate
-            },
-            'unit_tests': unit_results,
-            'integration_tests': integration_results,
-            'performance_tests': performance_results,
-            'timestamp': datetime.utcnow().isoformat()
-        }
-        
-    except Exception as e:
-        logger.error(f"Comprehensive test suite failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
 # ============================================================================
 # COMPREHENSIVE MONITORING & OBSERVABILITY SYSTEM
 # ============================================================================
@@ -11644,53 +11323,6 @@ class UniversalComponentMonitoringSystem:
             }
         
         # Calculate overall metrics
-        if total_ops > 0:
-            summary['overall_metrics']['total_operations'] = total_ops
-            summary['overall_metrics']['successful_operations'] = total_success
-            summary['overall_metrics']['failed_operations'] = total_failed
-            summary['overall_metrics']['avg_duration'] = total_duration / total_ops
-            summary['overall_metrics']['success_rate'] = total_success / total_ops
-        
-        # Error summary
-        for component, errors in self.error_tracker.items():
-            if errors:
-                summary['error_summary'][component] = {
-                    'total_errors': len(errors),
-                    'recent_errors': len([e for e in errors if 
-                                        (datetime.utcnow() - datetime.fromisoformat(e['timestamp'])).seconds < 3600]),
-                    'error_types': {}
-                }
-                
-                # Count error types
-                for error in errors:
-                    error_type = error['error_type']
-                    if error_type not in summary['error_summary'][component]['error_types']:
-                        summary['error_summary'][component]['error_types'][error_type] = 0
-                    summary['error_summary'][component]['error_types'][error_type] += 1
-        
-        # Performance summary
-        for component, perf_records in self.performance_tracker.items():
-            if perf_records:
-                summary['performance_summary'][component] = {
-                    'total_records': len(perf_records),
-                    'recent_records': len([p for p in perf_records if 
-                                         (datetime.utcnow() - datetime.fromisoformat(p['timestamp'])).seconds < 3600])
-                }
-        
-        return summary
-    
-    def export_metrics_for_prometheus(self) -> str:
-        """Export metrics in Prometheus format"""
-        prometheus_metrics = []
-        
-        for component, metrics in self.metrics_store.items():
-            prometheus_metrics.append(f"universal_component_operations_total{{component=\"{component}\"}} {metrics['total_operations']}")
-            prometheus_metrics.append(f"universal_component_success_total{{component=\"{component}\"}} {metrics['successful_operations']}")
-            prometheus_metrics.append(f"universal_component_failures_total{{component=\"{component}\"}} {metrics['failed_operations']}")
-            prometheus_metrics.append(f"universal_component_duration_seconds{{component=\"{component}\"}} {metrics['avg_duration']}")
-        
-        return "\n".join(prometheus_metrics)
-
 # Initialize monitoring system
 monitoring_system = UniversalComponentMonitoringSystem()
 
@@ -11867,92 +11499,6 @@ async def get_audit_log(component: str = None, user_id: str = None, limit: int =
         
     except Exception as e:
         logger.error(f"Failed to get audit log: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/api/monitoring/performance-test")
-async def run_performance_test(component: str, iterations: int = 100):
-    """Run performance test for a specific component"""
-    try:
-        import time
-        
-        if iterations > 1000:
-            iterations = 1000  # Limit to prevent overload
-        
-        start_time = time.time()
-        results = []
-        
-        # Run performance test based on component
-        for i in range(iterations):
-            test_start = time.time()
-            
-            try:
-                if component == 'UniversalFieldDetector':
-                    detector = UniversalFieldDetector()
-                    await detector.detect_field_types_universal(
-                        data={'test_field': f'value_{i}'},
-                        filename=f'test_{i}.csv',
-                        user_id='performance-test'
-                    )
-                elif component == 'ExcelProcessor':
-                    processor = ExcelProcessor()
-                    await processor.stream_xlsx_processing(
-                        file_content=b'test,data\n1,2\n3,4',
-                        filename=f'test_{i}.csv',
-                        user_id='performance-test'
-                    )
-                # Add more components as needed
-                
-                test_duration = time.time() - test_start
-                results.append({'iteration': i, 'duration': test_duration, 'success': True})
-                
-                # Record metrics
-                monitoring_system.record_operation_metrics(
-                    component=component,
-                    operation='performance_test',
-                    duration=test_duration,
-                    success=True,
-                    user_id='performance-test'
-                )
-                
-            except Exception as e:
-                test_duration = time.time() - test_start
-                results.append({'iteration': i, 'duration': test_duration, 'success': False, 'error': str(e)})
-                
-                monitoring_system.record_operation_metrics(
-                    component=component,
-                    operation='performance_test',
-                    duration=test_duration,
-                    success=False,
-                    user_id='performance-test'
-                )
-        
-        total_duration = time.time() - start_time
-        successful_tests = len([r for r in results if r['success']])
-        avg_duration = sum(r['duration'] for r in results) / len(results)
-        
-        performance_metrics = {
-            'component': component,
-            'iterations': iterations,
-            'successful_tests': successful_tests,
-            'failed_tests': iterations - successful_tests,
-            'success_rate': successful_tests / iterations,
-            'total_duration': total_duration,
-            'avg_duration_per_test': avg_duration,
-            'tests_per_second': iterations / total_duration
-        }
-        
-        # Record performance metrics
-        monitoring_system.record_performance_metrics(component, performance_metrics)
-        
-        return {
-            'status': 'success',
-            'performance_test': performance_metrics,
-            'sample_results': results[:10],  # Return first 10 results as sample
-            'timestamp': datetime.utcnow().isoformat()
-        }
-        
-    except Exception as e:
-        logger.error(f"Performance test failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 # ============================================================================

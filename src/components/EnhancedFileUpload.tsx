@@ -35,7 +35,9 @@ export const EnhancedFileUpload: React.FC = () => {
     currentFileHash: null as string | null,
     currentStoragePath: null as string | null,
     currentFileName: null as string | null,
-    currentFileId: null as string | null
+    currentFileId: null as string | null,
+    currentExistingFileId: null as string | null,
+    deltaAnalysis: null as any
   });
 
   const { toast } = useToast();
@@ -70,14 +72,20 @@ export const EnhancedFileUpload: React.FC = () => {
     try {
       const result = await processFileWithFastAPI(file, customPrompt, (progress) => {
         // Handle duplicate detection progress
-        if (progress.step === 'duplicate_detected') {
+        if ([
+          'duplicate_detected',
+          'duplicate_found',
+          'near_duplicate_found',
+          'content_duplicate_found',
+          'delta_analysis_complete'
+        ].includes(progress.step)) {
           // Show duplicate modal
           setDuplicateModal(prev => ({
             ...prev,
             isOpen: true,
             phase: 'basic_duplicate',
             duplicateInfo: {
-              message: 'Duplicate file detected!',
+              message: 'Potential duplicate detected!',
               filename: file.name,
               recommendation: 'replace_or_skip'
             },
@@ -106,15 +114,15 @@ export const EnhancedFileUpload: React.FC = () => {
         ));
       });
 
-      // Check if result indicates duplicate detection
-      if (result.status === 'duplicate_detected') {
+      // Check if result indicates any duplicate flow requiring user decision
+      if (result.requires_user_decision) {
         // Show duplicate modal with actual duplicate information
         setDuplicateModal(prev => ({
           ...prev,
           isOpen: true,
           phase: 'basic_duplicate',
           duplicateInfo: {
-            message: result.message || 'Duplicate file detected!',
+            message: result.message || 'Duplicate or similar file detected!',
             filename: file.name,
             recommendation: result.duplicate_analysis?.recommendation || 'replace_or_skip',
             duplicateFiles: result.duplicate_analysis?.duplicate_files || []
@@ -123,7 +131,9 @@ export const EnhancedFileUpload: React.FC = () => {
           currentFileHash: result.file_hash || null,
           currentStoragePath: result.storage_path || null,
           currentFileName: result.file_name || file.name,
-          currentFileId: fileId
+          currentFileId: fileId,
+          currentExistingFileId: (result as any).existing_file_id || null,
+          deltaAnalysis: (result as any).delta_analysis || null
         }));
         
         // Don't proceed with normal completion
@@ -265,7 +275,7 @@ export const EnhancedFileUpload: React.FC = () => {
   }, []);
 
   // Duplicate detection handlers
-  const handleDuplicateDecision = async (decision: 'replace' | 'keep_both' | 'skip') => {
+  const handleDuplicateDecision = async (decision: 'replace' | 'keep_both' | 'skip' | 'delta_merge') => {
     if (!duplicateModal.currentJobId || !duplicateModal.currentFileHash) {
       toast({
         title: "Error",
@@ -290,7 +300,10 @@ export const EnhancedFileUpload: React.FC = () => {
           user_id: user?.id || 'anonymous',
           decision: decision,
           file_hash: duplicateModal.currentFileHash,
-          session_token: session?.access_token
+          session_token: session?.access_token,
+          ...(decision === 'delta_merge' && duplicateModal.currentExistingFileId
+            ? { existing_file_id: duplicateModal.currentExistingFileId }
+            : {})
         })
       });
       if (!response.ok) throw new Error('Failed to process duplicate decision');
@@ -484,6 +497,7 @@ export const EnhancedFileUpload: React.FC = () => {
         onDecision={handleDuplicateDecision}
         onVersionAccept={handleVersionRecommendationFeedback}
         phase={duplicateModal.phase}
+        deltaAnalysis={duplicateModal.deltaAnalysis}
       />
     </div>
   );

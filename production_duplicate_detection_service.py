@@ -1049,78 +1049,199 @@ class ProductionDuplicateDetectionService:
         
         Args:
             user_id: User identifier
-            file_hash: File hash
-            decision: User's decision (replace, keep_both, skip, delta_merge)
-            existing_file_id: Optional existing file ID for delta operations
-            
+            file_hash: File hash of the new file
+            decision: User decision ('replace', 'keep_both', 'skip', 'delta_merge')
+            existing_file_id: Existing file ID for delta operations (optional)
+        
         Returns:
-            Dictionary with decision result
+            Dictionary with action taken
         """
         try:
+            decision = decision.lower()
             if decision == "replace":
-                # Mark old files as replaced
+                # Mark old versions as replaced
                 result = self.supabase.table('raw_records').update({
                     'status': 'replaced',
-                    'updated_at': datetime.utcnow().isoformat()
-                }).eq('user_id', user_id).eq('content->>file_hash', file_hash).execute()
-                
+                    'updated_at': datetime.utcnow().isoformat(),
+                    'metadata': {
+                        'replaced_at': datetime.utcnow().isoformat(),
+                        'replacement_hash': file_hash
+                    }
+                }).eq('user_id', user_id).eq('file_hash', file_hash).execute()
+                replaced_count = len(result.data) if result.data else 0
                 return {
                     'status': 'success',
                     'action': 'replaced',
-                    'message': f"Marked {len(result.data)} file(s) as replaced",
-                    'affected_files': len(result.data)
+                    'message': f"Marked {replaced_count} file(s) as replaced",
+                    'replaced_count': replaced_count
                 }
-                
+            
             elif decision == "keep_both":
+                # No action needed, just return success
                 return {
                     'status': 'success',
-                    'action': 'kept_both',
-                    'message': "Both files will be kept"
+                    'action': 'keep_both',
+                    'message': 'New file will be processed alongside existing files'
                 }
-                
+            
             elif decision == "skip":
+                # No action needed, user cancelled processing
                 return {
                     'status': 'success',
-                    'action': 'skipped',
-                    'message': "Upload skipped due to duplicate"
+                    'action': 'skip',
+                    'message': 'Processing skipped by user'
                 }
-                
+            
             elif decision == "delta_merge":
                 if not existing_file_id:
                     return {
                         'status': 'error',
-                        'message': "Existing file ID required for delta merge"
+                        'error': 'existing_file_id required for delta_merge'
                     }
-                
+
+                delta_result = await self._perform_delta_merge(user_id, file_hash, existing_file_id)
                 return {
                     'status': 'success',
-                    'action': 'delta_merge_ready',
-                    'message': "Ready for delta merge processing",
-                    'existing_file_id': existing_file_id
+                    'action': 'delta_merge',
+                    'message': 'Delta merge completed',
+                    'delta_result': delta_result
                 }
-                
+            
             else:
                 return {
                     'status': 'error',
-                    'message': f"Invalid decision: {decision}"
+                    'error': f"Unsupported decision: {decision}"
                 }
-                
         except Exception as e:
             logger.error(f"Error handling duplicate decision: {e}")
             return {
                 'status': 'error',
-                'message': f"Failed to handle decision: {str(e)}"
+                'error': str(e)
             }
+
+    async def _perform_delta_merge(self, user_id: str, new_file_hash: str, existing_file_id: str) -> Dict[str, Any]:
+        """Apply delta ingestion by merging new rows into existing records."""
+        try:
+            new_record = (
+                self.supabase
+                .table('raw_records')
+                .select('id, content, storage_path, source, status, file_name, job_id')
+                .eq('user_id', user_id)
+                .eq('file_hash', new_file_hash)
+                .order('created_at', desc=True)
+                .limit(1)
+                .execute()
+            )
+            if not new_record.data:
+                raise ValueError('New file not found for delta merge')
+            new_record_id = new_record.data[0]['id']
+
+            delta_payload = await self._prepare_delta_payload(user_id, existing_file_id, new_record_id)
+
+            if not delta_payload['new_events']:
+                return {
+                    'merged_events': 0,
+                    'reason': 'No new rows found compared to existing file'
+                }
+
+            inserted_events = (
+                self.supabase
+                .table('raw_events')
+                .insert(delta_payload['new_events'])
+                .execute()
+            )
+
+            result_data = {
+                'merged_events': len(inserted_events.data or []),
+                'existing_events': delta_payload['existing_event_count'],
+                'new_record_id': new_record_id,
+                'existing_file_id': existing_file_id
+            }
+
+            if delta_payload['event_id_mapping']:
+                self.supabase.table('event_delta_logs').insert({
+                    'user_id': user_id,
+                    'existing_file_id': existing_file_id,
+                    'new_file_id': new_record_id,
+                    'delta_summary': result_data,
+                    'events_included': delta_payload['event_id_mapping'],
+                    'created_at': datetime.utcnow().isoformat()
+                }).execute()
+
+            return result_data
+        except Exception as e:
+            logger.error(f"Delta merge failed: {e}")
+            raise
+
+    async def _prepare_delta_payload(self, user_id: str, existing_file_id: str, new_record_id: str) -> Dict[str, Any]:
+        """Compile payload for delta merge by comparing existing and new events."""
+        existing_events_resp = (
+            self.supabase
+            .table('raw_events')
+            .select('id, payload, row_index, sheet_name')
+            .eq('user_id', user_id)
+            .eq('file_id', existing_file_id)
+            .execute()
+        )
+        existing_events = existing_events_resp.data or []
+        existing_hashes = {
+            self._hash_event_payload(event['payload']): event['id']
+            for event in existing_events
+        }
+
+        new_events_resp = (
+            self.supabase
+            .table('raw_events')
+            .select('*')
+            .eq('user_id', user_id)
+            .eq('file_id', new_record_id)
+            .execute()
+        )
+        new_events = new_events_resp.data or []
+
+        new_rows = []
+        event_id_mapping = {}
+        for event in new_events:
+            event_hash = self._hash_event_payload(event.get('payload', {}))
+            if event_hash not in existing_hashes:
+                event_copy = {**event}
+                event_copy['file_id'] = existing_file_id
+                event_copy.pop('id', None)
+                new_rows.append(event_copy)
+            else:
+                event_id_mapping[event.get('id')] = existing_hashes[event_hash]
+
+        return {
+            'new_events': new_rows,
+            'existing_event_count': len(existing_events),
+            'event_id_mapping': event_id_mapping
+        }
+
+    def _hash_event_payload(self, payload: Dict[str, Any]) -> str:
+        try:
+            normalized = json.dumps(payload, sort_keys=True, default=str)
+        except Exception:
+            normalized = str(payload)
+        return hashlib.sha256(normalized.encode('utf-8')).hexdigest()
     
     async def get_metrics(self) -> Dict[str, Any]:
         """Get service metrics for monitoring"""
+        average_time = 0.0
+        try:
+            total_requests = max(1, self.metrics['cache_hits'] + self.metrics['cache_misses'])
+            average_time = self.metrics['total_processing_time'] / total_requests
+        except Exception:
+            average_time = 0.0
+
         return {
-            **self.metrics,
+            'cache_hits': self.metrics['cache_hits'],
+            'cache_misses': self.metrics['cache_misses'],
+            'exact_duplicates_found': self.metrics['exact_duplicates_found'],
+            'near_duplicates_found': self.metrics['near_duplicates_found'],
+            'processing_errors': self.metrics['processing_errors'],
             'cache_size': len(self.memory_cache),
-            'avg_processing_time': (
-                self.metrics['total_processing_time'] / 
-                max(1, self.metrics['cache_hits'] + self.metrics['cache_misses'])
-            )
+            'avg_processing_time_ms': average_time,
+            'redis_enabled': bool(self.redis_client)
         }
     
     async def clear_cache(self, user_id: Optional[str] = None) -> None:

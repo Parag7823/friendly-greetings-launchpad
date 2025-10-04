@@ -44,9 +44,10 @@ interface DuplicateDetectionModalProps {
   duplicateInfo?: DuplicateInfo;
   versionCandidates?: VersionCandidate[];
   recommendation?: VersionRecommendation;
-  onDecision: (decision: 'replace' | 'keep_both' | 'skip') => void;
+  onDecision: (decision: 'replace' | 'keep_both' | 'skip' | 'delta_merge') => void;
   onVersionAccept: (accepted: boolean, feedback?: string) => void;
   phase: 'basic_duplicate' | 'versions_detected' | 'similar_files';
+  deltaAnalysis?: any;
 }
 
 export const DuplicateDetectionModal: React.FC<DuplicateDetectionModalProps> = ({
@@ -57,7 +58,8 @@ export const DuplicateDetectionModal: React.FC<DuplicateDetectionModalProps> = (
   recommendation,
   onDecision,
   onVersionAccept,
-  phase
+  phase,
+  deltaAnalysis
 }) => {
   const [feedback, setFeedback] = useState('');
   const [showFeedback, setShowFeedback] = useState(false);
@@ -98,6 +100,19 @@ export const DuplicateDetectionModal: React.FC<DuplicateDetectionModalProps> = (
               </div>
             ))}
           </div>
+
+          {/* Optional delta analysis summary */}
+          {deltaAnalysis?.delta_analysis && (
+            <div className="mt-4 bg-white rounded p-3 border">
+              <p className="font-medium text-gray-900 mb-1">Delta analysis</p>
+              <p className="text-sm text-gray-700">
+                New rows: <span className="font-semibold">{deltaAnalysis.delta_analysis.new_rows}</span> •
+                Existing rows: <span className="font-semibold">{deltaAnalysis.delta_analysis.existing_rows}</span> •
+                Confidence: <span className="font-semibold">{Math.round((deltaAnalysis.delta_analysis.confidence || 0) * 100)}%</span>
+              </p>
+            </div>
+          )}
+
         </div>
       )}
 
@@ -126,6 +141,20 @@ export const DuplicateDetectionModal: React.FC<DuplicateDetectionModalProps> = (
             <div className="text-left">
               <p className="font-medium text-gray-900">Keep both files</p>
               <p className="text-sm text-gray-600">Process this file alongside the existing one</p>
+            </div>
+          </div>
+        </button>
+
+        {/* Delta merge option when we have analysis or similar/near duplicate */}
+        <button
+          onClick={() => onDecision('delta_merge')}
+          className="w-full flex items-center justify-between p-4 border border-blue-200 rounded-lg hover:bg-blue-50 transition-colors"
+        >
+          <div className="flex items-center space-x-3">
+            <BarChart3 className="h-5 w-5 text-blue-500" />
+            <div className="text-left">
+              <p className="font-medium text-gray-900">Merge new rows (delta)</p>
+              <p className="text-sm text-gray-600">Only append rows not present in the existing file</p>
             </div>
           </div>
         </button>

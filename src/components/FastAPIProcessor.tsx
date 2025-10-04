@@ -33,6 +33,8 @@ interface FastAPIProcessingResult {
   file_name?: string;
   requires_user_decision?: boolean;
   message?: string;
+  existing_file_id?: string;
+  delta_analysis?: any;
 }
 
 interface FastAPIProcessingProgress {
@@ -362,7 +364,38 @@ export class FastAPIProcessor {
             processingTime: 0,
             file_hash: fileHash,
             storage_path: fileName,
-            file_name: file.name
+            file_name: file.name,
+            existing_file_id: initialResponse.existing_file_id || null,
+            delta_analysis: initialResponse.delta_analysis
+          };
+        }
+
+        // Handle near/content duplicate statuses that also require a user decision
+        if (initialResponse.status === 'near_duplicate_detected' || initialResponse.status === 'content_duplicate_detected') {
+          this.updateProgress('duplicate_detected', 'Potential duplicate detected!', 20);
+          const analysis =
+            initialResponse.duplicate_analysis ??
+            initialResponse.near_duplicate_analysis ??
+            initialResponse.content_duplicate_analysis;
+          return {
+            status: initialResponse.status,
+            duplicate_analysis: analysis,
+            delta_analysis: initialResponse.delta_analysis,
+            job_id: initialResponse.job_id,
+            requires_user_decision: true,
+            message: initialResponse.message,
+            // Return empty result structure for consistency
+            documentType: 'duplicate',
+            insights: {},
+            metrics: {},
+            summary: 'Duplicate or similar file detected',
+            sheets: [],
+            customPromptSuggestions: [],
+            processingTime: 0,
+            file_hash: fileHash,
+            storage_path: fileName,
+            file_name: file.name,
+            existing_file_id: initialResponse.existing_file_id || null
           };
         }
 
@@ -970,7 +1003,15 @@ export const useFastAPIProcessor = () => {
       });
 
       const result = await processor.processFile(file, customPrompt, undefined, onJobId);
-      
+
+      if (result?.requires_user_decision) {
+        toast({
+          title: "Action Required",
+          description: result.message || "Duplicate detected. Please choose how to proceed."
+        });
+        return result;
+      }
+
       toast({
         title: "Analysis Complete",
         description: `Processed ${result.sheets.length} sheets with real-time updates`
