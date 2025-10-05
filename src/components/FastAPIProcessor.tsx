@@ -46,6 +46,10 @@ interface FastAPIProcessingProgress {
     sheetsCompleted: number;
     totalSheets: number;
   };
+  // When duplicates are detected via WebSocket, backend attaches rich context.
+  // We forward it via this optional field so the UI can show a modal immediately.
+  extra?: any;
+  requires_user_decision?: boolean;
 }
 
 export class FastAPIProcessor {
@@ -61,13 +65,15 @@ export class FastAPIProcessor {
     this.progressCallback = callback;
   }
 
-  private updateProgress(step: string, message: string, progress: number, sheetProgress?: any) {
+  private updateProgress(step: string, message: string, progress: number, sheetProgress?: any, extra?: any) {
     if (this.progressCallback) {
       this.progressCallback({
         step,
         message,
         progress,
-        sheetProgress
+        sheetProgress,
+        extra,
+        requires_user_decision: extra?.requires_user_decision
       });
     }
   }
@@ -165,11 +171,19 @@ export class FastAPIProcessor {
             reject(new Error(data.error || 'Processing failed'));
           } else {
             // Progress update
+            const extra: any = {
+              duplicate_info: data.duplicate_info,
+              near_duplicate_info: data.near_duplicate_info,
+              content_duplicate_info: data.content_duplicate_info,
+              delta_analysis: data.delta_analysis,
+              requires_user_decision: data.requires_user_decision,
+            };
             this.updateProgress(
               data.step || 'processing',
               data.message || 'Processing...',
               data.progress || 0,
-              data.sheetProgress
+              data.sheetProgress,
+              extra
             );
           }
         } catch (error) {
@@ -238,7 +252,7 @@ export class FastAPIProcessor {
     file: File, 
     customPrompt?: string,
     userId?: string,
-    onJobId?: (jobId: string) => void
+    onJobId?: (jobId: string, fileHash: string) => void
   ): Promise<FastAPIProcessingResult> {
     let jobData: any = null;
     
@@ -303,7 +317,7 @@ export class FastAPIProcessor {
       
       // Notify about job ID for cancel functionality
       if (onJobId) {
-        onJobId(jobData.id);
+        onJobId(jobData.id, fileHash);
       }
 
       this.updateProgress('analysis', 'Processing with FastAPI backend...', 30);
@@ -990,7 +1004,7 @@ export const useFastAPIProcessor = () => {
     file: File,
     customPrompt?: string,
     onProgress?: (progress: FastAPIProcessingProgress) => void,
-    onJobId?: (jobId: string) => void
+    onJobId?: (jobId: string, fileHash: string) => void
   ) => {
     try {
       if (onProgress) {

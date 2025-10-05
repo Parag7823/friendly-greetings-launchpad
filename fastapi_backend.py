@@ -1410,61 +1410,70 @@ async def _quickbooks_sync_run(nango: NangoClient, req: ConnectorSyncRequest) ->
                     return {'normalized_events': 0}
                 events_batch = []
                 row_idx = 0
-                for it in items:
-                    meta = it.get('metadata') or {}
-                    if isinstance(meta, str):
-                        try:
-                            meta = json.loads(meta)
-                        except Exception:
-                            meta = {}
-                    txn_type = meta.get('TxnType') or 'Txn'
-                    kind = 'txn'
-                    lt = str(txn_type).lower()
-                    if lt == 'invoice':
-                        kind = 'invoice'
-                    elif lt == 'bill':
-                        kind = 'bill'
-                    elif lt == 'payment':
-                        kind = 'payment'
-                    payload = {
-                        'txn_id': it.get('provider_id'),
-                        'txn_type': txn_type,
-                        'doc_number': meta.get('DocNumber'),
-                        'txn_date': meta.get('TxnDate'),
-                        'total_amount': meta.get('TotalAmt'),
-                    }
-                    event = {
-                        'user_id': user_id,
-                        'file_id': None,
-                        'job_id': None,
-                        'provider': 'quickbooks',
-                        'kind': kind,
-                        'source_platform': 'QuickBooks',
-                        'payload': payload,
-                        'row_index': row_idx,
-                        'sheet_name': None,
-                        'source_filename': f"quickbooks:{it.get('provider_id')}",
-                        'uploader': user_id,
-                        'ingest_ts': (it.get('source_ts') or datetime.utcnow().isoformat()),
-                        'status': 'processed',
-                        'confidence_score': 0.95,
-                        'classification_metadata': {
-                            'category': 'financial_data',
-                            'subcategory': kind,
-                            'provider_id': it.get('provider_id')
-                        },
-                        'entities': {},
-                        'relationships': {}
-                    }
-                    events_batch.append(event)
-                    row_idx += 1
+                def _qbo_build_events(batch_items):
+                    nonlocal row_idx
+                    out = []
+                    for it in batch_items:
+                        meta = it.get('metadata') or {}
+                        if isinstance(meta, str):
+                            try:
+                                meta = json.loads(meta)
+                            except Exception:
+                                meta = {}
+                        txn_type = meta.get('TxnType') or 'Txn'
+                        kind = 'txn'
+                        lt = str(txn_type).lower()
+                        if lt == 'invoice':
+                            kind = 'invoice'
+                        elif lt == 'bill':
+                            kind = 'bill'
+                        elif lt == 'payment':
+                            kind = 'payment'
+                        payload = {
+                            'txn_id': it.get('provider_id'),
+                            'txn_type': txn_type,
+                            'doc_number': meta.get('DocNumber'),
+                            'txn_date': meta.get('TxnDate'),
+                            'total_amount': meta.get('TotalAmt'),
+                            'name': meta.get('Name')
+                        }
+                        event = {
+                            'user_id': user_id,
+                            'file_id': None,
+                            'job_id': None,
+                            'provider': 'quickbooks',
+                            'kind': kind,
+                            'source_platform': 'QuickBooks',
+                            'payload': payload,
+                            'row_index': row_idx,
+                            'sheet_name': None,
+                            'source_filename': f"quickbooks:{it.get('provider_id')}",
+                            'uploader': user_id,
+                            'ingest_ts': (it.get('source_ts') or datetime.utcnow().isoformat()),
+                            'status': 'processed',
+                            'confidence_score': 0.95,
+                            'classification_metadata': {
+                                'category': 'financial_data',
+                                'subcategory': kind,
+                                'provider_id': it.get('provider_id')
+                            },
+                            'entities': {},
+                            'relationships': {}
+                        }
+                        out.append(event)
+                        row_idx += 1
+                    return out
+                events_batch = batch_optimizer.batch_process_events(items, _qbo_build_events)
                 transaction_manager = get_transaction_manager()
+                norm_tx_id = None
                 async with transaction_manager.transaction(
                     user_id=user_id,
                     operation_type="accounting_normalization"
                 ) as tx:
                     if events_batch:
                         await tx.insert_batch('raw_events', events_batch)
+                    # capture tx id for downstream entity pipeline
+                    norm_tx_id = tx.transaction_id
                     # Mark external_items as normalized with timestamp
                     for it in items:
                         meta = it.get('metadata') or {}
@@ -1475,6 +1484,13 @@ async def _quickbooks_sync_run(nango: NangoClient, req: ConnectorSyncRequest) ->
                                 meta = {}
                         meta['normalized_at'] = datetime.utcnow().isoformat()
                         await tx.update('external_items', {'status': 'normalized', 'metadata': meta}, {'id': it['id']})
+                # Run entity pipeline for records inserted in this normalization transaction
+                try:
+                    if norm_tx_id:
+                        excel_processor = ExcelProcessor()
+                        await excel_processor._run_entity_pipeline_for_transaction(user_id, norm_tx_id, supabase)
+                except Exception as ep_err:
+                    logger.warning(f"QBO connector entity pipeline failed for tx {norm_tx_id}: {ep_err}")
                 return {'normalized_events': len(events_batch)}
             except Exception as e:
                 logger.error(f"QuickBooks normalization failed: {e}")
@@ -1487,7 +1503,7 @@ async def _quickbooks_sync_run(nango: NangoClient, req: ConnectorSyncRequest) ->
             return page
 
         # Fetch Invoices
-        inv_sql = f"SELECT Id, TxnDate, TotalAmt, DocNumber FROM Invoice ORDER BY TxnDate DESC STARTPOSITION 1 MAXRESULTS {limit}"
+        inv_sql = f"SELECT Id, TxnDate, TotalAmt, DocNumber, CustomerRef FROM Invoice ORDER BY TxnDate DESC STARTPOSITION 1 MAXRESULTS {limit}"
         inv_page = await qbo_query(inv_sql)
         invoices = (inv_page.get('QueryResponse') or {}).get('Invoice') or []
         batch_items: List[Dict[str, Any]] = []
@@ -1496,11 +1512,15 @@ async def _quickbooks_sync_run(nango: NangoClient, req: ConnectorSyncRequest) ->
             if not pid:
                 stats['skipped'] += 1
                 continue
+            # Try to capture customer name when available
+            cust_ref = inv.get('CustomerRef') or {}
+            cust_name = (cust_ref.get('name') or cust_ref.get('Name') or cust_ref.get('value')) if isinstance(cust_ref, dict) else None
             meta = {
                 'TxnType': 'Invoice',
                 'DocNumber': inv.get('DocNumber'),
                 'TxnDate': inv.get('TxnDate'),
                 'TotalAmt': inv.get('TotalAmt'),
+                'Name': cust_name,
                 'correlation_id': req.correlation_id,
             }
             item = {
@@ -1536,7 +1556,7 @@ async def _quickbooks_sync_run(nango: NangoClient, req: ConnectorSyncRequest) ->
                 logger.error(f"QuickBooks invoice batch transaction failed: {batch_err}")
 
         # Fetch Bills
-        bill_sql = f"SELECT Id, TxnDate, TotalAmt, DocNumber FROM Bill ORDER BY TxnDate DESC STARTPOSITION 1 MAXRESULTS {limit}"
+        bill_sql = f"SELECT Id, TxnDate, TotalAmt, DocNumber, VendorRef FROM Bill ORDER BY TxnDate DESC STARTPOSITION 1 MAXRESULTS {limit}"
         bill_page = await qbo_query(bill_sql)
         bills = (bill_page.get('QueryResponse') or {}).get('Bill') or []
         batch_items = []
@@ -1545,11 +1565,14 @@ async def _quickbooks_sync_run(nango: NangoClient, req: ConnectorSyncRequest) ->
             if not pid:
                 stats['skipped'] += 1
                 continue
+            vend_ref = bill.get('VendorRef') or {}
+            vend_name = (vend_ref.get('name') or vend_ref.get('Name') or vend_ref.get('value')) if isinstance(vend_ref, dict) else None
             meta = {
                 'TxnType': 'Bill',
                 'DocNumber': bill.get('DocNumber'),
                 'TxnDate': bill.get('TxnDate'),
                 'TotalAmt': bill.get('TotalAmt'),
+                'Name': vend_name,
                 'correlation_id': req.correlation_id,
             }
             item = {
@@ -1585,7 +1608,7 @@ async def _quickbooks_sync_run(nango: NangoClient, req: ConnectorSyncRequest) ->
                 logger.error(f"QuickBooks bill batch transaction failed: {batch_err}")
 
         # Fetch Payments
-        pay_sql = f"SELECT Id, TxnDate, TotalAmt FROM Payment ORDER BY TxnDate DESC STARTPOSITION 1 MAXRESULTS {limit}"
+        pay_sql = f"SELECT Id, TxnDate, TotalAmt, CustomerRef FROM Payment ORDER BY TxnDate DESC STARTPOSITION 1 MAXRESULTS {limit}"
         pay_page = await qbo_query(pay_sql)
         payments = (pay_page.get('QueryResponse') or {}).get('Payment') or []
         batch_items = []
@@ -1594,10 +1617,13 @@ async def _quickbooks_sync_run(nango: NangoClient, req: ConnectorSyncRequest) ->
             if not pid:
                 stats['skipped'] += 1
                 continue
+            pay_ref = pay.get('CustomerRef') or pay.get('EntityRef') or {}
+            pay_name = (pay_ref.get('name') or pay_ref.get('Name') or pay_ref.get('value')) if isinstance(pay_ref, dict) else None
             meta = {
                 'TxnType': 'Payment',
                 'TxnDate': pay.get('TxnDate'),
                 'TotalAmt': pay.get('TotalAmt'),
+                'Name': pay_name,
                 'correlation_id': req.correlation_id,
             }
             item = {
@@ -1802,64 +1828,72 @@ async def _xero_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> Dict[
                     return {'normalized_events': 0}
                 events_batch = []
                 row_idx = 0
-                for it in items:
-                    meta = it.get('metadata') or {}
-                    if isinstance(meta, str):
-                        try:
-                            meta = json.loads(meta)
-                        except Exception:
-                            meta = {}
-                    txn_type = meta.get('TxnType') or meta.get('type') or 'Txn'
-                    lt = str(txn_type).lower()
-                    if lt == 'invoice':
-                        kind = 'invoice'
-                    elif lt == 'payment':
-                        kind = 'payment'
-                    elif lt == 'contact':
-                        kind = 'contact'
-                    else:
-                        kind = 'txn'
-                    payload = {
-                        'txn_id': it.get('provider_id'),
-                        'txn_type': txn_type,
-                        'doc_number': meta.get('InvoiceNumber') or meta.get('DocNumber'),
-                        'txn_date': meta.get('Date') or meta.get('UpdatedDateUTC'),
-                        'total_amount': meta.get('Total') or meta.get('Amount'),
-                        'name': meta.get('Name'),
-                        'email': meta.get('EmailAddress')
-                    }
-                    event = {
-                        'user_id': user_id,
-                        'file_id': None,
-                        'job_id': None,
-                        'provider': 'xero',
-                        'kind': kind,
-                        'source_platform': 'Xero',
-                        'payload': payload,
-                        'row_index': row_idx,
-                        'sheet_name': None,
-                        'source_filename': f"xero:{it.get('provider_id')}",
-                        'uploader': user_id,
-                        'ingest_ts': (it.get('source_ts') or datetime.utcnow().isoformat()),
-                        'status': 'processed',
-                        'confidence_score': 0.95,
-                        'classification_metadata': {
-                            'category': 'financial_data',
-                            'subcategory': kind,
-                            'provider_id': it.get('provider_id')
-                        },
-                        'entities': {},
-                        'relationships': {}
-                    }
-                    events_batch.append(event)
-                    row_idx += 1
+                def _xero_build_events(batch_items):
+                    nonlocal row_idx
+                    out = []
+                    for it in batch_items:
+                        meta = it.get('metadata') or {}
+                        if isinstance(meta, str):
+                            try:
+                                meta = json.loads(meta)
+                            except Exception:
+                                meta = {}
+                        txn_type = meta.get('TxnType') or meta.get('type') or 'Txn'
+                        lt = str(txn_type).lower()
+                        if lt == 'invoice':
+                            kind = 'invoice'
+                        elif lt == 'payment':
+                            kind = 'payment'
+                        elif lt == 'contact':
+                            kind = 'contact'
+                        else:
+                            kind = 'txn'
+                        payload = {
+                            'txn_id': it.get('provider_id'),
+                            'txn_type': txn_type,
+                            'doc_number': meta.get('InvoiceNumber') or meta.get('DocNumber'),
+                            'txn_date': meta.get('Date') or meta.get('UpdatedDateUTC'),
+                            'total_amount': meta.get('Total') or meta.get('Amount'),
+                            'name': meta.get('Name'),
+                            'email': meta.get('EmailAddress')
+                        }
+                        event = {
+                            'user_id': user_id,
+                            'file_id': None,
+                            'job_id': None,
+                            'provider': 'xero',
+                            'kind': kind,
+                            'source_platform': 'Xero',
+                            'payload': payload,
+                            'row_index': row_idx,
+                            'sheet_name': None,
+                            'source_filename': f"xero:{it.get('provider_id')}",
+                            'uploader': user_id,
+                            'ingest_ts': (it.get('source_ts') or datetime.utcnow().isoformat()),
+                            'status': 'processed',
+                            'confidence_score': 0.95,
+                            'classification_metadata': {
+                                'category': 'financial_data',
+                                'subcategory': kind,
+                                'provider_id': it.get('provider_id')
+                            },
+                            'entities': {},
+                            'relationships': {}
+                        }
+                        out.append(event)
+                        row_idx += 1
+                    return out
+                events_batch = batch_optimizer.batch_process_events(items, _xero_build_events)
                 transaction_manager = get_transaction_manager()
+                norm_tx_id = None
                 async with transaction_manager.transaction(
                     user_id=user_id,
                     operation_type="accounting_normalization"
                 ) as tx:
                     if events_batch:
                         await tx.insert_batch('raw_events', events_batch)
+                    # capture tx id for downstream entity pipeline
+                    norm_tx_id = tx.transaction_id
                     # Mark external_items as normalized with timestamp
                     for it in items:
                         meta = it.get('metadata') or {}
@@ -1870,6 +1904,13 @@ async def _xero_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> Dict[
                                 meta = {}
                         meta['normalized_at'] = datetime.utcnow().isoformat()
                         await tx.update('external_items', {'status': 'normalized', 'metadata': meta}, {'id': it['id']})
+                # Run entity pipeline for records inserted in this normalization transaction
+                try:
+                    if norm_tx_id:
+                        excel_processor = ExcelProcessor()
+                        await excel_processor._run_entity_pipeline_for_transaction(user_id, norm_tx_id, supabase)
+                except Exception as ep_err:
+                    logger.warning(f"Xero connector entity pipeline failed for tx {norm_tx_id}: {ep_err}")
                 return {'normalized_events': len(events_batch)}
             except Exception as e:
                 logger.error(f"Xero normalization failed: {e}")
@@ -5759,7 +5800,6 @@ class ExcelProcessor:
         if not duplicate_decision:
             try:
                 file_metadata = FileMetadata(
-{{ ... }}
                     user_id=user_id,
                     file_hash=file_hash_for_check,
                     filename=filename,
@@ -5990,6 +6030,22 @@ class ExcelProcessor:
             # Calculate content fingerprint for row-level deduplication
             content_fingerprint = duplicate_service.calculate_content_fingerprint(sheets)
             
+            # Compute per-sheet row hashes for delta analysis (lightweight representation)
+            sheets_row_hashes = {}
+            try:
+                for sheet_name, df in sheets.items():
+                    try:
+                        hashes = []
+                        for _, row in df.iterrows():
+                            row_str = "|".join([str(val) for val in row.values if pd.notna(val)])
+                            hashes.append(hashlib.md5(row_str.encode('utf-8')).hexdigest())
+                        sheets_row_hashes[sheet_name] = hashes
+                    except Exception:
+                        # Best-effort; skip problematic sheets
+                        continue
+            except Exception:
+                sheets_row_hashes = {}
+            
             # Attempt to resolve originating external_item_id via file hash
             external_item_id = None
             try:
@@ -6012,6 +6068,7 @@ class ExcelProcessor:
                     'document_analysis': doc_analysis,
                     'file_hash': file_hash,
                     'content_fingerprint': content_fingerprint,
+                    'sheets_row_hashes': sheets_row_hashes,
                     'total_rows': sum(len(sheet) for sheet in sheets.values()),
                     'processed_at': datetime.utcnow().isoformat(),
                     'duplicate_analysis': duplicate_analysis
@@ -6095,14 +6152,36 @@ class ExcelProcessor:
                 column_names = list(chunk_data.columns)
                 
                 # Process chunk rows in smaller batches for transaction efficiency
-                batch_size = 50  # Smaller batches for better transaction performance
+                batch_size = batch_optimizer.batch_size  # Align with batch optimizer configuration
                 events_batch = []
                 
                 for batch_idx in range(0, len(chunk_data), batch_size):
                     batch_df = chunk_data.iloc[batch_idx:batch_idx + batch_size]
                     
                     try:
-                        # Process batch with fast pattern-based classification
+                        # Build vectorized platform guesses for this batch (fast, no-LLM)
+                        row_platform_series = None
+                        try:
+                            pattern_dict = {}
+                            detector_patterns = getattr(self.platform_detector, 'platform_patterns', {}) or {}
+                            for plat, meta in detector_patterns.items():
+                                try:
+                                    keywords = []
+                                    if isinstance(meta, dict):
+                                        kw = meta.get('keywords')
+                                        if isinstance(kw, list):
+                                            keywords = [str(k) for k in kw if k]
+                                    if keywords:
+                                        pattern_dict[plat] = keywords
+                                except Exception:
+                                    continue
+                            if pattern_dict:
+                                row_platform_series = batch_optimizer.vectorized_classify(batch_df, pattern_dict)
+                        except Exception as v_err:
+                            logger.warning(f"Vectorized platform classification failed: {v_err}")
+                            row_platform_series = None
+
+                        # Process batch with fast pattern-based + vectorized classification
                         for row_index, row in batch_df.iterrows():
                             try:
                                 # Create event for this row
@@ -6113,6 +6192,21 @@ class ExcelProcessor:
                                 # Fast cached classification with 90% cost reduction
                                 classification = await self._fast_classify_row_cached(row, platform_info, column_names)
                                 event['classification_metadata'].update(classification)
+
+                                # Apply vectorized row-level platform guess
+                                if row_platform_series is not None:
+                                    try:
+                                        row_guess = row_platform_series.get(row_index)
+                                    except Exception:
+                                        row_guess = None
+                                    if isinstance(row_guess, str) and row_guess:
+                                        # expose guess in classification metadata
+                                        event['classification_metadata'] = event.get('classification_metadata', {})
+                                        event['classification_metadata']['platform_guess'] = row_guess
+                                        # set source_platform when unknown/general
+                                        src_plat = event.get('source_platform') or 'unknown'
+                                        if src_plat in ('unknown', 'general', None, ''):
+                                            event['source_platform'] = row_guess
                                 
                                 # Store event in raw_events table with enrichment fields
                                 enriched_payload = event['payload']  # This is now the enriched payload
@@ -6232,6 +6326,7 @@ class ExcelProcessor:
                         'platform_detection': platform_info,
                         'document_analysis': doc_analysis,
                         'file_hash': file_hash,
+                        'sheets_row_hashes': sheets_row_hashes,
                         'total_rows': total_rows,
                         'events_created': events_created,
                         'errors': errors,
@@ -7179,13 +7274,17 @@ async def get_performance_optimization_status():
                 payload = event.get('payload', {})
                 
                 # Check what vendor fields are available
-                vendor_fields = ['vendor_raw', 'vendor', 'merchant', 'payee', 'description']
+                vendor_fields = ['vendor_raw', 'vendor', 'merchant', 'payee', 'description', 'name', 'counterparty', 'customer', 'client']
                 for field in vendor_fields:
                     if field in payload and payload[field]:
                         vendor_fields_found.append(f"{field}: {payload[field]}")
                 
                 vendor_raw = payload.get('vendor_raw') or payload.get('vendor') or payload.get('merchant')
                 
+                # Additional fallbacks for connector payloads
+                if not vendor_raw:
+                    vendor_raw = payload.get('payee') or payload.get('name') or payload.get('counterparty') or payload.get('customer') or payload.get('client')
+
                 if vendor_raw and vendor_raw not in entity_map:
                     entity = {
                         'entity_type': 'vendor',
@@ -7252,6 +7351,69 @@ async def get_performance_optimization_status():
         except Exception as e:
             logger.error(f"Error resolving entities: {e}")
             return []
+
+    async def _extract_entities_from_events_by_transaction(self, user_id: str, transaction_id: str, supabase: Client) -> List[Dict]:
+        """Extract entities from processed events for normalization, filtered by transaction_id (connector flow)"""
+        try:
+            events = supabase.table('raw_events').select(
+                'id, payload, kind, source_platform, row_index'
+            ).eq('user_id', user_id).eq('transaction_id', transaction_id).execute()
+            events_data = events.data or []
+            
+            logger.info(f"Found {len(events_data)} events for entity extraction (transaction {transaction_id})")
+            
+            entities = []
+            entity_map = {}
+            vendor_fields_found = []
+            
+            for event in events_data:
+                payload = event.get('payload', {})
+                vendor_fields = ['vendor_raw', 'vendor', 'merchant', 'payee', 'description', 'name', 'counterparty', 'customer', 'client']
+                for field in vendor_fields:
+                    if field in payload and payload[field]:
+                        vendor_fields_found.append(f"{field}: {payload[field]}")
+                vendor_raw = (
+                    payload.get('vendor_raw') or payload.get('vendor') or payload.get('merchant') or
+                    payload.get('payee') or payload.get('name') or payload.get('counterparty') or
+                    payload.get('customer') or payload.get('client')
+                )
+                if vendor_raw and vendor_raw not in entity_map:
+                    entity = {
+                        'entity_type': 'vendor',
+                        'canonical_name': vendor_raw,
+                        'aliases': [vendor_raw],
+                        'email': payload.get('email'),
+                        'phone': payload.get('phone'),
+                        'bank_account': payload.get('bank_account'),
+                        'platform_sources': [event.get('source_platform', 'unknown')],
+                        'source_files': [event.get('source_filename', '')],
+                        'confidence_score': 0.8
+                    }
+                    entities.append(entity)
+                    entity_map[vendor_raw] = entity
+            if vendor_fields_found:
+                logger.info(f"Found vendor fields (tx): {vendor_fields_found[:5]}")
+            else:
+                logger.warning("No vendor/merchant fields found in any events for transaction - entity extraction returns 0")
+            
+            return entities
+        except Exception as e:
+            logger.error(f"Error extracting entities by transaction: {e}")
+            return []
+
+    async def _run_entity_pipeline_for_transaction(self, user_id: str, transaction_id: str, supabase: Client):
+        """Run extraction + resolution + persistence for connector-ingested events referenced by transaction_id."""
+        try:
+            entities = await self._extract_entities_from_events_by_transaction(user_id, transaction_id, supabase)
+            if not entities:
+                logger.info(f"No entities found for transaction {transaction_id}; skipping connector entity resolution")
+                return
+            matches = await self._resolve_entities(entities, user_id, f"connector_txn:{transaction_id}", supabase)
+            await self._store_normalized_entities(entities, user_id, transaction_id, supabase)
+            await self._store_entity_matches(matches, user_id, transaction_id, supabase)
+            logger.info(f"Connector entity pipeline completed for tx {transaction_id}: entities={len(entities)}, matches={len(matches)}")
+        except Exception as e:
+            logger.error(f"Connector entity pipeline failed for tx {transaction_id}: {e}")
 
     async def _learn_platform_patterns(self, platform_info: Dict, user_id: str, filename: str, supabase: Client) -> List[Dict]:
         """Learn platform patterns from the detected platform"""
@@ -7972,6 +8134,13 @@ async def classify_document_endpoint(request: DocumentClassificationRequest):
         
         # Classify document
         result = await document_classifier.classify_document_universal(
+            payload=request.payload,
+            filename=request.filename,
+            file_content=request.file_content,
+            user_id=request.user_id
+        )
+
+        return {
             "status": "success",
             "result": result,
             "user_id": request.user_id,
@@ -9761,9 +9930,15 @@ async def nango_webhook(request: Request):
                         correlation_id=correlation_id
                     )
                     if _queue_backend() == 'arq':
-                        pool = await get_arq_pool()
-                        await pool.enqueue_job('gmail_sync', req.model_dump())
-                        JOBS_ENQUEUED.labels(provider=NANGO_GMAIL_INTEGRATION_ID, mode='incremental').inc()
+                        try:
+                            pool = await get_arq_pool()
+                            await pool.enqueue_job('gmail_sync', req.model_dump())
+                            JOBS_ENQUEUED.labels(provider=NANGO_GMAIL_INTEGRATION_ID, mode='incremental').inc()
+                        except Exception as e:
+                            logger.warning(f"ARQ dispatch failed in webhook: {e}")
+                            nango = NangoClient(base_url=NANGO_BASE_URL)
+                            asyncio.create_task(_gmail_sync_run(nango, req))
+                            JOBS_ENQUEUED.labels(provider=NANGO_GMAIL_INTEGRATION_ID, mode='incremental').inc()
                     elif _use_celery() and task_gmail_sync:
                         task_gmail_sync.apply_async(args=[req.model_dump()])
                         JOBS_ENQUEUED.labels(provider=NANGO_GMAIL_INTEGRATION_ID, mode='incremental').inc()
@@ -9781,9 +9956,15 @@ async def nango_webhook(request: Request):
                         correlation_id=correlation_id
                     )
                     if _queue_backend() == 'arq':
-                        pool = await get_arq_pool()
-                        await pool.enqueue_job('dropbox_sync', req.model_dump())
-                        JOBS_ENQUEUED.labels(provider=NANGO_DROPBOX_INTEGRATION_ID, mode='incremental').inc()
+                        try:
+                            pool = await get_arq_pool()
+                            await pool.enqueue_job('dropbox_sync', req.model_dump())
+                            JOBS_ENQUEUED.labels(provider=NANGO_DROPBOX_INTEGRATION_ID, mode='incremental').inc()
+                        except Exception as e:
+                            logger.warning(f"ARQ dispatch failed in webhook: {e}")
+                            nango = NangoClient(base_url=NANGO_BASE_URL)
+                            asyncio.create_task(_dropbox_sync_run(nango, req))
+                            JOBS_ENQUEUED.labels(provider=NANGO_DROPBOX_INTEGRATION_ID, mode='incremental').inc()
                     else:
                         nango = NangoClient(base_url=NANGO_BASE_URL)
                         asyncio.create_task(_dropbox_sync_run(nango, req))
@@ -9798,9 +9979,15 @@ async def nango_webhook(request: Request):
                         correlation_id=correlation_id
                     )
                     if _queue_backend() == 'arq':
-                        pool = await get_arq_pool()
-                        await pool.enqueue_job('gdrive_sync', req.model_dump())
-                        JOBS_ENQUEUED.labels(provider=NANGO_GOOGLE_DRIVE_INTEGRATION_ID, mode='incremental').inc()
+                        try:
+                            pool = await get_arq_pool()
+                            await pool.enqueue_job('gdrive_sync', req.model_dump())
+                            JOBS_ENQUEUED.labels(provider=NANGO_GOOGLE_DRIVE_INTEGRATION_ID, mode='incremental').inc()
+                        except Exception as e:
+                            logger.warning(f"ARQ dispatch failed in webhook: {e}")
+                            nango = NangoClient(base_url=NANGO_BASE_URL)
+                            asyncio.create_task(_gdrive_sync_run(nango, req))
+                            JOBS_ENQUEUED.labels(provider=NANGO_GOOGLE_DRIVE_INTEGRATION_ID, mode='incremental').inc()
                     else:
                         nango = NangoClient(base_url=NANGO_BASE_URL)
                         asyncio.create_task(_gdrive_sync_run(nango, req))
@@ -9815,9 +10002,15 @@ async def nango_webhook(request: Request):
                         correlation_id=correlation_id
                     )
                     if _queue_backend() == 'arq':
-                        pool = await get_arq_pool()
-                        await pool.enqueue_job('zoho_mail_sync', req.model_dump())
-                        JOBS_ENQUEUED.labels(provider=NANGO_ZOHO_MAIL_INTEGRATION_ID, mode='incremental').inc()
+                        try:
+                            pool = await get_arq_pool()
+                            await pool.enqueue_job('zoho_mail_sync', req.model_dump())
+                            JOBS_ENQUEUED.labels(provider=NANGO_ZOHO_MAIL_INTEGRATION_ID, mode='incremental').inc()
+                        except Exception as e:
+                            logger.warning(f"ARQ dispatch failed in webhook: {e}")
+                            nango = NangoClient(base_url=NANGO_BASE_URL)
+                            asyncio.create_task(_zohomail_sync_run(nango, req))
+                            JOBS_ENQUEUED.labels(provider=NANGO_ZOHO_MAIL_INTEGRATION_ID, mode='incremental').inc()
                     else:
                         nango = NangoClient(base_url=NANGO_BASE_URL)
                         asyncio.create_task(_zohomail_sync_run(nango, req))
@@ -9832,9 +10025,15 @@ async def nango_webhook(request: Request):
                         correlation_id=correlation_id
                     )
                     if _queue_backend() == 'arq':
-                        pool = await get_arq_pool()
-                        await pool.enqueue_job('quickbooks_sync', req.model_dump())
-                        JOBS_ENQUEUED.labels(provider=NANGO_QUICKBOOKS_INTEGRATION_ID, mode='incremental').inc()
+                        try:
+                            pool = await get_arq_pool()
+                            await pool.enqueue_job('quickbooks_sync', req.model_dump())
+                            JOBS_ENQUEUED.labels(provider=NANGO_QUICKBOOKS_INTEGRATION_ID, mode='incremental').inc()
+                        except Exception as e:
+                            logger.warning(f"ARQ dispatch failed in webhook: {e}")
+                            nango = NangoClient(base_url=NANGO_BASE_URL)
+                            asyncio.create_task(_quickbooks_sync_run(nango, req))
+                            JOBS_ENQUEUED.labels(provider=NANGO_QUICKBOOKS_INTEGRATION_ID, mode='incremental').inc()
                     else:
                         nango = NangoClient(base_url=NANGO_BASE_URL)
                         asyncio.create_task(_quickbooks_sync_run(nango, req))
@@ -9849,9 +10048,15 @@ async def nango_webhook(request: Request):
                         correlation_id=correlation_id
                     )
                     if _queue_backend() == 'arq':
-                        pool = await get_arq_pool()
-                        await pool.enqueue_job('xero_sync', req.model_dump())
-                        JOBS_ENQUEUED.labels(provider=NANGO_XERO_INTEGRATION_ID, mode='incremental').inc()
+                        try:
+                            pool = await get_arq_pool()
+                            await pool.enqueue_job('xero_sync', req.model_dump())
+                            JOBS_ENQUEUED.labels(provider=NANGO_XERO_INTEGRATION_ID, mode='incremental').inc()
+                        except Exception as e:
+                            logger.warning(f"ARQ dispatch failed in webhook: {e}")
+                            nango = NangoClient(base_url=NANGO_BASE_URL)
+                            asyncio.create_task(_xero_sync_run(nango, req))
+                            JOBS_ENQUEUED.labels(provider=NANGO_XERO_INTEGRATION_ID, mode='incremental').inc()
                     else:
                         nango = NangoClient(base_url=NANGO_BASE_URL)
                         asyncio.create_task(_xero_sync_run(nango, req))

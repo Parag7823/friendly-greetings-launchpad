@@ -897,16 +897,46 @@ class ProductionDuplicateDetectionService:
             Dictionary with delta analysis results
         """
         try:
-            # Get existing file data
+            # Get existing file data (prefer lightweight "sheets_row_hashes")
             existing_result = self.supabase.table('raw_records').select(
-                'content'
-            ).eq('id', existing_file_id).eq('user_id', user_id).execute()
+                'id, content, file_name'
+            ).eq('id', existing_file_id).eq('user_id', user_id).limit(1).execute()
             
             if not existing_result.data:
                 return {'delta_analysis': None, 'error': 'Existing file not found'}
             
-            existing_content = existing_result.data[0].get('content', {})
-            existing_sheets = existing_content.get('sheets_data', {})
+            existing_row = existing_result.data[0]
+            existing_content = existing_row.get('content', {}) or {}
+            existing_hashes = existing_content.get('sheets_row_hashes') or {}
+            existing_sheets: Dict[str, List[str]] = {}
+            
+            if existing_hashes:
+                # Use precomputed row hashes per sheet
+                for sheet_name, hashes in existing_hashes.items():
+                    if isinstance(hashes, list):
+                        existing_sheets[sheet_name] = hashes
+            else:
+                # Fallback: reconstruct per-sheet row hashes from raw_events of existing file
+                try:
+                    events_res = self.supabase.table('raw_events').select(
+                        'sheet_name, payload'
+                    ).eq('file_id', existing_file_id).eq('user_id', user_id).execute()
+                    tmp: Dict[str, List[str]] = {}
+                    for ev in (events_res.data or []):
+                        sname = ev.get('sheet_name') or 'Unknown'
+                        payload = ev.get('payload') or {}
+                        # naive stable hash across payload values
+                        try:
+                            # preserve key ordering by sorting items
+                            items = sorted(payload.items(), key=lambda kv: kv[0])
+                            row_str = "|".join([f"{k}={v}" for k, v in items])
+                        except Exception:
+                            row_str = str(payload)
+                        row_hash = hashlib.md5(row_str.encode('utf-8', errors='ignore')).hexdigest()
+                        tmp.setdefault(sname, []).append(row_hash)
+                    existing_sheets = tmp
+                except Exception:
+                    existing_sheets = {}
             
             delta_analysis = {
                 'new_rows': 0,
@@ -921,7 +951,8 @@ class ProductionDuplicateDetectionService:
             sheet_count = 0
             
             for sheet_name, new_df in new_sheets.items():
-                if sheet_name not in existing_sheets:
+                existing_hash_list = existing_sheets.get(sheet_name, [])
+                if not existing_hash_list:
                     # Entirely new sheet
                     delta_analysis['sheet_analysis'][sheet_name] = {
                         'status': 'new_sheet',
@@ -933,21 +964,14 @@ class ProductionDuplicateDetectionService:
                     continue
                 
                 # Compare rows in existing sheet
-                existing_df = pd.DataFrame(existing_sheets[sheet_name])
                 new_row_hashes = set()
-                existing_row_hashes = set()
+                existing_row_hashes = set(existing_hash_list)
                 
                 # Calculate hashes for new rows
-                for idx, row in new_df.iterrows():
+                for _, row in new_df.iterrows():
                     row_str = "|".join([str(val) for val in row.values if pd.notna(val)])
                     row_hash = hashlib.md5(row_str.encode('utf-8')).hexdigest()
                     new_row_hashes.add(row_hash)
-                
-                # Calculate hashes for existing rows
-                for idx, row in existing_df.iterrows():
-                    row_str = "|".join([str(val) for val in row.values if pd.notna(val)])
-                    row_hash = hashlib.md5(row_str.encode('utf-8')).hexdigest()
-                    existing_row_hashes.add(row_hash)
                 
                 # Analyze differences
                 new_only = new_row_hashes - existing_row_hashes

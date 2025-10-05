@@ -79,18 +79,44 @@ export const EnhancedFileUpload: React.FC = () => {
           'content_duplicate_found',
           'delta_analysis_complete'
         ].includes(progress.step)) {
-          // Show duplicate modal
+          // Extract duplicate info from WebSocket extras for accurate modal context
+          const extra: any = (progress as any).extra || {};
+          let duplicateFiles: any[] = [];
+          let existingId: string | null = null;
+          if (extra.duplicate_info?.duplicate_files?.length) {
+            duplicateFiles = extra.duplicate_info.duplicate_files;
+            existingId = duplicateFiles[0]?.id || null;
+          } else if (extra.near_duplicate_info?.duplicate_files?.length) {
+            duplicateFiles = extra.near_duplicate_info.duplicate_files;
+            existingId = duplicateFiles[0]?.id || null;
+          } else if (extra.content_duplicate_info?.overlapping_files?.length) {
+            duplicateFiles = extra.content_duplicate_info.overlapping_files;
+            existingId = duplicateFiles[0]?.id || null;
+          }
+
+          // Normalize items for UI expectations
+          const normalizedFiles = (duplicateFiles || []).map((f: any) => ({
+            id: f.id,
+            filename: f.filename || f.file_name || 'Unknown',
+            uploaded_at: f.uploaded_at || new Date().toISOString(),
+            status: f.status || 'unknown',
+            total_rows: f.total_rows || 0
+          }));
+
+          // Show duplicate modal populated from WS context
           setDuplicateModal(prev => ({
             ...prev,
             isOpen: true,
             phase: 'basic_duplicate',
             duplicateInfo: {
-              message: 'Potential duplicate detected!',
+              message: progress.message || 'Potential duplicate detected!',
               filename: file.name,
-              recommendation: 'replace_or_skip'
+              recommendation: 'replace_or_skip',
+              duplicate_files: normalizedFiles
             },
-            currentJobId: null,
-            currentFileHash: null
+            // currentJobId and currentFileHash are set in onJobId earlier
+            currentExistingFileId: existingId,
+            deltaAnalysis: extra.delta_analysis || prev.deltaAnalysis
           }));
         }
         
@@ -105,13 +131,20 @@ export const EnhancedFileUpload: React.FC = () => {
               }
             : f
         ));
-      }, (jobId) => {
+      }, (jobId, fileHash) => {
         // Store job ID for cancel functionality
         setFiles(prev => prev.map(f => 
           f.id === fileId 
             ? { ...f, jobId }
             : f
         ));
+
+        // Pre-fill duplicate modal context so decisions can be sent instantly when modal opens via WebSocket
+        setDuplicateModal(prev => ({
+          ...prev,
+          currentJobId: jobId,
+          currentFileHash: fileHash || prev.currentFileHash
+        }));
       });
 
       // Check if result indicates any duplicate flow requiring user decision
