@@ -45,6 +45,25 @@ try:
 except Exception:
     field_validator = None  # fallback if not available
 
+# ------------------------- Request Models (Pydantic) -------------------------
+class FieldDetectionRequest(BaseModel):
+    data: Dict[str, Any]
+    filename: Optional[str] = None
+    user_id: Optional[str] = None
+    context: Optional[Dict[str, Any]] = None
+
+class PlatformDetectionRequest(BaseModel):
+    file_content: Optional[str] = None  # base64 or text content
+    filename: Optional[str] = None
+    user_id: Optional[str] = None
+
+class DocumentClassificationRequest(BaseModel):
+    payload: Optional[Dict[str, Any]] = None
+    filename: Optional[str] = None
+    file_content: Optional[str] = None  # base64 or text content
+    user_id: Optional[str] = None
+    platform: Optional[str] = None
+
 # Database and external services
 from supabase import create_client, Client
 from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_LATEST
@@ -8083,10 +8102,16 @@ async def detect_fields_endpoint(request: FieldDetectionRequest):
         field_detector = UniversalFieldDetector()
         
         # Detect field types
+        ctx = request.context or {}
+        if request.user_id:
+            try:
+                ctx = {**ctx, 'user_id': request.user_id}
+            except Exception:
+                ctx = {'user_id': request.user_id}
         result = await field_detector.detect_field_types_universal(
             data=request.data,
             filename=request.filename,
-            user_id=request.user_id
+            context=ctx
         )
         
         return {
@@ -8133,8 +8158,9 @@ async def classify_document_endpoint(request: DocumentClassificationRequest):
         document_classifier = UniversalDocumentClassifier(cache_client=safe_get_ai_cache())
         
         # Classify document
+        safe_payload = request.payload or {}
         result = await document_classifier.classify_document_universal(
-            payload=request.payload,
+            payload=safe_payload,
             filename=request.filename,
             file_content=request.file_content,
             user_id=request.user_id
