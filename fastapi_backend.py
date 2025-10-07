@@ -22,7 +22,6 @@ from universal_platform_detector_optimized import UniversalPlatformDetectorOptim
 from universal_document_classifier_optimized import UniversalDocumentClassifierOptimized as UniversalDocumentClassifier
 from universal_extractors_optimized import UniversalExtractorsOptimized as UniversalExtractors
 from entity_resolver_optimized import EntityResolverOptimized as EntityResolver
-from mappers.universal_finance_mapper import UniversalFinanceMapper
 import pandas as pd
 import numpy as np
 import magic
@@ -91,10 +90,6 @@ def _use_celery() -> bool:
 def _queue_backend() -> str:
     """Return the queue backend mode: 'sync' (default) or 'arq'."""
     return (os.environ.get("QUEUE_BACKEND") or "sync").lower()
-
-def _ufs_dual_write() -> bool:
-    """Feature flag for Universal Finance Schema dual-write."""
-    return (os.environ.get("UFS_DUAL_WRITE") or "").lower() in ("1", "true", "yes")
 
 # Global ARQ pool (singleton pattern for connection reuse)
 _arq_pool = None
@@ -563,86 +558,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-@app.get("/api/schema/universal/v1")
-async def get_universal_schema():
-    """Return Universal Finance Schema v1 JSON."""
-    try:
-        base_dir = os.path.dirname(os.path.abspath(__file__))
-        schema_path = os.path.join(base_dir, "schemas", "universal_finance_schema.v1.json")
-        with open(schema_path, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Schema not available: {e}")
-
-@app.get("/api/ufs/verify")
-async def get_ufs_verification(user_id: Optional[str] = None):
-    """Verify Universal Finance Schema population vs legacy tables.
-    Returns counts and a small sample of any mismatches.
-    """
-    try:
-        # Counts: raw_events
-        re_q = supabase.table('raw_events').select('id', count='exact')
-        if user_id:
-            re_q = re_q.eq('user_id', user_id)
-        re_res = re_q.execute()
-        raw_events_count = getattr(re_res, 'count', None) or (len(re_res.data or []))
-
-        # Counts: universal_records total and with source_event_id not null
-        ur_total_q = supabase.table('universal_records').select('id', count='exact')
-        if user_id:
-            ur_total_q = ur_total_q.eq('user_id', user_id)
-        ur_total_res = ur_total_q.execute()
-        ur_total = getattr(ur_total_res, 'count', None) or (len(ur_total_res.data or []))
-
-        ur_null_q = supabase.table('universal_records').select('id', count='exact')
-        if user_id:
-            ur_null_q = ur_null_q.eq('user_id', user_id)
-        # source_event_id IS NULL
-        ur_null_q = ur_null_q.is_('source_event_id', 'null')
-        ur_null_res = ur_null_q.execute()
-        ur_source_null = getattr(ur_null_res, 'count', None) or (len(ur_null_res.data or []))
-        ur_with_source = max(ur_total - ur_source_null, 0)
-
-        # Counts: relationship_instances vs universal_relationships
-        ri_q = supabase.table('relationship_instances').select('id', count='exact')
-        if user_id:
-            ri_q = ri_q.eq('user_id', user_id)
-        ri_res = ri_q.execute()
-        rel_instances_count = getattr(ri_res, 'count', None) or (len(ri_res.data or []))
-
-        ur_rel_q = supabase.table('universal_relationships').select('id', count='exact')
-        if user_id:
-            ur_rel_q = ur_rel_q.eq('user_id', user_id)
-        ur_rel_res = ur_rel_q.execute()
-        universal_relationships_count = getattr(ur_rel_res, 'count', None) or (len(ur_rel_res.data or []))
-
-        # Sample mismatches: take up to 50 raw_event ids and see which lack universal mapping
-        sample_re_q = supabase.table('raw_events').select('id').order('created_at', desc=True).limit(50)
-        if user_id:
-            sample_re_q = sample_re_q.eq('user_id', user_id)
-        sample_re_res = sample_re_q.execute()
-        sample_ids = [row.get('id') for row in (sample_re_res.data or []) if row.get('id')]
-        missing_sample: List[str] = []
-        if sample_ids:
-            ur_map_res = supabase.table('universal_records').select('source_event_id').in_('source_event_id', sample_ids).execute()
-            mapped = {str(row.get('source_event_id')) for row in (ur_map_res.data or []) if row.get('source_event_id')}
-            for rid in sample_ids:
-                if str(rid) not in mapped:
-                    missing_sample.append(str(rid))
-
-        return {
-            'raw_events_count': raw_events_count,
-            'universal_records_total': ur_total,
-            'universal_records_with_source_event': ur_with_source,
-            'relationship_instances_count': rel_instances_count,
-            'universal_relationships_count': universal_relationships_count,
-            'missing_universal_sample': missing_sample[:10],
-            'timestamp': datetime.utcnow().isoformat()
-        }
-    except Exception as e:
-        logger.error(f"UFS verification failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
 
 # Startup environment validation
 async def validate_critical_environment():
@@ -1628,22 +1543,7 @@ async def _quickbooks_sync_run(nango: NangoClient, req: ConnectorSyncRequest) ->
                     operation_type="accounting_normalization"
                 ) as tx:
                     if events_batch:
-                        inserted = await tx.insert_batch('raw_events', events_batch)
-                        if _ufs_dual_write():
-                            try:
-                                universal_batch = []
-                                for rec in (inserted or []):
-                                    u = UniversalFinanceMapper.from_raw_event(rec, user_id=user_id)
-                                    universal_batch.append({
-                                        'user_id': user_id,
-                                        'record_type': u.get('record_type'),
-                                        'source_event_id': rec.get('id'),
-                                        'universal': u
-                                    })
-                                if universal_batch:
-                                    await tx.insert_batch('universal_records', universal_batch)
-                            except Exception as ue:
-                                logger.warning(f"Universal dual-write failed for batch: {ue}")
+                        await tx.insert_batch('raw_events', events_batch)
                     # capture tx id for downstream entity pipeline
                     norm_tx_id = tx.transaction_id
                     # Mark external_items as normalized with timestamp
@@ -2070,22 +1970,7 @@ async def _xero_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> Dict[
                     operation_type="accounting_normalization"
                 ) as tx:
                     if events_batch:
-                        inserted = await tx.insert_batch('raw_events', events_batch)
-                        if _ufs_dual_write():
-                            try:
-                                universal_batch = []
-                                for rec in (inserted or []):
-                                    u = UniversalFinanceMapper.from_raw_event(rec, user_id=user_id)
-                                    universal_batch.append({
-                                        'user_id': user_id,
-                                        'record_type': u.get('record_type'),
-                                        'source_event_id': rec.get('id'),
-                                        'universal': u
-                                    })
-                                if universal_batch:
-                                    await tx.insert_batch('universal_records', universal_batch)
-                            except Exception as ue:
-                                logger.warning(f"Universal dual-write failed for batch: {ue}")
+                        await tx.insert_batch('raw_events', events_batch)
                     # capture tx id for downstream entity pipeline
                     norm_tx_id = tx.transaction_id
                     # Mark external_items as normalized with timestamp
@@ -6469,22 +6354,6 @@ class ExcelProcessor:
                             try:
                                 batch_result = await tx.insert_batch('raw_events', events_batch)
                                 events_created += len(batch_result)
-                                # Dual-write universal records (feature-flagged)
-                                if _ufs_dual_write():
-                                    try:
-                                        universal_batch = []
-                                        for rec in (batch_result or []):
-                                            u = UniversalFinanceMapper.from_raw_event(rec, user_id=user_id)
-                                            universal_batch.append({
-                                                'user_id': user_id,
-                                                'record_type': u.get('record_type'),
-                                                'source_event_id': rec.get('id'),
-                                                'universal': u
-                                            })
-                                        if universal_batch:
-                                            await tx.insert_batch('universal_records', universal_batch)
-                                    except Exception as ue:
-                                        logger.warning(f"Universal dual-write failed for batch: {ue}")
                                 events_batch = []  # Clear batch
                                 
                             except Exception as e:
@@ -7253,27 +7122,6 @@ async def get_performance_optimization_status():
                     logger.debug(f"Stored normalized entity: {entity_data['canonical_name']}")
                 else:
                     logger.warning(f"Failed to store normalized entity: {entity_data['canonical_name']}")
-                
-                # Dual-write to universal_parties (feature-flagged)
-                if _ufs_dual_write():
-                    try:
-                        party_row = {
-                            'user_id': user_id,
-                            'entity_type': entity_data.get('entity_type') or 'vendor',
-                            'canonical_name': entity_data.get('canonical_name') or '',
-                            'aliases': entity_data.get('aliases') or [],
-                            'identifiers': {
-                                'email': entity_data.get('email'),
-                                'phone': entity_data.get('phone'),
-                                'bank_account': entity_data.get('bank_account'),
-                                'tax_id': entity_data.get('tax_id')
-                            },
-                            'match_history': [],
-                            'confidence_score': entity_data.get('confidence_score')
-                        }
-                        supabase.table('universal_parties').insert(party_row).execute()
-                    except Exception as ue:
-                        logger.warning(f"Universal parties dual-write failed: {ue}")
                     
         except Exception as e:
             logger.error(f"Error storing normalized entities: {e}")
@@ -7364,47 +7212,6 @@ async def get_performance_optimization_status():
                     logger.debug(f"Stored relationship: {rel_data['relationship_type']}")
                 else:
                     logger.warning(f"Failed to store relationship: {rel_data['relationship_type']}")
-
-            # Dual-write universal_relationships using universal_record IDs (feature-flagged)
-            if _ufs_dual_write():
-                try:
-                    # Build mapping: raw_event_id -> universal_record_id
-                    event_ids: List[str] = []
-                    for r in relationships:
-                        se = r.get('source_event_id'); te = r.get('target_event_id')
-                        if se:
-                            event_ids.append(se)
-                        if te:
-                            event_ids.append(te)
-                    event_ids = list({str(e) for e in event_ids if e})
-                    if event_ids:
-                        res = supabase.table('universal_records').select('id, source_event_id').in_('source_event_id', event_ids).execute()
-                        mapping = {str(row.get('source_event_id')): row.get('id') for row in (res.data or [])}
-                        universal_rows = []
-                        for r in relationships:
-                            sid = mapping.get(str(r.get('source_event_id')))
-                            tid = mapping.get(str(r.get('target_event_id')))
-                            if not sid or not tid:
-                                continue
-                            universal_rows.append({
-                                'user_id': user_id,
-                                'source_record_id': sid,
-                                'target_record_id': tid,
-                                'relationship_type': r.get('relationship_type', 'unknown'),
-                                'confidence_score': r.get('confidence_score', 0.5),
-                                'detection_method': r.get('detection_method', 'analysis'),
-                                'reasoning': r.get('reasoning', '')
-                            })
-                        # Batch insert
-                        batch_size = 100
-                        for i in range(0, len(universal_rows), batch_size):
-                            batch = universal_rows[i:i+batch_size]
-                            try:
-                                supabase.table('universal_relationships').insert(batch).execute()
-                            except Exception as ue:
-                                logger.warning(f"Universal relationship insert failed for batch {i}-{i+len(batch)}: {ue}")
-                except Exception as e:
-                    logger.warning(f"Universal dual-write (relationships) failed: {e}")
                     
         except Exception as e:
             logger.error(f"Error storing relationship instances: {e}")

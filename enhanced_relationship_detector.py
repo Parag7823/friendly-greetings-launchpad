@@ -30,36 +30,6 @@ class EnhancedRelationshipDetector:
         self.supabase = supabase_client
         self.relationship_cache = {}
         
-    def _use_universal_reads(self) -> bool:
-        """Feature flag for reading from universal_records instead of raw_events."""
-        return (os.environ.get('UFS_READS_FROM_UNIVERSAL') or '').lower() in ('1', 'true', 'yes')
-
-    async def _fetch_events_page(self, user_id: str, offset: int, batch_size: int) -> List[Dict[str, Any]]:
-        """Fetch a page of events from legacy raw_events or universal_records based on flag."""
-        if self._use_universal_reads():
-            res = self.supabase.table('universal_records').select(
-                'id, universal, created_at'
-            ).eq('user_id', user_id).order('created_at', desc=False).range(offset, offset + batch_size - 1).execute()
-            rows = res.data or []
-            out: List[Dict[str, Any]] = []
-            for r in rows:
-                u = r.get('universal') or {}
-                src = u.get('source') or {}
-                clsf = u.get('classification') or {}
-                out.append({
-                    'id': r.get('id'),
-                    'payload': u,
-                    'source_filename': src.get('filename') or 'unknown',
-                    'created_at': r.get('created_at'),
-                    'source_platform': clsf.get('platform') or src.get('platform') or 'unknown'
-                })
-            return out
-        else:
-            res = self.supabase.table('raw_events').select(
-                'id, payload, source_filename, created_at, source_platform'
-            ).eq('user_id', user_id).order('created_at', desc=False).range(offset, offset + batch_size - 1).execute()
-            return res.data or []
-
     async def detect_all_relationships(self, user_id: str) -> Dict[str, Any]:
         """Detect actual relationships between financial events"""
         try:
@@ -68,7 +38,10 @@ class EnhancedRelationshipDetector:
             offset = 0
             batch_size = 1000
             while True:
-                batch = await self._fetch_events_page(user_id, offset, batch_size)
+                result = self.supabase.table('raw_events').select(
+                    'id, payload, source_filename, created_at, source_platform'
+                ).eq('user_id', user_id).order('created_at', desc=False).range(offset, offset + batch_size - 1).execute()
+                batch = result.data or []
                 if not batch:
                     break
                 all_events.extend(batch)
