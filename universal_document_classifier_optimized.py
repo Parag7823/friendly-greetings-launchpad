@@ -15,6 +15,7 @@ import json
 import logging
 import re
 import time
+import os
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 from dataclasses import dataclass
@@ -80,6 +81,7 @@ class UniversalDocumentClassifierOptimized:
     
     def _get_default_config(self) -> Dict[str, Any]:
         """Get default configuration"""
+        default_model = os.getenv('DOC_CLASSIFIER_MODEL') or os.getenv('OPENAI_MODEL') or 'gpt-4o-mini'
         return {
             'enable_caching': True,
             'cache_ttl': 7200,  # 2 hours
@@ -88,7 +90,7 @@ class UniversalDocumentClassifierOptimized:
             'enable_learning': True,
             'confidence_threshold': 0.7,
             'max_indicators': 10,
-            'ai_model': 'gpt-4o-mini',
+            'ai_model': default_model,
             'ai_temperature': 0.1,
             'ai_max_tokens': 300,
             'learning_window': 1000,  # Keep last 1000 classifications for learning

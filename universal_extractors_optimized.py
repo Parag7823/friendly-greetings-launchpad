@@ -273,82 +273,13 @@ class UniversalExtractorsOptimized:
             
             return error_result
     
-    async def extract_vendor_universal(self, payload: Dict, confidence_threshold: float = None) -> Dict[str, Any]:
-        """Extract vendor name with confidence scoring and validation"""
-        try:
-            threshold = confidence_threshold or self.config['confidence_threshold']
-            
-            # 1. Pattern-based extraction
-            pattern_result = await self._extract_vendor_pattern(payload)
-            
-            # 2. AI-powered extraction (if available)
-            ai_result = await self._extract_vendor_ai(payload) if self.openai else None
-            
-            # 3. Combine results with confidence scoring
-            final_result = await self._combine_extraction_results(
-                'vendor', pattern_result, ai_result, payload
-            )
-            
-            # 4. Validate result
-            if final_result['confidence'] >= threshold:
-                return final_result
-            else:
-                return {
-                    'value': None,
-                    'confidence': final_result['confidence'],
-                    'method': 'insufficient_confidence',
-                    'suggestions': final_result.get('suggestions', [])
-                }
-                
-        except Exception as e:
-            logger.error(f"Vendor extraction failed: {e}")
-            return {
-                'value': None,
-                'confidence': 0.0,
-                'method': 'error',
-                'error': str(e)
-            }
-    
-    async def extract_amount_universal(self, payload: Dict, confidence_threshold: float = None) -> Dict[str, Any]:
-        """Extract amount with comprehensive validation and currency detection"""
-        try:
-            threshold = confidence_threshold or self.config['confidence_threshold']
-            
-            # 1. Pattern-based extraction
-            pattern_result = await self._extract_amount_pattern(payload)
-            
-            # 2. AI-powered extraction (if available)
-            ai_result = await self._extract_amount_ai(payload) if self.openai else None
-            
-            # 3. Combine results
-            final_result = await self._combine_extraction_results(
-                'amount', pattern_result, ai_result, payload
-            )
-            
-            # 4. Validate and normalize amount
-            if final_result['confidence'] >= threshold and final_result['value']:
-                normalized_amount = await self._normalize_amount(final_result['value'])
-                final_result['value'] = normalized_amount['amount']
-                final_result['currency'] = normalized_amount['currency']
-                final_result['confidence'] = min(final_result['confidence'], normalized_amount['confidence'])
-            
-            return final_result
-            
-        except Exception as e:
-            logger.error(f"Amount extraction failed: {e}")
-            return {
-                'value': None,
-                'confidence': 0.0,
-                'method': 'error',
-                'error': str(e)
-            }
-    
     # Helper methods
     def _generate_extraction_id(self, file_content: bytes, filename: str, user_id: str) -> str:
-        """Generate unique extraction ID"""
+        """Generate deterministic extraction ID (no timestamp)"""
         content_hash = hashlib.md5(file_content).hexdigest()[:8]
-        timestamp = int(time.time())
-        return f"extract_{user_id}_{timestamp}_{content_hash}"
+        filename_part = hashlib.md5((filename or "-").encode()).hexdigest()[:6]
+        user_part = (user_id or "anon")[:12]
+        return f"extract_{user_part}_{filename_part}_{content_hash}"
     
     def _detect_file_format(self, file_content: bytes, filename: str) -> str:
         """Detect file format from content and extension"""
@@ -401,25 +332,51 @@ class UniversalExtractorsOptimized:
         }
     
     async def _get_cached_extraction(self, extraction_id: str) -> Optional[Dict[str, Any]]:
-        """Get cached extraction result"""
+        """Get cached extraction result (prefers AIClassificationCache)."""
         if not self.cache:
             return None
         
         try:
+            # Prefer AIClassificationCache API
+            if hasattr(self.cache, 'get_cached_classification'):
+                return await self.cache.get_cached_classification(
+                    extraction_id,
+                    classification_type='data_extraction'
+                )
+            # Fallback to simple get(key)
             cache_key = f"extraction:{extraction_id}"
-            return await self.cache.get(cache_key)
+            get_fn = getattr(self.cache, 'get', None)
+            if get_fn:
+                return await get_fn(cache_key)
+            return None
         except Exception as e:
             logger.warning(f"Cache retrieval failed: {e}")
             return None
     
     async def _cache_extraction_result(self, extraction_id: str, result: Dict[str, Any]):
-        """Cache extraction result"""
+        """Cache extraction result (prefers AIClassificationCache)."""
         if not self.cache:
             return
         
         try:
+            # Prefer AIClassificationCache API
+            if hasattr(self.cache, 'store_classification'):
+                ttl_seconds = self.config.get('cache_ttl', 7200)
+                ttl_hours = max(1, int(ttl_seconds / 3600))
+                await self.cache.store_classification(
+                    extraction_id,
+                    result,
+                    classification_type='data_extraction',
+                    ttl_hours=ttl_hours,
+                    confidence_score=float(result.get('confidence_score', 0.0)) if isinstance(result, dict) else 0.0,
+                    model_version='extractors-v1'
+                )
+                return
+            # Fallback to simple set(key)
             cache_key = f"extraction:{extraction_id}"
-            await self.cache.set(cache_key, result, self.config['cache_ttl'])
+            set_fn = getattr(self.cache, 'set', None)
+            if set_fn:
+                await set_fn(cache_key, result, self.config.get('cache_ttl', 7200))
         except Exception as e:
             logger.warning(f"Cache storage failed: {e}")
     

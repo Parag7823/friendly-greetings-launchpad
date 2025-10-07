@@ -388,7 +388,7 @@ class EntityResolverOptimized:
             for entity in result.data:
                 # Calculate name similarity
                 entity_name_normalized = self._normalize_name(entity['canonical_name'])
-                name_similarity = self._calculate_name_similarity(normalized_name, entity_name_normalized)
+                name_similarity = await self._calculate_name_similarity(normalized_name, entity_name_normalized)
                 
                 # Calculate identifier similarity
                 identifier_similarity = self._calculate_identifier_similarity(identifiers, entity)
@@ -407,13 +407,37 @@ class EntityResolverOptimized:
             logger.error(f"Fuzzy match search failed: {e}")
             return None
     
-    def _calculate_name_similarity(self, name1: str, name2: str) -> float:
+    async def _calculate_name_similarity(self, name1: str, name2: str) -> float:
         """Calculate similarity between two entity names using multiple algorithms"""
         if not name1 or not name2:
             return 0.0
         
-        # Check cache first
-        cache_key = f"{name1}|{name2}"
+        # Check cache first (external shared cache preferred, then local)
+        # Use symmetric key to avoid order-dependence
+        _n1, _n2 = sorted([name1, name2])
+        cache_key = f"{_n1}|{_n2}"
+        # External cache path
+        if self.cache:
+            try:
+                # Prefer AIClassificationCache interface when available
+                if hasattr(self.cache, 'get_cached_classification'):
+                    cached_obj = await self.cache.get_cached_classification(
+                        {'name1': _n1, 'name2': _n2},
+                        classification_type='entity_similarity'
+                    )
+                    if isinstance(cached_obj, dict) and 'similarity' in cached_obj:
+                        return float(cached_obj['similarity'])
+                # Fallback to simple get(key)
+                get_fn = getattr(self.cache, 'get', None)
+                if get_fn:
+                    ext_val = await get_fn(f"entity_similarity:{cache_key}")
+                    if isinstance(ext_val, (int, float)):
+                        return float(ext_val)
+                    if isinstance(ext_val, dict) and 'similarity' in ext_val:
+                        return float(ext_val['similarity'])
+            except Exception as e:
+                logger.warning(f"Similarity external cache retrieval failed: {e}")
+        # Local in-process cache
         if cache_key in self.similarity_cache:
             return self.similarity_cache[cache_key]
         
@@ -441,7 +465,27 @@ class EntityResolverOptimized:
             # Weighted combination
             similarity = (sequence_similarity * 0.4) + (jaccard_similarity * 0.4) + (char_similarity * 0.2)
         
-        # Cache the result
+        # Cache the result (external first, then local)
+        if self.cache:
+            try:
+                if hasattr(self.cache, 'store_classification'):
+                    ttl_seconds = self.config.get('cache_ttl', 3600)
+                    ttl_hours = max(1, int(ttl_seconds / 3600))
+                    await self.cache.store_classification(
+                        {'name1': _n1, 'name2': _n2},
+                        {'similarity': float(similarity)},
+                        classification_type='entity_similarity',
+                        ttl_hours=ttl_hours,
+                        confidence_score=float(similarity),
+                        model_version='v1'
+                    )
+                else:
+                    set_fn = getattr(self.cache, 'set', None)
+                    if set_fn:
+                        await set_fn(f"entity_similarity:{cache_key}", float(similarity), self.config.get('cache_ttl', 3600))
+            except Exception as e:
+                logger.warning(f"Similarity external cache store failed: {e}")
+        # Always keep a fast local cache too
         self.similarity_cache[cache_key] = similarity
         if len(self.similarity_cache) > 10000:  # Limit cache size
             # Remove oldest entries
@@ -579,61 +623,66 @@ class EntityResolverOptimized:
             'platform': platform,
             'confidence': 0.0,
             'method': 'unresolved',
-            'identifiers': identifiers,
-            'source_file': source_file,
-            'row_id': row_id,
             'resolution_success': False,
             'reason': 'No matching entity found and creation failed'
         }
     
     # Helper methods
     def _generate_resolution_id(self, entity_name: str, entity_type: str, platform: str, user_id: str) -> str:
-        """Generate unique resolution ID"""
-        content_hash = hashlib.md5(f"{entity_name}_{entity_type}_{platform}_{user_id}".encode()).hexdigest()[:8]
-        timestamp = int(time.time())
-        return f"resolve_{user_id}_{timestamp}_{content_hash}"
-    
-    async def _validate_resolution_input(self, entity_name: str, entity_type: str, platform: str, user_id: str) -> Dict[str, Any]:
-        """Validate resolution input"""
-        errors = []
-        
-        if not entity_name or not entity_name.strip():
-            errors.append("Entity name is required")
-        
-        if not entity_type or not entity_type.strip():
-            errors.append("Entity type is required")
-        
-        if not platform or not platform.strip():
-            errors.append("Platform is required")
-        
-        if not user_id or not user_id.strip():
-            errors.append("User ID is required")
-        
-        return {
-            'valid': len(errors) == 0,
-            'errors': errors
-        }
+        """Generate deterministic resolution ID (no timestamp)"""
+        try:
+            normalized_name = self._normalize_name(entity_name)
+        except Exception:
+            normalized_name = str(entity_name or "")
+        user_part = (user_id or "anon")[:12]
+        key = f"{normalized_name}|{entity_type}|{platform}|{user_part}"
+        content_hash = hashlib.md5(key.encode('utf-8')).hexdigest()[:12]
+        return f"resolve_{user_part}_{content_hash}"
     
     async def _get_cached_resolution(self, resolution_id: str) -> Optional[Dict[str, Any]]:
-        """Get cached resolution result"""
+        """Get cached resolution result (prefers AIClassificationCache interface)."""
         if not self.cache:
             return None
-        
         try:
+            # Prefer AIClassificationCache API if available
+            if hasattr(self.cache, 'get_cached_classification'):
+                return await self.cache.get_cached_classification(
+                    resolution_id,
+                    classification_type='entity_resolution'
+                )
+            # Fallback to simple get(key)
             cache_key = f"entity_resolution:{resolution_id}"
-            return await self.cache.get(cache_key)
+            get_fn = getattr(self.cache, 'get', None)
+            if get_fn:
+                return await get_fn(cache_key)
+            return None
         except Exception as e:
             logger.warning(f"Cache retrieval failed: {e}")
             return None
     
     async def _cache_resolution_result(self, resolution_id: str, result: Dict[str, Any]):
-        """Cache resolution result"""
+        """Cache resolution result (prefers AIClassificationCache interface)."""
         if not self.cache:
             return
-        
         try:
+            # Prefer AIClassificationCache API if available
+            if hasattr(self.cache, 'store_classification'):
+                ttl_seconds = self.config.get('cache_ttl', 3600)
+                ttl_hours = max(1, int(ttl_seconds / 3600))
+                await self.cache.store_classification(
+                    resolution_id,
+                    result,
+                    classification_type='entity_resolution',
+                    ttl_hours=ttl_hours,
+                    confidence_score=float(result.get('confidence', 0.0)) if isinstance(result, dict) else 0.0,
+                    model_version='resolver-v1'
+                )
+                return
+            # Fallback to simple set(key, value, ttl)
             cache_key = f"entity_resolution:{resolution_id}"
-            await self.cache.set(cache_key, result, self.config['cache_ttl'])
+            set_fn = getattr(self.cache, 'set', None)
+            if set_fn:
+                await set_fn(cache_key, result, self.config.get('cache_ttl', 3600))
         except Exception as e:
             logger.warning(f"Cache storage failed: {e}")
     

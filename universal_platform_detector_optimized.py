@@ -15,6 +15,7 @@ import json
 import logging
 import re
 import time
+import os
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 from dataclasses import dataclass
@@ -76,6 +77,7 @@ class UniversalPlatformDetectorOptimized:
     
     def _get_default_config(self) -> Dict[str, Any]:
         """Get default configuration"""
+        default_model = os.getenv('PLATFORM_DETECTOR_MODEL') or os.getenv('OPENAI_MODEL') or 'gpt-4o-mini'
         return {
             'enable_caching': True,
             'cache_ttl': 7200,  # 2 hours
@@ -83,7 +85,7 @@ class UniversalPlatformDetectorOptimized:
             'enable_learning': True,
             'confidence_threshold': 0.7,
             'max_indicators': 10,
-            'ai_model': 'gpt-4o-mini',
+            'ai_model': default_model,
             'ai_temperature': 0.1,
             'ai_max_tokens': 300,
             'learning_window': 1000,  # Keep last 1000 detections for learning
@@ -648,11 +650,12 @@ class UniversalPlatformDetectorOptimized:
     
     # Helper methods
     def _generate_detection_id(self, payload: Dict, filename: str, user_id: str) -> str:
-        """Generate unique detection ID"""
+        """Generate deterministic detection ID (no timestamp)"""
         payload_str = str(sorted(payload.items())) if isinstance(payload, dict) else str(payload)
         content_hash = hashlib.md5(payload_str.encode()).hexdigest()[:8]
-        timestamp = int(time.time())
-        return f"detect_{user_id}_{timestamp}_{content_hash}"
+        filename_part = hashlib.md5((filename or "-").encode()).hexdigest()[:6]
+        user_part = (user_id or "anon")[:12]
+        return f"detect_{user_part}_{filename_part}_{content_hash}"
     
     async def _safe_openai_call(self, client, model: str, messages: List[Dict], 
                                temperature: float, max_tokens: int) -> str:
@@ -690,25 +693,49 @@ class UniversalPlatformDetectorOptimized:
             return None
     
     async def _get_cached_detection(self, detection_id: str) -> Optional[Dict[str, Any]]:
-        """Get cached detection result"""
+        """Get cached detection result (prefers AIClassificationCache)."""
         if not self.cache:
             return None
-        
         try:
+            # Prefer AIClassificationCache API
+            if hasattr(self.cache, 'get_cached_classification'):
+                return await self.cache.get_cached_classification(
+                    detection_id,
+                    classification_type='platform_detection'
+                )
+            # Fallback to simple get(key)
             cache_key = f"platform_detection:{detection_id}"
-            return await self.cache.get(cache_key)
+            get_fn = getattr(self.cache, 'get', None)
+            if get_fn:
+                return await get_fn(cache_key)
+            return None
         except Exception as e:
             logger.warning(f"Cache retrieval failed: {e}")
             return None
     
     async def _cache_detection_result(self, detection_id: str, result: Dict[str, Any]):
-        """Cache detection result"""
+        """Cache detection result (prefers AIClassificationCache)."""
         if not self.cache:
             return
-        
         try:
+            # Prefer AIClassificationCache API
+            if hasattr(self.cache, 'store_classification'):
+                ttl_seconds = self.config.get('cache_ttl', 7200)
+                ttl_hours = max(1, int(ttl_seconds / 3600))
+                await self.cache.store_classification(
+                    detection_id,
+                    result,
+                    classification_type='platform_detection',
+                    ttl_hours=ttl_hours,
+                    confidence_score=float(result.get('confidence', 0.0)) if isinstance(result, dict) else 0.0,
+                    model_version=str(self.config.get('ai_model', 'gpt-4o-mini'))
+                )
+                return
+            # Fallback to simple set(key)
             cache_key = f"platform_detection:{detection_id}"
-            await self.cache.set(cache_key, result, self.config['cache_ttl'])
+            set_fn = getattr(self.cache, 'set', None)
+            if set_fn:
+                await set_fn(cache_key, result, self.config.get('cache_ttl', 7200))
         except Exception as e:
             logger.warning(f"Cache storage failed: {e}")
     

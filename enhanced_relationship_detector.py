@@ -30,27 +30,65 @@ class EnhancedRelationshipDetector:
         self.supabase = supabase_client
         self.relationship_cache = {}
         
+    def _use_universal_reads(self) -> bool:
+        """Feature flag for reading from universal_records instead of raw_events."""
+        return (os.environ.get('UFS_READS_FROM_UNIVERSAL') or '').lower() in ('1', 'true', 'yes')
+
+    async def _fetch_events_page(self, user_id: str, offset: int, batch_size: int) -> List[Dict[str, Any]]:
+        """Fetch a page of events from legacy raw_events or universal_records based on flag."""
+        if self._use_universal_reads():
+            res = self.supabase.table('universal_records').select(
+                'id, universal, created_at'
+            ).eq('user_id', user_id).order('created_at', desc=False).range(offset, offset + batch_size - 1).execute()
+            rows = res.data or []
+            out: List[Dict[str, Any]] = []
+            for r in rows:
+                u = r.get('universal') or {}
+                src = u.get('source') or {}
+                clsf = u.get('classification') or {}
+                out.append({
+                    'id': r.get('id'),
+                    'payload': u,
+                    'source_filename': src.get('filename') or 'unknown',
+                    'created_at': r.get('created_at'),
+                    'source_platform': clsf.get('platform') or src.get('platform') or 'unknown'
+                })
+            return out
+        else:
+            res = self.supabase.table('raw_events').select(
+                'id, payload, source_filename, created_at, source_platform'
+            ).eq('user_id', user_id).order('created_at', desc=False).range(offset, offset + batch_size - 1).execute()
+            return res.data or []
+
     async def detect_all_relationships(self, user_id: str) -> Dict[str, Any]:
         """Detect actual relationships between financial events"""
         try:
-            # Get all events for the user
-            events = self.supabase.table('raw_events').select(
-                'id, payload, source_filename, created_at, source_platform'
-            ).eq('user_id', user_id).execute()
-            
-            if not events.data:
+            # Get all events for the user (paginated to avoid full-table scan)
+            all_events: List[Dict[str, Any]] = []
+            offset = 0
+            batch_size = 1000
+            while True:
+                batch = await self._fetch_events_page(user_id, offset, batch_size)
+                if not batch:
+                    break
+                all_events.extend(batch)
+                if len(batch) < batch_size:
+                    break
+                offset += batch_size
+
+            if not all_events:
                 return {"relationships": [], "message": "No data found for relationship analysis"}
             
-            logger.info(f"Processing {len(events.data)} events for enhanced relationship detection")
+            logger.info(f"Processing {len(all_events)} events for enhanced relationship detection")
             
             # Group events by file type for cross-file analysis
-            events_by_file = self._group_events_by_file(events.data)
+            events_by_file = self._group_events_by_file(all_events)
             
             # Detect cross-file relationships
             cross_file_relationships = await self._detect_cross_file_relationships(events_by_file)
             
             # Detect within-file relationships
-            within_file_relationships = await self._detect_within_file_relationships(events.data)
+            within_file_relationships = await self._detect_within_file_relationships(all_events)
             
             # Combine all relationships
             all_relationships = cross_file_relationships + within_file_relationships
@@ -67,7 +105,7 @@ class EnhancedRelationshipDetector:
                 "cross_file_relationships": len(cross_file_relationships),
                 "within_file_relationships": len(within_file_relationships),
                 "processing_stats": {
-                    "total_events": len(events.data),
+                    "total_events": len(all_events),
                     "files_analyzed": len(events_by_file),
                     "relationship_types_found": list(set([r.get('relationship_type', 'unknown') for r in validated_relationships]))
                 },
