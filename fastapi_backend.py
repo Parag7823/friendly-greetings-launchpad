@@ -8303,6 +8303,9 @@ async def process_excel_endpoint(request: dict):
                             "duplicate_files": duplicate_files
                         }
                     })
+                    # CRITICAL: Return immediately without starting background processing
+                    # The job will resume only after user makes a decision via /handle-duplicate-decision
+                    logger.info(f"Duplicate detected for job {job_id}, waiting for user decision")
                     return {
                         "status": "duplicate_detected",
                         "job_id": job_id,

@@ -1,14 +1,12 @@
-import React, { useState, useCallback, useEffect } from 'react';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
-import { UploadBox } from './UploadBox';
-import { FileList } from './FileList';
-import type { FileRowData } from './FileRow';
+import React, { useState, useCallback } from 'react';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Upload, FileText, CheckCircle, XCircle, Loader2, AlertCircle, X } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
-import { useFastAPIProcessor } from './FastAPIProcessor';
-import { DuplicateDetectionModal } from './DuplicateDetectionModal';
-import { useAuth } from './AuthProvider';
-import { config } from '@/config';
 import { supabase } from '@/integrations/supabase/client';
+import { useFastAPIProcessor } from '@/hooks/useFastAPIProcessor';
+import { DuplicateDetectionModal } from './DuplicateDetectionModal';
+import { ErrorBoundary } from './ErrorBoundary';
+import { config } from '@/config';
 
 interface UploadedFile {
   id: string;
@@ -560,17 +558,19 @@ export const EnhancedFileUpload: React.FC = () => {
       )}
 
       {/* Duplicate Detection Modal */}
-      <DuplicateDetectionModal
-        isOpen={duplicateModal.isOpen}
-        onClose={handleModalCancel}
-        duplicateInfo={duplicateModal.duplicateInfo}
-        versionCandidates={duplicateModal.versionCandidates}
-        recommendation={duplicateModal.recommendation}
-        onDecision={handleDuplicateDecision}
-        onVersionAccept={handleVersionRecommendationFeedback}
-        phase={duplicateModal.phase}
-        deltaAnalysis={duplicateModal.deltaAnalysis}
-      />
+      <ErrorBoundary>
+        <DuplicateDetectionModal
+          isOpen={duplicateModal.isOpen}
+          onClose={handleModalCancel}
+          duplicateInfo={duplicateModal.duplicateInfo}
+          versionCandidates={duplicateModal.versionCandidates}
+          recommendation={duplicateModal.recommendation}
+          onDecision={handleDuplicateDecision}
+          onVersionAccept={handleVersionRecommendationFeedback}
+          phase={duplicateModal.phase}
+          deltaAnalysis={duplicateModal.deltaAnalysis}
+        />
+      </ErrorBoundary>
     </div>
   );
 };
