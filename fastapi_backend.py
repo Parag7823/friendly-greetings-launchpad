@@ -8,7 +8,6 @@ import uuid
 import time
 import json
 import re
-import io
 import asyncio
 from datetime import datetime, timedelta
 from typing import Dict, Any, List, Optional, Tuple
@@ -3697,57 +3696,42 @@ class DataEnrichmentProcessor:
             
             self.metrics['cache_misses'] += 1
             
-            # 3-8. Advanced pipeline (if available). Otherwise, build a safe fallback payload
-            enriched_payload = None
-            try:
-                has_advanced = all([
-                    hasattr(self, '_extract_core_fields'),
-                    hasattr(self, '_classify_platform_and_document'),
-                    hasattr(self, '_standardize_vendor_with_validation'),
-                    hasattr(self, '_extract_platform_ids_with_validation'),
-                    hasattr(self, '_process_currency_with_validation'),
-                    hasattr(self, '_build_enriched_payload'),
-                    hasattr(self, '_validate_enriched_payload'),
-                    hasattr(self, '_apply_accuracy_enhancement'),
-                ])
-                if has_advanced:
-                    # 3. Extract and validate core fields
-                    extraction_results = await self._extract_core_fields(validated_data)
-                    # 4. Platform and document classification
-                    classification_results = await self._classify_platform_and_document(
-                        validated_data, extraction_results
-                    )
-                    # 5. Vendor standardization with confidence scoring
-                    vendor_results = await self._standardize_vendor_with_validation(
-                        extraction_results, classification_results
-                    )
-                    # 6. Platform ID extraction with validation
-                    platform_id_results = await self._extract_platform_ids_with_validation(
-                        validated_data, classification_results
-                    )
-                    # 7. Currency processing with exchange rate handling
-                    currency_results = await self._process_currency_with_validation(
-                        extraction_results, classification_results
-                    )
-                    # 8. Build enriched payload with confidence scoring
-                    enriched_payload = await self._build_enriched_payload(
-                        validated_data, extraction_results, classification_results,
-                        vendor_results, platform_id_results, currency_results, ai_classification
-                    )
-                    # 9. Final validation and accuracy enhancement
-                    validated_payload = await self._validate_enriched_payload(enriched_payload)
-                    enhanced_payload = await self._apply_accuracy_enhancement(
-                        validated_data['row_data'], validated_payload, file_context
-                    )
-                else:
-                    enhanced_payload = await self._build_fallback_enriched_payload(
-                        validated_data, ai_classification
-                    )
-            except Exception as adv_err:
-                logger.warning(f"Advanced enrichment pipeline failed, using fallback: {adv_err}")
-                enhanced_payload = await self._build_fallback_enriched_payload(
-                    validated_data, ai_classification
-                )
+            # 3. Extract and validate core fields
+            extraction_results = await self._extract_core_fields(validated_data)
+            
+            # 4. Platform and document classification
+            classification_results = await self._classify_platform_and_document(
+                validated_data, extraction_results
+            )
+            
+            # 5. Vendor standardization with confidence scoring
+            vendor_results = await self._standardize_vendor_with_validation(
+                extraction_results, classification_results
+            )
+            
+            # 6. Platform ID extraction with validation
+            platform_id_results = await self._extract_platform_ids_with_validation(
+                validated_data, classification_results
+            )
+            
+            # 7. Currency processing with exchange rate handling
+            currency_results = await self._process_currency_with_validation(
+                extraction_results, classification_results
+            )
+            
+            # 8. Build enriched payload with confidence scoring
+            enriched_payload = await self._build_enriched_payload(
+                validated_data, extraction_results, classification_results,
+                vendor_results, platform_id_results, currency_results, ai_classification
+            )
+            
+            # 9. Final validation and confidence scoring
+            validated_payload = await self._validate_enriched_payload(enriched_payload)
+            
+            # 9.5. Apply accuracy enhancement
+            enhanced_payload = await self._apply_accuracy_enhancement(
+                validated_data['row_data'], validated_payload, file_context
+            )
             
             # 10. Cache the result
             await self._cache_enrichment_result(enrichment_id, enhanced_payload)
@@ -3922,140 +3906,6 @@ class DataEnrichmentProcessor:
         except Exception as e:
             logger.error(f"Description cleaning failed: {e}")
             return description
-    
-    # ------------------------------------------------------------------------
-    # FALLBACK ENRICHMENT (no-AI path)
-    # ------------------------------------------------------------------------
-    def _guess_currency_from_text(self, text: str) -> Optional[str]:
-        try:
-            if not text or not isinstance(text, str):
-                return None
-            t = text.upper()
-            # Symbol heuristics
-            symbol_map = {
-                '$': 'USD', '₹': 'INR', '€': 'EUR', '£': 'GBP', 'A$': 'AUD', 'C$': 'CAD'
-            }
-            for sym, code in symbol_map.items():
-                if sym in text:
-                    return code
-            # Code heuristics
-            for code in ['USD','INR','EUR','GBP','AUD','CAD']:
-                if code in t:
-                    return code
-            return None
-        except Exception:
-            return None
-
-    def _detect_currency_from_row(self, row_data: Dict, column_names: List[str]) -> str:
-        """Detect currency code from obvious fields or symbols; default USD."""
-        try:
-            # Direct fields first
-            for key in list(row_data.keys()):
-                lk = str(key).lower()
-                if lk in ("currency", "currency_code", "curr", "ccy"):
-                    val = row_data.get(key)
-                    if isinstance(val, str) and val.strip():
-                        return val.strip().upper()[:3]
-            # Look for currency symbols in common amount fields
-            for field in ['amount', 'total', 'value', 'payment_amount', 'price']:
-                if field in row_data and isinstance(row_data[field], str):
-                    code = self._guess_currency_from_text(row_data[field])
-                    if code:
-                        return code
-            # Scan any string cell for codes
-            for key, val in row_data.items():
-                if isinstance(val, str):
-                    code = self._guess_currency_from_text(val)
-                    if code:
-                        return code
-        except Exception:
-            pass
-        return 'USD'
-
-    def _standardize_vendor_basic(self, vendor_name: str) -> str:
-        """Quick, rule-based vendor cleaner that avoids AI calls."""
-        try:
-            if not vendor_name or not isinstance(vendor_name, str):
-                return ''
-            v = vendor_name.strip()
-            # Remove excessive punctuation but keep alnum and spaces
-            v = re.sub(r"[^\w\s.&'-]", ' ', v)
-            v = re.sub(r"\s+", ' ', v).strip()
-            # Drop common suffixes
-            suffixes = [' inc', ' corp', ' llc', ' ltd', ' co', ' company', ' pvt', ' private', ' limited']
-            lv = v.lower()
-            for s in suffixes:
-                if lv.endswith(s):
-                    v = v[: -len(s)].strip()
-                    break
-            # Title case with simple exceptions
-            v = ' '.join(w.capitalize() if w.isalpha() else w for w in v.split())
-            return v
-        except Exception:
-            return vendor_name or ''
-
-    async def _build_fallback_enriched_payload(self, validated_data: Dict, ai_classification: Dict) -> Dict[str, Any]:
-        """Fallback payload builder to ensure amount_usd and vendor fields exist without AI."""
-        row_data = validated_data['row_data']
-        column_names = validated_data['column_names']
-        platform_info = validated_data['platform_info'] or {}
-
-        # Amount + currency
-        amount_original = float(self._extract_amount(row_data))
-        currency = self._detect_currency_from_row(row_data, column_names)
-        # Very small, static FX table (USD per unit); safe defaults for tests
-        fx_usd_per_unit = {
-            'USD': 1.0,
-            'INR': 0.012,
-            'EUR': 1.08,
-            'GBP': 1.26,
-            'AUD': 0.65,
-            'CAD': 0.73,
-        }
-        exchange_rate = fx_usd_per_unit.get(currency, 1.0)
-        amount_usd = round(amount_original * exchange_rate, 2)
-
-        # Vendor fields
-        vendor_raw = self._extract_vendor_name(row_data, column_names)
-        vendor_standard = self._standardize_vendor_basic(vendor_raw) if vendor_raw else ''
-
-        # Description
-        description = self._clean_description(self._extract_description(row_data))
-
-        # Category heuristic (if AI classification missing)
-        category = (ai_classification or {}).get('category')
-        if not category:
-            if amount_original < 0:
-                category = 'expense'
-            elif amount_original > 0:
-                category = 'revenue'
-            else:
-                category = 'financial_data'
-        subcategory = (ai_classification or {}).get('subcategory') or 'general'
-
-        # Build minimal enriched payload
-        payload = {
-            'kind': (ai_classification or {}).get('kind', 'transaction'),
-            'category': category,
-            'subcategory': subcategory,
-            'standard_description': description,
-            'amount_original': amount_original if amount_original != 0 else None,
-            'amount_usd': amount_usd if amount_original != 0 else None,
-            'currency': currency,
-            'exchange_rate': exchange_rate if currency else None,
-            'exchange_date': datetime.utcnow().date().isoformat(),
-            'vendor_raw': vendor_raw or None,
-            'vendor_standard': vendor_standard or None,
-            'vendor_confidence': 0.7 if vendor_standard else 0.0,
-            'vendor_cleaning_method': 'fallback_basic' if vendor_standard else 'none',
-            'platform_ids': {},
-            'entities': {'vendor': {'name': vendor_standard or vendor_raw}} if (vendor_raw or vendor_standard) else {},
-            'relationships': {},
-            'ai_confidence': (ai_classification or {}).get('confidence', 0.6),
-            'ingested_on': datetime.utcnow().isoformat(),
-            'platform': platform_info.get('platform', 'excel_upload')
-        }
-        return payload
     
     # ============================================================================
     # PRODUCTION-GRADE HELPER METHODS
@@ -8541,9 +8391,6 @@ async def process_excel_endpoint(request: dict):
         metrics_collector.increment_counter("file_processing_requests")
 
         return {"status": "accepted", "job_id": job_id}
-    except HTTPException as he:
-        # Preserve intended HTTP error codes (e.g., 401 from security validation)
-        raise he
     except Exception as e:
         structured_logger.error("Process excel endpoint error", error=str(e))
         metrics_collector.increment_counter("file_processing_errors")

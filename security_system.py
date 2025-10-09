@@ -8,8 +8,6 @@ import hashlib
 import hmac
 import secrets
 import logging
-import os
-import httpx
 from typing import Dict, List, Any, Optional, Union, Tuple
 from datetime import datetime, timedelta
 from dataclasses import dataclass
@@ -272,43 +270,28 @@ class AuthenticationValidator:
         self.failed_attempts: Dict[str, List[datetime]] = {}
     
     def validate_user_session(self, user_id: str, session_token: str) -> Tuple[bool, str]:
-        """Validate user session.
-        First tries in-memory session (fast path). If missing/invalid, validates Supabase JWT via Auth API.
-        """
+        """Validate user session"""
         if not user_id or not session_token:
             return False, "Missing user ID or session token"
-
-        # Fast path: in-memory session store
-        session_data = self.active_sessions.get(user_id)
-        if session_data:
-            if session_data.get('token') != session_token:
-                # Try Supabase as source of truth
-                ok, msg = self._validate_supabase_session(user_id, session_token)
-                if not ok:
-                    return False, msg
-            else:
-                # Check expiry
-                if datetime.utcnow() > session_data.get('expires_at', datetime.min):
-                    del self.active_sessions[user_id]
-                    # Fall through to Supabase validation
-                else:
-                    session_data['last_activity'] = datetime.utcnow()
-                    return True, "Session valid"
-
-        # Source of truth: validate Supabase session
-        ok, msg = self._validate_supabase_session(user_id, session_token)
-        if ok:
-            # Cache minimally in memory for subsequent checks
-            self.active_sessions[user_id] = {
-                'token': session_token,
-                'created_at': datetime.utcnow(),
-                'expires_at': datetime.utcnow() + timedelta(seconds=self.session_timeout),
-                'last_activity': datetime.utcnow(),
-                'ip_address': None,
-                'user_agent': None,
-            }
-            return True, "Session valid"
-        return False, msg
+        
+        if user_id not in self.active_sessions:
+            return False, "No active session found"
+        
+        session_data = self.active_sessions[user_id]
+        
+        # Check session token
+        if session_data.get('token') != session_token:
+            return False, "Invalid session token"
+        
+        # Check session expiry
+        if datetime.utcnow() > session_data.get('expires_at', datetime.min):
+            del self.active_sessions[user_id]
+            return False, "Session expired"
+        
+        # Update last activity
+        session_data['last_activity'] = datetime.utcnow()
+        
+        return True, "Session valid"
     
     def create_user_session(self, user_id: str, additional_data: Dict[str, Any] = None) -> str:
         """Create new user session"""
@@ -383,47 +366,6 @@ class AuthenticationValidator:
             return True, "api_user"  # Return user ID
         except:
             return False, None
-
-    def _validate_supabase_session(self, user_id: str, session_token: str) -> Tuple[bool, str]:
-        """Validate Supabase JWT by calling Auth API /auth/v1/user.
-        Requires SUPABASE_URL and preferably SUPABASE_KEY (anon)."""
-        try:
-            supabase_url = (
-                os.environ.get("SUPABASE_URL")
-                or os.environ.get("SUPABASE_PROJECT_URL")
-                or os.environ.get("DATABASE_URL")
-            )
-            if not supabase_url:
-                return False, "Supabase URL not configured"
-
-            endpoint = supabase_url.rstrip('/') + "/auth/v1/user"
-            headers = {
-                "Authorization": f"Bearer {session_token}",
-            }
-            # apikey header recommended by Supabase; try known env names
-            apikey = (
-                os.environ.get("SUPABASE_KEY")
-                or os.environ.get("SUPABASE_ANON_KEY")
-                or os.environ.get("SUPABASE_SERVICE_KEY")
-                or os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
-            )
-            if apikey:
-                headers["apikey"] = apikey
-
-            with httpx.Client(timeout=5.0) as client:
-                resp = client.get(endpoint, headers=headers)
-                if resp.status_code != 200:
-                    return False, f"Supabase auth failed: HTTP {resp.status_code}"
-                data = resp.json() if resp.content else {}
-                supabase_user_id = data.get("id") or data.get("user", {}).get("id")
-                if not supabase_user_id:
-                    return False, "Supabase auth response missing user id"
-                if str(supabase_user_id) != str(user_id):
-                    return False, "Supabase auth user mismatch"
-                return True, "Session valid (supabase)"
-        except Exception as e:
-            logger.warning(f"Supabase session validation error: {e}")
-            return False, f"Supabase auth error: {e}"
 
 class SecurityValidator:
     """
@@ -584,12 +526,6 @@ class SecurityValidator:
         ]
         
         endpoint = request_data.get('endpoint', '')
-        # Optional dev override to unblock testing
-        try:
-            if os.environ.get('ALLOW_UNAUTH_PROCESS_EXCEL', '').lower() in ('1', 'true', 'yes') and endpoint == 'process-excel':
-                return False
-        except Exception:
-            pass
         return endpoint not in public_endpoints
     
     def get_security_statistics(self) -> Dict[str, Any]:
