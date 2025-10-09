@@ -8391,6 +8391,9 @@ async def process_excel_endpoint(request: dict):
         metrics_collector.increment_counter("file_processing_requests")
 
         return {"status": "accepted", "job_id": job_id}
+    except HTTPException as he:
+        # Preserve intended HTTP error codes (e.g., 401 from security validation)
+        raise he
     except Exception as e:
         structured_logger.error("Process excel endpoint error", error=str(e))
         metrics_collector.increment_counter("file_processing_errors")
