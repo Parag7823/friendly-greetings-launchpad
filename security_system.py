@@ -8,6 +8,7 @@ import hashlib
 import hmac
 import secrets
 import logging
+import os
 from typing import Dict, List, Any, Optional, Union, Tuple
 from datetime import datetime, timedelta
 from dataclasses import dataclass
@@ -16,6 +17,7 @@ import json
 import base64
 import urllib.parse
 from pathlib import Path
+import httpx
 
 logger = logging.getLogger(__name__)
 
@@ -273,24 +275,54 @@ class AuthenticationValidator:
         """Validate user session"""
         if not user_id or not session_token:
             return False, "Missing user ID or session token"
-        
+
+        # 1) Try Supabase JWT validation (preferred in production)
+        try:
+            supabase_url = os.environ.get("SUPABASE_URL")
+            # apikey header required by Supabase Auth endpoints
+            supabase_api_key = (
+                os.environ.get("SUPABASE_ANON_KEY")
+                or os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
+                or os.environ.get("SUPABASE_SERVICE_KEY")
+                or os.environ.get("SUPABASE_KEY")
+            )
+            if supabase_url and supabase_api_key:
+                headers = {
+                    "Authorization": f"Bearer {session_token}",
+                    "apikey": supabase_api_key,
+                }
+                # Synchronous HTTP call to verify the user from JWT
+                resp = httpx.get(f"{supabase_url}/auth/v1/user", headers=headers, timeout=5.0)
+                if resp.status_code == 200:
+                    data = resp.json() or {}
+                    token_user_id = data.get("id") or (data.get("user") or {}).get("id")
+                    if token_user_id == user_id:
+                        return True, "Session valid"
+                    else:
+                        return False, "Token user mismatch"
+                # For 401/403 keep falling back to in-memory session check
+        except Exception:
+            # Network or parse error; fall back to in-memory session logic
+            pass
+
+        # 2) Fallback to in-memory sessions (dev/testing compatibility)
         if user_id not in self.active_sessions:
             return False, "No active session found"
-        
+
         session_data = self.active_sessions[user_id]
-        
+
         # Check session token
         if session_data.get('token') != session_token:
             return False, "Invalid session token"
-        
+
         # Check session expiry
         if datetime.utcnow() > session_data.get('expires_at', datetime.min):
             del self.active_sessions[user_id]
             return False, "Session expired"
-        
+
         # Update last activity
         session_data['last_activity'] = datetime.utcnow()
-        
+
         return True, "Session valid"
     
     def create_user_session(self, user_id: str, additional_data: Dict[str, Any] = None) -> str:

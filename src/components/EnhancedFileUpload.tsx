@@ -344,8 +344,20 @@ export const EnhancedFileUpload: React.FC = () => {
       // Close modal
       setDuplicateModal(prev => ({ ...prev, isOpen: false }));
 
-      // If skip, just toast and return
+      // If skip, mark UI as cancelled and remove from list
       if (decision === 'skip') {
+        const fileRowId = duplicateModal.currentFileId as string | null;
+        if (fileRowId) {
+          setFiles(prev => prev.map(f => 
+            f.id === fileRowId 
+              ? { ...f, status: 'cancelled' as const, currentStep: 'Skipped due to duplicate', progress: 100 }
+              : f
+          ));
+          // Remove after a short delay for UX
+          setTimeout(() => {
+            setFiles(prev => prev.filter(f => f.id !== fileRowId));
+          }, 1200);
+        }
         toast({ title: 'Upload Skipped', description: 'Duplicate file was skipped.' });
         return;
       }
@@ -406,6 +418,33 @@ export const EnhancedFileUpload: React.FC = () => {
       });
     }
   };
+
+  // Expose a helper to cancel from modal's footer button
+  const handleModalCancel = useCallback(async () => {
+    try {
+      const jobId = duplicateModal.currentJobId;
+      const fileRowId = duplicateModal.currentFileId as string | null;
+      if (!jobId) {
+        setDuplicateModal(prev => ({ ...prev, isOpen: false }));
+        return;
+      }
+      const res = await fetch(`${config.apiUrl}/cancel-upload/${jobId}`, { method: 'POST', headers: { 'Content-Type': 'application/json' } });
+      // Optimistic UI regardless
+      if (fileRowId) {
+        setFiles(prev => prev.map(f => 
+          f.id === fileRowId 
+            ? { ...f, status: 'cancelled' as const, currentStep: 'Cancelled by user', progress: 100 }
+            : f
+        ));
+        setTimeout(() => setFiles(prev => prev.filter(f => f.id !== fileRowId)), 1200);
+      }
+      setDuplicateModal(prev => ({ ...prev, isOpen: false }));
+      if (!res.ok) throw new Error('Failed to cancel upload');
+      toast({ title: 'Upload Cancelled', description: 'File upload has been cancelled' });
+    } catch (e) {
+      toast({ variant: 'destructive', title: 'Cancel Failed', description: 'Could not cancel upload. Please try again.' });
+    }
+  }, [duplicateModal, toast]);
 
   const handleVersionRecommendationFeedback = async (accepted: boolean, feedback?: string) => {
     if (!duplicateModal.recommendation) return;
@@ -523,7 +562,7 @@ export const EnhancedFileUpload: React.FC = () => {
       {/* Duplicate Detection Modal */}
       <DuplicateDetectionModal
         isOpen={duplicateModal.isOpen}
-        onClose={() => setDuplicateModal(prev => ({ ...prev, isOpen: false }))}
+        onClose={handleModalCancel}
         duplicateInfo={duplicateModal.duplicateInfo}
         versionCandidates={duplicateModal.versionCandidates}
         recommendation={duplicateModal.recommendation}

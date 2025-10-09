@@ -7889,6 +7889,9 @@ async def handle_duplicate_decision(request: DuplicateDecisionRequest):
             return {"status": "success", "message": "Duplicate decision processed: resuming"}
 
         raise HTTPException(status_code=400, detail="Invalid decision. Use one of: replace, keep_both, skip")
+    except HTTPException as he:
+        # Keep explicit HTTP errors (like 401) intact
+        raise he
     except Exception as e:
         logger.error(f"Error handling duplicate decision: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -8391,6 +8394,9 @@ async def process_excel_endpoint(request: dict):
         metrics_collector.increment_counter("file_processing_requests")
 
         return {"status": "accepted", "job_id": job_id}
+    except HTTPException as he:
+        # Preserve the intended status code (e.g., 401 on auth failures)
+        raise he
     except Exception as e:
         structured_logger.error("Process excel endpoint error", error=str(e))
         metrics_collector.increment_counter("file_processing_errors")
