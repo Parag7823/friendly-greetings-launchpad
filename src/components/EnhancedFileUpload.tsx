@@ -3,10 +3,11 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Upload, FileText, CheckCircle, XCircle, Loader2, AlertCircle, X } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
-import { useFastAPIProcessor } from '@/hooks/useFastAPIProcessor';
+import { useFastAPIProcessor } from './FastAPIProcessor';
 import { DuplicateDetectionModal } from './DuplicateDetectionModal';
 import { ErrorBoundary } from './ErrorBoundary';
 import { config } from '@/config';
+import { useAuth } from './AuthProvider';
 
 interface UploadedFile {
   id: string;
