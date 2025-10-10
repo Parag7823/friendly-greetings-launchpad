@@ -9,6 +9,8 @@ import time
 import json
 import re
 import asyncio
+import io
+import random
 from datetime import datetime, timedelta
 from typing import Dict, Any, List, Optional, Tuple
 from contextlib import asynccontextmanager
@@ -5482,7 +5484,6 @@ class ExcelProcessor:
         try:
             # Use openpyxl for streaming processing
             from openpyxl import load_workbook
-            import io
             
             workbook = load_workbook(io.BytesIO(file_content), read_only=True, data_only=True)
             sheets = {}
