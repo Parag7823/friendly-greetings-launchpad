@@ -55,11 +55,11 @@ export const EnhancedFileUpload: React.FC = () => {
       };
     }
     
-    const maxSize = 50 * 1024 * 1024; // 50MB
+    const maxSize = 500 * 1024 * 1024; // 500MB (matches backend limit)
     if (file.size > maxSize) {
       return {
         isValid: false,
-        error: 'File size must be less than 50MB.'
+        error: 'File size must be less than 500MB.'
       };
     }
     

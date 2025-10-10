@@ -271,7 +271,7 @@ class AuthenticationValidator:
         self.active_sessions: Dict[str, Dict[str, Any]] = {}
         self.failed_attempts: Dict[str, List[datetime]] = {}
     
-    def validate_user_session(self, user_id: str, session_token: str) -> Tuple[bool, str]:
+    async def validate_user_session(self, user_id: str, session_token: str) -> Tuple[bool, str]:
         """Validate user session"""
         if not user_id or not session_token:
             return False, "Missing user ID or session token"
@@ -291,16 +291,17 @@ class AuthenticationValidator:
                     "Authorization": f"Bearer {session_token}",
                     "apikey": supabase_api_key,
                 }
-                # Synchronous HTTP call to verify the user from JWT
-                resp = httpx.get(f"{supabase_url}/auth/v1/user", headers=headers, timeout=5.0)
-                if resp.status_code == 200:
-                    data = resp.json() or {}
-                    token_user_id = data.get("id") or (data.get("user") or {}).get("id")
-                    if token_user_id == user_id:
-                        return True, "Session valid"
-                    else:
-                        return False, "Token user mismatch"
-                # For 401/403 keep falling back to in-memory session check
+                # Async HTTP call to verify the user from JWT
+                async with httpx.AsyncClient() as client:
+                    resp = await client.get(f"{supabase_url}/auth/v1/user", headers=headers, timeout=5.0)
+                    if resp.status_code == 200:
+                        data = resp.json() or {}
+                        token_user_id = data.get("id") or (data.get("user") or {}).get("id")
+                        if token_user_id == user_id:
+                            return True, "Session valid"
+                        else:
+                            return False, "Token user mismatch"
+                    # For 401/403 keep falling back to in-memory session check
         except Exception:
             # Network or parse error; fall back to in-memory session logic
             pass

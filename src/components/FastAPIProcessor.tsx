@@ -149,7 +149,7 @@ export class FastAPIProcessor {
       timeoutId = setTimeout(() => {
         ws.close();
         reject(new Error('WebSocket connection timeout'));
-      }, 10000); // 10 second timeout
+      }, 30000); // 30 second timeout (increased for large files)
 
       ws.onopen = () => {
         // WebSocket connected successfully
@@ -418,11 +418,11 @@ export class FastAPIProcessor {
         
         let backendResult: any;
         try {
-          // Try WebSocket connection with shorter timeout
+          // Try WebSocket connection with timeout
           backendResult = await Promise.race([
             this.setupWebSocketConnection(jobData.id),
             new Promise((_, reject) => 
-              setTimeout(() => reject(new Error('WebSocket timeout')), 10000) // 10 second timeout
+              setTimeout(() => reject(new Error('WebSocket timeout')), 30000) // 30 second timeout (increased for large files)
             )
           ]);
           // WebSocket processing completed successfully

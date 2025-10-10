@@ -2,6 +2,7 @@
 from __future__ import annotations
 # Standard library imports
 import os
+import sys
 import logging
 import hashlib
 import uuid
@@ -3997,12 +3998,16 @@ class DataEnrichmentProcessor:
         try:
             # Initialize cache if not already done
             if not self._cache_initialized:
-                self.cache = None
+                self.cache = safe_get_ai_cache()
                 self._cache_initialized = True
             
-            if self.cache:
-                cached_data = None
+            if self.cache and hasattr(self.cache, 'get_cached_classification'):
+                cached_data = await self.cache.get_cached_classification(
+                    {'enrichment_id': enrichment_id}, 
+                    'enrichment'
+                )
                 if cached_data:
+                    logger.debug(f"Cache hit for enrichment {enrichment_id}")
                     return cached_data
         except Exception as e:
             logger.warning(f"Cache retrieval failed for {enrichment_id}: {e}")
@@ -4017,18 +4022,471 @@ class DataEnrichmentProcessor:
         try:
             # Initialize cache if not already done
             if not self._cache_initialized:
-                self.cache = None
+                self.cache = safe_get_ai_cache()
                 self._cache_initialized = True
             
-            if self.cache:
-                pass
+            if self.cache and hasattr(self.cache, 'store_classification'):
+                await self.cache.store_classification(
+                    {'enrichment_id': enrichment_id},
+                    result,
+                    'enrichment',
+                    ttl_hours=self.config['cache_ttl'] / 3600
+                )
+                logger.debug(f"Cached enrichment result for {enrichment_id}")
         except Exception as e:
             logger.warning(f"Cache storage failed for {enrichment_id}: {e}")
+    
     async def _extract_core_fields(self, validated_data: Dict) -> Dict[str, Any]:
         """Extract and validate core fields with confidence scoring"""
         row_data = validated_data['row_data']
+        column_names = validated_data['column_names']
         
-        # ... (rest of the method remains the same)
+        try:
+            # Extract amount
+            amount = self._extract_amount(row_data)
+            
+            # Extract vendor name
+            vendor_name = self._extract_vendor_name(row_data, column_names)
+            
+            # Extract date
+            date = self._extract_date(row_data)
+            
+            # Extract description
+            description = self._extract_description(row_data)
+            
+            # Extract currency (default to USD)
+            currency = row_data.get('currency', 'USD')
+            
+            # Calculate confidence based on field completeness
+            fields_found = sum([
+                bool(amount),
+                bool(vendor_name),
+                bool(date),
+                bool(description)
+            ])
+            confidence = fields_found / 4.0
+            
+            return {
+                'amount': amount,
+                'vendor_name': vendor_name,
+                'date': date,
+                'description': description,
+                'currency': currency,
+                'confidence': confidence,
+                'fields_extracted': fields_found
+            }
+            
+        except Exception as e:
+            logger.error(f"Core field extraction failed: {e}")
+            return {
+                'amount': 0.0,
+                'vendor_name': '',
+                'date': datetime.now().strftime('%Y-%m-%d'),
+                'description': '',
+                'currency': 'USD',
+                'confidence': 0.0,
+                'fields_extracted': 0,
+                'error': str(e)
+            }
+    
+    async def _classify_platform_and_document(self, validated_data: Dict, extraction_results: Dict) -> Dict[str, Any]:
+        """Classify platform and document type"""
+        try:
+            platform_info = validated_data.get('platform_info', {})
+            file_context = validated_data.get('file_context', {})
+            
+            # Use existing platform detection if available
+            platform = platform_info.get('platform', 'unknown')
+            platform_confidence = platform_info.get('confidence', 0.0)
+            
+            # Simple document classification based on extracted fields
+            has_vendor = bool(extraction_results.get('vendor_name'))
+            has_amount = bool(extraction_results.get('amount'))
+            
+            if has_vendor and has_amount:
+                document_type = 'invoice'
+                doc_confidence = 0.8
+            elif has_amount:
+                document_type = 'transaction'
+                doc_confidence = 0.7
+            else:
+                document_type = 'unknown'
+                doc_confidence = 0.3
+            
+            return {
+                'platform': platform,
+                'platform_confidence': platform_confidence,
+                'document_type': document_type,
+                'document_confidence': doc_confidence
+            }
+        except Exception as e:
+            logger.error(f"Classification failed: {e}")
+            return {
+                'platform': 'unknown',
+                'platform_confidence': 0.0,
+                'document_type': 'unknown',
+                'document_confidence': 0.0
+            }
+    
+    async def _standardize_vendor_with_validation(self, extraction_results: Dict, classification_results: Dict) -> Dict[str, Any]:
+        """Standardize vendor name with validation"""
+        try:
+            vendor_name = extraction_results.get('vendor_name', '')
+            
+            if not vendor_name:
+                return {
+                    'vendor_raw': '',
+                    'vendor_standard': '',
+                    'vendor_confidence': 0.0,
+                    'vendor_cleaning_method': 'none'
+                }
+            
+            # Use VendorStandardizer
+            standardized = await self.vendor_standardizer.standardize_vendor(vendor_name)
+            
+            return {
+                'vendor_raw': vendor_name,
+                'vendor_standard': standardized.get('standardized_name', vendor_name),
+                'vendor_confidence': standardized.get('confidence', 0.7),
+                'vendor_cleaning_method': standardized.get('method', 'rule_based')
+            }
+        except Exception as e:
+            logger.error(f"Vendor standardization failed: {e}")
+            vendor_name = extraction_results.get('vendor_name', '')
+            return {
+                'vendor_raw': vendor_name,
+                'vendor_standard': vendor_name,
+                'vendor_confidence': 0.5,
+                'vendor_cleaning_method': 'fallback'
+            }
+    
+    async def _extract_platform_ids_with_validation(self, validated_data: Dict, classification_results: Dict) -> Dict[str, Any]:
+        """Extract platform-specific IDs with validation"""
+        try:
+            row_data = validated_data.get('row_data', {})
+            platform = classification_results.get('platform', 'unknown')
+            column_names = validated_data.get('column_names', [])
+            
+            # Use PlatformIDExtractor
+            platform_ids = await self.platform_id_extractor.extract_platform_ids(row_data, platform, column_names)
+            
+            return {
+                'platform_ids': platform_ids,
+                'platform_id_count': len(platform_ids),
+                'has_platform_id': len(platform_ids) > 0
+            }
+        except Exception as e:
+            logger.error(f"Platform ID extraction failed: {e}")
+            return {
+                'platform_ids': {},
+                'platform_id_count': 0,
+                'has_platform_id': False
+            }
+    
+    async def _process_currency_with_validation(self, extraction_results: Dict, classification_results: Dict) -> Dict[str, Any]:
+        """Process currency with exchange rate handling using real-time rates"""
+        try:
+            amount = extraction_results.get('amount', 0.0)
+            currency = extraction_results.get('currency', 'USD')
+            
+            if currency == 'USD':
+                amount_usd = amount
+                exchange_rate = 1.0
+            else:
+                # Get real-time exchange rate
+                exchange_rate = await self._get_exchange_rate(currency, 'USD')
+                amount_usd = amount * exchange_rate
+            
+            return {
+                'amount_original': amount,
+                'amount_usd': amount_usd,
+                'currency': currency,
+                'exchange_rate': exchange_rate,
+                'exchange_date': datetime.now().strftime('%Y-%m-%d')
+            }
+        except Exception as e:
+            logger.error(f"Currency processing failed: {e}")
+            amount = extraction_results.get('amount', 0.0)
+            return {
+                'amount_original': amount,
+                'amount_usd': amount,
+                'currency': 'USD',
+                'exchange_rate': 1.0,
+                'exchange_date': datetime.now().strftime('%Y-%m-%d')
+            }
+    
+    async def _get_exchange_rate(self, from_currency: str, to_currency: str) -> float:
+        """Get real-time exchange rate with caching"""
+        try:
+            # Check cache first
+            cache_key = f"exchange_rate_{from_currency}_{to_currency}_{datetime.now().strftime('%Y-%m-%d')}"
+            
+            if self.cache and hasattr(self.cache, 'get_cached_classification'):
+                cached_rate = await self.cache.get_cached_classification(
+                    {'cache_key': cache_key}, 
+                    'exchange_rate'
+                )
+                if cached_rate and isinstance(cached_rate, dict):
+                    return cached_rate.get('rate', 1.0)
+            
+            # Use exchangerate-api.com (free tier: 1500 requests/month)
+            import aiohttp
+            async with aiohttp.ClientSession() as session:
+                url = f"https://api.exchangerate-api.com/v4/latest/{from_currency}"
+                async with session.get(url, timeout=aiohttp.ClientTimeout(total=5)) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        rate = data.get('rates', {}).get(to_currency, 1.0)
+                        
+                        # Cache the rate for 24 hours
+                        if self.cache and hasattr(self.cache, 'store_classification'):
+                            await self.cache.store_classification(
+                                {'cache_key': cache_key},
+                                {'rate': rate},
+                                'exchange_rate',
+                                ttl_hours=24
+                            )
+                        
+                        return rate
+            
+            # Fallback to static rates if API fails
+            return self._get_fallback_exchange_rate(from_currency, to_currency)
+            
+        except Exception as e:
+            logger.warning(f"Exchange rate API failed for {from_currency}/{to_currency}: {e}")
+            return self._get_fallback_exchange_rate(from_currency, to_currency)
+    
+    def _get_fallback_exchange_rate(self, from_currency: str, to_currency: str) -> float:
+        """Fallback exchange rates (updated quarterly)"""
+        # Static rates as fallback (last updated: 2024-Q4)
+        rates_to_usd = {
+            'EUR': 1.09,
+            'GBP': 1.27,
+            'INR': 0.012,
+            'JPY': 0.0067,
+            'CNY': 0.14,
+            'AUD': 0.65,
+            'CAD': 0.73,
+            'CHF': 1.16,
+            'SGD': 0.75,
+            'HKD': 0.13,
+            'NZD': 0.60,
+            'SEK': 0.096,
+            'NOK': 0.093,
+            'MXN': 0.058,
+            'BRL': 0.20,
+            'ZAR': 0.055,
+            'RUB': 0.011,
+            'KRW': 0.00076,
+            'TRY': 0.029,
+            'AED': 0.27
+        }
+        
+        if from_currency == to_currency:
+            return 1.0
+        
+        return rates_to_usd.get(from_currency, 1.0)
+    
+    async def _build_enriched_payload(self, validated_data: Dict, extraction_results: Dict, 
+                                     classification_results: Dict, vendor_results: Dict, 
+                                     platform_id_results: Dict, currency_results: Dict, 
+                                     ai_classification: Dict) -> Dict[str, Any]:
+        """Build enriched payload with all processed data"""
+        try:
+            row_data = validated_data.get('row_data', {})
+            file_context = validated_data.get('file_context', {})
+            
+            # Build comprehensive payload
+            payload = {
+                # Original data
+                **row_data,
+                
+                # Extracted core fields
+                'amount_original': extraction_results.get('amount', 0.0),
+                'date': extraction_results.get('date', ''),
+                'description': extraction_results.get('description', ''),
+                'standard_description': self._clean_description(extraction_results.get('description', '')),
+                
+                # Vendor information
+                'vendor_raw': vendor_results.get('vendor_raw', ''),
+                'vendor_standard': vendor_results.get('vendor_standard', ''),
+                'vendor_confidence': vendor_results.get('vendor_confidence', 0.0),
+                'vendor_cleaning_method': vendor_results.get('vendor_cleaning_method', 'none'),
+                
+                # Currency and amounts
+                'amount_usd': currency_results.get('amount_usd', 0.0),
+                'currency': currency_results.get('currency', 'USD'),
+                'exchange_rate': currency_results.get('exchange_rate', 1.0),
+                'exchange_date': currency_results.get('exchange_date', ''),
+                
+                # Platform IDs
+                'platform_ids': platform_id_results.get('platform_ids', {}),
+                
+                # Classification
+                'kind': ai_classification.get('row_type', 'transaction'),
+                'category': ai_classification.get('category', 'other'),
+                'subcategory': ai_classification.get('subcategory', 'general'),
+                'ai_confidence': ai_classification.get('confidence', 0.5),
+                'ai_reasoning': ai_classification.get('reasoning', ''),
+                
+                # Entities
+                'entities': ai_classification.get('entities', {}),
+                'relationships': ai_classification.get('relationships', {}),
+                
+                # Metadata
+                'ingested_on': datetime.now().isoformat(),
+                'enrichment_version': '2.0.0',
+                'file_context': {
+                    'filename': file_context.get('filename', ''),
+                    'row_index': file_context.get('row_index', 0)
+                }
+            }
+            
+            return payload
+            
+        except Exception as e:
+            logger.error(f"Payload building failed: {e}")
+            return validated_data.get('row_data', {})
+    
+    async def _validate_enriched_payload(self, enriched_payload: Dict[str, Any]) -> Dict[str, Any]:
+        """Validate enriched payload for correctness"""
+        try:
+            # Validate amount
+            if 'amount_usd' in enriched_payload:
+                amount = enriched_payload['amount_usd']
+                if not isinstance(amount, (int, float)):
+                    enriched_payload['amount_usd'] = 0.0
+                elif amount < -1000000 or amount > 1000000:
+                    logger.warning(f"Amount out of range: {amount}")
+            
+            # Validate currency
+            valid_currencies = ['USD', 'EUR', 'GBP', 'INR', 'JPY', 'CNY', 'AUD', 'CAD']
+            if enriched_payload.get('currency') not in valid_currencies:
+                enriched_payload['currency'] = 'USD'
+            
+            # Validate confidence scores
+            for key in ['vendor_confidence', 'ai_confidence']:
+                if key in enriched_payload:
+                    conf = enriched_payload[key]
+                    if not isinstance(conf, (int, float)) or conf < 0 or conf > 1:
+                        enriched_payload[key] = 0.5
+            
+            return enriched_payload
+            
+        except Exception as e:
+            logger.error(f"Payload validation failed: {e}")
+            return enriched_payload
+    
+    async def _apply_accuracy_enhancement(self, row_data: Dict, validated_payload: Dict, 
+                                         file_context: Dict) -> Dict[str, Any]:
+        """Apply accuracy enhancement to the payload"""
+        try:
+            # For now, just return the validated payload
+            # Can be enhanced with ML-based accuracy improvements
+            return validated_payload
+        except Exception as e:
+            logger.error(f"Accuracy enhancement failed: {e}")
+            return validated_payload
+    
+    async def _create_fallback_payload(self, row_data: Dict, platform_info: Dict, 
+                                      ai_classification: Dict, file_context: Dict, 
+                                      error_message: str) -> Dict[str, Any]:
+        """Create fallback payload when enrichment fails"""
+        return {
+            **row_data,
+            'kind': ai_classification.get('row_type', 'transaction'),
+            'category': ai_classification.get('category', 'other'),
+            'subcategory': ai_classification.get('subcategory', 'general'),
+            'amount_original': self._extract_amount(row_data),
+            'amount_usd': self._extract_amount(row_data),
+            'currency': 'USD',
+            'vendor_raw': '',
+            'vendor_standard': '',
+            'platform_ids': {},
+            'enrichment_error': error_message,
+            'enrichment_version': '2.0.0-fallback',
+            'ingested_on': datetime.now().isoformat()
+        }
+    
+    async def _validate_security(self, row_data: Dict, platform_info: Dict, 
+                                column_names: List[str], ai_classification: Dict, 
+                                file_context: Dict) -> bool:
+        """Validate security of input data"""
+        try:
+            # Check for SQL injection patterns
+            dangerous_patterns = ['DROP TABLE', 'DELETE FROM', 'INSERT INTO', '--', ';--']
+            
+            for key, value in row_data.items():
+                if isinstance(value, str):
+                    value_upper = value.upper()
+                    if any(pattern in value_upper for pattern in dangerous_patterns):
+                        logger.warning(f"Potential SQL injection detected in {key}: {value}")
+                        return False
+            
+            return True
+        except Exception as e:
+            logger.error(f"Security validation failed: {e}")
+            return True  # Allow processing on validation error
+    
+    async def _initialize_observability(self):
+        """Initialize observability system"""
+        if not self._observability_system_initialized:
+            self._observability_system_initialized = True
+    
+    async def _log_operation_start(self, operation: str, enrichment_id: str, file_context: Dict):
+        """Log operation start"""
+        logger.debug(f"Starting {operation} for {enrichment_id}")
+    
+    async def _log_operation_end(self, operation: str, success: bool, duration: float, 
+                                file_context: Dict, error: Exception = None):
+        """Log operation end"""
+        if success:
+            logger.debug(f"Completed {operation} in {duration:.3f}s")
+        else:
+            logger.error(f"Failed {operation}: {error}")
+    
+    def _update_metrics(self, processing_time: float):
+        """Update processing metrics"""
+        self.metrics['enrichment_count'] += 1
+        
+        # Update average processing time
+        count = self.metrics['enrichment_count']
+        current_avg = self.metrics['avg_processing_time']
+        self.metrics['avg_processing_time'] = (current_avg * (count - 1) + processing_time) / count
+    
+    async def _send_enrichment_notification(self, file_context: Dict, enriched_payload: Dict, 
+                                           processing_time: float):
+        """Send real-time notification about enrichment via WebSocket"""
+        try:
+            job_id = file_context.get('job_id')
+            if not job_id:
+                return
+            
+            # Send enrichment notification through WebSocket manager
+            notification = {
+                "step": "enrichment_completed",
+                "message": f"✅ Row enriched: {enriched_payload.get('vendor_standard', 'N/A')} - ${enriched_payload.get('amount_usd', 0):.2f}",
+                "enrichment_data": {
+                    "vendor": enriched_payload.get('vendor_standard'),
+                    "amount_usd": enriched_payload.get('amount_usd'),
+                    "currency": enriched_payload.get('currency'),
+                    "category": enriched_payload.get('category'),
+                    "confidence": enriched_payload.get('vendor_confidence'),
+                    "processing_time_ms": int(processing_time * 1000)
+                },
+                "timestamp": datetime.now().isoformat()
+            }
+            
+            # Use the global WebSocket manager
+            await manager.send_update(job_id, notification)
+            
+        except Exception as e:
+            logger.warning(f"Failed to send enrichment notification: {e}")
+    
+    async def _log_enrichment_audit(self, enrichment_id: str, enriched_payload: Dict, 
+                                   processing_time: float):
+        """Log enrichment audit trail"""
+        logger.info(f"Enrichment {enrichment_id} completed in {processing_time:.3f}s")
 
     async def _cache_analysis_result(self, analysis_id: str, result: Dict[str, Any]) -> None:
         """Cache analysis result for future use"""
@@ -4310,7 +4768,7 @@ class DataEnrichmentProcessor:
             }
     
     async def _analyze_with_ocr(self, validated_input: Dict, document_features: Dict) -> Dict[str, Any]:
-        """Analyze document using OCR if applicable"""
+        """Analyze document using OCR for image/PDF content extraction"""
         if not self.ocr_available or not validated_input.get('file_content'):
             return {
                 'ocr_used': False,
@@ -4322,14 +4780,78 @@ class DataEnrichmentProcessor:
         try:
             self.metrics['ocr_operations'] += 1
             
-            # This would integrate with actual OCR service
-            # For now, return a placeholder
-            return {
-                'ocr_used': True,
-                'confidence': 0.0,
-                'extracted_text': '',
-                'analysis': 'OCR analysis placeholder - would extract text from images/PDFs'
-            }
+            file_content = validated_input.get('file_content')
+            filename = validated_input.get('filename', '')
+            
+            # Check if file is image or PDF
+            file_ext = filename.split('.')[-1].lower() if '.' in filename else ''
+            
+            if file_ext not in ['pdf', 'png', 'jpg', 'jpeg', 'tiff', 'bmp']:
+                return {
+                    'ocr_used': False,
+                    'confidence': 0.0,
+                    'extracted_text': '',
+                    'analysis': f'OCR not applicable for {file_ext} files'
+                }
+            
+            # Use pytesseract for OCR
+            try:
+                import pytesseract
+                from PIL import Image
+                import io
+                
+                # Convert file content to image
+                if file_ext == 'pdf':
+                    # For PDF, use pdf2image
+                    try:
+                        from pdf2image import convert_from_bytes
+                        images = convert_from_bytes(file_content, first_page=1, last_page=1)
+                        if images:
+                            image = images[0]
+                        else:
+                            raise Exception("No pages in PDF")
+                    except ImportError:
+                        logger.warning("pdf2image not available, skipping PDF OCR")
+                        return {
+                            'ocr_used': False,
+                            'confidence': 0.0,
+                            'extracted_text': '',
+                            'analysis': 'PDF OCR requires pdf2image library'
+                        }
+                else:
+                    # For images, use PIL directly
+                    image = Image.open(io.BytesIO(file_content))
+                
+                # Extract text using OCR
+                extracted_text = pytesseract.image_to_string(image)
+                
+                # Calculate confidence based on text length and quality
+                text_length = len(extracted_text.strip())
+                confidence = min(0.9, text_length / 1000) if text_length > 0 else 0.0
+                
+                # Analyze extracted text for financial keywords
+                financial_keywords = ['invoice', 'receipt', 'total', 'amount', 'payment', 'date', 'vendor', 'customer']
+                keyword_count = sum(1 for keyword in financial_keywords if keyword.lower() in extracted_text.lower())
+                
+                analysis = f"Extracted {text_length} characters, found {keyword_count} financial keywords"
+                
+                return {
+                    'ocr_used': True,
+                    'confidence': confidence,
+                    'extracted_text': extracted_text[:500],  # First 500 chars
+                    'full_text_length': text_length,
+                    'financial_keywords_found': keyword_count,
+                    'analysis': analysis
+                }
+                
+            except Exception as ocr_error:
+                logger.warning(f"OCR processing failed: {ocr_error}")
+                return {
+                    'ocr_used': True,
+                    'confidence': 0.0,
+                    'extracted_text': '',
+                    'analysis': f'OCR processing failed: {str(ocr_error)}'
+                }
             
         except Exception as e:
             logger.error(f"OCR analysis failed: {e}")
@@ -4911,17 +5433,66 @@ class AIRowClassifier:
         
         return entities
     
-    def map_relationships(self, entities: Dict[str, List[str]], platform_info: Dict) -> Dict[str, str]:
-        """Map extracted entities to internal IDs (placeholder for future implementation)"""
+    async def map_relationships(self, entities: Dict[str, List[str]], platform_info: Dict, 
+                               user_id: str, supabase_client) -> Dict[str, str]:
+        """Map extracted entities to internal IDs with database lookups"""
         relationships = {}
         
-        # Placeholder for entity ID mapping
-        # In a real implementation, this would:
-        # 1. Check if entities exist in the database
-        # 2. Create new entities if they don't exist
-        # 3. Return the internal IDs
-        
-        return relationships
+        try:
+            # Map each entity type to internal IDs
+            for entity_type, entity_names in entities.items():
+                if not entity_names:
+                    continue
+                
+                for entity_name in entity_names:
+                    if not entity_name:
+                        continue
+                    
+                    try:
+                        # Search for existing entity
+                        search_result = supabase_client.table('normalized_entities')\
+                            .select('id, canonical_name')\
+                            .eq('user_id', user_id)\
+                            .eq('entity_type', entity_type)\
+                            .or_(f"canonical_name.ilike.%{entity_name}%,aliases.cs.{{{entity_name}}}")\
+                            .limit(1)\
+                            .execute()
+                        
+                        if search_result.data and len(search_result.data) > 0:
+                            # Entity exists, use its ID
+                            entity_id = search_result.data[0]['id']
+                            relationships[f"{entity_type}_{entity_name}"] = entity_id
+                        else:
+                            # Entity doesn't exist, create it
+                            new_entity = {
+                                'user_id': user_id,
+                                'entity_type': entity_type,
+                                'canonical_name': entity_name,
+                                'aliases': [entity_name],
+                                'platform_sources': [platform_info.get('platform', 'unknown')],
+                                'confidence_score': 0.7,
+                                'first_seen_at': datetime.utcnow().isoformat(),
+                                'last_seen_at': datetime.utcnow().isoformat()
+                            }
+                            
+                            insert_result = supabase_client.table('normalized_entities')\
+                                .insert(new_entity)\
+                                .execute()
+                            
+                            if insert_result.data and len(insert_result.data) > 0:
+                                entity_id = insert_result.data[0]['id']
+                                relationships[f"{entity_type}_{entity_name}"] = entity_id
+                                logger.info(f"Created new entity: {entity_type} - {entity_name}")
+                    
+                    except Exception as entity_error:
+                        logger.warning(f"Failed to map entity {entity_type}/{entity_name}: {entity_error}")
+                        continue
+            
+            return relationships
+            
+        except Exception as e:
+            logger.error(f"Entity relationship mapping failed: {e}")
+            return {}
 
 class BatchAIRowClassifier:
     """Optimized batch AI classifier for large files"""
@@ -7867,19 +8438,114 @@ class LegacyEntityResolver:
         return normalized
     
     async def _find_similar_entities(self, normalized_name: str, entity_type: str, user_id: str) -> List[Dict[str, Any]]:
-        """Find similar entities in the database"""
+        """Find similar entities in the database using fuzzy matching"""
         try:
             if not self.supabase:
                 return []
             
-            # Query database for similar entities
-            # This would be implemented with actual database queries
-            # For now, return empty list as placeholder
-            return []
+            # Query database for similar entities using multiple strategies
+            similar_entities = []
+            
+            # Strategy 1: Exact canonical name match
+            exact_result = self.supabase.table('normalized_entities')\
+                .select('*')\
+                .eq('user_id', user_id)\
+                .eq('entity_type', entity_type)\
+                .eq('canonical_name', normalized_name)\
+                .limit(5)\
+                .execute()
+            
+            if exact_result.data:
+                for entity in exact_result.data:
+                    entity['similarity_score'] = 1.0
+                    entity['match_method'] = 'exact'
+                similar_entities.extend(exact_result.data)
+            
+            # Strategy 2: Fuzzy match on canonical name (ILIKE)
+            if len(similar_entities) < 5:
+                fuzzy_result = self.supabase.table('normalized_entities')\
+                    .select('*')\
+                    .eq('user_id', user_id)\
+                    .eq('entity_type', entity_type)\
+                    .ilike('canonical_name', f'%{normalized_name}%')\
+                    .limit(5)\
+                    .execute()
+                
+                if fuzzy_result.data:
+                    for entity in fuzzy_result.data:
+                        if entity not in similar_entities:
+                            # Calculate similarity score using Levenshtein distance
+                            entity['similarity_score'] = self._calculate_similarity(
+                                normalized_name, 
+                                entity.get('canonical_name', '')
+                            )
+                            entity['match_method'] = 'fuzzy'
+                            similar_entities.append(entity)
+            
+            # Strategy 3: Check aliases
+            if len(similar_entities) < 5:
+                alias_result = self.supabase.table('normalized_entities')\
+                    .select('*')\
+                    .eq('user_id', user_id)\
+                    .eq('entity_type', entity_type)\
+                    .contains('aliases', [normalized_name])\
+                    .limit(5)\
+                    .execute()
+                
+                if alias_result.data:
+                    for entity in alias_result.data:
+                        if entity not in similar_entities:
+                            entity['similarity_score'] = 0.9
+                            entity['match_method'] = 'alias'
+                            similar_entities.append(entity)
+            
+            # Sort by similarity score
+            similar_entities.sort(key=lambda x: x.get('similarity_score', 0), reverse=True)
+            
+            return similar_entities[:5]  # Return top 5
             
         except Exception as e:
             logger.error(f"Error finding similar entities: {e}")
             return []
+    
+    def _calculate_similarity(self, str1: str, str2: str) -> float:
+        """Calculate similarity score between two strings using Levenshtein distance"""
+        try:
+            # Simple character-based similarity
+            if not str1 or not str2:
+                return 0.0
+            
+            str1_lower = str1.lower()
+            str2_lower = str2.lower()
+            
+            # Exact match
+            if str1_lower == str2_lower:
+                return 1.0
+            
+            # Calculate Levenshtein distance
+            len1, len2 = len(str1_lower), len(str2_lower)
+            if len1 > len2:
+                str1_lower, str2_lower = str2_lower, str1_lower
+                len1, len2 = len2, len1
+            
+            current_row = range(len1 + 1)
+            for i in range(1, len2 + 1):
+                previous_row, current_row = current_row, [i] + [0] * len1
+                for j in range(1, len1 + 1):
+                    add, delete, change = previous_row[j] + 1, current_row[j - 1] + 1, previous_row[j - 1]
+                    if str1_lower[j - 1] != str2_lower[i - 1]:
+                        change += 1
+                    current_row[j] = min(add, delete, change)
+            
+            distance = current_row[len1]
+            max_len = max(len(str1), len(str2))
+            similarity = 1.0 - (distance / max_len) if max_len > 0 else 0.0
+            
+            return similarity
+            
+        except Exception as e:
+            logger.error(f"Error calculating similarity: {e}")
+            return 0.0
     
     def get_metrics(self) -> Dict[str, Any]:
         """Get performance metrics"""
@@ -8378,10 +9044,33 @@ async def process_excel_endpoint(request: dict):
             logger.warning(f"Security validation error for job {job_id}: {sec_e}")
             raise HTTPException(status_code=401, detail="Unauthorized or invalid session")
 
-        # Early duplicate check based on real file hash (if provided)
-        file_hash = request.get('file_hash')
+        # Early duplicate check based on file hash
+        # NOTE: We verify the hash server-side after download for security
+        client_provided_hash = request.get('file_hash')  # Client hint, will be verified
         resume_after_duplicate = request.get('resume_after_duplicate')
-        if file_hash and not resume_after_duplicate:
+        
+        # Download file first to calculate server-side hash
+        file_bytes = None
+        try:
+            storage = supabase.storage.from_("finely-upload")
+            file_resp = storage.download(storage_path)
+            file_bytes = file_resp if isinstance(file_resp, (bytes, bytearray)) else getattr(file_resp, 'data', None)
+            if file_bytes is None:
+                file_bytes = file_resp
+        except Exception as e:
+            logger.error(f"Storage download failed for hash verification: {e}")
+            # Continue without duplicate check if download fails
+            file_bytes = None
+        
+        # Calculate server-side hash for security
+        if file_bytes and not resume_after_duplicate:
+            import hashlib
+            file_hash = hashlib.sha256(file_bytes).hexdigest()
+            
+            # Verify client hash matches (security check)
+            if client_provided_hash and client_provided_hash != file_hash:
+                logger.warning(f"Client hash mismatch for job {job_id}: client={client_provided_hash}, server={file_hash}")
+            
             try:
                 dup_res = supabase.table('raw_records').select(
                     'id, file_name, created_at, content'
@@ -8451,35 +9140,79 @@ async def process_excel_endpoint(request: dict):
         })
 
         async def _run_processing_job():
+            # Reuse file_bytes from outer scope if already downloaded for hash verification
+            nonlocal file_bytes
+            
             try:
                 # Cooperative cancellation helper
                 async def is_cancelled() -> bool:
                     status = await websocket_manager.get_job_status(job_id)
                     return (status or {}).get("status") == "cancelled"
-                # Notify start
+                
+                # Download file bytes from Supabase Storage (if not already downloaded)
+                if file_bytes is None:
+                    await websocket_manager.send_overall_update(
+                        job_id=job_id,
+                        status="processing",
+                        message="📥 Downloading file from storage...",
+                        progress=5
+                    )
+                    if await is_cancelled():
+                        return
+                    
+                    try:
+                        storage = supabase.storage.from_("finely-upload")
+                        file_resp = storage.download(storage_path)
+                        # supabase-py returns bytes or Response-like
+                        file_bytes = file_resp if isinstance(file_resp, (bytes, bytearray)) else getattr(file_resp, 'data', None)
+                        if file_bytes is None:
+                            # Some versions return a dict-like with 'data'
+                            file_bytes = file_resp
+                    except Exception as e:
+                        logger.error(f"Storage download failed: {e}")
+                        await websocket_manager.send_error(job_id, f"Download failed: {e}")
+                        await websocket_manager.merge_job_state(job_id, {**((await websocket_manager.get_job_status(job_id)) or {}), "status": "failed", "error": str(e)})
+                        return
+                else:
+                    # File already downloaded for hash verification
+                    logger.info(f"Reusing downloaded file for job {job_id} (already verified hash)")
+                
+                # Validate file type using magic numbers (security check)
+                try:
+                    import magic
+                    file_mime = magic.from_buffer(file_bytes[:2048], mime=True)
+                    allowed_mimes = [
+                        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',  # .xlsx
+                        'application/vnd.ms-excel',  # .xls
+                        'application/zip',  # .xlsx (also detected as zip)
+                        'text/csv',  # .csv
+                        'text/plain',  # .csv (sometimes detected as plain text)
+                        'application/octet-stream'  # Generic binary (fallback)
+                    ]
+                    if file_mime not in allowed_mimes:
+                        error_msg = f"Invalid file type: {file_mime}. Only Excel (.xlsx, .xls) and CSV files are allowed."
+                        logger.error(f"File type validation failed for job {job_id}: {error_msg}")
+                        await websocket_manager.send_error(job_id, error_msg)
+                        await websocket_manager.merge_job_state(job_id, {
+                            **((await websocket_manager.get_job_status(job_id)) or {}),
+                            "status": "failed",
+                            "error": error_msg
+                        })
+                        return
+                    logger.info(f"File type validated for job {job_id}: {file_mime}")
+                except ImportError:
+                    logger.warning("python-magic not available, skipping file type validation")
+                except Exception as e:
+                    logger.warning(f"File type validation failed for job {job_id}: {e}")
+                
+                # Notify start of processing
                 await websocket_manager.send_overall_update(
                     job_id=job_id,
                     status="processing",
-                    message="📥 Downloading file from storage...",
-                    progress=5
+                    message="📥 File validated, starting processing...",
+                    progress=10
                 )
                 if await is_cancelled():
-                    return
-
-                # Download file bytes from Supabase Storage
-                file_bytes = None
-                try:
-                    storage = supabase.storage.from_("finely-upload")
-                    file_resp = storage.download(storage_path)
-                    # supabase-py returns bytes or Response-like
-                    file_bytes = file_resp if isinstance(file_resp, (bytes, bytearray)) else getattr(file_resp, 'data', None)
-                    if file_bytes is None:
-                        # Some versions return a dict-like with 'data'
-                        file_bytes = file_resp
-                except Exception as e:
-                    logger.error(f"Storage download failed: {e}")
-                    await websocket_manager.send_error(job_id, f"Download failed: {e}")
-                    await websocket_manager.merge_job_state(job_id, {**((await websocket_manager.get_job_status(job_id)) or {}), "status": "failed", "error": str(e)})
                     return
 
                 await websocket_manager.send_overall_update(
