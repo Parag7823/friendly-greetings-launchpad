@@ -1,5 +1,5 @@
 import React, { useState, useCallback } from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Upload, FileText, CheckCircle, XCircle, Loader2, AlertCircle, X } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
@@ -7,6 +7,14 @@ import { useFastAPIProcessor } from './FastAPIProcessor';
 import { DuplicateDetectionModal } from './DuplicateDetectionModal';
 import { config } from '@/config';
 import { useAuth } from './AuthProvider';
+
+interface FileRowData {
+  id: string;
+  file: File;
+  status: 'pending' | 'uploading' | 'processing' | 'completed' | 'error';
+  progress: number;
+  error?: string;
+}
 
 interface UploadedFile {
   id: string;
@@ -494,11 +502,27 @@ export const EnhancedFileUpload: React.FC = () => {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <UploadBox
-            onFilesSelected={handleFilesSelected}
-            disabled={isProcessing}
-            className="max-w-2xl mx-auto"
-          />
+          <div 
+            className={`border-2 border-dashed rounded-lg p-8 text-center hover:border-primary transition-colors ${isProcessing ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+            onClick={() => !isProcessing && document.getElementById('file-upload')?.click()}
+          >
+            <Upload className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
+            <p className="text-sm text-muted-foreground mb-2">
+              Click to upload or drag and drop
+            </p>
+            <p className="text-xs text-muted-foreground">
+              Excel (.xlsx, .xls) or CSV files up to 500MB
+            </p>
+            <input
+              id="file-upload"
+              type="file"
+              multiple
+              accept=".xlsx,.xls,.csv"
+              onChange={(e) => e.target.files && handleFilesSelected(Array.from(e.target.files))}
+              className="hidden"
+              disabled={isProcessing}
+            />
+          </div>
         </CardContent>
       </Card>
 
@@ -506,12 +530,28 @@ export const EnhancedFileUpload: React.FC = () => {
       {files.length > 0 && (
         <Card>
           <CardContent className="p-6">
-            <FileList
-              files={files}
-              onCancel={handleCancel}
-              onRemove={handleRemove}
-              maxHeight="max-h-96"
-            />
+            <div className="space-y-3 max-h-96 overflow-y-auto">
+              {files.map((fileData) => (
+                <div key={fileData.id} className="flex items-center justify-between p-3 bg-muted rounded-lg">
+                  <div className="flex items-center gap-3 flex-1">
+                    <FileText className="h-5 w-5" />
+                    <div className="flex-1">
+                      <p className="text-sm font-medium">{fileData.file.name}</p>
+                      <p className="text-xs text-muted-foreground">{fileData.status}</p>
+                    </div>
+                  </div>
+                  {fileData.status === 'completed' && <CheckCircle className="h-5 w-5 text-green-500" />}
+                  {fileData.status === 'error' && <XCircle className="h-5 w-5 text-red-500" />}
+                  {fileData.status === 'processing' && <Loader2 className="h-5 w-5 animate-spin" />}
+                  <button
+                    onClick={() => handleRemove(fileData.id)}
+                    className="ml-2 p-1 hover:bg-background rounded"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+              ))}
+            </div>
           </CardContent>
         </Card>
       )}

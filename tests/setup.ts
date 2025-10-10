@@ -7,19 +7,25 @@ afterEach(() => {
   cleanup();
 });
 
-// Mock crypto.subtle for hash calculations
-global.crypto = {
-  subtle: {
-    digest: async (algorithm: string, data: ArrayBuffer) => {
-      // Simple mock implementation
-      const hash = new Uint8Array(32); // 32 bytes for SHA-256
-      for (let i = 0; i < 32; i++) {
-        hash[i] = Math.floor(Math.random() * 256);
-      }
-      return hash.buffer;
+// Mock crypto.subtle for hash calculations (if not already available)
+if (!global.crypto?.subtle) {
+  Object.defineProperty(global, 'crypto', {
+    value: {
+      subtle: {
+        digest: async (algorithm: string, data: ArrayBuffer) => {
+          // Simple mock implementation
+          const hash = new Uint8Array(32); // 32 bytes for SHA-256
+          for (let i = 0; i < 32; i++) {
+            hash[i] = Math.floor(Math.random() * 256);
+          }
+          return hash.buffer;
+        },
+      },
     },
-  },
-} as any;
+    writable: true,
+    configurable: true,
+  });
+}
 
 // Mock WebSocket
 global.WebSocket = class MockWebSocket {
