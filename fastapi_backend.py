@@ -6115,7 +6115,13 @@ class ExcelProcessor:
             file_hash = hashlib.sha256(file_content).hexdigest()
 
             # Calculate content fingerprint for row-level deduplication
-            content_fingerprint = duplicate_service.calculate_content_fingerprint(sheets)
+            # Create a simple content fingerprint from sheet data
+            try:
+                sheet_content = json.dumps({name: df.to_dict('records')[:100] for name, df in sheets.items()}, default=str)
+                content_fingerprint = hashlib.sha256(sheet_content.encode('utf-8')).hexdigest()
+            except Exception as e:
+                logger.warning(f"Failed to calculate content fingerprint: {e}")
+                content_fingerprint = file_hash  # Fallback to file hash
             
             # Compute per-sheet row hashes for delta analysis (lightweight representation)
             sheets_row_hashes = {}
