@@ -7577,8 +7577,10 @@ async def get_performance_optimization_status():
 
 
 
-class EntityResolver:
+class LegacyEntityResolver:
     """
+    DEPRECATED: Legacy entity resolver - use EntityResolverOptimized instead
+    
     Enterprise-grade entity resolver with:
     - Fuzzy matching + embeddings + rules
     - Entity graph maintenance in DB with relationships + merges

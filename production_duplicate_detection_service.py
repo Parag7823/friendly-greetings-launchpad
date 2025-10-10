@@ -512,8 +512,9 @@ class ProductionDuplicateDetectionService:
             cutoff_date = (datetime.utcnow() - timedelta(days=days)).isoformat()
             
             # Memory-optimized query: only select essential fields
+            # Note: content_fingerprint is stored in the 'content' JSONB column
             result = self.supabase.table('raw_records').select(
-                'id, file_name, created_at, file_size, content_fingerprint'
+                'id, file_name, created_at, file_size, content'
             ).eq('user_id', user_id).gte('created_at', cutoff_date).limit(50).execute()  # Reduced limit for memory efficiency
             
             return result.data or []
