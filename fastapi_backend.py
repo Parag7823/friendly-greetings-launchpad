@@ -24,6 +24,7 @@ from universal_platform_detector_optimized import UniversalPlatformDetectorOptim
 from universal_document_classifier_optimized import UniversalDocumentClassifierOptimized as UniversalDocumentClassifier
 from universal_extractors_optimized import UniversalExtractorsOptimized as UniversalExtractors
 from entity_resolver_optimized import EntityResolverOptimized as EntityResolver
+from enhanced_relationship_detector import EnhancedRelationshipDetector
 import pandas as pd
 import numpy as np
 import magic
@@ -5810,6 +5811,29 @@ class ExcelProcessor:
             logger.warning(f"Failed to create processing transaction: {e}")
             transaction_id = None
 
+        # Create processing lock to prevent concurrent processing of same job
+        lock_id = f"job_{job_id}"
+        lock_acquired = False
+        try:
+            lock_data = {
+                'id': lock_id,
+                'lock_type': 'file_processing',
+                'resource_id': job_id,
+                'user_id': user_id,
+                'acquired_at': datetime.utcnow().isoformat(),
+                'expires_at': (datetime.utcnow() + timedelta(hours=1)).isoformat(),
+                'metadata': {
+                    'filename': filename,
+                    'transaction_id': transaction_id
+                }
+            }
+            supabase.table('processing_locks').insert(lock_data).execute()
+            lock_acquired = True
+            logger.info(f"Acquired processing lock: {lock_id}")
+        except Exception as e:
+            logger.warning(f"Failed to acquire processing lock (may already exist): {e}")
+            # Continue processing even if lock fails - it's for optimization, not critical
+
         # Step 1: Initialize streaming processor for memory-efficient processing
         await manager.send_update(job_id, {
             "step": "initializing_streaming",
@@ -6562,49 +6586,42 @@ class ExcelProcessor:
             "progress": 97
         })
         
-        imports_available = True
+        # Relationship detection - now always available (imported at top)
         try:
-            from enhanced_relationship_detector import EnhancedRelationshipDetector
+            # Initialize relationship detector
             from openai import AsyncOpenAI
-        except ImportError:
-            logger.warning("Enhanced relationship detector not available, skipping relationship detection")
-            imports_available = False
+            openai_client = AsyncOpenAI(api_key=os.getenv('OPENAI_API_KEY'))
+            relationship_detector = EnhancedRelationshipDetector(openai_client, supabase)
 
-        if imports_available:
-            try:
-                # Initialize relationship detector
-                openai_client = AsyncOpenAI(api_key=os.getenv('OPENAI_API_KEY'))
-                relationship_detector = EnhancedRelationshipDetector(openai_client, supabase)
-
-                # Detect all relationships
-                relationship_results = await relationship_detector.detect_all_relationships(user_id)
-                
-                # Store relationship instances
-                if relationship_results.get('relationships'):
-                    await self._store_relationship_instances(relationship_results['relationships'], user_id, transaction_id, supabase)
-                    # Also store cross-platform relationships for analytics
-                    await self._store_cross_platform_relationships(relationship_results['relationships'], user_id, supabase)
-                
-                # Add relationship results to insights
-                insights['relationship_analysis'] = relationship_results
-                
-                await manager.send_update(job_id, {
-                    "step": "relationships_completed",
-                    "message": f"✅ Found {relationship_results.get('total_relationships', 0)} relationships between events",
-                    "progress": 98
-                })
-            except Exception as e:
-                logger.error(f"Relationship detection failed: {e}")
-                insights['relationship_analysis'] = {
-                    'error': str(e),
-                    'message': 'Relationship detection failed but processing completed'
-                }
-                # Send error to frontend
-                await manager.send_update(job_id, {
-                    "step": "relationship_detection_failed",
-                    "message": f"❌ Relationship detection failed: {str(e)}",
-                    "progress": 98
-                })
+            # Detect all relationships
+            relationship_results = await relationship_detector.detect_all_relationships(user_id)
+            
+            # Store relationship instances
+            if relationship_results.get('relationships'):
+                await self._store_relationship_instances(relationship_results['relationships'], user_id, transaction_id, supabase)
+                # Also store cross-platform relationships for analytics
+                await self._store_cross_platform_relationships(relationship_results['relationships'], user_id, supabase)
+            
+            # Add relationship results to insights
+            insights['relationship_analysis'] = relationship_results
+            
+            await manager.send_update(job_id, {
+                "step": "relationships_completed",
+                "message": f"✅ Found {relationship_results.get('total_relationships', 0)} relationships between events",
+                "progress": 98
+            })
+        except Exception as e:
+            logger.error(f"Relationship detection failed: {e}")
+            insights['relationship_analysis'] = {
+                'error': str(e),
+                'message': 'Relationship detection failed but processing completed'
+            }
+            # Send error to frontend
+            await manager.send_update(job_id, {
+                "step": "relationship_detection_failed",
+                "message": f"❌ Relationship detection failed: {str(e)}",
+                "progress": 98
+            })
 
         # Step 11: Compute and Store Metrics
         await manager.send_update(job_id, {
@@ -6677,6 +6694,14 @@ class ExcelProcessor:
             "message": f"✅ Processing completed! {events_created} events created from {processed_rows} rows.",
             "progress": 100
         })
+        
+        # Release processing lock
+        if lock_acquired:
+            try:
+                supabase.table('processing_locks').delete().eq('id', lock_id).execute()
+                logger.info(f"Released processing lock: {lock_id}")
+            except Exception as e:
+                logger.warning(f"Failed to release processing lock: {e}")
         
         insights['raw_record_id'] = file_id
         insights['file_hash'] = file_hash_for_check
@@ -7566,13 +7591,64 @@ async def get_performance_optimization_status():
             return []
 
     async def _discover_new_platforms(self, user_id: str, filename: str, supabase: Client) -> List[Dict]:
-        """Discover new platforms from the data"""
+        """Discover new platforms from the data by analyzing patterns"""
         try:
-            # For now, return empty list - this would be implemented with AI analysis
-            # of the data to discover custom platforms
             platforms = []
             
-            logger.info(f"Discovered {len(platforms)} new platforms")
+            # Query recent events to analyze platform patterns
+            events_response = supabase.table('raw_events').select(
+                'source_platform, payload, classification_metadata'
+            ).eq('user_id', user_id).limit(100).execute()
+            
+            if not events_response.data:
+                logger.info("No events found for platform discovery")
+                return []
+            
+            # Analyze platform distribution
+            platform_counts = {}
+            platform_samples = {}
+            
+            for event in events_response.data:
+                platform = event.get('source_platform', 'unknown')
+                if platform not in platform_counts:
+                    platform_counts[platform] = 0
+                    platform_samples[platform] = []
+                
+                platform_counts[platform] += 1
+                if len(platform_samples[platform]) < 5:
+                    platform_samples[platform].append(event)
+            
+            # Discover platforms that appear frequently but aren't in discovered_platforms yet
+            for platform, count in platform_counts.items():
+                if count >= 5 and platform not in ['unknown', '']:  # Minimum threshold
+                    # Check if already discovered
+                    existing = supabase.table('discovered_platforms').select('id').eq(
+                        'user_id', user_id
+                    ).eq('platform_name', platform).execute()
+                    
+                    if not existing.data:
+                        # Extract characteristics from samples
+                        sample_payloads = [e.get('payload', {}) for e in platform_samples[platform]]
+                        common_fields = set()
+                        if sample_payloads:
+                            # Find common fields across samples
+                            common_fields = set(sample_payloads[0].keys())
+                            for payload in sample_payloads[1:]:
+                                common_fields &= set(payload.keys())
+                        
+                        platform_info = {
+                            'platform_name': platform,
+                            'confidence_score': min(0.9, 0.5 + (count / 100)),  # Higher count = higher confidence
+                            'detection_method': 'pattern_analysis',
+                            'characteristics': {
+                                'common_fields': list(common_fields),
+                                'event_count': count,
+                                'sample_file': filename
+                            }
+                        }
+                        platforms.append(platform_info)
+            
+            logger.info(f"Discovered {len(platforms)} new platforms from {len(events_response.data)} events")
             return platforms
             
         except Exception as e:
