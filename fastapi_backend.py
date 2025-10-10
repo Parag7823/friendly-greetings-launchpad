@@ -7360,16 +7360,29 @@ async def get_performance_optimization_status():
                 payload = event.get('payload', {})
                 
                 # Check what vendor fields are available
-                vendor_fields = ['vendor_raw', 'vendor', 'merchant', 'payee', 'description', 'name', 'counterparty', 'customer', 'client']
+                vendor_fields = ['vendor_raw', 'vendor_standard', 'vendor', 'merchant', 'payee', 'description', 'name', 'counterparty', 'customer', 'client']
                 for field in vendor_fields:
                     if field in payload and payload[field]:
                         vendor_fields_found.append(f"{field}: {payload[field]}")
                 
-                vendor_raw = payload.get('vendor_raw') or payload.get('vendor') or payload.get('merchant')
+                # CRITICAL FIX: Check vendor_standard first (from enrichment), then fallback to vendor_raw
+                vendor_raw = (
+                    payload.get('vendor_standard') or  # Enriched/standardized vendor name
+                    payload.get('vendor_raw') or       # Raw vendor from original data
+                    payload.get('vendor') or           # Generic vendor field
+                    payload.get('merchant')            # Merchant field
+                )
                 
-                # Additional fallbacks for connector payloads
+                # Additional fallbacks for connector payloads and CSV files
                 if not vendor_raw:
-                    vendor_raw = payload.get('payee') or payload.get('name') or payload.get('counterparty') or payload.get('customer') or payload.get('client')
+                    vendor_raw = (
+                        payload.get('payee') or 
+                        payload.get('description') or  # Common in bank statements
+                        payload.get('name') or 
+                        payload.get('counterparty') or 
+                        payload.get('customer') or 
+                        payload.get('client')
+                    )
 
                 if vendor_raw and vendor_raw not in entity_map:
                     entity = {
@@ -7454,14 +7467,22 @@ async def get_performance_optimization_status():
             
             for event in events_data:
                 payload = event.get('payload', {})
-                vendor_fields = ['vendor_raw', 'vendor', 'merchant', 'payee', 'description', 'name', 'counterparty', 'customer', 'client']
+                vendor_fields = ['vendor_raw', 'vendor_standard', 'vendor', 'merchant', 'payee', 'description', 'name', 'counterparty', 'customer', 'client']
                 for field in vendor_fields:
                     if field in payload and payload[field]:
                         vendor_fields_found.append(f"{field}: {payload[field]}")
+                # CRITICAL FIX: Check vendor_standard first (from enrichment), then fallback to other fields
                 vendor_raw = (
-                    payload.get('vendor_raw') or payload.get('vendor') or payload.get('merchant') or
-                    payload.get('payee') or payload.get('name') or payload.get('counterparty') or
-                    payload.get('customer') or payload.get('client')
+                    payload.get('vendor_standard') or  # Enriched/standardized vendor name
+                    payload.get('vendor_raw') or       # Raw vendor from original data
+                    payload.get('vendor') or           # Generic vendor field
+                    payload.get('merchant') or         # Merchant field
+                    payload.get('payee') or 
+                    payload.get('description') or      # Common in bank statements
+                    payload.get('name') or 
+                    payload.get('counterparty') or
+                    payload.get('customer') or 
+                    payload.get('client')
                 )
                 if vendor_raw and vendor_raw not in entity_map:
                     entity = {
@@ -7506,20 +7527,29 @@ async def get_performance_optimization_status():
         try:
             patterns = []
             
-            if platform_info.get('platform') != 'unknown':
+            # CRITICAL FIX: Learn patterns for ALL platforms including 'general' and 'unknown'
+            # This allows the system to learn from CSV files and custom formats
+            platform = platform_info.get('platform')
+            if platform:  # Only skip if platform is None or empty string
                 pattern = {
-                    'platform': platform_info['platform'],
+                    'platform': platform,
                     'pattern_type': 'column_structure',
                     'pattern_data': {
                         'matched_columns': platform_info.get('matched_columns', []),
                         'matched_patterns': platform_info.get('matched_patterns', []),
                         'confidence': platform_info.get('confidence', 0.0),
-                        'reasoning': platform_info.get('reasoning', '')
+                        'reasoning': platform_info.get('reasoning', ''),
+                        'file_name': filename,  # Track which file this pattern came from
+                        'column_count': len(platform_info.get('matched_columns', [])),
+                        'is_generic': platform in ['general', 'unknown']  # Flag generic platforms
                     },
                     'confidence_score': platform_info.get('confidence', 0.0),
                     'detection_method': 'ai_analysis'
                 }
                 patterns.append(pattern)
+                logger.info(f"Learned pattern for platform '{platform}' from file '{filename}'")
+            else:
+                logger.warning(f"No platform detected for file '{filename}', skipping pattern learning")
             
             logger.info(f"Learned {len(patterns)} platform patterns")
             return patterns
