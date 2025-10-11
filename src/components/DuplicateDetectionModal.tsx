@@ -67,33 +67,38 @@ export const DuplicateDetectionModal: React.FC<DuplicateDetectionModalProps> = (
   if (!isOpen) return null;
 
   const renderBasicDuplicate = () => (
-    <div className="space-y-6">
-      <div className="flex items-center space-x-3">
-        <AlertTriangle className="h-8 w-8 text-amber-500" />
+    <div className="space-y-6 animate-fade-in">
+      {/* Header with modern gradient */}
+      <div className="flex items-center space-x-4 p-4 bg-gradient-to-r from-amber-500/10 to-orange-500/10 rounded-xl border border-amber-500/20">
+        <div className="p-3 bg-amber-500/20 rounded-lg">
+          <AlertTriangle className="h-7 w-7 text-amber-400" />
+        </div>
         <div>
-          <h3 className="text-lg font-semibold text-gray-900">Identical File Detected</h3>
-          <p className="text-sm text-gray-600">This exact file has been uploaded before</p>
+          <h3 className="text-xl font-bold text-white">Identical File Detected</h3>
+          <p className="text-sm text-gray-400">This exact file has been uploaded before</p>
         </div>
       </div>
 
       {duplicateInfo && (
-        <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
-          <p className="text-amber-800 mb-3">{duplicateInfo.message}</p>
+        <div className="bg-card border border-border rounded-xl p-5 space-y-4">
+          <p className="text-amber-400 font-medium">{duplicateInfo.message}</p>
           
-          <div className="space-y-2">
+          <div className="space-y-3">
             {duplicateInfo.duplicate_files.map((file) => (
-              <div key={file.id} className="flex items-center justify-between bg-white rounded p-3 border">
+              <div key={file.id} className="flex items-center justify-between bg-background/50 rounded-lg p-4 border border-border hover:border-muted-foreground/30 transition-all">
                 <div className="flex items-center space-x-3">
-                  <FileText className="h-5 w-5 text-gray-400" />
+                  <div className="p-2 bg-muted rounded-lg">
+                    <FileText className="h-5 w-5 text-muted-foreground" />
+                  </div>
                   <div>
-                    <p className="font-medium text-gray-900">{file.filename}</p>
-                    <p className="text-sm text-gray-500">
+                    <p className="font-semibold text-white">{file.filename}</p>
+                    <p className="text-sm text-muted-foreground">
                       Uploaded {new Date(file.uploaded_at).toLocaleDateString()} • {file.total_rows} rows
                     </p>
                   </div>
                 </div>
-                <span className={`px-2 py-1 rounded text-xs font-medium ${
-                  file.status === 'completed' ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'
+                <span className={`px-3 py-1 rounded-full text-xs font-semibold ${
+                  file.status === 'completed' ? 'bg-green-500/20 text-green-400' : 'bg-muted text-muted-foreground'
                 }`}>
                   {file.status}
                 </span>
@@ -103,44 +108,57 @@ export const DuplicateDetectionModal: React.FC<DuplicateDetectionModalProps> = (
 
           {/* Optional delta analysis summary */}
           {deltaAnalysis?.delta_analysis && (
-            <div className="mt-4 bg-white rounded p-3 border">
-              <p className="font-medium text-gray-900 mb-1">Delta analysis</p>
-              <p className="text-sm text-gray-700">
-                New rows: <span className="font-semibold">{deltaAnalysis.delta_analysis.new_rows}</span> •
-                Existing rows: <span className="font-semibold">{deltaAnalysis.delta_analysis.existing_rows}</span> •
-                Confidence: <span className="font-semibold">{Math.round((deltaAnalysis.delta_analysis.confidence || 0) * 100)}%</span>
-              </p>
+            <div className="mt-4 bg-background/50 rounded-lg p-4 border border-border">
+              <p className="font-semibold text-white mb-2">Delta Analysis</p>
+              <div className="flex items-center space-x-4 text-sm">
+                <span className="text-muted-foreground">
+                  New rows: <span className="font-bold text-white">{deltaAnalysis.delta_analysis.new_rows}</span>
+                </span>
+                <span className="text-muted-foreground">•</span>
+                <span className="text-muted-foreground">
+                  Existing: <span className="font-bold text-white">{deltaAnalysis.delta_analysis.existing_rows}</span>
+                </span>
+                <span className="text-muted-foreground">•</span>
+                <span className="text-muted-foreground">
+                  Confidence: <span className="font-bold text-white">{Math.round((deltaAnalysis.delta_analysis.confidence || 0) * 100)}%</span>
+                </span>
+              </div>
             </div>
           )}
-
         </div>
       )}
 
-      <div className="space-y-3">
-        <h4 className="font-medium text-gray-900">What would you like to do?</h4>
+      <div className="space-y-4">
+        <h4 className="font-semibold text-white text-lg">What would you like to do?</h4>
         
         <button
           onClick={() => onDecision('replace')}
-          className="w-full flex items-center justify-between p-4 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
+          data-testid="replace-button"
+          className="group w-full flex items-center justify-between p-5 border-2 border-border rounded-xl hover:border-green-500/50 hover:bg-green-500/5 transition-all duration-200 hover-lift"
         >
-          <div className="flex items-center space-x-3">
-            <CheckCircle className="h-5 w-5 text-green-500" />
+          <div className="flex items-center space-x-4">
+            <div className="p-2 bg-green-500/20 rounded-lg group-hover:bg-green-500/30 transition-colors">
+              <CheckCircle className="h-6 w-6 text-green-400" />
+            </div>
             <div className="text-left">
-              <p className="font-medium text-gray-900">Replace existing file</p>
-              <p className="text-sm text-gray-600">Archive the old version and process this new one</p>
+              <p className="font-semibold text-white text-base">Replace existing file</p>
+              <p className="text-sm text-muted-foreground">Archive the old version and process this new one</p>
             </div>
           </div>
         </button>
 
         <button
           onClick={() => onDecision('keep_both')}
-          className="w-full flex items-center justify-between p-4 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
+          data-testid="keep-both-button"
+          className="group w-full flex items-center justify-between p-5 border-2 border-border rounded-xl hover:border-blue-500/50 hover:bg-blue-500/5 transition-all duration-200 hover-lift"
         >
-          <div className="flex items-center space-x-3">
-            <Info className="h-5 w-5 text-blue-500" />
+          <div className="flex items-center space-x-4">
+            <div className="p-2 bg-blue-500/20 rounded-lg group-hover:bg-blue-500/30 transition-colors">
+              <Info className="h-6 w-6 text-blue-400" />
+            </div>
             <div className="text-left">
-              <p className="font-medium text-gray-900">Keep both files</p>
-              <p className="text-sm text-gray-600">Process this file alongside the existing one</p>
+              <p className="font-semibold text-white text-base">Keep both files</p>
+              <p className="text-sm text-muted-foreground">Process this file alongside the existing one</p>
             </div>
           </div>
         </button>
@@ -148,26 +166,32 @@ export const DuplicateDetectionModal: React.FC<DuplicateDetectionModalProps> = (
         {/* Delta merge option when we have analysis or similar/near duplicate */}
         <button
           onClick={() => onDecision('delta_merge')}
-          className="w-full flex items-center justify-between p-4 border border-blue-200 rounded-lg hover:bg-blue-50 transition-colors"
+          data-testid="delta-merge-button"
+          className="group w-full flex items-center justify-between p-5 border-2 border-blue-500/30 rounded-xl hover:border-blue-500/60 hover:bg-blue-500/10 transition-all duration-200 hover-lift bg-blue-500/5"
         >
-          <div className="flex items-center space-x-3">
-            <BarChart3 className="h-5 w-5 text-blue-500" />
+          <div className="flex items-center space-x-4">
+            <div className="p-2 bg-blue-500/30 rounded-lg group-hover:bg-blue-500/40 transition-colors">
+              <BarChart3 className="h-6 w-6 text-blue-300" />
+            </div>
             <div className="text-left">
-              <p className="font-medium text-gray-900">Merge new rows (delta)</p>
-              <p className="text-sm text-gray-600">Only append rows not present in the existing file</p>
+              <p className="font-semibold text-white text-base">Merge new rows (delta)</p>
+              <p className="text-sm text-muted-foreground">Only append rows not present in the existing file</p>
             </div>
           </div>
         </button>
 
         <button
           onClick={() => onDecision('skip')}
-          className="w-full flex items-center justify-between p-4 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
+          data-testid="skip-button"
+          className="group w-full flex items-center justify-between p-5 border-2 border-border rounded-xl hover:border-red-500/50 hover:bg-red-500/5 transition-all duration-200 hover-lift"
         >
-          <div className="flex items-center space-x-3">
-            <XCircle className="h-5 w-5 text-red-500" />
+          <div className="flex items-center space-x-4">
+            <div className="p-2 bg-red-500/20 rounded-lg group-hover:bg-red-500/30 transition-colors">
+              <XCircle className="h-6 w-6 text-red-400" />
+            </div>
             <div className="text-left">
-              <p className="font-medium text-gray-900">Skip this upload</p>
-              <p className="text-sm text-gray-600">Cancel processing and keep the existing file</p>
+              <p className="font-semibold text-white text-base">Skip this upload</p>
+              <p className="text-sm text-muted-foreground">Cancel processing and keep the existing file</p>
             </div>
           </div>
         </button>
@@ -283,16 +307,17 @@ export const DuplicateDetectionModal: React.FC<DuplicateDetectionModalProps> = (
   );
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto">
-        <div className="p-6">
+    <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 animate-fade-in">
+      <div className="bg-card border border-border rounded-2xl shadow-2xl max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto animate-scale-in">
+        <div className="p-8">
           {phase === 'basic_duplicate' && renderBasicDuplicate()}
           {phase === 'versions_detected' && renderVersionDetection()}
           
-          <div className="mt-6 pt-4 border-t border-gray-200">
+          <div className="mt-8 pt-6 border-t border-border">
             <button
               onClick={onClose}
-              className="w-full px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
+              data-testid="cancel-upload-button"
+              className="w-full px-6 py-3 border-2 border-border text-white rounded-xl hover:bg-muted hover:border-muted-foreground/30 transition-all duration-200 font-medium"
             >
               Cancel Upload
             </button>

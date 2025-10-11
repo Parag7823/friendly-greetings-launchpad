@@ -16,7 +16,7 @@ export default defineConfig({
     ['html', { outputFolder: 'playwright-report-production', open: 'never' }]
   ],
   use: {
-    baseURL: 'https://friendly-greetings-launchpad-1.onrender.com',
+    baseURL: 'https://friendly-greetings-launchpad-amey.onrender.com',
     trace: 'on-first-retry',
     screenshot: 'only-on-failure',
     video: 'retain-on-failure',

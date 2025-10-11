@@ -1,0 +1,41 @@
+# Page snapshot
+
+```yaml
+- generic [ref=e2]:
+  - region "Notifications (F8)":
+    - list
+  - generic [ref=e3]:
+    - button [ref=e4] [cursor=pointer]:
+      - img
+    - generic [ref=e6]:
+      - generic [ref=e10]: F
+      - generic [ref=e11]:
+        - button [ref=e12] [cursor=pointer]:
+          - img
+        - button [ref=e13] [cursor=pointer]:
+          - img
+        - button [ref=e14] [cursor=pointer]:
+          - img
+    - generic [ref=e19]:
+      - generic [ref=e20]:
+        - heading "Upload Financial Documents" [level=1] [ref=e21]
+        - paragraph [ref=e22]: Upload your Excel, CSV, or other financial files for AI analysis
+      - generic [ref=e23]:
+        - generic [ref=e24]:
+          - generic [ref=e25]:
+            - heading "Upload Financial Documents" [level=3] [ref=e26]
+            - paragraph [ref=e27]: Upload Excel or CSV files for AI-powered financial analysis
+          - generic [ref=e29]:
+            - img [ref=e30]
+            - paragraph [ref=e33]: Click to upload or drag and drop
+            - paragraph [ref=e34]: Excel (.xlsx, .xls) or CSV files up to 500MB
+        - generic [ref=e38]:
+          - generic [ref=e39]:
+            - img [ref=e40]
+            - generic [ref=e43]:
+              - paragraph [ref=e44]: progress-test.csv
+              - paragraph [ref=e45]: processing
+          - img [ref=e46]
+          - button [ref=e48] [cursor=pointer]:
+            - img [ref=e49] [cursor=pointer]
+```
