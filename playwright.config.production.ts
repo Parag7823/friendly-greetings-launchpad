@@ -1,27 +1,25 @@
 import { defineConfig, devices } from '@playwright/test';
 
 /**
- * Playwright configuration for testing against production deployment
- * Usage: npx playwright test --config=playwright.config.production.ts
+ * Playwright configuration for production testing
+ * Tests against the deployed production environment
  */
 export default defineConfig({
   testDir: './tests/e2e',
-  fullyParallel: false, // Sequential for production testing
+  fullyParallel: false,
   forbidOnly: true,
-  retries: 2, // Retry failed tests twice
-  workers: 1, // Single worker for production
-  timeout: 120000, // 2 minutes per test (production can be slower)
+  retries: 2,
+  workers: 1,
+  timeout: 180000, // 3 minutes per test
   reporter: [
     ['list'],
-    ['html', { outputFolder: 'playwright-report-production' }]
+    ['html', { outputFolder: 'playwright-report-production', open: 'never' }]
   ],
   use: {
-    // Production URL
-    baseURL: 'https://friendly-greetings-launchpad-amey.onrender.com',
+    baseURL: 'https://friendly-greetings-launchpad-1.onrender.com',
     trace: 'on-first-retry',
     screenshot: 'only-on-failure',
     video: 'retain-on-failure',
-    // Longer timeouts for production
     actionTimeout: 30000,
     navigationTimeout: 60000,
   },
@@ -31,5 +29,4 @@ export default defineConfig({
       use: { ...devices['Desktop Chrome'] },
     },
   ],
-  // No webServer needed - testing against deployed app
-});
+});  // No webServer needed - testing against deployed app

@@ -24,11 +24,19 @@ function createTestExcelFile(filename: string, rows: number): Buffer {
 
 test.describe('Duplicate Detection - Basic Flow', () => {
   test.beforeEach(async ({ page }) => {
-    // Navigate to upload page
+    // Navigate to landing page
     await page.goto('/');
     
-    // Wait for auth (anonymous sign-in)
-    await page.waitForTimeout(2000);
+    // Click "Get Started" button to trigger auth
+    const getStartedButton = page.getByRole('button', { name: /get started/i });
+    await getStartedButton.waitFor({ state: 'visible', timeout: 10000 });
+    await getStartedButton.click();
+    
+    // Wait for authentication and redirect to upload page
+    await page.waitForTimeout(3000);
+    
+    // Wait for file input to be available
+    await page.locator('input[type="file"]').waitFor({ state: 'visible', timeout: 30000 });
   });
 
   test('should detect exact duplicate and show modal', async ({ page }) => {
@@ -204,7 +212,13 @@ test.describe('Duplicate Detection - Basic Flow', () => {
 test.describe('Duplicate Detection - Near Duplicate Flow', () => {
   test('should detect near-duplicate files', async ({ page }) => {
     await page.goto('/');
-    await page.waitForTimeout(2000);
+    
+    // Click "Get Started" and wait for auth
+    const getStartedButton = page.getByRole('button', { name: /get started/i });
+    await getStartedButton.waitFor({ state: 'visible', timeout: 10000 });
+    await getStartedButton.click();
+    await page.waitForTimeout(3000);
+    await page.locator('input[type="file"]').waitFor({ state: 'visible', timeout: 30000 });
     
     // Upload file with 100 rows
     const file1 = createTestExcelFile('near-dup-1.csv', 100);
@@ -241,7 +255,13 @@ test.describe('Duplicate Detection - Near Duplicate Flow', () => {
 
   test('should offer delta merge for near-duplicates', async ({ page }) => {
     await page.goto('/');
-    await page.waitForTimeout(2000);
+    
+    // Click "Get Started" and wait for auth
+    const getStartedButton = page.getByRole('button', { name: /get started/i });
+    await getStartedButton.waitFor({ state: 'visible', timeout: 10000 });
+    await getStartedButton.click();
+    await page.waitForTimeout(3000);
+    await page.locator('input[type="file"]').waitFor({ state: 'visible', timeout: 30000 });
     
     const file1 = createTestExcelFile('delta-1.csv', 50);
     const fileInput = page.locator('input[type="file"]');
@@ -284,7 +304,13 @@ test.describe('Duplicate Detection - Near Duplicate Flow', () => {
 test.describe('Duplicate Detection - Error Handling', () => {
   test('should handle network errors gracefully', async ({ page }) => {
     await page.goto('/');
-    await page.waitForTimeout(2000);
+    
+    // Click "Get Started" and wait for auth
+    const getStartedButton = page.getByRole('button', { name: /get started/i });
+    await getStartedButton.waitFor({ state: 'visible', timeout: 10000 });
+    await getStartedButton.click();
+    await page.waitForTimeout(3000);
+    await page.locator('input[type="file"]').waitFor({ state: 'visible', timeout: 30000 });
     
     // Upload file
     const testFile = createTestExcelFile('network-error-test.csv', 10);
@@ -320,7 +346,13 @@ test.describe('Duplicate Detection - Error Handling', () => {
 
   test('should handle missing job information', async ({ page }) => {
     await page.goto('/');
-    await page.waitForTimeout(2000);
+    
+    // Click "Get Started" and wait for auth
+    const getStartedButton = page.getByRole('button', { name: /get started/i });
+    await getStartedButton.waitFor({ state: 'visible', timeout: 10000 });
+    await getStartedButton.click();
+    await page.waitForTimeout(3000);
+    await page.locator('input[type="file"]').waitFor({ state: 'visible', timeout: 30000 });
     
     // This test verifies error handling when job_id or file_hash is missing
     // In normal flow, this shouldn't happen, but we test defensive programming
@@ -342,7 +374,13 @@ test.describe('Duplicate Detection - Error Handling', () => {
 test.describe('Duplicate Detection - Performance', () => {
   test('should handle large file duplicates efficiently', async ({ page }) => {
     await page.goto('/');
-    await page.waitForTimeout(2000);
+    
+    // Click "Get Started" and wait for auth
+    const getStartedButton = page.getByRole('button', { name: /get started/i });
+    await getStartedButton.waitFor({ state: 'visible', timeout: 10000 });
+    await getStartedButton.click();
+    await page.waitForTimeout(3000);
+    await page.locator('input[type="file"]').waitFor({ state: 'visible', timeout: 30000 });
     
     // Create large file (1000 rows)
     const largeFile = createTestExcelFile('large-file.csv', 1000);
@@ -379,7 +417,13 @@ test.describe('Duplicate Detection - Performance', () => {
 
   test('should use caching for repeated checks', async ({ page }) => {
     await page.goto('/');
-    await page.waitForTimeout(2000);
+    
+    // Click "Get Started" and wait for auth
+    const getStartedButton = page.getByRole('button', { name: /get started/i });
+    await getStartedButton.waitFor({ state: 'visible', timeout: 10000 });
+    await getStartedButton.click();
+    await page.waitForTimeout(3000);
+    await page.locator('input[type="file"]').waitFor({ state: 'visible', timeout: 30000 });
     
     const testFile = createTestExcelFile('cache-test.csv', 50);
     const fileInput = page.locator('input[type="file"]');
@@ -419,7 +463,13 @@ test.describe('Duplicate Detection - Performance', () => {
 test.describe('Duplicate Detection - UI/UX', () => {
   test('should show progress during duplicate check', async ({ page }) => {
     await page.goto('/');
-    await page.waitForTimeout(2000);
+    
+    // Click "Get Started" and wait for auth
+    const getStartedButton = page.getByRole('button', { name: /get started/i });
+    await getStartedButton.waitFor({ state: 'visible', timeout: 10000 });
+    await getStartedButton.click();
+    await page.waitForTimeout(3000);
+    await page.locator('input[type="file"]').waitFor({ state: 'visible', timeout: 30000 });
     
     const testFile = createTestExcelFile('progress-test.csv', 100);
     const fileInput = page.locator('input[type="file"]');
@@ -438,7 +488,13 @@ test.describe('Duplicate Detection - UI/UX', () => {
 
   test('should display duplicate file details correctly', async ({ page }) => {
     await page.goto('/');
-    await page.waitForTimeout(2000);
+    
+    // Click "Get Started" and wait for auth
+    const getStartedButton = page.getByRole('button', { name: /get started/i });
+    await getStartedButton.waitFor({ state: 'visible', timeout: 10000 });
+    await getStartedButton.click();
+    await page.waitForTimeout(3000);
+    await page.locator('input[type="file"]').waitFor({ state: 'visible', timeout: 30000 });
     
     const testFile = createTestExcelFile('details-test.csv', 20);
     const fileInput = page.locator('input[type="file"]');
@@ -470,7 +526,13 @@ test.describe('Duplicate Detection - UI/UX', () => {
 
   test('should allow closing modal and restarting', async ({ page }) => {
     await page.goto('/');
-    await page.waitForTimeout(2000);
+    
+    // Click "Get Started" and wait for auth
+    const getStartedButton = page.getByRole('button', { name: /get started/i });
+    await getStartedButton.waitFor({ state: 'visible', timeout: 10000 });
+    await getStartedButton.click();
+    await page.waitForTimeout(3000);
+    await page.locator('input[type="file"]').waitFor({ state: 'visible', timeout: 30000 });
     
     const testFile = createTestExcelFile('close-modal-test.csv', 10);
     const fileInput = page.locator('input[type="file"]');
