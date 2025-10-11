@@ -11,6 +11,7 @@ python-magic==0.4.27
 filetype==1.2.0
 openai==1.54.4
 supabase==2.10.0
+httpx>=0.26.0
 requests==2.32.3
 python-multipart==0.0.12
 pydantic==2.10.2
@@ -47,4 +48,3 @@ pytest>=7.0.0
 pytest-bdd>=6.0.0
 pytest-asyncio>=0.21.0
 pytest-cov>=4.0.0
-httpx>=0.24.0,<0.25.0
