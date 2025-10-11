@@ -18,15 +18,15 @@ aiohttp==3.11.7
 
 # Enhanced file processing capabilities
 odfpy==1.4.1
-tabula-py==2.9.0
-camelot-py==0.11.0
-pdfplumber==0.10.3
+tabula-py==2.9.3
+camelot-py[cv]==0.11.0
+pdfplumber==0.11.4
 pytesseract==0.3.13
 Pillow==10.4.0
 opencv-python-headless==4.10.0.84
-pdf2image==1.16.3
-py7zr==0.20.8
-rarfile==4.1
+pdf2image==1.17.0
+py7zr==0.22.0
+rarfile==4.2
 
 # Job Orchestration and Performance Optimization Dependencies
 redis==5.0.1
