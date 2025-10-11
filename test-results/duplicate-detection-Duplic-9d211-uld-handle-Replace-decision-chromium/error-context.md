@@ -3,90 +3,84 @@
 ```yaml
 - generic [ref=e2]:
   - region "Notifications (F8)":
-    - list [ref=e4]:
-      - status [ref=e5]:
-        - generic [ref=e6]:
-          - generic [ref=e7]: Analysis Complete
-          - generic [ref=e8]: Processed 1 sheets with real-time updates
-        - button [ref=e9] [cursor=pointer]:
-          - img [ref=e10] [cursor=pointer]
-  - generic [ref=e14]:
-    - button [ref=e15] [cursor=pointer]:
+    - list
+  - generic [ref=e3]:
+    - button [ref=e4] [cursor=pointer]:
       - img
-    - generic [ref=e17]:
-      - generic [ref=e21]: F
-      - generic [ref=e22]:
-        - button [ref=e23] [cursor=pointer]:
+    - generic [ref=e6]:
+      - generic [ref=e10]: F
+      - generic [ref=e11]:
+        - button [ref=e12] [cursor=pointer]:
           - img
-        - button [ref=e24] [cursor=pointer]:
+        - button [ref=e13] [cursor=pointer]:
           - img
-        - button [ref=e25] [cursor=pointer]:
+        - button [ref=e14] [cursor=pointer]:
           - img
-    - generic [ref=e30]:
-      - generic [ref=e31]:
-        - heading "Upload Financial Documents" [level=1] [ref=e32]
-        - paragraph [ref=e33]: Upload your Excel, CSV, or other financial files for AI analysis
-      - generic [ref=e34]:
+    - generic [ref=e19]:
+      - generic [ref=e20]:
+        - heading "Upload Financial Documents" [level=1] [ref=e21]
+        - paragraph [ref=e22]: Upload your Excel, CSV, or other financial files for AI analysis
+      - generic [ref=e23]:
+        - generic [ref=e24]:
+          - generic [ref=e25]:
+            - heading "Upload Financial Documents" [level=3] [ref=e26]
+            - paragraph [ref=e27]: Upload Excel or CSV files for AI-powered financial analysis
+          - generic [ref=e29] [cursor=pointer]:
+            - img [ref=e30] [cursor=pointer]
+            - paragraph [ref=e33] [cursor=pointer]: Click to upload or drag and drop
+            - paragraph [ref=e34] [cursor=pointer]: Excel (.xlsx, .xls) or CSV files up to 500MB
         - generic [ref=e35]:
           - generic [ref=e36]:
-            - heading "Upload Financial Documents" [level=3] [ref=e37]
-            - paragraph [ref=e38]: Upload Excel or CSV files for AI-powered financial analysis
-          - generic [ref=e40] [cursor=pointer]:
-            - img [ref=e41] [cursor=pointer]
-            - paragraph [ref=e44] [cursor=pointer]: Click to upload or drag and drop
-            - paragraph [ref=e45] [cursor=pointer]: Excel (.xlsx, .xls) or CSV files up to 500MB
-        - generic [ref=e46]:
-          - generic [ref=e47]:
-            - heading "Completed Files (2)" [level=3] [ref=e48]
-            - paragraph [ref=e49]: Successfully processed files ready for analysis
-          - generic [ref=e51]:
-            - generic [ref=e52]:
-              - generic [ref=e53]:
-                - generic [ref=e55]: ✓
-                - generic [ref=e56]:
-                  - paragraph [ref=e57]: replace-test.csv
-                  - paragraph [ref=e58]: Completed 10/12/2025, 12:57:43 AM • 1 sheets
-              - button "Remove" [ref=e59] [cursor=pointer]
-            - generic [ref=e60]:
-              - generic [ref=e61]:
-                - generic [ref=e63]: ✓
-                - generic [ref=e64]:
-                  - paragraph [ref=e65]: replace-test.csv
-                  - paragraph [ref=e66]: Completed 10/12/2025, 12:57:49 AM • 1 sheets
-              - button "Remove" [ref=e67] [cursor=pointer]
-        - generic [ref=e70]:
-          - generic [ref=e71]:
-            - generic [ref=e72]:
-              - img [ref=e73]
-              - generic [ref=e75]:
-                - heading "Identical File Detected" [level=3] [ref=e76]
-                - paragraph [ref=e77]: This exact file has been uploaded before
-            - paragraph [ref=e79]: Duplicate file detected!
-            - generic [ref=e80]:
-              - heading "What would you like to do?" [level=4] [ref=e81]
-              - button "Replace existing file Archive the old version and process this new one" [active] [ref=e82] [cursor=pointer]:
-                - generic [ref=e83] [cursor=pointer]:
-                  - img [ref=e84] [cursor=pointer]
-                  - generic [ref=e87] [cursor=pointer]:
-                    - paragraph [ref=e88] [cursor=pointer]: Replace existing file
-                    - paragraph [ref=e89] [cursor=pointer]: Archive the old version and process this new one
-              - button "Keep both files Process this file alongside the existing one" [ref=e90] [cursor=pointer]:
-                - generic [ref=e91] [cursor=pointer]:
-                  - img [ref=e92] [cursor=pointer]
-                  - generic [ref=e94] [cursor=pointer]:
-                    - paragraph [ref=e95] [cursor=pointer]: Keep both files
-                    - paragraph [ref=e96] [cursor=pointer]: Process this file alongside the existing one
-              - button "Merge new rows (delta) Only append rows not present in the existing file" [ref=e97] [cursor=pointer]:
-                - generic [ref=e98] [cursor=pointer]:
-                  - img [ref=e99] [cursor=pointer]
-                  - generic [ref=e101] [cursor=pointer]:
-                    - paragraph [ref=e102] [cursor=pointer]: Merge new rows (delta)
-                    - paragraph [ref=e103] [cursor=pointer]: Only append rows not present in the existing file
-              - button "Skip this upload Cancel processing and keep the existing file" [ref=e104] [cursor=pointer]:
-                - generic [ref=e105] [cursor=pointer]:
-                  - img [ref=e106] [cursor=pointer]
-                  - generic [ref=e110] [cursor=pointer]:
-                    - paragraph [ref=e111] [cursor=pointer]: Skip this upload
-                    - paragraph [ref=e112] [cursor=pointer]: Cancel processing and keep the existing file
-          - button "Cancel Upload" [ref=e114] [cursor=pointer]
+            - heading "Completed Files (2)" [level=3] [ref=e37]
+            - paragraph [ref=e38]: Successfully processed files ready for analysis
+          - generic [ref=e40]:
+            - generic [ref=e41]:
+              - generic [ref=e42]:
+                - generic [ref=e44]: ✓
+                - generic [ref=e45]:
+                  - paragraph [ref=e46]: replace-test.csv
+                  - paragraph [ref=e47]: Completed 10/12/2025, 1:29:47 AM • 1 sheets
+              - button "Remove" [ref=e48] [cursor=pointer]
+            - generic [ref=e49]:
+              - generic [ref=e50]:
+                - generic [ref=e52]: ✓
+                - generic [ref=e53]:
+                  - paragraph [ref=e54]: replace-test.csv
+                  - paragraph [ref=e55]: Completed 10/12/2025, 1:29:54 AM • 1 sheets
+              - button "Remove" [ref=e56] [cursor=pointer]
+        - generic [ref=e59]:
+          - generic [ref=e60]:
+            - generic [ref=e61]:
+              - img [ref=e62]
+              - generic [ref=e64]:
+                - heading "Identical File Detected" [level=3] [ref=e65]
+                - paragraph [ref=e66]: This exact file has been uploaded before
+            - paragraph [ref=e68]: Duplicate file detected!
+            - generic [ref=e69]:
+              - heading "What would you like to do?" [level=4] [ref=e70]
+              - button "Replace existing file Archive the old version and process this new one" [ref=e71] [cursor=pointer]:
+                - generic [ref=e72] [cursor=pointer]:
+                  - img [ref=e73] [cursor=pointer]
+                  - generic [ref=e76] [cursor=pointer]:
+                    - paragraph [ref=e77] [cursor=pointer]: Replace existing file
+                    - paragraph [ref=e78] [cursor=pointer]: Archive the old version and process this new one
+              - button "Keep both files Process this file alongside the existing one" [ref=e79] [cursor=pointer]:
+                - generic [ref=e80] [cursor=pointer]:
+                  - img [ref=e81] [cursor=pointer]
+                  - generic [ref=e83] [cursor=pointer]:
+                    - paragraph [ref=e84] [cursor=pointer]: Keep both files
+                    - paragraph [ref=e85] [cursor=pointer]: Process this file alongside the existing one
+              - button "Merge new rows (delta) Only append rows not present in the existing file" [ref=e86] [cursor=pointer]:
+                - generic [ref=e87] [cursor=pointer]:
+                  - img [ref=e88] [cursor=pointer]
+                  - generic [ref=e90] [cursor=pointer]:
+                    - paragraph [ref=e91] [cursor=pointer]: Merge new rows (delta)
+                    - paragraph [ref=e92] [cursor=pointer]: Only append rows not present in the existing file
+              - button "Skip this upload Cancel processing and keep the existing file" [ref=e93] [cursor=pointer]:
+                - generic [ref=e94] [cursor=pointer]:
+                  - img [ref=e95] [cursor=pointer]
+                  - generic [ref=e99] [cursor=pointer]:
+                    - paragraph [ref=e100] [cursor=pointer]: Skip this upload
+                    - paragraph [ref=e101] [cursor=pointer]: Cancel processing and keep the existing file
+          - button "Cancel Upload" [ref=e103] [cursor=pointer]
 ```
