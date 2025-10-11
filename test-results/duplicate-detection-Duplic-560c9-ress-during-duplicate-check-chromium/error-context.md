@@ -1,0 +1,49 @@
+# Page snapshot
+
+```yaml
+- generic [active] [ref=e1]:
+  - generic [ref=e2]:
+    - region "Notifications (F8)":
+      - list [ref=e4]:
+        - status [ref=e5]:
+          - generic [ref=e6]:
+            - generic [ref=e7]: Analysis Complete
+            - generic [ref=e8]: Processed 1 sheets with real-time updates
+          - button [ref=e9] [cursor=pointer]:
+            - img [ref=e10] [cursor=pointer]
+    - generic [ref=e14]:
+      - button [ref=e15] [cursor=pointer]:
+        - img
+      - generic [ref=e17]:
+        - generic [ref=e21]: F
+        - generic [ref=e22]:
+          - button [ref=e23] [cursor=pointer]:
+            - img
+          - button [ref=e24] [cursor=pointer]:
+            - img
+          - button [ref=e25] [cursor=pointer]:
+            - img
+      - generic [ref=e30]:
+        - generic [ref=e31]:
+          - heading "Upload Financial Documents" [level=1] [ref=e32]
+          - paragraph [ref=e33]: Upload your Excel, CSV, or other financial files for AI analysis
+        - generic [ref=e34]:
+          - generic [ref=e35]:
+            - generic [ref=e36]:
+              - heading "Upload Financial Documents" [level=3] [ref=e37]
+              - paragraph [ref=e38]: Upload Excel or CSV files for AI-powered financial analysis
+            - generic [ref=e40] [cursor=pointer]:
+              - img [ref=e41] [cursor=pointer]
+              - paragraph [ref=e44] [cursor=pointer]: Click to upload or drag and drop
+              - paragraph [ref=e45] [cursor=pointer]: Excel (.xlsx, .xls) or CSV files up to 500MB
+          - generic [ref=e49]:
+            - generic [ref=e50]:
+              - img [ref=e51]
+              - generic [ref=e54]:
+                - paragraph [ref=e55]: progress-test.csv
+                - paragraph [ref=e56]: completed
+            - img [ref=e57]
+            - button [ref=e60] [cursor=pointer]:
+              - img [ref=e61] [cursor=pointer]
+  - status [ref=e64]: Notification Analysis CompleteProcessed 1 sheets with real-time updates
+```

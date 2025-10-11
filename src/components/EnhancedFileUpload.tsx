@@ -33,17 +33,16 @@ export const EnhancedFileUpload: React.FC = () => {
   // Duplicate detection state
   const [duplicateModal, setDuplicateModal] = useState({
     isOpen: false,
+    duplicateInfo: undefined as any,
+    versionCandidates: undefined as any,
+    recommendation: undefined as any,
     phase: 'basic_duplicate' as 'basic_duplicate' | 'versions_detected' | 'similar_files',
-    duplicateInfo: null as any,
-    versionCandidates: null as any,
-    recommendation: null as any,
     currentJobId: null as string | null,
     currentFileHash: null as string | null,
-    currentStoragePath: null as string | null,
-    currentFileName: null as string | null,
     currentFileId: null as string | null,
     currentExistingFileId: null as string | null,
-    deltaAnalysis: null as any
+    deltaAnalysis: undefined as any,
+    error: null as string | null
   });
 
   const { toast } = useToast();
@@ -417,9 +416,17 @@ export const EnhancedFileUpload: React.FC = () => {
         }
       }
     } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : "Failed to process duplicate decision";
+      
+      // Show error in modal
+      setDuplicateModal(prev => ({ 
+        ...prev, 
+        error: errorMessage 
+      }));
+      
       toast({
         title: "Error",
-        description: error instanceof Error ? error.message : "Failed to process duplicate decision",
+        description: errorMessage,
         variant: "destructive"
       });
     }
@@ -608,6 +615,7 @@ export const EnhancedFileUpload: React.FC = () => {
         onVersionAccept={handleVersionRecommendationFeedback}
         phase={duplicateModal.phase}
         deltaAnalysis={duplicateModal.deltaAnalysis}
+        error={duplicateModal.error}
       />
     </div>
   );

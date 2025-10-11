@@ -48,6 +48,7 @@ interface DuplicateDetectionModalProps {
   onVersionAccept: (accepted: boolean, feedback?: string) => void;
   phase: 'basic_duplicate' | 'versions_detected' | 'similar_files';
   deltaAnalysis?: any;
+  error?: string | null;
 }
 
 export const DuplicateDetectionModal: React.FC<DuplicateDetectionModalProps> = ({
@@ -59,7 +60,8 @@ export const DuplicateDetectionModal: React.FC<DuplicateDetectionModalProps> = (
   onDecision,
   onVersionAccept,
   phase,
-  deltaAnalysis
+  deltaAnalysis,
+  error
 }) => {
   const [feedback, setFeedback] = useState('');
   const [showFeedback, setShowFeedback] = useState(false);
@@ -125,6 +127,19 @@ export const DuplicateDetectionModal: React.FC<DuplicateDetectionModalProps> = (
               </div>
             </div>
           )}
+        </div>
+      )}
+
+      {/* Error Display */}
+      {error && (
+        <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-4">
+          <div className="flex items-center space-x-3">
+            <XCircle className="h-5 w-5 text-red-400" />
+            <div>
+              <p className="font-semibold text-red-400">Error Processing Decision</p>
+              <p className="text-sm text-red-300 mt-1">{error}</p>
+            </div>
+          </div>
         </div>
       )}
 

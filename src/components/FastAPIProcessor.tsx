@@ -270,7 +270,7 @@ export class FastAPIProcessor {
       const fileHash = await this.calculateFileHash(fileBuffer);
       
       // Check for duplicates
-      this.updateProgress('duplicate_check', 'Checking for duplicate files...', 10);
+      this.updateProgress('duplicate_check', 'Checking for duplicates...', 10);
       const duplicateCheck = await this.checkForDuplicates(user.id, fileHash, file.name);
       
       if (duplicateCheck.is_duplicate) {
