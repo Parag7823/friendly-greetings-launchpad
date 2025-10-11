@@ -1,95 +1,46 @@
 # Page snapshot
 
 ```yaml
-- generic [ref=e1]:
-  - generic [ref=e2]:
-    - region "Notifications (F8)":
-      - list [ref=e4]:
-        - status [ref=e5]:
-          - generic [ref=e6]:
-            - generic [ref=e7]: Error
-            - generic [ref=e8]: Failed to fetch
-          - button [ref=e9] [cursor=pointer]:
-            - img [ref=e10] [cursor=pointer]
-    - generic [ref=e14]:
-      - button [ref=e15] [cursor=pointer]:
-        - img
+- generic [ref=e2]:
+  - generic [ref=e3]:
+    - link "Render Logo" [ref=e5] [cursor=pointer]:
+      - /url: https://render.com/?utm_source=free_interstitialv2
+      - img "Render Logo" [ref=e6] [cursor=pointer]
+    - generic [ref=e7]:
+      - generic [ref=e8]:
+        - generic [ref=e9]: 02:35:28
+        - generic [ref=e10]: Incoming HTTP request detected ...
+      - generic [ref=e11]:
+        - generic [ref=e12]: 02:35:31
+        - generic [ref=e13]: Service waking up ...
+      - generic [ref=e16]: __| |______________________________________________________________________________________________________________________________| |__ __ ______________________________________________________________________________________________________________________________ __ | | | | | | | | | | | | | | ___ __ _______ ___ ________ ________ _____ ______ _______ | | | | |\ \ |\ \ |\ ___ \ |\ \ |\ ____\ |\ __ \ |\ _ \ _ \ |\ ___ \ | | | | \ \ \ \ \ \ \ \ __/| \ \ \ \ \ \___| \ \ \|\ \ \ \ \\\__\ \ \ \ \ __/| | | | | \ \ \ __\ \ \ \ \ \_|/__ \ \ \ \ \ \ \ \ \\\ \ \ \ \\|__| \ \ \ \ \_|/__ | | | | \ \ \|\__\_\ \ \ \ \_|\ \ \ \ \____ \ \ \____ \ \ \\\ \ \ \ \ \ \ \ \ \ \_|\ \ | | | | \ \____________\ \ \_______\ \ \_______\ \ \_______\ \ \_______\ \ \__\ \ \__\ \ \_______\ | | | | \|____________| \|_______| \|_______| \|_______| \|_______| \|__| \|__| \|_______| | | | | | | | | | | | | | | | | _________ ________ ________ _______ ________ ________ _______ ________ | | | | |\___ ___\ |\ __ \ |\ __ \ |\ ___ \ |\ ___ \ |\ ___ \ |\ ___ \ |\ __ \ | | | | \|___ \ \_| \ \ \|\ \ \ \ \|\ \ \ \ __/| \ \ \\ \ \ \ \ \_|\ \ \ \ __/| \ \ \|\ \ | | | | \ \ \ \ \ \\\ \ \ \ _ _\ \ \ \_|/__ \ \ \\ \ \ \ \ \ \\ \ \ \ \_|/__ \ \ _ _\ | | | | \ \ \ \ \ \\\ \ \ \ \\ \| \ \ \_|\ \ \ \ \\ \ \ \ \ \_\\ \ \ \ \_|\ \ \ \ \\ \| | | | | \ \__\ \ \_______\ \ \__\\ _\ \ \_______\ \ \__\\ \__\ \ \_______\ \ \_______\ \ \__\\ _\ | | | | \|__| \|_______| \|__|\|__| \|_______| \|__| \|__| \|_______| \|_______| \|__|\|__| | | | | | | | | | | __| |______________________________________________________________________________________________________________________________| |__ __ ______________________________________________________________________________________________________________________________ __ | | | |
       - generic [ref=e17]:
-        - generic [ref=e21]: F
-        - generic [ref=e22]:
-          - button [ref=e23] [cursor=pointer]:
-            - img
-          - button [ref=e24] [cursor=pointer]:
-            - img
-          - button [ref=e25] [cursor=pointer]:
-            - img
-      - generic [ref=e30]:
-        - generic [ref=e31]:
-          - heading "Upload Financial Documents" [level=1] [ref=e32]
-          - paragraph [ref=e33]: Upload your Excel, CSV, or other financial files for AI analysis
-        - generic [ref=e34]:
-          - generic [ref=e35]:
-            - generic [ref=e36]:
-              - heading "Upload Financial Documents" [level=3] [ref=e37]
-              - paragraph [ref=e38]: Upload Excel or CSV files for AI-powered financial analysis
-            - generic [ref=e40]:
-              - img [ref=e41]
-              - paragraph [ref=e44]: Click to upload or drag and drop
-              - paragraph [ref=e45]: Excel (.xlsx, .xls) or CSV files up to 500MB
-          - generic [ref=e49]:
-            - generic [ref=e50]:
-              - img [ref=e51]
-              - generic [ref=e54]:
-                - paragraph [ref=e55]: network-error-test.csv
-                - paragraph [ref=e56]: completed
-            - img [ref=e57]
-            - button [ref=e60] [cursor=pointer]:
-              - img [ref=e61] [cursor=pointer]
-          - generic [ref=e64]:
-            - generic [ref=e65]:
-              - heading "Completed Files (1)" [level=3] [ref=e66]
-              - paragraph [ref=e67]: Successfully processed files ready for analysis
-            - generic [ref=e70]:
-              - generic [ref=e71]:
-                - generic [ref=e73]: ✓
-                - generic [ref=e74]:
-                  - paragraph [ref=e75]: network-error-test.csv
-                  - paragraph [ref=e76]: Completed 10/12/2025, 1:58:22 AM • 1 sheets
-              - button "Remove" [ref=e77] [cursor=pointer]
-          - generic [ref=e80]:
-            - generic [ref=e81]:
-              - generic [ref=e82]:
-                - img [ref=e84]
-                - generic [ref=e86]:
-                  - heading "Identical File Detected" [level=3] [ref=e87]
-                  - paragraph [ref=e88]: This exact file has been uploaded before
-              - paragraph [ref=e90]: Duplicate file detected!
-              - generic [ref=e91]:
-                - heading "What would you like to do?" [level=4] [ref=e92]
-                - button "Replace existing file Archive the old version and process this new one" [active] [ref=e93] [cursor=pointer]:
-                  - generic [ref=e94] [cursor=pointer]:
-                    - img [ref=e96] [cursor=pointer]
-                    - generic [ref=e99] [cursor=pointer]:
-                      - paragraph [ref=e100] [cursor=pointer]: Replace existing file
-                      - paragraph [ref=e101] [cursor=pointer]: Archive the old version and process this new one
-                - button "Keep both files Process this file alongside the existing one" [ref=e102] [cursor=pointer]:
-                  - generic [ref=e103] [cursor=pointer]:
-                    - img [ref=e105] [cursor=pointer]
-                    - generic [ref=e107] [cursor=pointer]:
-                      - paragraph [ref=e108] [cursor=pointer]: Keep both files
-                      - paragraph [ref=e109] [cursor=pointer]: Process this file alongside the existing one
-                - button "Merge new rows (delta) Only append rows not present in the existing file" [ref=e110] [cursor=pointer]:
-                  - generic [ref=e111] [cursor=pointer]:
-                    - img [ref=e113] [cursor=pointer]
-                    - generic [ref=e115] [cursor=pointer]:
-                      - paragraph [ref=e116] [cursor=pointer]: Merge new rows (delta)
-                      - paragraph [ref=e117] [cursor=pointer]: Only append rows not present in the existing file
-                - button "Skip this upload Cancel processing and keep the existing file" [ref=e118] [cursor=pointer]:
-                  - generic [ref=e119] [cursor=pointer]:
-                    - img [ref=e121] [cursor=pointer]
-                    - generic [ref=e125] [cursor=pointer]:
-                      - paragraph [ref=e126] [cursor=pointer]: Skip this upload
-                      - paragraph [ref=e127] [cursor=pointer]: Cancel processing and keep the existing file
-            - button "Cancel Upload" [ref=e129] [cursor=pointer]
-  - status [ref=e130]: Notification ErrorFailed to fetch
+        - generic [ref=e18]: 02:35:35
+        - generic [ref=e19]: Allocating compute resources ...
+      - generic [ref=e20]:
+        - generic [ref=e21]: 02:35:38
+        - generic [ref=e22]: Preparing instance for initialization ...
+      - generic [ref=e23]:
+        - generic [ref=e24]: 02:35:42
+        - generic [ref=e25]: Starting the instance ...
+      - generic [ref=e26]:
+        - generic [ref=e27]: 02:35:48
+        - generic [ref=e28]: Environment variables injected ...
+      - generic [ref=e29]:
+        - generic [ref=e30]: 02:35:50
+        - generic [ref=e31]: Finalizing startup ...
+      - generic [ref=e32]:
+        - generic [ref=e33]: 02:35:52
+        - generic [ref=e34]: Optimizing deployment ...
+      - generic [ref=e35]:
+        - generic [ref=e36]: 02:35:54
+        - generic [ref=e37]: Steady hands. Clean logs. Your app is almost live ...
+  - generic [ref=e38]:
+    - link "Start building on Render today" [ref=e40] [cursor=pointer]:
+      - /url: https://render.com/?utm_source=free_interstitialv2
+      - text: Start building on Render today
+      - img [ref=e42] [cursor=pointer]
+    - generic [ref=e45]:
+      - img [ref=e46]
+      - generic [ref=e49]: Application loading
 ```
