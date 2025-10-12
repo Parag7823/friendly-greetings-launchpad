@@ -11,9 +11,12 @@ import { useAuth } from './AuthProvider';
 interface FileRowData {
   id: string;
   file: File;
-  status: 'pending' | 'uploading' | 'processing' | 'completed' | 'error';
+  status: 'pending' | 'uploading' | 'processing' | 'completed' | 'error' | 'failed' | 'queued' | 'cancelled';
   progress: number;
   error?: string;
+  currentStep?: string;
+  sheetProgress?: any;
+  jobId?: string;
 }
 
 interface UploadedFile {
