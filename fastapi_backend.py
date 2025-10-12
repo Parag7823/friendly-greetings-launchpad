@@ -8761,7 +8761,7 @@ async def handle_duplicate_decision(request: DuplicateDecisionRequest):
 @app.get("/api/connectors/history")
 async def connectors_history(connection_id: str, user_id: str, page: int = 1, page_size: int = 20, session_token: Optional[str] = None):
     """Paginated sync_runs for a connection. Returns {runs, page, page_size, has_more}."""
-    _require_security('connectors-history', user_id, session_token)
+    await _require_security('connectors-history', user_id, session_token)
     try:
         if page < 1:
             page = 1
@@ -9517,7 +9517,7 @@ class UpdateFrequencyRequest(BaseModel):
     minutes: int
     session_token: Optional[str] = None
 
-def _require_security(endpoint: str, user_id: str, session_token: Optional[str]):
+async def _require_security(endpoint: str, user_id: str, session_token: Optional[str]):
     try:
         # Optional dev bypass for connector testing
         if os.environ.get("CONNECTORS_DEV_TRUST") == "1" or os.environ.get("SECURITY_DEV_TRUST") == "1":
@@ -10641,7 +10641,7 @@ async def list_providers(request: dict):
         user_id = (request or {}).get('user_id') or ''
         session_token = (request or {}).get('session_token')
         if user_id:
-            _require_security('connectors-providers', user_id, session_token)
+            await _require_security('connectors-providers', user_id, session_token)
         return {
             'providers': [
                 {'provider': 'google-mail', 'display_name': 'Gmail', 'integration_id': NANGO_GMAIL_INTEGRATION_ID, 'auth_type': 'OAUTH2', 'scopes': ['https://mail.google.com/'], 'endpoints': ['/emails', '/labels', '/attachment']},
@@ -10663,7 +10663,7 @@ async def list_providers(request: dict):
 @app.post("/api/connectors/initiate")
 async def initiate_connector(req: ConnectorInitiateRequest):
     """Create a Nango Connect session for supported providers."""
-    _require_security('connectors-initiate', req.user_id, req.session_token)
+    await _require_security('connectors-initiate', req.user_id, req.session_token)
     try:
         provider_map = {
             'google-mail': NANGO_GMAIL_INTEGRATION_ID,
@@ -10691,7 +10691,7 @@ async def initiate_connector(req: ConnectorInitiateRequest):
 @app.post("/api/connectors/sync")
 async def connectors_sync(req: ConnectorSyncRequest):
     """Run a sync via Nango (historical or incremental) for supported providers."""
-    _require_security('connectors-sync', req.user_id, req.session_token)
+    await _require_security('connectors-sync', req.user_id, req.session_token)
     try:
         integ = (req.integration_id or NANGO_GMAIL_INTEGRATION_ID)
         # Validate provider enum
@@ -10770,7 +10770,7 @@ class ConnectorMetadataUpdate(BaseModel):
 @app.post('/api/connectors/metadata')
 async def update_connection_metadata(req: ConnectorMetadataUpdate):
     """Update provider-specific metadata for a user connection (e.g., realmId, tenantId)."""
-    _require_security('connectors-metadata', req.user_id, req.session_token)
+    await _require_security('connectors-metadata', req.user_id, req.session_token)
     try:
         row = supabase.table('user_connections').select('metadata').eq('nango_connection_id', req.connection_id).limit(1).execute()
         base_meta = (row.data[0].get('metadata') if row.data else {}) or {}
@@ -10795,7 +10795,7 @@ class ConnectorFrequencyUpdate(BaseModel):
 @app.post('/api/connectors/frequency')
 async def update_connection_frequency(req: ConnectorFrequencyUpdate):
     """Update sync frequency in minutes for a user connection."""
-    _require_security('connectors-frequency', req.user_id, req.session_token)
+    await _require_security('connectors-frequency', req.user_id, req.session_token)
     try:
         minutes = max(0, min(int(req.minutes), 7 * 24 * 60))  # clamp to [0, 10080]
         supabase.table('user_connections').update({'sync_frequency_minutes': minutes}).eq('nango_connection_id', req.connection_id).execute()
@@ -10806,7 +10806,7 @@ async def update_connection_frequency(req: ConnectorFrequencyUpdate):
 
 @app.get("/api/connectors/status")
 async def connectors_status(connection_id: str, user_id: str, session_token: Optional[str] = None):
-    _require_security('connectors-status', user_id, session_token)
+    await _require_security('connectors-status', user_id, session_token)
     try:
         # Fetch user_connection and recent runs
         uc_res = supabase.table('user_connections').select('id, user_id, nango_connection_id, connector_id, status, last_synced_at, created_at, provider_account_id, metadata, sync_frequency_minutes').eq('nango_connection_id', connection_id).limit(1).execute()
@@ -10831,7 +10831,7 @@ async def connectors_status(connection_id: str, user_id: str, session_token: Opt
 @app.post("/api/connectors/user-connections")
 async def list_user_connections(req: UserConnectionsRequest):
     """List the current user's Nango connections with integration IDs for UI rendering."""
-    _require_security('connectors-user-connections', req.user_id, req.session_token)
+    await _require_security('connectors-user-connections', req.user_id, req.session_token)
     try:
         res = supabase.table('user_connections').select('id, user_id, nango_connection_id, connector_id, status, last_synced_at, created_at').eq('user_id', req.user_id).limit(1000).execute()
         items = []
@@ -11282,7 +11282,7 @@ async def _authorize_websocket_connection(websocket: WebSocket, job_id: str):
         token = qp.get('session_token') or websocket.headers.get('authorization')
         if not user_id or not token:
             raise HTTPException(status_code=401, detail='Missing user credentials for WebSocket')
-        _require_security('websocket', user_id, token)
+        await _require_security('websocket', user_id, token)
         # Check job ownership if known
         owner_state = await websocket_manager.get_job_status(job_id)
         owner = (owner_state or {}).get('user_id')
