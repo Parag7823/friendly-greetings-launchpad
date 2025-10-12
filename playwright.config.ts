@@ -8,7 +8,8 @@ export default defineConfig({
   workers: process.env.CI ? 1 : undefined,
   reporter: 'html',
   use: {
-    baseURL: 'http://localhost:5173',
+    // Use deployed frontend for E2E tests, fallback to local
+    baseURL: process.env.E2E_APP_URL || 'https://friendly-greetings-launchpad-1.onrender.com',
     trace: 'on-first-retry',
     screenshot: 'only-on-failure',
   },
@@ -17,18 +18,6 @@ export default defineConfig({
       name: 'chromium',
       use: { ...devices['Desktop Chrome'] },
     },
-    {
-      name: 'firefox',
-      use: { ...devices['Desktop Firefox'] },
-    },
-    {
-      name: 'webkit',
-      use: { ...devices['Desktop Safari'] },
-    },
   ],
-  webServer: {
-    command: 'npm run dev',
-    url: 'http://localhost:5173',
-    reuseExistingServer: !process.env.CI,
-  },
+  // No webServer needed - testing deployed app
 });

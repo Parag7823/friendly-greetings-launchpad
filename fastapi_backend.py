@@ -6895,6 +6895,11 @@ class ExcelProcessor:
                 
                 logger.info(f"🚀 OPTIMIZATION 2: Using dynamic batch_size={optimal_batch_size} for {len(chunk_data)} rows")
                 
+                # OPTIMIZATION 3: Memory monitoring to prevent OOM
+                import psutil
+                process = psutil.Process()
+                MEMORY_LIMIT_MB = 400  # 400MB limit for batch processing
+                
                 events_batch = []
                 
                 for batch_idx in range(0, len(chunk_data), optimal_batch_size):
@@ -6995,6 +7000,20 @@ class ExcelProcessor:
                                 events_batch.append(event_data)
                                 processed_rows += 1
                                 
+                                # CONSUMER EXPERIENCE: Send enrichment progress every 50 rows
+                                if processed_rows % 50 == 0:
+                                    enrichment_stats = {
+                                        'vendors_standardized': sum(1 for e in events_batch if e.get('vendor_standard')),
+                                        'platform_ids_extracted': sum(1 for e in events_batch if e.get('platform_ids')),
+                                        'amounts_normalized': sum(1 for e in events_batch if e.get('amount_usd'))
+                                    }
+                                    await manager.send_update(job_id, {
+                                        "step": "enrichment",
+                                        "message": f"🔄 Enriching row {processed_rows}/{total_rows}...",
+                                        "progress": 40 + int((processed_rows / total_rows) * 50),
+                                        "enrichment_details": enrichment_stats
+                                    })
+                                
                             except Exception as e:
                                 # Handle datetime serialization errors specifically
                                 if "datetime" in str(e) and "JSON serializable" in str(e):
@@ -7011,6 +7030,14 @@ class ExcelProcessor:
                                 batch_result = await tx.insert_batch('raw_events', events_batch)
                                 events_created += len(batch_result)
                                 events_batch = []  # Clear batch
+                                
+                                # OPTIMIZATION 3: Check memory usage after batch insert
+                                mem_mb = process.memory_info().rss / 1024 / 1024
+                                if mem_mb > MEMORY_LIMIT_MB:
+                                    logger.warning(f"⚠️ Memory usage high: {mem_mb:.1f}MB, allowing GC...")
+                                    import gc
+                                    gc.collect()
+                                    await asyncio.sleep(0.1)  # Allow garbage collection
                                 
                             except Exception as e:
                                 error_msg = f"Error inserting event batch: {str(e)}"

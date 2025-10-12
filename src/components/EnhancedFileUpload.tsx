@@ -128,14 +128,23 @@ export const EnhancedFileUpload: React.FC = () => {
           }));
         }
         
+        // Update file state with progress and enrichment details
+        const enrichmentDetails = (progress as any).enrichment_details;
+        let detailedMessage = progress.message;
+        
+        // Add enrichment stats to message if available
+        if (enrichmentDetails && progress.step === 'enrichment') {
+          detailedMessage = `${progress.message}\n✓ ${enrichmentDetails.vendors_standardized || 0} vendors standardized\n✓ ${enrichmentDetails.platform_ids_extracted || 0} IDs extracted\n✓ ${enrichmentDetails.amounts_normalized || 0} amounts normalized`;
+        }
+        
         setFiles(prev => prev.map(f => 
           f.id === fileId 
-            ? {
-                ...f,
-                currentStep: progress.message,
+            ? { 
+                ...f, 
+                status: progress.step === 'completed' ? 'completed' : 'processing',
                 progress: progress.progress,
-                sheetProgress: progress.sheetProgress,
-                status: progress.progress === 100 ? 'completed' : 'processing'
+                currentStep: detailedMessage,
+                sheetProgress: progress.sheetProgress
               }
             : f
         ));
@@ -254,24 +263,50 @@ export const EnhancedFileUpload: React.FC = () => {
     setFiles(prev => [...prev, ...initialFileStates]);
     setIsProcessing(true);
 
-    // Process files sequentially for better control
-    for (let i = 0; i < fileEntries.length; i++) {
-      const { id, file } = fileEntries[i];
+    // CONSUMER EXPERIENCE: Process up to 3 files concurrently for faster bulk uploads
+    const MAX_CONCURRENT = 3;
+    const processQueue = async () => {
+      const queue = [...fileEntries];
+      const processing: Promise<void>[] = [];
       
-      // Update status to uploading
-      setFiles(prev => prev.map(f => 
-        f.id === id 
-          ? { ...f, status: 'uploading' as const, currentStep: 'Uploading file...' }
-          : f
-      ));
-
-      try {
-        await processFile(file, id);
-      } catch (error) {
-        console.error(`Error processing file ${file.name}:`, error);
+      while (queue.length > 0 || processing.length > 0) {
+        // Start new files while under concurrent limit
+        while (processing.length < MAX_CONCURRENT && queue.length > 0) {
+          const entry = queue.shift()!;
+          const { id, file } = entry;
+          
+          // Update status to uploading
+          setFiles(prev => prev.map(f => 
+            f.id === id 
+              ? { ...f, status: 'uploading' as const, currentStep: 'Uploading file...' }
+              : f
+          ));
+          
+          // Start processing
+          const processPromise = processFile(file, id)
+            .catch(error => {
+              console.error(`Error processing file ${file.name}:`, error);
+            });
+          
+          processing.push(processPromise);
+        }
+        
+        // Wait for at least one to complete
+        if (processing.length > 0) {
+          await Promise.race(processing);
+          // Remove completed promises
+          const stillProcessing = processing.filter(p => {
+            let completed = false;
+            p.then(() => { completed = true; }).catch(() => { completed = true; });
+            return !completed;
+          });
+          processing.length = 0;
+          processing.push(...stillProcessing);
+        }
       }
-    }
-
+    };
+    
+    await processQueue();
     setIsProcessing(false);
   }, [toast]);
 
