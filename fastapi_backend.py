@@ -8661,7 +8661,7 @@ async def handle_duplicate_decision(request: DuplicateDecisionRequest):
 
         # Security validation: require session token for decision
         try:
-            valid, violations = security_validator.validate_request({
+            valid, violations = await security_validator.validate_request({
                 'endpoint': 'handle-duplicate-decision',
                 'user_id': request.user_id,
                 'session_token': request.session_token
@@ -8820,7 +8820,7 @@ async def submit_version_recommendation_feedback(request: VersionRecommendationF
     try:
         # Security validation: require valid session token
         try:
-            valid, violations = security_validator.validate_request({
+            valid, violations = await security_validator.validate_request({
                 'endpoint': 'version-recommendation-feedback',
                 'user_id': request.user_id,
                 'session_token': request.session_token
@@ -9111,7 +9111,7 @@ async def process_excel_endpoint(request: dict):
         # Security validation: sanitize and require valid session token
         try:
             _ = security_validator.input_sanitizer.sanitize_string(filename)
-            valid, violations = security_validator.validate_request({
+            valid, violations = await security_validator.validate_request({
                 'endpoint': 'process-excel',
                 'user_id': user_id,
                 'session_token': request.get('session_token')
@@ -9571,7 +9571,7 @@ def _require_security(endpoint: str, user_id: str, session_token: Optional[str])
             except Exception as e:
                 logger.warning(f"Supabase session validation bridge failed: {e}")
 
-        valid, violations = security_validator.validate_request({
+        valid, violations = await security_validator.validate_request({
             'endpoint': endpoint,
             'user_id': user_id,
             'session_token': session_token

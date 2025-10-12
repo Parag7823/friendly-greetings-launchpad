@@ -411,7 +411,7 @@ class SecurityValidator:
         self.security_violations: List[SecurityViolation] = []
         self.rate_limits: Dict[str, List[datetime]] = {}
     
-    def validate_request(self, request_data: Dict[str, Any], 
+    async def validate_request(self, request_data: Dict[str, Any], 
                         security_context: SecurityContext) -> Tuple[bool, List[SecurityViolation]]:
         """Validate entire request for security issues"""
         violations = []
@@ -429,8 +429,8 @@ class SecurityValidator:
         # Input sanitization
         sanitized_data = self._sanitize_request_data(request_data, violations, security_context)
         
-        # Authentication check
-        if not self._validate_authentication(request_data, security_context, violations):
+        # Authentication check - FIX: Added await
+        if not await self._validate_authentication(request_data, security_context, violations):
             return False, violations
         
         # Store violations
@@ -511,7 +511,7 @@ class SecurityValidator:
         
         return sanitized_data
     
-    def _validate_authentication(self, request_data: Dict[str, Any],
+    async def _validate_authentication(self, request_data: Dict[str, Any],
                                 security_context: SecurityContext,
                                 violations: List[SecurityViolation]) -> bool:
         """Validate authentication"""
@@ -533,8 +533,8 @@ class SecurityValidator:
             ))
             return False
         
-        # Validate session
-        is_valid, message = self.auth_validator.validate_user_session(user_id, session_token)
+        # Validate session - FIX: Added await
+        is_valid, message = await self.auth_validator.validate_user_session(user_id, session_token)
         if not is_valid:
             violations.append(SecurityViolation(
                 violation_type="invalid_authentication",

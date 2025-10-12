@@ -8,6 +8,11 @@ import { createClient } from '@supabase/supabase-js';
 import * as XLSX from 'xlsx';
 import * as fs from 'fs';
 import * as path from 'path';
+import { fileURLToPath } from 'url';
+
+// ES module equivalent of __dirname
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 // Supabase client for database verification
 const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || 'http://localhost:54321';
@@ -23,12 +28,29 @@ const supabase = supabaseKey ? createClient(supabaseUrl, supabaseKey) : null;
 test.describe('Phase 4-6: Complete File Processing E2E', () => {
   
   test.beforeEach(async ({ page }) => {
-    // Navigate to application (use deployed URL if available)
-    const appUrl = process.env.E2E_APP_URL || 'http://localhost:5173';
-    await page.goto(appUrl);
-    
-    // Wait for app to load
+    // First navigate to root to ensure app loads
+    await page.goto('/');
     await page.waitForLoadState('networkidle');
+    await page.waitForTimeout(2000);
+    
+    console.log('Root page title:', await page.title());
+    console.log('Root page URL:', page.url());
+    
+    // Now navigate to upload page
+    await page.goto('/upload');
+    await page.waitForLoadState('networkidle');
+    await page.waitForTimeout(5000);
+    
+    console.log('Upload page URL:', page.url());
+    console.log('Upload page title:', await page.title());
+    console.log('Body text:', await page.locator('body').textContent());
+    
+    // Take screenshot for debugging
+    await page.screenshot({ path: 'test-results/upload-page-debug.png', fullPage: true });
+    
+    // Wait for the file input to exist (more reliable than text)
+    const fileInput = page.locator('#file-upload');
+    await expect(fileInput).toBeAttached({ timeout: 15000 });
   });
 
   test('E2E: Upload Stripe CSV and verify complete enrichment pipeline', async ({ page }) => {
@@ -36,6 +58,15 @@ test.describe('Phase 4-6: Complete File Processing E2E', () => {
       test.skip();
       return;
     }
+    
+    // DEBUG: Take screenshot and log page content
+    await page.screenshot({ path: 'test-results/debug-page-state.png', fullPage: true });
+    const pageContent = await page.content();
+    console.log('Page title:', await page.title());
+    console.log('Page URL:', page.url());
+    console.log('Has file input:', await page.locator('#file-upload').count());
+    console.log('Has upload text:', await page.locator('text=Upload').count());
+    
     // ========================================================================
     // PHASE 4: File Upload & Parsing
     // ========================================================================
@@ -59,8 +90,8 @@ test.describe('Phase 4-6: Complete File Processing E2E', () => {
     
     fs.writeFileSync(testFilePath, csvContent);
     
-    // Upload file
-    const fileInput = page.locator('input[type="file"]');
+    // Upload file using the correct ID selector
+    const fileInput = page.locator('#file-upload');
     await fileInput.setInputFiles(testFilePath);
     
     // Wait for file to be added to queue
@@ -147,8 +178,8 @@ test.describe('Phase 4-6: Complete File Processing E2E', () => {
     const testFilePath = path.join(__dirname, '../../test_files/quickbooks_1000_rows.xlsx');
     XLSX.writeFile(wb, testFilePath);
     
-    // Upload file
-    const fileInput = page.locator('input[type="file"]');
+    // Upload file using the correct ID selector
+    const fileInput = page.locator('#file-upload');
     await fileInput.setInputFiles(testFilePath);
     
     await expect(page.locator('text=quickbooks_1000_rows.xlsx')).toBeVisible({ timeout: 5000 });
@@ -212,8 +243,8 @@ test.describe('Phase 4-6: Complete File Processing E2E', () => {
     const testFilePath = path.join(__dirname, '../../test_files/razorpay_test.csv');
     fs.writeFileSync(testFilePath, csvContent);
     
-    // Upload and process
-    const fileInput = page.locator('input[type="file"]');
+    // Upload and process using correct ID selector
+    const fileInput = page.locator('#file-upload');
     await fileInput.setInputFiles(testFilePath);
     
     await expect(page.locator('text=razorpay_test.csv')).toBeVisible({ timeout: 5000 });
@@ -274,8 +305,8 @@ test.describe('Phase 4-6: Complete File Processing E2E', () => {
     const testFilePath = path.join(__dirname, '../../test_files/vendor_test.csv');
     fs.writeFileSync(testFilePath, csvContent);
     
-    // Upload and process
-    const fileInput = page.locator('input[type="file"]');
+    // Upload and process using correct ID selector
+    const fileInput = page.locator('#file-upload');
     await fileInput.setInputFiles(testFilePath);
     
     await expect(page.locator('text=vendor_test.csv')).toBeVisible({ timeout: 5000 });
@@ -339,8 +370,8 @@ test.describe('Phase 4-6: Complete File Processing E2E', () => {
     
     const startTime = Date.now();
     
-    // Upload file
-    const fileInput = page.locator('input[type="file"]');
+    // Upload file using the correct ID selector
+    const fileInput = page.locator('#file-upload');
     await fileInput.setInputFiles(testFilePath);
     
     await expect(page.locator('text=performance_10k.xlsx')).toBeVisible({ timeout: 5000 });
