@@ -26,13 +26,26 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class StreamingConfig:
-    """Configuration for streaming operations"""
-    chunk_size: int = 1000  # Rows per chunk
-    memory_limit_mb: int = 500  # Memory limit in MB
-    max_file_size_gb: int = 5  # Maximum file size in GB
-    temp_dir: Optional[str] = None
-    enable_compression: bool = True
-    progress_callback_interval: int = 100  # Chunks between progress updates
+    """Configuration for streaming operations - all values configurable via environment"""
+    chunk_size: int = 1000  # Rows per chunk (env: STREAMING_CHUNK_SIZE)
+    memory_limit_mb: int = 800  # Memory limit in MB (env: STREAMING_MEMORY_LIMIT_MB)
+    max_file_size_gb: int = 5  # Maximum file size in GB (env: STREAMING_MAX_FILE_SIZE_GB)
+    temp_dir: Optional[str] = None  # Temp directory (env: STREAMING_TEMP_DIR)
+    enable_compression: bool = True  # Enable compression (env: STREAMING_ENABLE_COMPRESSION)
+    progress_callback_interval: int = 100  # Chunks between progress updates (env: STREAMING_PROGRESS_INTERVAL)
+    
+    @staticmethod
+    def from_env() -> 'StreamingConfig':
+        """Create configuration from environment variables"""
+        import os
+        return StreamingConfig(
+            chunk_size=int(os.getenv('STREAMING_CHUNK_SIZE', '1000')),
+            memory_limit_mb=int(os.getenv('STREAMING_MEMORY_LIMIT_MB', '800')),
+            max_file_size_gb=int(os.getenv('STREAMING_MAX_FILE_SIZE_GB', '5')),
+            temp_dir=os.getenv('STREAMING_TEMP_DIR'),
+            enable_compression=os.getenv('STREAMING_ENABLE_COMPRESSION', 'true').lower() == 'true',
+            progress_callback_interval=int(os.getenv('STREAMING_PROGRESS_INTERVAL', '100'))
+        )
 
 @dataclass
 class ProcessingStats:

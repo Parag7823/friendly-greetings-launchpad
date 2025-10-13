@@ -64,32 +64,6 @@ class OptimizedDatabaseQueries:
             logger.error(f"Duplicate records query failed: {e}")
             return []
 
-    async def get_pending_version_recommendations(
-        self,
-        user_id: str,
-        limit: int = 50
-    ) -> List[Dict[str, Any]]:
-        """
-        Optimized query for pending version recommendations awaiting user decision.
-        """
-        try:
-            result = (
-                self.supabase
-                .table('version_recommendations')
-                .select('id, user_id, file_id, version_group_id, recommendation_type, created_at, user_accepted, user_feedback')
-                .eq('user_id', user_id)
-                .is_('user_accepted', 'null')
-                .order('created_at', desc=True)
-                .limit(limit)
-                .execute()
-            )
-
-            return result.data or []
-
-        except Exception as e:
-            logger.error(f"Pending version recommendations query failed: {e}")
-            return []
-
     # ============================================================================
     # RAW EVENTS QUERIES - Most frequently used table
     # ============================================================================

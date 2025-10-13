@@ -276,37 +276,67 @@ class EnhancedRelationshipDetector:
         return relationships
     
     async def _find_file_relationships(self, source_events: List[Dict], target_events: List[Dict], relationship_type: str) -> List[Dict]:
-        """Find relationships between two sets of events"""
+        """Find relationships between two sets of events with optimized pagination"""
         relationships = []
         
-        for source_event in source_events[:10]:  # Limit for performance
-            for target_event in target_events[:10]:  # Limit for performance
-                score = await self._calculate_relationship_score(source_event, target_event, relationship_type)
-                
-                if score > 0.6:  # Only include high-confidence relationships
-                    relationship = {
-                        'source_event_id': source_event.get('id'),
-                        'target_event_id': target_event.get('id'),
-                        'relationship_type': relationship_type,
-                        'confidence_score': score,
-                        'source_file': source_event.get('source_filename'),
-                        'target_file': target_event.get('source_filename'),
-                        'detection_method': 'cross_file_analysis',
-                        'reasoning': f"Cross-file relationship between {source_event.get('source_filename')} and {target_event.get('source_filename')}"
-                    }
-                    relationships.append(relationship)
+        # Use environment variable for configurable limits (default 100 for better coverage)
+        import os
+        max_source_events = int(os.getenv('RELATIONSHIP_MAX_SOURCE_EVENTS', '100'))
+        max_target_events = int(os.getenv('RELATIONSHIP_MAX_TARGET_EVENTS', '100'))
+        batch_size = int(os.getenv('RELATIONSHIP_BATCH_SIZE', '50'))
         
+        # Process in batches to avoid O(N²) explosion while maintaining good coverage
+        source_batch_count = min(len(source_events), max_source_events)
+        target_batch_count = min(len(target_events), max_target_events)
+        
+        logger.info(f"Processing {source_batch_count} source events x {target_batch_count} target events for {relationship_type}")
+        
+        # Process in smaller batches for memory efficiency
+        for source_start in range(0, source_batch_count, batch_size):
+            source_batch = source_events[source_start:source_start + batch_size]
+            
+            for target_start in range(0, target_batch_count, batch_size):
+                target_batch = target_events[target_start:target_start + batch_size]
+                
+                # Process this batch
+                for source_event in source_batch:
+                    for target_event in target_batch:
+                        score = await self._calculate_relationship_score(source_event, target_event, relationship_type)
+                        
+                        if score > 0.6:  # Only include high-confidence relationships
+                            relationship = {
+                                'source_event_id': source_event.get('id'),
+                                'target_event_id': target_event.get('id'),
+                                'relationship_type': relationship_type,
+                                'confidence_score': score,
+                                'source_file': source_event.get('source_filename'),
+                                'target_file': target_event.get('source_filename'),
+                                'detection_method': 'cross_file_analysis',
+                                'reasoning': f"Cross-file relationship between {source_event.get('source_filename')} and {target_event.get('source_filename')}"
+                            }
+                            relationships.append(relationship)
+        
+        logger.info(f"Found {len(relationships)} relationships for {relationship_type}")
         return relationships
     
     async def _find_within_file_relationships(self, events: List[Dict], filename: str) -> List[Dict]:
-        """Find relationships within a single file"""
+        """Find relationships within a single file with configurable window"""
         relationships = []
+        
+        # Use environment variable for configurable window size (default 20 for better coverage)
+        import os
+        relationship_window = int(os.getenv('RELATIONSHIP_WITHIN_FILE_WINDOW', '20'))
         
         # Sort events by date if possible
         sorted_events = self._sort_events_by_date(events)
         
+        logger.info(f"Processing {len(sorted_events)} events within {filename} (window={relationship_window})")
+        
         for i, event1 in enumerate(sorted_events):
-            for j, event2 in enumerate(sorted_events[i+1:i+6]):  # Look at next 5 events
+            # Look at next N events (configurable window)
+            window_end = min(i + relationship_window + 1, len(sorted_events))
+            for j in range(i + 1, window_end):
+                event2 = sorted_events[j]
                 relationship_type = self._determine_relationship_type(event1, event2)
                 score = await self._calculate_relationship_score(event1, event2, relationship_type)
                 
@@ -323,6 +353,7 @@ class EnhancedRelationshipDetector:
                     }
                     relationships.append(relationship)
         
+        logger.info(f"Found {len(relationships)} within-file relationships in {filename}")
         return relationships
     
     def _sort_events_by_date(self, events: List[Dict]) -> List[Dict]:

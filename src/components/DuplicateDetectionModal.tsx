@@ -108,8 +108,8 @@ export const DuplicateDetectionModal: React.FC<DuplicateDetectionModalProps> = (
             ))}
           </div>
 
-          {/* Optional delta analysis summary */}
-          {deltaAnalysis?.delta_analysis && (
+          {/* Delta Analysis Display - Backend sends unwrapped delta_analysis object */}
+          {deltaAnalysis?.delta_analysis?.new_rows !== undefined && (
             <div className="mt-4 bg-background/50 rounded-lg p-4 border border-border">
               <p className="font-semibold text-white mb-2">Delta Analysis</p>
               <div className="flex items-center space-x-4 text-sm">

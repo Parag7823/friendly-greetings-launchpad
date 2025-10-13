@@ -6,14 +6,16 @@ import pandas as pd
 import numpy as np
 from typing import List, Dict, Any, Optional
 import logging
+import os
 
 logger = logging.getLogger(__name__)
 
 class BatchOptimizer:
     """Simple but effective batch processing for 5x performance improvement"""
     
-    def __init__(self, batch_size: int = 100):
-        self.batch_size = batch_size
+    def __init__(self, batch_size: Optional[int] = None):
+        # Make batch_size configurable via environment variable
+        self.batch_size = batch_size or int(os.getenv('BATCH_OPTIMIZER_SIZE', '100'))
     
     def vectorized_classify(self, df: pd.DataFrame, patterns: Dict[str, List[str]]) -> pd.Series:
         """5x faster classification using pandas vectorization"""
@@ -49,5 +51,5 @@ class BatchOptimizer:
         
         return results
 
-# Global instance
-batch_optimizer = BatchOptimizer(batch_size=100)
+# Global instance with configurable batch size
+batch_optimizer = BatchOptimizer()  # Uses env var BATCH_OPTIMIZER_SIZE or defaults to 100

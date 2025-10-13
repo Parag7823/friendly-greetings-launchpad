@@ -225,7 +225,7 @@ export const EnhancedFileUpload: React.FC = () => {
     }
   };
 
-  const handleFilesSelected = useCallback(async (fileList: FileList) => {
+  const handleFilesSelected = useCallback(async (fileList: FileList | File[]) => {
     const fileArray = Array.from(fileList).slice(0, 15); // Limit to 15 files
 
     // Validate all files first
@@ -267,11 +267,11 @@ export const EnhancedFileUpload: React.FC = () => {
     const MAX_CONCURRENT = 3;
     const processQueue = async () => {
       const queue = [...fileEntries];
-      const processing: Promise<void>[] = [];
+      const processing = new Map<string, Promise<void>>();
       
-      while (queue.length > 0 || processing.length > 0) {
+      while (queue.length > 0 || processing.size > 0) {
         // Start new files while under concurrent limit
-        while (processing.length < MAX_CONCURRENT && queue.length > 0) {
+        while (processing.size < MAX_CONCURRENT && queue.length > 0) {
           const entry = queue.shift()!;
           const { id, file } = entry;
           
@@ -282,26 +282,23 @@ export const EnhancedFileUpload: React.FC = () => {
               : f
           ));
           
-          // Start processing
+          // Start processing with proper cleanup
           const processPromise = processFile(file, id)
+            .then(() => {}) // Convert to Promise<void> for Map type consistency
             .catch(error => {
               console.error(`Error processing file ${file.name}:`, error);
+            })
+            .finally(() => {
+              // Remove from processing map when done
+              processing.delete(id);
             });
           
-          processing.push(processPromise);
+          processing.set(id, processPromise);
         }
         
         // Wait for at least one to complete
-        if (processing.length > 0) {
-          await Promise.race(processing);
-          // Remove completed promises
-          const stillProcessing = processing.filter(p => {
-            let completed = false;
-            p.then(() => { completed = true; }).catch(() => { completed = true; });
-            return !completed;
-          });
-          processing.length = 0;
-          processing.push(...stillProcessing);
+        if (processing.size > 0) {
+          await Promise.race(Array.from(processing.values()));
         }
       }
     };

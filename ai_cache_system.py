@@ -56,13 +56,15 @@ class AIClassificationCache:
     """
     
     def __init__(self, 
-                 max_cache_size: int = 10000,
-                 default_ttl_hours: int = 24,
-                 cost_per_1k_tokens: float = 0.002):
+                 max_cache_size: Optional[int] = None,
+                 default_ttl_hours: Optional[int] = None,
+                 cost_per_1k_tokens: Optional[float] = None):
+        import os
+        # Make all parameters configurable via environment variables
         self.cache: Dict[str, CacheEntry] = {}
-        self.max_cache_size = max_cache_size
-        self.default_ttl_hours = default_ttl_hours
-        self.cost_per_1k_tokens = cost_per_1k_tokens
+        self.max_cache_size = max_cache_size or int(os.getenv('AI_CACHE_MAX_SIZE', '10000'))
+        self.default_ttl_hours = default_ttl_hours or int(os.getenv('AI_CACHE_TTL_HOURS', '24'))
+        self.cost_per_1k_tokens = cost_per_1k_tokens or float(os.getenv('AI_CACHE_COST_PER_1K', '0.002'))
         self.stats = CacheStats()
         self._lock = asyncio.Lock()
     
@@ -267,17 +269,17 @@ class AIClassificationCache:
 # Global cache instance
 _ai_cache: Optional[AIClassificationCache] = None
 
-def initialize_ai_cache(max_cache_size: int = 10000,
-                       default_ttl_hours: int = 24,
-                       cost_per_1k_tokens: float = 0.002) -> AIClassificationCache:
-    """Initialize global AI cache instance"""
+def initialize_ai_cache(max_cache_size: Optional[int] = None,
+                       default_ttl_hours: Optional[int] = None,
+                       cost_per_1k_tokens: Optional[float] = None) -> AIClassificationCache:
+    """Initialize global AI cache instance with environment variable support"""
     global _ai_cache
     _ai_cache = AIClassificationCache(
         max_cache_size=max_cache_size,
         default_ttl_hours=default_ttl_hours,
         cost_per_1k_tokens=cost_per_1k_tokens
     )
-    logger.info(f"AI classification cache initialized (max_size={max_cache_size}, ttl={default_ttl_hours}h)")
+    logger.info(f"AI classification cache initialized (max_size={_ai_cache.max_cache_size}, ttl={_ai_cache.default_ttl_hours}h, cost_per_1k=${_ai_cache.cost_per_1k_tokens})")
     return _ai_cache
 
 def get_ai_cache() -> AIClassificationCache:

@@ -3,6 +3,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 import { FileProcessingEvent } from '@/types/database';
 import { config } from '@/config';
+import { UnifiedErrorHandler, ErrorSeverity, ErrorSource } from '@/utils/errorHandler';
 
 interface SheetMetadata {
   name: string;
@@ -84,7 +85,7 @@ export class FastAPIProcessor {
     return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
   }
 
-  private async checkForDuplicates(userId: string, fileHash: string, fileName: string): Promise<{
+  private async checkForDuplicates(userId: string, fileHash: string, fileName: string, sessionToken?: string): Promise<{
     is_duplicate: boolean;
     duplicate_files?: any[];
     latest_duplicate?: any;
@@ -93,45 +94,42 @@ export class FastAPIProcessor {
     error?: string;
   }> {
     try {
-      // Check if file with same hash exists
-      const result: any = await (supabase as any)
-        .from('raw_records')
-        .select('id, file_name, created_at, content')
-        .eq('user_id', userId)
-        .eq('file_hash', fileHash);
-      
-      const existingFiles = result.data;
-      const error = result.error;
+      // SECURITY FIX: Use backend API instead of direct Supabase query to respect RLS
+      const response = await fetch(`${this.apiUrl}/check-duplicate`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          user_id: userId,
+          file_hash: fileHash,
+          file_name: fileName,
+          session_token: sessionToken
+        })
+      });
 
-      if (error) {
-        console.error('Error checking for duplicates:', error);
-        return { is_duplicate: false, error: error.message };
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+        // MISMATCH FIX #3: Use unified error handler
+        UnifiedErrorHandler.handle({
+          message: errorData.error || 'Duplicate check failed',
+          severity: ErrorSeverity.MEDIUM,
+          source: ErrorSource.BACKEND,
+          code: response.status.toString()
+        });
+        return { is_duplicate: false, error: errorData.error || 'Duplicate check failed' };
       }
 
-      if (existingFiles && existingFiles.length > 0) {
-        const duplicateFiles = existingFiles.map(file => ({
-          id: file.id,
-          filename: file.file_name,
-          uploaded_at: file.created_at,
-          total_rows: (file.content as any)?.total_rows || 0
-        }));
-
-        const latestDuplicate = duplicateFiles.reduce((latest, current) => 
-          new Date(current.uploaded_at) > new Date(latest.uploaded_at) ? current : latest
-        );
-
-        return {
-          is_duplicate: true,
-          duplicate_files: duplicateFiles,
-          latest_duplicate: latestDuplicate,
-          recommendation: 'replace_or_skip',
-          message: `Identical file '${latestDuplicate.filename}' was uploaded on ${latestDuplicate.uploaded_at.split('T')[0]}. Do you want to replace it or skip this upload?`
-        };
-      }
-
-      return { is_duplicate: false };
+      const result = await response.json();
+      return result;
     } catch (error) {
-      console.error('Duplicate check failed:', error);
+      // MISMATCH FIX #3: Use unified error handler
+      UnifiedErrorHandler.handle({
+        message: error instanceof Error ? error.message : 'Duplicate check failed',
+        severity: ErrorSeverity.MEDIUM,
+        source: ErrorSource.NETWORK,
+        retryable: true
+      });
       return { is_duplicate: false, error: error instanceof Error ? error.message : 'Unknown error' };
     }
   }
@@ -144,10 +142,21 @@ export class FastAPIProcessor {
       
       const ws = new WebSocket(wsUrl);
       let timeoutId: NodeJS.Timeout;
+      let isCleanedUp = false;
+
+      // Cleanup function to prevent memory leaks
+      const cleanup = () => {
+        if (isCleanedUp) return;
+        isCleanedUp = true;
+        clearTimeout(timeoutId);
+        if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
+          ws.close();
+        }
+      };
 
       // Set a timeout for the connection (60 seconds for better large file handling)
       timeoutId = setTimeout(() => {
-        ws.close();
+        cleanup();
         reject(new Error('WebSocket connection timeout'));
       }, 60000); // 60 second timeout for large files
 
@@ -162,12 +171,10 @@ export class FastAPIProcessor {
           // Process WebSocket progress update
 
           if (data.status === 'completed') {
-            clearTimeout(timeoutId);
-            ws.close();
+            cleanup();
             resolve(data.result || data);
           } else if (data.status === 'error') {
-            clearTimeout(timeoutId);
-            ws.close();
+            cleanup();
             reject(new Error(data.error || 'Processing failed'));
           } else {
             // Progress update
@@ -192,15 +199,21 @@ export class FastAPIProcessor {
       };
 
       ws.onerror = (error) => {
-        console.error('WebSocket error:', error);
-        clearTimeout(timeoutId);
+        // MISMATCH FIX #3: Use unified error handler
+        UnifiedErrorHandler.handle({
+          message: 'WebSocket connection failed - using polling fallback',
+          severity: ErrorSeverity.MEDIUM,
+          source: ErrorSource.WEBSOCKET,
+          retryable: true
+        });
+        cleanup();
         reject(new Error('WebSocket connection failed - will use polling fallback'));
       };
 
       ws.onclose = (event) => {
         // WebSocket connection closed
-        clearTimeout(timeoutId);
-        if (event.code !== 1000 && event.reason !== 'Processing completed') {
+        cleanup();
+        if (event.code !== 1000 && event.reason !== 'Processing completed' && !isCleanedUp) {
           reject(new Error('WebSocket connection closed unexpectedly'));
         }
       };
@@ -269,9 +282,15 @@ export class FastAPIProcessor {
       const fileBuffer = await file.arrayBuffer();
       const fileHash = await this.calculateFileHash(fileBuffer);
       
-      // Check for duplicates
+      // Get session for consistent token passing
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        throw new Error('User session required');
+      }
+      
+      // MISMATCH FIX #2: Pass session token consistently to duplicate check
       this.updateProgress('duplicate_check', 'Checking for duplicates...', 10);
-      const duplicateCheck = await this.checkForDuplicates(user.id, fileHash, file.name);
+      const duplicateCheck = await this.checkForDuplicates(user.id, fileHash, file.name, session.access_token);
       
       if (duplicateCheck.is_duplicate) {
         // Handle duplicate detection
@@ -322,13 +341,7 @@ export class FastAPIProcessor {
 
       this.updateProgress('analysis', 'Processing with FastAPI backend...', 30);
 
-      // Get Supabase configuration for backend
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) {
-        throw new Error('User session required');
-      }
-
-      // Prepare request for FastAPI backend
+      // Prepare request for FastAPI backend (session already fetched above)
       const requestBody = {
         job_id: jobData.id,
         storage_path: fileName,
@@ -474,165 +487,32 @@ export class FastAPIProcessor {
         return result;
 
       } catch (backendError) {
-        console.error('Backend processing error:', backendError);
+        // MISMATCH FIX #3: Use unified error handler
+        UnifiedErrorHandler.handle({
+          message: backendError instanceof Error ? backendError.message : 'Backend processing failed',
+          severity: ErrorSeverity.HIGH,
+          source: ErrorSource.BACKEND,
+          jobId: jobData?.id,
+          retryable: true
+        });
         
-        // Fallback to local processing if backend fails
-        this.updateProgress('fallback', 'Backend unavailable, using local processing...', 40);
+        // REMOVED: Incomplete fallback processing that doesn't run enrichment, entity resolution, or relationship detection
+        // This ensures data quality consistency - all files must be processed by the backend
+        this.updateProgress('error', 'Backend processing failed. Please try again.', 0);
         
-        // Read the file and analyze sheets locally
-        const arrayBuffer = await file.arrayBuffer();
-        const workbook = await import('xlsx').then(xlsx => xlsx.read(arrayBuffer, { type: 'array' }));
+        // Update job status to failed
+        if (jobData?.id) {
+          await supabase
+            .from('ingestion_jobs')
+            .update({
+              status: 'failed',
+              progress: 0,
+              error_message: backendError instanceof Error ? backendError.message : 'Backend processing failed'
+            })
+            .eq('id', jobData.id);
+        }
         
-        const sheets: SheetMetadata[] = [];
-        const sheetNames = workbook.SheetNames;
-        
-        for (let i = 0; i < sheetNames.length; i++) {
-          const sheetName = sheetNames[i];
-          const worksheet = workbook.Sheets[sheetName];
-          const jsonData = await import('xlsx').then(xlsx => xlsx.utils.sheet_to_json(worksheet, { header: 1 })) as any[][];
-          
-          const type = this.detectSheetType(sheetName, jsonData);
-          const keyColumns = this.extractKeyColumns(jsonData);
-          
-          sheets.push({
-            name: sheetName,
-            type,
-            rowCount: jsonData.length,
-            columnCount: (jsonData[0] as any[])?.length || 0,
-            keyColumns,
-            hasNumbers: this.hasNumericData(jsonData),
-            preview: jsonData.slice(0, 10),
-            confidenceScore: Math.random() * 0.3 + 0.7,
-            detectedPeriod: this.detectPeriod(jsonData),
-            suggestedPrompts: this.generatePrompts(type, sheetName)
-          });
-        }
-
-        const insights = this.generateInsights(sheets);
-        const metrics = this.calculateMetrics(sheets);
-        const summary = this.generateSummary(sheets, insights);
-
-        this.updateProgress('complete', 'Local analysis complete!', 100);
-
-        // Store raw data in raw_records table for local processing
-        const { data: rawRecord, error: rawRecordError } = await supabase
-          .from('raw_records')
-          .insert({
-            user_id: user.id,
-            file_name: file.name,
-            file_hash: fileHash,
-            source: 'local_processing',
-            content: {
-              sheets: sheets.map(sheet => ({
-                name: sheet.name,
-                type: sheet.type,
-                rowCount: sheet.rowCount,
-                columnCount: sheet.columnCount,
-                preview: sheet.preview
-              })),
-              insights,
-              metrics
-            },
-            metadata: {
-              processing_stats: {
-                total_sheets: sheets.length,
-                total_rows_processed: sheets.reduce((acc, s) => acc + s.rowCount, 0)
-              },
-              backend_processed: false
-            }
-          })
-          .select()
-          .single();
-
-        if (rawRecordError) {
-          console.error('Failed to store raw record:', rawRecordError);
-        }
-
-        // Create raw_events from local processing
-        if (rawRecord?.id) {
-          const rawEvents = this.createRawEventsFromLocal(
-            sheets,
-            jobData.id,
-            user.id,
-            file.name,
-            rawRecord.id
-          );
-
-          if (rawEvents.length > 0) {
-            const { error: eventsError } = await supabase
-              .from('raw_events')
-              .insert(rawEvents);
-
-            if (eventsError) {
-              console.error('Failed to store raw events:', eventsError);
-            } else {
-              // Successfully created raw events from local processing
-            }
-          }
-        }
-
-        // Extract and store metrics for local processing
-        if (rawRecord?.id) {
-          const allMetrics: any[] = [];
-          
-          // Extract metrics from each sheet
-          sheets.forEach(sheet => {
-            const sheetMetrics = this.extractSheetMetrics(sheet, rawRecord.id);
-            allMetrics.push(...sheetMetrics.map(metric => ({
-              ...metric,
-              user_id: user.id,
-              record_id: rawRecord.id,
-              metric_type: 'extracted'
-            })));
-          });
-
-          if (allMetrics.length > 0) {
-            const { error: metricsError } = await supabase
-              .from('metrics')
-              .insert(allMetrics);
-
-            if (metricsError) {
-              console.error('Failed to store metrics:', metricsError);
-            }
-          }
-        }
-
-        this.updateProgress('saving', 'Processing complete...', 98);
-
-        // Update job status with local processing results
-        await supabase
-          .from('ingestion_jobs')
-          .update({
-            status: 'completed',
-            progress: 100,
-            record_id: rawRecord?.id || null,
-            result: {
-              document_type: this.detectDocumentType(sheets),
-              insights,
-              metrics,
-              summary,
-              processing_stats: {
-                total_sheets: sheets.length,
-                total_rows_processed: sheets.reduce((acc, s) => acc + s.rowCount, 0)
-              },
-              processing_time: Date.now() - performance.now(),
-              raw_record_id: rawRecord?.id,
-              backend_processed: false
-            }
-          })
-          .eq('id', jobData.id);
-
-        const result: FastAPIProcessingResult = {
-          documentType: this.detectDocumentType(sheets),
-          insights,
-          metrics,
-          summary,
-          sheets,
-          customPromptSuggestions: this.generateCustomPrompts(sheets),
-          processingTime: Date.now() - performance.now()
-        };
-
-        return result;
+        throw new Error('Backend processing failed. Please try again later.');
       }
 
     } catch (error) {
