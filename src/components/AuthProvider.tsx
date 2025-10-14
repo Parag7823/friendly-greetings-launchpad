@@ -23,9 +23,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    // FIX #1: Auto sign-in anonymously if no session exists
     supabase.auth.getSession()
       .then(({ data: { session } }) => {
+        if (!session) {
+          // Auto sign-in anonymously for better UX
+          console.log('No session found, signing in anonymously...');
+          return supabase.auth.signInAnonymously();
+        }
         setUser(session?.user ?? null);
+        setLoading(false);
+      })
+      .then((result) => {
+        if (result && 'data' in result) {
+          setUser(result.data.user ?? null);
+        }
         setLoading(false);
       })
       .catch((error) => {
@@ -53,10 +65,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
+  // FIX #1: Add getToken method to retrieve JWT token for API requests
+  const getToken = async (): Promise<string | null> => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      return session?.access_token ?? null;
+    } catch (error) {
+      console.error('Failed to get auth token:', error);
+      return null;
+    }
+  };
+
   const value = {
     user,
     loading,
     signInAnonymously,
+    getToken,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

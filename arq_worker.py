@@ -138,14 +138,62 @@ async def xero_sync(ctx, req: Dict[str, Any]) -> Dict[str, Any]:
 
 
 async def process_spreadsheet(ctx, user_id: str, filename: str, storage_path: str, job_id: str) -> Dict[str, Any]:
-    # Reuse the web process' processing logic, including WebSocket updates
-    await start_processing_job(user_id, job_id, storage_path, filename)
-    return {"status": "dispatched", "job_id": job_id}
+    """FIX #5: Wrap ARQ spreadsheet processing in transaction for consistency with Phase 1-11"""
+    try:
+        from transaction_manager import get_transaction_manager
+        transaction_manager = get_transaction_manager()
+        
+        # Wrap entire processing in transaction for atomic operations
+        async with transaction_manager.transaction(
+            user_id=user_id,
+            operation_type="arq_spreadsheet_processing"
+        ) as tx:
+            # Reuse the web process' processing logic, including WebSocket updates
+            await start_processing_job(user_id, job_id, storage_path, filename)
+            logger.info(f"✅ ARQ spreadsheet processing completed for job {job_id}")
+            return {"status": "completed", "job_id": job_id}
+            
+    except Exception as e:
+        logger.error(f"❌ ARQ spreadsheet processing failed for job {job_id}: {e}")
+        # Transaction auto-rolls back on exception
+        # Retry with exponential backoff
+        delay = await _retry_or_dlq(ctx, 'spreadsheet_processing', {
+            'user_id': user_id,
+            'job_id': job_id,
+            'filename': filename
+        }, e, max_retries=3, base_delay=60)
+        if delay is None:
+            return {"status": "failed", "job_id": job_id, "error": str(e)}
+        raise Retry(defer=delay)
 
 
 async def process_pdf(ctx, user_id: str, filename: str, storage_path: str, job_id: str) -> Dict[str, Any]:
-    await start_pdf_processing_job(user_id, job_id, storage_path, filename)
-    return {"status": "dispatched", "job_id": job_id}
+    """FIX #5: Wrap ARQ PDF processing in transaction for consistency with Phase 1-11"""
+    try:
+        from transaction_manager import get_transaction_manager
+        transaction_manager = get_transaction_manager()
+        
+        # Wrap entire processing in transaction for atomic operations
+        async with transaction_manager.transaction(
+            user_id=user_id,
+            operation_type="arq_pdf_processing"
+        ) as tx:
+            await start_pdf_processing_job(user_id, job_id, storage_path, filename)
+            logger.info(f"✅ ARQ PDF processing completed for job {job_id}")
+            return {"status": "completed", "job_id": job_id}
+            
+    except Exception as e:
+        logger.error(f"❌ ARQ PDF processing failed for job {job_id}: {e}")
+        # Transaction auto-rolls back on exception
+        # Retry with exponential backoff
+        delay = await _retry_or_dlq(ctx, 'pdf_processing', {
+            'user_id': user_id,
+            'job_id': job_id,
+            'filename': filename
+        }, e, max_retries=3, base_delay=60)
+        if delay is None:
+            return {"status": "failed", "job_id": job_id, "error": str(e)}
+        raise Retry(defer=delay)
 
 
 async def detect_relationships(ctx, user_id: str) -> Dict[str, Any]:

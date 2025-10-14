@@ -70,20 +70,20 @@ export const DuplicateDetectionModal: React.FC<DuplicateDetectionModalProps> = (
 
   const renderBasicDuplicate = () => (
     <div className="space-y-6 animate-fade-in">
-      {/* Header with modern gradient */}
-      <div className="flex items-center space-x-4 p-4 bg-gradient-to-r from-amber-500/10 to-orange-500/10 rounded-xl border border-amber-500/20">
-        <div className="p-3 bg-amber-500/20 rounded-lg">
-          <AlertTriangle className="h-7 w-7 text-amber-400" />
+      {/* FIX #6: Header with Finley AI branding - Premium Black with White accents */}
+      <div className="flex items-center space-x-4 p-4 bg-gradient-to-r from-white/5 to-white/10 rounded-xl border border-white/20">
+        <div className="p-3 bg-white/10 rounded-lg">
+          <AlertTriangle className="h-7 w-7 text-white" />
         </div>
         <div>
           <h3 className="text-xl font-bold text-white">Identical File Detected</h3>
-          <p className="text-sm text-gray-400">This exact file has been uploaded before</p>
+          <p className="text-sm text-muted-foreground">This exact file has been uploaded before</p>
         </div>
       </div>
 
       {duplicateInfo && (
         <div className="bg-card border border-border rounded-xl p-5 space-y-4">
-          <p className="text-amber-400 font-medium">{duplicateInfo.message}</p>
+          <p className="text-white font-medium">{duplicateInfo.message}</p>
           
           <div className="space-y-3">
             {duplicateInfo.duplicate_files.map((file) => (
@@ -149,11 +149,11 @@ export const DuplicateDetectionModal: React.FC<DuplicateDetectionModalProps> = (
         <button
           onClick={() => onDecision('replace')}
           data-testid="replace-button"
-          className="group w-full flex items-center justify-between p-5 border-2 border-border rounded-xl hover:border-green-500/50 hover:bg-green-500/5 transition-all duration-200 hover-lift"
+          className="group w-full flex items-center justify-between p-5 border-2 border-white/20 rounded-xl hover:border-white/40 hover:bg-white/5 transition-all duration-200 hover-lift"
         >
           <div className="flex items-center space-x-4">
-            <div className="p-2 bg-green-500/20 rounded-lg group-hover:bg-green-500/30 transition-colors">
-              <CheckCircle className="h-6 w-6 text-green-400" />
+            <div className="p-2 bg-white/10 rounded-lg group-hover:bg-white/20 transition-colors">
+              <CheckCircle className="h-6 w-6 text-white" />
             </div>
             <div className="text-left">
               <p className="font-semibold text-white text-base">Replace existing file</p>
@@ -165,11 +165,11 @@ export const DuplicateDetectionModal: React.FC<DuplicateDetectionModalProps> = (
         <button
           onClick={() => onDecision('keep_both')}
           data-testid="keep-both-button"
-          className="group w-full flex items-center justify-between p-5 border-2 border-border rounded-xl hover:border-blue-500/50 hover:bg-blue-500/5 transition-all duration-200 hover-lift"
+          className="group w-full flex items-center justify-between p-5 border-2 border-white/20 rounded-xl hover:border-white/40 hover:bg-white/5 transition-all duration-200 hover-lift"
         >
           <div className="flex items-center space-x-4">
-            <div className="p-2 bg-blue-500/20 rounded-lg group-hover:bg-blue-500/30 transition-colors">
-              <Info className="h-6 w-6 text-blue-400" />
+            <div className="p-2 bg-white/10 rounded-lg group-hover:bg-white/20 transition-colors">
+              <Info className="h-6 w-6 text-white" />
             </div>
             <div className="text-left">
               <p className="font-semibold text-white text-base">Keep both files</p>
@@ -182,11 +182,11 @@ export const DuplicateDetectionModal: React.FC<DuplicateDetectionModalProps> = (
         <button
           onClick={() => onDecision('delta_merge')}
           data-testid="delta-merge-button"
-          className="group w-full flex items-center justify-between p-5 border-2 border-blue-500/30 rounded-xl hover:border-blue-500/60 hover:bg-blue-500/10 transition-all duration-200 hover-lift bg-blue-500/5"
+          className="group w-full flex items-center justify-between p-5 border-2 border-white/30 rounded-xl hover:border-white/50 hover:bg-white/10 transition-all duration-200 hover-lift bg-white/5"
         >
           <div className="flex items-center space-x-4">
-            <div className="p-2 bg-blue-500/30 rounded-lg group-hover:bg-blue-500/40 transition-colors">
-              <BarChart3 className="h-6 w-6 text-blue-300" />
+            <div className="p-2 bg-white/20 rounded-lg group-hover:bg-white/30 transition-colors">
+              <BarChart3 className="h-6 w-6 text-white" />
             </div>
             <div className="text-left">
               <p className="font-semibold text-white text-base">Merge new rows (delta)</p>
@@ -198,11 +198,11 @@ export const DuplicateDetectionModal: React.FC<DuplicateDetectionModalProps> = (
         <button
           onClick={() => onDecision('skip')}
           data-testid="skip-button"
-          className="group w-full flex items-center justify-between p-5 border-2 border-border rounded-xl hover:border-red-500/50 hover:bg-red-500/5 transition-all duration-200 hover-lift"
+          className="group w-full flex items-center justify-between p-5 border-2 border-white/10 rounded-xl hover:border-white/20 hover:bg-white/5 transition-all duration-200 hover-lift"
         >
           <div className="flex items-center space-x-4">
-            <div className="p-2 bg-red-500/20 rounded-lg group-hover:bg-red-500/30 transition-colors">
-              <XCircle className="h-6 w-6 text-red-400" />
+            <div className="p-2 bg-white/5 rounded-lg group-hover:bg-white/10 transition-colors">
+              <XCircle className="h-6 w-6 text-muted-foreground" />
             </div>
             <div className="text-left">
               <p className="font-semibold text-white text-base">Skip this upload</p>

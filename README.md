@@ -43,3 +43,12 @@ Anomaly-first cleaning — Instead of just “fixing” data, Finley flags the e
 Global compliance mapping — While normalizing, Finley already maps transactions to local compliance codes (e.g., GST in India, VAT in EU) — no extra step later.
 
 📌 Result: Every transaction in the world speaks the same “financial language” instantly.
+
+Summary
+Layer 1–3 Functional Scope
+
+Layer 1 – Ingestion: File uploads, connectors, and live sync AND SOME OTHER MORE.
+
+Layer 2 – Normalization: Relationship detection, entity resolver, duplication handler, extractors, transaction batching, and streaming processors and SOME OTHER MORE.
+
+Layer 3 – Finance Logic: Core financial intelligence — metrics, projections, variance models, decision engine, and “Explain this” AI.

@@ -94,12 +94,19 @@ export class FastAPIProcessor {
     error?: string;
   }> {
     try {
+      // FIX #1: Add JWT token to API request headers
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+      };
+      
+      if (sessionToken) {
+        headers['Authorization'] = `Bearer ${sessionToken}`;
+      }
+      
       // SECURITY FIX: Use backend API instead of direct Supabase query to respect RLS
       const response = await fetch(`${this.apiUrl}/check-duplicate`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers,
         body: JSON.stringify({
           user_id: userId,
           file_hash: fileHash,
@@ -354,12 +361,19 @@ export class FastAPIProcessor {
 
       // Start FastAPI backend processing and connect to WebSocket for real-time updates
       try {
+        // FIX #1: Add JWT token to API request headers
+        const headers: Record<string, string> = {
+          'Content-Type': 'application/json',
+        };
+        
+        if (session?.access_token) {
+          headers['Authorization'] = `Bearer ${session.access_token}`;
+        }
+        
         // Start the processing job
         const response = await fetch(`${this.apiUrl}/process-excel`, {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
+          headers,
           body: JSON.stringify(requestBody)
         });
 

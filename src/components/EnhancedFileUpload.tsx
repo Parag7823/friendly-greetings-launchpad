@@ -33,35 +33,66 @@ export const EnhancedFileUpload: React.FC = () => {
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
 
-  // Duplicate detection state
-  const [duplicateModal, setDuplicateModal] = useState({
+  // FIX #5: Consolidated duplicate modal state for better maintainability
+  interface DuplicateModalState {
+    isOpen: boolean;
+    phase: 'basic_duplicate' | 'versions_detected' | 'similar_files';
+    context: {
+      jobId: string | null;
+      fileHash: string | null;
+      fileId: string | null;
+      existingFileId: string | null;
+    };
+    data: {
+      duplicateInfo?: any;
+      versionCandidates?: any;
+      recommendation?: any;
+      deltaAnalysis?: any;
+    };
+    error: string | null;
+  }
+
+  const [duplicateModal, setDuplicateModal] = useState<DuplicateModalState>({
     isOpen: false,
-    duplicateInfo: undefined as any,
-    versionCandidates: undefined as any,
-    recommendation: undefined as any,
-    phase: 'basic_duplicate' as 'basic_duplicate' | 'versions_detected' | 'similar_files',
-    currentJobId: null as string | null,
-    currentFileHash: null as string | null,
-    currentFileId: null as string | null,
-    currentExistingFileId: null as string | null,
-    deltaAnalysis: undefined as any,
-    error: null as string | null
+    phase: 'basic_duplicate',
+    context: {
+      jobId: null,
+      fileHash: null,
+      fileId: null,
+      existingFileId: null,
+    },
+    data: {},
+    error: null,
   });
 
   const { toast } = useToast();
   const { processFileWithFastAPI } = useFastAPIProcessor();
 
+  // FIX #3: Expand file type validation to match backend capabilities
   const validateFile = (file: File): { isValid: boolean; error?: string } => {
     const validTypes = [
+      // Spreadsheets
       'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
       'application/vnd.ms-excel',
-      'text/csv'
+      'text/csv',
+      // PDFs
+      'application/pdf',
+      // Images
+      'image/png',
+      'image/jpeg',
+      'image/jpg',
+      'image/gif',
+      'image/webp',
+      'image/bmp',
+      'image/tiff'
     ];
     
-    if (!validTypes.includes(file.type) && !file.name.match(/\.(xlsx|xls|csv)$/i)) {
+    const validExtensions = /\.(xlsx|xls|csv|pdf|png|jpg|jpeg|gif|webp|bmp|tiff|tif)$/i;
+    
+    if (!validTypes.includes(file.type) && !file.name.match(validExtensions)) {
       return {
         isValid: false,
-        error: 'Please upload a valid Excel file (.xlsx, .xls) or CSV file.'
+        error: 'Please upload Excel (.xlsx, .xls), CSV, PDF, or image files (PNG, JPG, GIF, WebP, BMP, TIFF).'
       };
     }
     
@@ -111,20 +142,25 @@ export const EnhancedFileUpload: React.FC = () => {
             total_rows: f.total_rows || 0
           }));
 
-          // Show duplicate modal populated from WS context
+          // FIX #4: Show consolidated duplicate modal
           setDuplicateModal(prev => ({
             ...prev,
             isOpen: true,
             phase: 'basic_duplicate',
-            duplicateInfo: {
-              message: progress.message || 'Potential duplicate detected!',
-              filename: file.name,
-              recommendation: 'replace_or_skip',
-              duplicate_files: normalizedFiles
+            context: {
+              ...prev.context,
+              existingFileId: existingId,
             },
-            // currentJobId and currentFileHash are set in onJobId earlier
-            currentExistingFileId: existingId,
-            deltaAnalysis: extra.delta_analysis || prev.deltaAnalysis
+            data: {
+              ...prev.data,
+              duplicateInfo: {
+                message: progress.message || 'Potential duplicate detected!',
+                filename: file.name,
+                recommendation: 'replace_or_skip',
+                duplicate_files: normalizedFiles
+              },
+              deltaAnalysis: extra.delta_analysis || prev.data.deltaAnalysis
+            }
           }));
         }
         
@@ -156,34 +192,39 @@ export const EnhancedFileUpload: React.FC = () => {
             : f
         ));
 
-        // Pre-fill duplicate modal context so decisions can be sent instantly when modal opens via WebSocket
+        // Pre-fill duplicate modal context
         setDuplicateModal(prev => ({
           ...prev,
-          currentJobId: jobId,
-          currentFileHash: fileHash || prev.currentFileHash
+          context: {
+            ...prev.context,
+            jobId,
+            fileHash: fileHash || prev.context.fileHash
+          }
         }));
       });
 
       // Check if result indicates any duplicate flow requiring user decision
       if (result.requires_user_decision) {
-        // Show duplicate modal with actual duplicate information
+        // FIX #4: Show consolidated duplicate modal
         setDuplicateModal(prev => ({
           ...prev,
           isOpen: true,
           phase: 'basic_duplicate',
-          duplicateInfo: {
-            message: result.message || 'Duplicate or similar file detected!',
-            filename: file.name,
-            recommendation: result.duplicate_analysis?.recommendation || 'replace_or_skip',
-            duplicateFiles: result.duplicate_analysis?.duplicate_files || []
+          context: {
+            jobId: result.job_id || null,
+            fileHash: result.file_hash || null,
+            fileId: fileId,
+            existingFileId: (result as any).existing_file_id || null,
           },
-          currentJobId: result.job_id,
-          currentFileHash: result.file_hash || null,
-          currentStoragePath: result.storage_path || null,
-          currentFileName: result.file_name || file.name,
-          currentFileId: fileId,
-          currentExistingFileId: (result as any).existing_file_id || null,
-          deltaAnalysis: (result as any).delta_analysis || null
+          data: {
+            duplicateInfo: {
+              message: result.message || 'Duplicate or similar file detected!',
+              filename: file.name,
+              recommendation: result.duplicate_analysis?.recommendation || 'replace_or_skip',
+              duplicateFiles: result.duplicate_analysis?.duplicate_files || []
+            },
+            deltaAnalysis: (result as any).delta_analysis || null
+          }
         }));
         
         // Don't proceed with normal completion
@@ -349,7 +390,7 @@ export const EnhancedFileUpload: React.FC = () => {
 
   // Duplicate detection handlers
   const handleDuplicateDecision = async (decision: 'replace' | 'keep_both' | 'skip' | 'delta_merge') => {
-    if (!duplicateModal.currentJobId || !duplicateModal.currentFileHash) {
+    if (!duplicateModal.context.jobId || !duplicateModal.context.fileHash) {
       toast({
         title: "Error",
         description: "Missing job information for duplicate decision",
@@ -369,13 +410,13 @@ export const EnhancedFileUpload: React.FC = () => {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          job_id: duplicateModal.currentJobId,
+          job_id: duplicateModal.context.jobId,
           user_id: user?.id || 'anonymous',
           decision: decision,
-          file_hash: duplicateModal.currentFileHash,
+          file_hash: duplicateModal.context.fileHash,
           session_token: session?.access_token,
-          ...(decision === 'delta_merge' && duplicateModal.currentExistingFileId
-            ? { existing_file_id: duplicateModal.currentExistingFileId }
+          ...(decision === 'delta_merge' && duplicateModal.context.existingFileId
+            ? { existing_file_id: duplicateModal.context.existingFileId }
             : {})
         })
       });
@@ -386,7 +427,7 @@ export const EnhancedFileUpload: React.FC = () => {
 
       // If skip, mark UI as cancelled and remove from list
       if (decision === 'skip') {
-        const fileRowId = duplicateModal.currentFileId as string | null;
+        const fileRowId = duplicateModal.context.fileId as string | null;
         if (fileRowId) {
           setFiles(prev => prev.map(f => 
             f.id === fileRowId 
@@ -403,8 +444,8 @@ export const EnhancedFileUpload: React.FC = () => {
       }
 
       // For replace/keep_both, poll job status as backend resumes processing
-      const jobId = duplicateModal.currentJobId as string;
-      const fileRowId = duplicateModal.currentFileId as string | null;
+      const jobId = duplicateModal.context.jobId as string;
+      const fileRowId = duplicateModal.context.fileId as string | null;
 
       if (fileRowId) {
         // Optimistic UI update
@@ -470,8 +511,8 @@ export const EnhancedFileUpload: React.FC = () => {
   // Expose a helper to cancel from modal's footer button
   const handleModalCancel = useCallback(async () => {
     try {
-      const jobId = duplicateModal.currentJobId;
-      const fileRowId = duplicateModal.currentFileId as string | null;
+      const jobId = duplicateModal.context.jobId;
+      const fileRowId = duplicateModal.context.fileId as string | null;
       if (!jobId) {
         setDuplicateModal(prev => ({ ...prev, isOpen: false }));
         return;
@@ -495,7 +536,7 @@ export const EnhancedFileUpload: React.FC = () => {
   }, [duplicateModal, toast]);
 
   const handleVersionRecommendationFeedback = async (accepted: boolean, feedback?: string) => {
-    if (!duplicateModal.recommendation) return;
+    if (!duplicateModal.data.recommendation) return;
 
     try {
       const { data: { session } } = await supabase.auth.getSession();
@@ -505,7 +546,7 @@ export const EnhancedFileUpload: React.FC = () => {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          recommendation_id: duplicateModal.recommendation.id,
+          recommendation_id: duplicateModal.data.recommendation.id,
           user_id: user?.id || 'anonymous',
           accepted: accepted,
           feedback: feedback,
@@ -639,17 +680,17 @@ export const EnhancedFileUpload: React.FC = () => {
         </Card>
       )}
 
-      {/* Duplicate Detection Modal */}
+      {/* FIX #4: Duplicate Detection Modal with consolidated state */}
       <DuplicateDetectionModal
         isOpen={duplicateModal.isOpen}
         onClose={handleModalCancel}
-        duplicateInfo={duplicateModal.duplicateInfo}
-        versionCandidates={duplicateModal.versionCandidates}
-        recommendation={duplicateModal.recommendation}
+        duplicateInfo={duplicateModal.data.duplicateInfo}
+        versionCandidates={duplicateModal.data.versionCandidates}
+        recommendation={duplicateModal.data.recommendation}
         onDecision={handleDuplicateDecision}
         onVersionAccept={handleVersionRecommendationFeedback}
         phase={duplicateModal.phase}
-        deltaAnalysis={duplicateModal.deltaAnalysis}
+        deltaAnalysis={duplicateModal.data.deltaAnalysis}
         error={duplicateModal.error}
       />
     </div>
