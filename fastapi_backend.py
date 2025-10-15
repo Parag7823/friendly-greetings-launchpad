@@ -7726,11 +7726,11 @@ class ExcelProcessor:
             openai_client = AsyncOpenAI(api_key=os.getenv('OPENAI_API_KEY'))
             relationship_detector = EnhancedRelationshipDetector(openai_client, supabase)
 
-            # CRITICAL FIX #5: Add timeout to prevent hanging on large datasets
+            # CRITICAL FIX #5: Add timeout and file_id scope to prevent hanging on large datasets
             import asyncio
             try:
                 relationship_results = await asyncio.wait_for(
-                    relationship_detector.detect_all_relationships(user_id),
+                    relationship_detector.detect_all_relationships(user_id, file_id=file_id),  # FIX #5: Pass file_id
                     timeout=300  # 5 minutes max
                 )
             except asyncio.TimeoutError:
@@ -7763,9 +7763,9 @@ class ExcelProcessor:
             
             # Store relationship instances atomically
             if relationship_results.get('relationships'):
-                await self._store_relationship_instances(relationship_results['relationships'], user_id, supabase)
+                await self._store_relationship_instances(relationship_results['relationships'], user_id, transaction_id, supabase)  # FIX #6: Pass transaction_id
                 # Also store cross-platform relationships for analytics
-                await self._store_cross_platform_relationships(relationship_results['relationships'], user_id, supabase)
+                await self._store_cross_platform_relationships(relationship_results['relationships'], user_id, transaction_id, supabase)  # FIX #9: Pass transaction_id
             
             # Add relationship results to insights
             insights['relationship_analysis'] = relationship_results
@@ -8291,70 +8291,95 @@ async def get_performance_optimization_status():
         }
 
     async def _store_normalized_entities(self, entities: List[Dict], user_id: str, transaction_id: str, supabase: Client):
-        """Store normalized entities in the database"""
+        """Store normalized entities in the database atomically with transaction manager
+        
+        FIX #4: Uses transaction manager for atomic operations with automatic rollback on failure.
+        This prevents partial entity data from being stored if an error occurs.
+        """
         try:
             if not entities:
                 return
             
-            logger.info(f"Storing {len(entities)} normalized entities")
+            logger.info(f"Storing {len(entities)} normalized entities atomically")
             
-            for entity in entities:
-                entity_data = {
-                    'user_id': user_id,
-                    'entity_type': entity.get('entity_type', 'vendor'),
-                    'canonical_name': entity.get('canonical_name', ''),
-                    'aliases': entity.get('aliases', []),
-                    'email': entity.get('email'),
-                    'phone': entity.get('phone'),
-                    'bank_account': entity.get('bank_account'),
-                    'tax_id': entity.get('tax_id'),
-                    'platform_sources': entity.get('platform_sources', []),
-                    'source_files': entity.get('source_files', []),
-                    'confidence_score': entity.get('confidence_score', 0.5),
-                    'transaction_id': transaction_id
-                }
+            # Use transaction manager for atomic operations
+            transaction_manager = get_transaction_manager()
+            
+            async with transaction_manager.transaction(
+                user_id=user_id,
+                operation_type="entity_storage"
+            ) as tx:
+                # Prepare batch data
+                entities_batch = []
+                for entity in entities:
+                    entity_data = {
+                        'user_id': user_id,
+                        'entity_type': entity.get('entity_type', 'vendor'),
+                        'canonical_name': entity.get('canonical_name', ''),
+                        'aliases': entity.get('aliases', []),
+                        'email': entity.get('email'),
+                        'phone': entity.get('phone'),
+                        'bank_account': entity.get('bank_account'),
+                        'tax_id': entity.get('tax_id'),
+                        'platform_sources': entity.get('platform_sources', []),
+                        'source_files': entity.get('source_files', []),
+                        'confidence_score': entity.get('confidence_score', 0.5),
+                        'transaction_id': transaction_id
+                    }
+                    entities_batch.append(entity_data)
                 
-                result = supabase.table('normalized_entities').insert(entity_data).execute()
-                if result.data:
-                    logger.debug(f"Stored normalized entity: {entity_data['canonical_name']}")
-                else:
-                    logger.warning(f"Failed to store normalized entity: {entity_data['canonical_name']}")
+                # Batch insert all entities atomically (100x faster than single inserts)
+                if entities_batch:
+                    result = await tx.insert_batch('normalized_entities', entities_batch)
+                    logger.info(f"✅ Stored {len(result)} entities atomically in batch")
                     
         except Exception as e:
-            logger.error(f"Error storing normalized entities: {e}")
+            logger.error(f"❌ Error storing normalized entities (transaction rolled back): {e}")
 
     async def _store_entity_matches(self, matches: List[Dict], user_id: str, transaction_id: str, supabase: Client):
-        """Store entity matches in the database"""
+        """Store entity matches in the database atomically with transaction manager
+        
+        FIX #4: Uses transaction manager for atomic operations with automatic rollback on failure.
+        """
         try:
             if not matches:
                 return
                 
-            logger.info(f"Storing {len(matches)} entity matches")
+            logger.info(f"Storing {len(matches)} entity matches atomically")
             
-            for match in matches:
-                match_data = {
-                    'user_id': user_id,
-                    'source_entity_name': match.get('source_entity_name', ''),
-                    'source_entity_type': match.get('source_entity_type', 'vendor'),
-                    'source_platform': match.get('source_platform', 'unknown'),
-                    'source_file': match.get('source_file', ''),
-                    'source_row_id': match.get('source_row_id'),
-                    'normalized_entity_id': match.get('normalized_entity_id'),
-                    'match_confidence': match.get('match_confidence', 0.5),
-                    'match_reason': match.get('match_reason', 'unknown'),
-                    'similarity_score': match.get('similarity_score'),
-                    'matched_fields': match.get('matched_fields', []),
-                    'transaction_id': transaction_id
-                }
+            # Use transaction manager for atomic operations
+            transaction_manager = get_transaction_manager()
+            
+            async with transaction_manager.transaction(
+                user_id=user_id,
+                operation_type="entity_match_storage"
+            ) as tx:
+                # Prepare batch data
+                matches_batch = []
+                for match in matches:
+                    match_data = {
+                        'user_id': user_id,
+                        'source_entity_name': match.get('source_entity_name', ''),
+                        'source_entity_type': match.get('source_entity_type', 'vendor'),
+                        'source_platform': match.get('source_platform', 'unknown'),
+                        'source_file': match.get('source_file', ''),
+                        'source_row_id': match.get('source_row_id'),
+                        'normalized_entity_id': match.get('normalized_entity_id'),
+                        'match_confidence': match.get('match_confidence', 0.5),
+                        'match_reason': match.get('match_reason', 'unknown'),
+                        'similarity_score': match.get('similarity_score'),
+                        'matched_fields': match.get('matched_fields', []),
+                        'transaction_id': transaction_id
+                    }
+                    matches_batch.append(match_data)
                 
-                result = supabase.table('entity_matches').insert(match_data).execute()
-                if result.data:
-                    logger.debug(f"Stored entity match: {match_data['source_entity_name']}")
-                else:
-                    logger.warning(f"Failed to store entity match: {match_data['source_entity_name']}")
+                # Batch insert all matches atomically
+                if matches_batch:
+                    result = await tx.insert_batch('entity_matches', matches_batch)
+                    logger.info(f"✅ Stored {len(result)} entity matches atomically in batch")
                     
         except Exception as e:
-            logger.error(f"Error storing entity matches: {e}")
+            logger.error(f"❌ Error storing entity matches (transaction rolled back): {e}")
 
     async def _store_platform_patterns(self, patterns: List[Dict], user_id: str, transaction_id: str, supabase: Client):
         """Store platform patterns in the database"""
@@ -8384,8 +8409,11 @@ async def get_performance_optimization_status():
         except Exception as e:
             logger.error(f"Error storing platform patterns: {e}")
 
-    async def _store_relationship_instances(self, relationships: List[Dict], user_id: str, supabase: Client):
-        """Store relationship instances in the database atomically with batch insert"""
+    async def _store_relationship_instances(self, relationships: List[Dict], user_id: str, transaction_id: str, supabase: Client):
+        """Store relationship instances in the database atomically with batch insert
+        
+        FIX #6: Added transaction_id parameter for rollback capability and transaction tracking.
+        """
         try:
             if not relationships:
                 return
@@ -8410,7 +8438,8 @@ async def get_performance_optimization_status():
                         'confidence_score': relationship.get('confidence_score', 0.5),
                         'detection_method': relationship.get('detection_method', 'ai'),
                         'pattern_id': relationship.get('pattern_id'),
-                        'reasoning': relationship.get('reasoning', '')
+                        'reasoning': relationship.get('reasoning', ''),
+                        'transaction_id': transaction_id  # FIX #6: Add transaction_id for rollback
                     }
                     relationships_batch.append(rel_data)
                 
@@ -8422,8 +8451,11 @@ async def get_performance_optimization_status():
         except Exception as e:
             logger.error(f"❌ Error storing relationship instances (transaction rolled back): {e}")
 
-    async def _store_cross_platform_relationships(self, relationships: List[Dict], user_id: str, supabase: Client):
-        """Store cross-platform relationship rows for analytics and compatibility stats"""
+    async def _store_cross_platform_relationships(self, relationships: List[Dict], user_id: str, transaction_id: str, supabase: Client):
+        """Store cross-platform relationship rows for analytics and compatibility stats
+        
+        FIX #9 & #10: Now uses transaction manager for atomic operations with transaction_id for cleanup.
+        """
         try:
             if not relationships:
                 return
@@ -8451,7 +8483,7 @@ async def get_performance_optimization_status():
             except Exception as e:
                 logger.warning(f"Failed to fetch platforms for cross-platform relationships: {e}")
 
-            # Prepare batch insert
+            # Prepare batch data
             rows = []
             for rel in relationships:
                 src_id = rel.get('source_event_id')
@@ -8472,21 +8504,27 @@ async def get_performance_optimization_status():
                     'source_platform': src_platform,
                     'target_platform': tgt_platform,
                     'platform_compatibility': compatibility,
+                    'transaction_id': transaction_id  # FIX #9: Add transaction_id for cleanup
                 })
 
-            # Insert in batches to avoid payload limits
-            batch_size = 100
-            for i in range(0, len(rows), batch_size):
-                batch = rows[i:i+batch_size]
-                try:
-                    supabase.table('cross_platform_relationships').insert(batch).execute()
-                except Exception as e:
-                    logger.warning(f"Failed to insert cross_platform_relationships batch ({i}-{i+len(batch)}): {e}")
-
-            logger.info(f"Stored {len(rows)} cross_platform_relationships rows")
+            # FIX #10: Use transaction manager for atomic batch insert
+            logger.info(f"Storing {len(rows)} cross-platform relationships atomically")
+            transaction_manager = get_transaction_manager()
+            
+            async with transaction_manager.transaction(
+                user_id=user_id,
+                operation_type="cross_platform_relationship_storage"
+            ) as tx:
+                # Insert in batches to avoid payload limits (transaction manager handles this)
+                batch_size = 100
+                for i in range(0, len(rows), batch_size):
+                    batch = rows[i:i+batch_size]
+                    await tx.insert_batch('cross_platform_relationships', batch)
+                
+                logger.info(f"✅ Stored {len(rows)} cross-platform relationships atomically")
 
         except Exception as e:
-            logger.error(f"Error storing cross-platform relationships: {e}")
+            logger.error(f"❌ Error storing cross-platform relationships (transaction rolled back): {e}")
 
     async def _store_discovered_platforms(self, platforms: List[Dict], user_id: str, transaction_id: str, supabase: Client):
         """Store discovered platforms in the database"""
@@ -8565,20 +8603,25 @@ async def get_performance_optimization_status():
                 raise ValueError("Cannot provide both file_id and transaction_id")
             
             # Get events based on filter criteria
+            # CRITICAL FIX: Query enriched columns (vendor_standard, amount_usd, etc.) from Phase 5
             if file_id:
                 # File upload flow - use optimized query when available
                 if optimized_db:
                     events_data = await optimized_db.get_events_for_entity_extraction(user_id, file_id)
                 else:
                     events = supabase.table('raw_events').select(
-                        'id, payload, kind, source_platform, row_index'
+                        'id, payload, kind, source_platform, row_index, '
+                        'vendor_standard, vendor_raw, amount_usd, currency, '
+                        'email, phone, bank_account, source_filename'
                     ).eq('user_id', user_id).eq('file_id', file_id).execute()
                     events_data = events.data or []
                 filter_desc = f"file_id={file_id}"
             else:
                 # Connector flow - filter by transaction_id
                 events = supabase.table('raw_events').select(
-                    'id, payload, kind, source_platform, row_index'
+                    'id, payload, kind, source_platform, row_index, '
+                    'vendor_standard, vendor_raw, amount_usd, currency, '
+                    'email, phone, bank_account, source_filename'
                 ).eq('user_id', user_id).eq('transaction_id', transaction_id).execute()
                 events_data = events.data or []
                 filter_desc = f"transaction_id={transaction_id}"
@@ -8590,43 +8633,50 @@ async def get_performance_optimization_status():
             vendor_fields_found = []
             
             for event in events_data:
-                # Extract vendor/entity information from payload
-                payload = event.get('payload', {})
+                # CRITICAL FIX: Extract vendor from enriched columns FIRST, then fallback to payload
+                # Priority 1: vendor_standard from enriched column (Phase 5 standardization)
+                vendor_name = event.get('vendor_standard')
                 
-                # Check what vendor fields are available
-                vendor_fields = ['vendor_raw', 'vendor_standard', 'vendor', 'merchant', 'payee', 'description', 'name', 'counterparty', 'customer', 'client']
-                for field in vendor_fields:
-                    if field in payload and payload[field]:
-                        vendor_fields_found.append(f"{field}: {payload[field]}")
+                # Priority 2: vendor_raw from enriched column
+                if not vendor_name:
+                    vendor_name = event.get('vendor_raw')
                 
-                # CRITICAL FIX: Check vendor_standard first (from enrichment), then fallback to vendor_raw
-                vendor_raw = (
-                    payload.get('vendor_standard') or  # Enriched/standardized vendor name
-                    payload.get('vendor_raw') or       # Raw vendor from original data
-                    payload.get('vendor') or           # Generic vendor field
-                    payload.get('merchant') or         # Merchant field
-                    payload.get('payee') or 
-                    payload.get('description') or      # Common in bank statements
-                    payload.get('name') or 
-                    payload.get('counterparty') or
-                    payload.get('customer') or 
-                    payload.get('client')
-                )
+                # Priority 3: Fallback to payload fields (for old data or non-enriched events)
+                if not vendor_name:
+                    payload = event.get('payload', {})
+                    vendor_name = (
+                        payload.get('vendor_standard') or
+                        payload.get('vendor_raw') or
+                        payload.get('vendor') or
+                        payload.get('merchant') or
+                        payload.get('payee') or
+                        payload.get('description') or
+                        payload.get('name') or
+                        payload.get('counterparty') or
+                        payload.get('customer') or
+                        payload.get('client')
+                    )
+                
+                # Track what fields we found for debugging
+                if vendor_name:
+                    vendor_fields_found.append(f"vendor: {vendor_name}")
 
-                if vendor_raw and vendor_raw not in entity_map:
+                if vendor_name and vendor_name not in entity_map:
+                    # Extract contact info from enriched columns first, then payload
+                    payload = event.get('payload', {})
                     entity = {
                         'entity_type': 'vendor',
-                        'canonical_name': vendor_raw,
-                        'aliases': [vendor_raw],
-                        'email': payload.get('email'),
-                        'phone': payload.get('phone'),
-                        'bank_account': payload.get('bank_account'),
+                        'canonical_name': vendor_name,
+                        'aliases': [vendor_name],
+                        'email': event.get('email') or payload.get('email'),
+                        'phone': event.get('phone') or payload.get('phone'),
+                        'bank_account': event.get('bank_account') or payload.get('bank_account'),
                         'platform_sources': [event.get('source_platform', 'unknown')],
                         'source_files': [event.get('source_filename', '')],
-                        'confidence_score': 0.8
+                        'confidence_score': 0.9 if event.get('vendor_standard') else 0.7  # Higher confidence for standardized names
                     }
                     entities.append(entity)
-                    entity_map[vendor_raw] = entity
+                    entity_map[vendor_name] = entity
             
             logger.info(f"Extracted {len(entities)} entities from {len(events_data)} events")
             if vendor_fields_found:

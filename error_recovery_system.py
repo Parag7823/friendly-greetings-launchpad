@@ -467,7 +467,10 @@ class ErrorRecoverySystem:
             logger.error(f"Failed to update error status: {e}")
     
     async def _cleanup_transaction_data(self, transaction_id: str, cleaned_records: List[str]):
-        """Clean up data associated with a transaction"""
+        """Clean up data associated with a transaction
+        
+        FIX #9: Added cleanup for cross_platform_relationships to prevent orphaned data.
+        """
         try:
             # Clean up normalized entities
             entities_result = self.supabase.table('normalized_entities').delete().eq('transaction_id', transaction_id).execute()
@@ -478,6 +481,11 @@ class ErrorRecoverySystem:
             relations_result = self.supabase.table('relationship_instances').delete().eq('transaction_id', transaction_id).execute()
             if relations_result.data:
                 cleaned_records.extend([f"relation:{record['id']}" for record in relations_result.data])
+            
+            # FIX #9: Clean up cross-platform relationships (analytics data)
+            cross_platform_result = self.supabase.table('cross_platform_relationships').delete().eq('transaction_id', transaction_id).execute()
+            if cross_platform_result.data:
+                cleaned_records.extend([f"cross_platform:{record['id']}" for record in cross_platform_result.data])
             
             # Clean up metrics
             metrics_result = self.supabase.table('metrics').delete().eq('transaction_id', transaction_id).execute()

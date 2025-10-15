@@ -30,17 +30,34 @@ class EnhancedRelationshipDetector:
         self.supabase = supabase_client
         self.relationship_cache = {}
         
-    async def detect_all_relationships(self, user_id: str) -> Dict[str, Any]:
-        """Detect actual relationships between financial events"""
+    async def detect_all_relationships(self, user_id: str, file_id: Optional[str] = None) -> Dict[str, Any]:
+        """Detect relationships between financial events
+        
+        FIX #5: Added file_id parameter to scope relationship detection to current file only.
+        This prevents O(N²) complexity on all user events and avoids timeouts on large datasets.
+        
+        Args:
+            user_id: User ID to filter events
+            file_id: Optional file_id to scope detection to specific file (recommended)
+        """
         try:
-            # Get all events for the user (paginated to avoid full-table scan)
+            # Get events for the user (with optional file filter)
+            # FIX #5: Query enriched columns (amount_usd, vendor_standard, source_ts) for accurate matching
             all_events: List[Dict[str, Any]] = []
             offset = 0
             batch_size = 1000
             while True:
-                result = self.supabase.table('raw_events').select(
-                    'id, payload, source_filename, created_at, source_platform'
-                ).eq('user_id', user_id).order('created_at', desc=False).range(offset, offset + batch_size - 1).execute()
+                query = self.supabase.table('raw_events').select(
+                    'id, payload, source_filename, created_at, source_platform, '
+                    'amount_usd, vendor_standard, source_ts'  # Include enriched columns
+                ).eq('user_id', user_id)
+                
+                # FIX #5: Add file_id filter for scoped relationship detection
+                if file_id:
+                    query = query.eq('file_id', file_id)
+                    logger.info(f"Scoped relationship detection to file_id={file_id}")
+                
+                result = query.order('created_at', desc=False).range(offset, offset + batch_size - 1).execute()
                 batch = result.data or []
                 if not batch:
                     break
@@ -425,7 +442,8 @@ class EnhancedRelationshipDetector:
             target_payload = target.get('payload', {})
             
             # Calculate individual scores
-            amount_score = self._calculate_amount_score(source_payload, target_payload)
+            # CRITICAL FIX: Pass full events to _calculate_amount_score for amount_usd access
+            amount_score = self._calculate_amount_score(source, target)
             date_score = self._calculate_date_score(source, target)
             entity_score = self._calculate_entity_score(source_payload, target_payload)
             id_score = self._calculate_id_score(source_payload, target_payload)
@@ -449,11 +467,14 @@ class EnhancedRelationshipDetector:
             logger.error(f"Error calculating relationship score: {e}")
             return 0.0
     
-    def _calculate_amount_score(self, source_payload: Dict, target_payload: Dict) -> float:
-        """Calculate amount similarity score"""
+    def _calculate_amount_score(self, source: Dict, target: Dict) -> float:
+        """Calculate amount similarity score using USD-normalized amounts
+        
+        CRITICAL: Now receives full events to access amount_usd from enriched columns.
+        """
         try:
-            source_amount = self._extract_amount(source_payload)
-            target_amount = self._extract_amount(target_payload)
+            source_amount = self._extract_amount(source)
+            target_amount = self._extract_amount(target)
             
             if source_amount == 0 or target_amount == 0:
                 return 0.0
@@ -586,57 +607,85 @@ class EnhancedRelationshipDetector:
         
         return weights
     
-    def _extract_amount(self, payload: Dict) -> float:
-        """Extract amount from payload using universal field detection"""
+    def _extract_amount(self, event: Dict) -> float:
+        """Extract amount from event using enriched amount_usd for currency consistency
+        
+        CRITICAL: This function now receives the full event dict (not just payload)
+        to access enriched columns like amount_usd for accurate cross-currency matching.
+        """
         try:
-            # Import universal extractors directly (avoid circular import)
-            from universal_extractors_optimized import UniversalExtractorsOptimized
-            universal_extractors = UniversalExtractorsOptimized()
+            # PRIORITY 1: Use amount_usd from enriched columns (Phase 5 enrichment)
+            # This ensures all amounts are in USD for accurate cross-currency comparison
+            if 'amount_usd' in event and event['amount_usd'] is not None:
+                amount_usd = event['amount_usd']
+                if isinstance(amount_usd, (int, float)) and amount_usd != 0:
+                    return float(amount_usd)
             
-            # Use synchronous extraction method to avoid async/sync mixing
+            # PRIORITY 2: Check payload for amount_usd (fallback)
+            payload = event.get('payload', {})
+            if 'amount_usd' in payload and payload['amount_usd']:
+                return float(payload['amount_usd'])
+            
+            # PRIORITY 3: Use universal extractors on raw payload
             try:
-                # Use synchronous fallback method instead of async
+                from universal_extractors_optimized import UniversalExtractorsOptimized
+                universal_extractors = UniversalExtractorsOptimized()
                 amount_result = universal_extractors._extract_amount_fallback(payload)
                 if amount_result and isinstance(amount_result, (int, float)):
                     return float(amount_result)
             except Exception as e:
                 logger.warning(f"Universal amount extraction failed: {e}")
-                pass  # Fall back to manual extraction
             
-            # Fallback to old method
-            amount_fields = ['amount', 'amount_usd', 'total', 'value', 'payment_amount']
+            # PRIORITY 4: Manual extraction from payload
+            amount_fields = ['amount', 'total', 'value', 'payment_amount']
             for field in amount_fields:
                 if field in payload and payload[field]:
                     return float(payload[field])
             
-            # Try to extract from text
-            text = str(payload)
-            matches = re.findall(r'[\d,]+\.?\d*', text)
-            if matches:
-                return float(matches[0].replace(',', ''))
-            
             return 0.0
-        except:
+        except Exception as e:
+            logger.error(f"Amount extraction failed: {e}")
             return 0.0
     
     def _extract_date(self, event: Dict) -> Optional[datetime]:
-        """Extract date from event using universal field detection"""
+        """Extract transaction date from event, prioritizing business date over system timestamps
+        
+        CRITICAL: Uses transaction date from payload (business logic) instead of created_at
+        (system timestamp) for accurate historical relationship detection.
+        """
         try:
-            # Import universal extractors directly (avoid circular import)
-            from universal_extractors_optimized import UniversalExtractorsOptimized
-            universal_extractors = UniversalExtractorsOptimized()
+            # PRIORITY 1: Transaction date from payload (business date)
+            payload = event.get('payload', {})
             
-            # Note: No extract_date_universal method in optimized version
-            # Fall back to manual date extraction
+            # Check common transaction date fields in payload
+            transaction_date_fields = ['date', 'transaction_date', 'txn_date', 'posting_date', 'value_date']
+            for field in transaction_date_fields:
+                if field in payload and payload[field]:
+                    try:
+                        date_str = str(payload[field])
+                        return datetime.fromisoformat(date_str.replace('Z', '+00:00'))
+                    except:
+                        continue
             
-            # Fallback to old method
-            date_fields = ['created_at', 'date', 'timestamp', 'processed_at']
-            for field in date_fields:
+            # PRIORITY 2: Check enriched source_ts column (from Phase 5)
+            if 'source_ts' in event and event['source_ts']:
+                try:
+                    return datetime.fromisoformat(event['source_ts'].replace('Z', '+00:00'))
+                except:
+                    pass
+            
+            # PRIORITY 3: Fallback to system timestamps (ONLY if no transaction date found)
+            system_date_fields = ['created_at', 'ingest_ts', 'processed_at']
+            for field in system_date_fields:
                 if field in event and event[field]:
-                    return datetime.fromisoformat(event[field].replace('Z', '+00:00'))
+                    try:
+                        return datetime.fromisoformat(event[field].replace('Z', '+00:00'))
+                    except:
+                        continue
             
             return None
-        except:
+        except Exception as e:
+            logger.error(f"Date extraction failed: {e}")
             return None
     
     def _extract_entities(self, payload: Dict) -> List[str]:
