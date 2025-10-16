@@ -105,7 +105,7 @@ class DocumentClassificationRequest(BaseModel):
 
 # Database and external services
 from supabase import create_client, Client
-from prometheus_client import Counter, Histogram, Gauge, generate_latest, CONTENT_TYPE_LATEST
+from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_LATEST
 
 # Celery app (Phase 4 orchestration)
 try:

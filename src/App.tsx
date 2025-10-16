@@ -6,7 +6,6 @@ import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { AuthProvider } from "@/components/AuthProvider";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import Index from "./pages/Index";
-import MainWorkspace from "./pages/MainWorkspace";
 import IntegrationTest from "./pages/IntegrationTest";
 import NotFound from "./pages/NotFound";
 import Integrations from "./pages/Integrations";
@@ -23,9 +22,7 @@ const App = () => (
           <Sonner />
           <BrowserRouter>
             <Routes>
-              <Route path="/" element={<MainWorkspace />} />
-              <Route path="/workspace" element={<MainWorkspace />} />
-              <Route path="/old-ui" element={<Index />} />
+              <Route path="/" element={<Index />} />
               <Route path="/chat" element={<Index />} />
               <Route path="/connectors" element={<Index />} />
               <Route path="/connectors/:connectionId/history" element={<SyncHistory />} />

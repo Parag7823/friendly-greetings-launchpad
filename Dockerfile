@@ -57,7 +57,6 @@ COPY ai_cache_system.py .
 COPY batch_optimizer.py .
 COPY observability_system.py .
 COPY security_system.py .
-COPY provenance_tracker.py .
 COPY nango_client.py .
 COPY arq_worker.py .
 

@@ -5,57 +5,45 @@
 
 @layer base {
   :root {
-    /* Finley AI Brand Colors - New Palette */
-    /* Core Colors */
-    --offblack: 180 61% 5%;          /* #091717 - Offblack */
-    --paper-white: 50 67% 97%;       /* #FBFAF4 - Paper White */
-    --true-turquoise: 189 63% 34%;   /* #20808D - True Turquoise */
+    /* Finley AI Dark Theme - Premium Black */
+    --background: 0 0% 0%;           /* #000000 - Solid black */
+    --foreground: 0 0% 100%;         /* #FFFFFF - Pure white text */
     
-    /* Secondary Blue Tones */
-    --inky-blue: 192 51% 15%;        /* #13343B - Inky Blue */
-    --peacock: 188 34% 27%;          /* #2E565E - Peacock */
-    --plex-blue: 186 75% 46%;        /* #1FB8CD - Plex Blue */
-    --sky: 186 51% 81%;              /* #BADEDD - Sky */
+    --card: 0 0% 4%;                 /* #0A0A0A - Slightly lighter black for cards */
+    --card-foreground: 0 0% 100%;    /* #FFFFFF - White text on cards */
     
-    /* Theme Variables */
-    --background: var(--offblack);   /* #091717 - Offblack background */
-    --foreground: var(--paper-white); /* #FBFAF4 - Paper White text */
+    --popover: 0 0% 4%;              /* #0A0A0A - Dark popover background */
+    --popover-foreground: 0 0% 100%; /* #FFFFFF - White text in popovers */
     
-    --card: var(--inky-blue);        /* #13343B - Inky Blue for cards */
-    --card-foreground: var(--paper-white); /* Paper White text on cards */
+    --primary: 0 0% 100%;            /* #FFFFFF - White for primary buttons */
+    --primary-foreground: 0 0% 0%;   /* #000000 - Black text on white buttons */
     
-    --popover: var(--inky-blue);     /* #13343B - Inky Blue popover */
-    --popover-foreground: var(--paper-white); /* Paper White text in popovers */
+    --secondary: 0 0% 8%;            /* #141414 - Dark gray for secondary */
+    --secondary-foreground: 0 0% 100%; /* #FFFFFF - White text on secondary */
     
-    --primary: var(--true-turquoise); /* #20808D - True Turquoise primary */
-    --primary-foreground: var(--paper-white); /* Paper White text on primary */
+    --muted: 0 0% 8%;                /* #141414 - Muted background */
+    --muted-foreground: 0 0% 63%;    /* #A0A0A0 - Muted text */
     
-    --secondary: var(--peacock);     /* #2E565E - Peacock secondary */
-    --secondary-foreground: var(--paper-white); /* Paper White text on secondary */
-    
-    --muted: var(--peacock);         /* #2E565E - Peacock muted */
-    --muted-foreground: var(--sky);  /* #BADEDD - Sky muted text */
-    
-    --accent: var(--plex-blue);      /* #1FB8CD - Plex Blue accent */
-    --accent-foreground: var(--offblack); /* Offblack text on accent */
+    --accent: 0 0% 8%;               /* #141414 - Accent background */
+    --accent-foreground: 0 0% 96%;   /* #F4F4F4 - Light accent text */
     
     --destructive: 0 84% 60%;        /* Red for errors */
-    --destructive-foreground: var(--paper-white); /* Paper White on destructive */
+    --destructive-foreground: 0 0% 98%; /* Light text on destructive */
     
-    --border: var(--peacock);        /* #2E565E - Peacock borders */
-    --input: var(--inky-blue);       /* #13343B - Inky Blue inputs */
-    --ring: var(--plex-blue);        /* #1FB8CD - Plex Blue focus rings */
+    --border: 0 0% 12%;              /* #1F1F1F - Subtle borders */
+    --input: 0 0% 12%;               /* #1F1F1F - Input backgrounds */
+    --ring: 0 0% 63%;                /* #A0A0A0 - Focus rings */
     
     --radius: 0.5rem;               /* 8px border radius */
     
     /* Finley AI Custom Variables */
-    --finley-accent: var(--true-turquoise); /* #20808D - Brand accent */
-    --finley-light-accent: var(--sky);      /* #BADEDD - Light accent */
-    --finley-shadow: var(--offblack);       /* #091717 - Offblack shadows */
+    --finley-accent: 0 0% 63%;       /* #A0A0A0 - Brand accent */
+    --finley-light-accent: 0 0% 96%; /* #F4F4F4 - Light accent */
+    --finley-shadow: 0 0% 0%;        /* Pure black for shadows */
     
     /* Gradients */
-    --gradient-primary: linear-gradient(135deg, hsl(var(--true-turquoise)), hsl(var(--plex-blue)));
-    --gradient-subtle: linear-gradient(180deg, hsl(var(--offblack)), hsl(var(--inky-blue)));
+    --gradient-primary: linear-gradient(135deg, hsl(var(--primary)), hsl(var(--finley-light-accent)));
+    --gradient-subtle: linear-gradient(180deg, hsl(var(--background)), hsl(var(--card)));
     
     /* Animations */
     --transition-smooth: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
