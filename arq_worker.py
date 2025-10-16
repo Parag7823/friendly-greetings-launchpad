@@ -196,61 +196,61 @@ async def process_pdf(ctx, user_id: str, filename: str, storage_path: str, job_i
         raise Retry(defer=delay)
 
 
-async def detect_relationships(ctx, user_id: str) -> Dict[str, Any]:
-    """Background task for relationship detection across all user files"""
+async def detect_relationships(ctx, user_id: str, file_id: str = None) -> Dict[str, Any]:
+    """
+    CRITICAL FIX: Background task for relationship detection using optimized database JOINs.
+    This decouples heavy analysis from the synchronous ingestion pipeline.
+    
+    Args:
+        ctx: ARQ context
+        user_id: User ID to detect relationships for
+        file_id: Optional file_id to scope detection to specific file
+    """
     try:
         from enhanced_relationship_detector import EnhancedRelationshipDetector
         from openai import AsyncOpenAI
         
-        logger.info(f"Starting background relationship detection for user {user_id}")
+        logger.info(f"🔍 Starting background relationship detection for user_id={user_id}, file_id={file_id}")
         
-        # Initialize relationship detector
+        # Get cache client if available
+        try:
+            from ai_cache_system import safe_get_ai_cache
+            cache_client = safe_get_ai_cache()
+        except:
+            cache_client = None
+        
+        # Initialize relationship detector with cache
         openai_client = AsyncOpenAI(api_key=os.getenv('OPENAI_API_KEY'))
-        relationship_detector = EnhancedRelationshipDetector(openai_client, supabase)
+        relationship_detector = EnhancedRelationshipDetector(
+            openai_client, 
+            supabase,
+            cache_client=cache_client
+        )
         
-        # Detect all relationships
-        relationship_results = await relationship_detector.detect_all_relationships(user_id)
+        # CRITICAL FIX: Use new database-driven detection (no N² loops, no hardcoded filenames)
+        relationship_results = await relationship_detector.detect_all_relationships(
+            user_id, 
+            file_id=file_id
+        )
         
-        # Store relationships atomically using the same method as main flow
-        if relationship_results.get('relationships'):
-            from transaction_manager import get_transaction_manager
-            transaction_manager = get_transaction_manager()
-            
-            async with transaction_manager.transaction(
-                user_id=user_id,
-                operation_type="background_relationship_storage"
-            ) as tx:
-                # Prepare batch data
-                relationships_batch = []
-                for relationship in relationship_results['relationships']:
-                    rel_data = {
-                        'user_id': user_id,
-                        'source_event_id': relationship.get('source_event_id'),
-                        'target_event_id': relationship.get('target_event_id'),
-                        'relationship_type': relationship.get('relationship_type', 'unknown'),
-                        'confidence_score': relationship.get('confidence_score', 0.5),
-                        'detection_method': relationship.get('detection_method', 'background_task'),
-                        'pattern_id': relationship.get('pattern_id'),
-                        'reasoning': relationship.get('reasoning', '')
-                    }
-                    relationships_batch.append(rel_data)
-                
-                # Batch insert all relationships atomically
-                if relationships_batch:
-                    result = await tx.insert_batch('relationship_instances', relationships_batch)
-                    logger.info(f"✅ Background task stored {len(result)} relationships for user {user_id}")
+        # Relationships are already stored by the detector
+        logger.info(f"✅ Background relationship detection completed: {relationship_results.get('total_relationships', 0)} relationships found")
         
         return {
             "status": "success",
             "user_id": user_id,
+            "file_id": file_id,
             "total_relationships": relationship_results.get('total_relationships', 0),
-            "relationships_stored": len(relationship_results.get('relationships', []))
+            "cross_document_relationships": relationship_results.get('cross_document_relationships', 0),
+            "within_file_relationships": relationship_results.get('within_file_relationships', 0),
+            "method": "database_joins",
+            "complexity": "O(N log N)"
         }
         
     except Exception as e:
         logger.error(f"❌ Background relationship detection failed for user {user_id}: {e}")
         # Retry with exponential backoff
-        delay = await _retry_or_dlq(ctx, 'relationship_detection', {'user_id': user_id}, e, max_retries=3, base_delay=60)
+        delay = await _retry_or_dlq(ctx, 'relationship_detection', {'user_id': user_id, 'file_id': file_id}, e, max_retries=3, base_delay=60)
         if delay is None:
             return {"status": "failed", "user_id": user_id, "error": str(e)}
         raise Retry(defer=delay)

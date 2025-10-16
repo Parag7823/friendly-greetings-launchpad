@@ -69,12 +69,8 @@ class EntityResolverOptimized:
             'processing_times': []
         }
         
-        # Entity similarity cache
-        self.similarity_cache = {}
-        
-        # Learning system
+        # Learning system - now persists to database
         self.learning_enabled = True
-        self.resolution_history = []
         
         logger.info("✅ EntityResolverOptimized initialized with production-grade features")
     
@@ -366,42 +362,74 @@ class EntityResolverOptimized:
     
     async def _find_fuzzy_match(self, entity_name: str, entity_type: str, platform: str, 
                               user_id: str, identifiers: Dict[str, str]) -> Optional[Dict[str, Any]]:
-        """Find fuzzy match using advanced similarity algorithms"""
+        """
+        CRITICAL FIX: Use PostgreSQL pg_trgm for efficient fuzzy matching.
+        This offloads similarity computation to the database and returns only top matches.
+        """
         if not self.supabase or not self.config['enable_fuzzy_matching']:
             return None
         
         try:
-            # Get all entities of this type for the user
-            result = self.supabase.table('normalized_entities').select(
-                'id, canonical_name, email, tax_id, bank_account, phone'
-            ).eq('user_id', user_id).eq('entity_type', entity_type).execute()
+            # OPTIMIZATION: Use PostgreSQL pg_trgm function for efficient similarity search
+            # This returns only top 10 matches above threshold, not all entities
+            fuzzy_result = self.supabase.rpc('find_fuzzy_entity_matches', {
+                'p_user_id': user_id,
+                'p_entity_name': entity_name,
+                'p_entity_type': entity_type,
+                'p_similarity_threshold': self.config['fuzzy_threshold'],
+                'p_max_results': self.config['max_similar_entities']
+            }).execute()
             
-            if not result.data:
+            if not fuzzy_result.data or len(fuzzy_result.data) == 0:
+                # Try phonetic matching as fallback
+                phonetic_result = self.supabase.rpc('find_phonetic_entity_matches', {
+                    'p_user_id': user_id,
+                    'p_entity_name': entity_name,
+                    'p_entity_type': entity_type,
+                    'p_max_results': 5
+                }).execute()
+                
+                if phonetic_result.data and len(phonetic_result.data) > 0:
+                    # Phonetic match found
+                    best_phonetic = phonetic_result.data[0]
+                    logger.info(f"✅ Phonetic match found: {entity_name} -> {best_phonetic['canonical_name']} ({best_phonetic['match_method']})")
+                    return {
+                        'id': best_phonetic['entity_id'],
+                        'canonical_name': best_phonetic['canonical_name'],
+                        'email': best_phonetic.get('email'),
+                        'tax_id': best_phonetic.get('tax_id'),
+                        'bank_account': best_phonetic.get('bank_account'),
+                        'phone': best_phonetic.get('phone'),
+                        'similarity': 0.75,
+                        'phonetic_match': True,
+                        'match_method': best_phonetic['match_method']
+                    }
+                
                 return None
             
-            # Calculate similarity for each entity
-            best_match = None
-            best_similarity = 0.0
+            # Get best match from pg_trgm results
+            best_match = fuzzy_result.data[0]
             
-            normalized_name = self._normalize_name(entity_name)
+            # Calculate identifier similarity for additional confidence
+            identifier_similarity = self._calculate_identifier_similarity(identifiers, best_match)
             
-            for entity in result.data:
-                # Calculate name similarity
-                entity_name_normalized = self._normalize_name(entity['canonical_name'])
-                name_similarity = await self._calculate_name_similarity(normalized_name, entity_name_normalized)
-                
-                # Calculate identifier similarity
-                identifier_similarity = self._calculate_identifier_similarity(identifiers, entity)
-                
-                # Combined similarity score
-                combined_similarity = (name_similarity * 0.7) + (identifier_similarity * 0.3)
-                
-                if combined_similarity > best_similarity and combined_similarity >= self.config['fuzzy_threshold']:
-                    best_similarity = combined_similarity
-                    best_match = entity
-                    best_match['similarity'] = combined_similarity
+            # Combine trigram similarity with identifier similarity
+            trigram_similarity = float(best_match['similarity_score'])
+            combined_similarity = (trigram_similarity * 0.7) + (identifier_similarity * 0.3)
             
-            return best_match if best_similarity >= self.config['fuzzy_threshold'] else None
+            logger.info(f"✅ Fuzzy match found: {entity_name} -> {best_match['canonical_name']} (similarity: {combined_similarity:.2f})")
+            
+            return {
+                'id': best_match['entity_id'],
+                'canonical_name': best_match['canonical_name'],
+                'email': best_match.get('email'),
+                'tax_id': best_match.get('tax_id'),
+                'bank_account': best_match.get('bank_account'),
+                'phone': best_match.get('phone'),
+                'similarity': combined_similarity,
+                'phonetic_match': False,
+                'match_type': best_match['match_type']
+            }
             
         except Exception as e:
             logger.error(f"Fuzzy match search failed: {e}")
@@ -412,34 +440,22 @@ class EntityResolverOptimized:
         if not name1 or not name2:
             return 0.0
         
-        # Check cache first (external shared cache preferred, then local)
+        # CRITICAL FIX: Use only AIClassificationCache (no local cache)
         # Use symmetric key to avoid order-dependence
         _n1, _n2 = sorted([name1, name2])
-        cache_key = f"{_n1}|{_n2}"
-        # External cache path
+        
+        # Check centralized cache
         if self.cache:
             try:
-                # Prefer AIClassificationCache interface when available
-                if hasattr(self.cache, 'get_cached_classification'):
-                    cached_obj = await self.cache.get_cached_classification(
-                        {'name1': _n1, 'name2': _n2},
-                        classification_type='entity_similarity'
-                    )
-                    if isinstance(cached_obj, dict) and 'similarity' in cached_obj:
-                        return float(cached_obj['similarity'])
-                # Fallback to simple get(key)
-                get_fn = getattr(self.cache, 'get', None)
-                if get_fn:
-                    ext_val = await get_fn(f"entity_similarity:{cache_key}")
-                    if isinstance(ext_val, (int, float)):
-                        return float(ext_val)
-                    if isinstance(ext_val, dict) and 'similarity' in ext_val:
-                        return float(ext_val['similarity'])
+                cached_obj = await self.cache.get_cached_classification(
+                    {'name1': _n1, 'name2': _n2},
+                    classification_type='entity_similarity'
+                )
+                if isinstance(cached_obj, dict) and 'similarity' in cached_obj:
+                    logger.debug(f"✅ Similarity cache hit: {name1} <-> {name2}")
+                    return float(cached_obj['similarity'])
             except Exception as e:
-                logger.warning(f"Similarity external cache retrieval failed: {e}")
-        # Local in-process cache
-        if cache_key in self.similarity_cache:
-            return self.similarity_cache[cache_key]
+                logger.warning(f"Similarity cache retrieval failed: {e}")
         
         # Exact match
         if name1 == name2:
@@ -465,33 +481,22 @@ class EntityResolverOptimized:
             # Weighted combination
             similarity = (sequence_similarity * 0.4) + (jaccard_similarity * 0.4) + (char_similarity * 0.2)
         
-        # Cache the result (external first, then local)
+        # CRITICAL FIX: Store only in centralized AIClassificationCache
         if self.cache:
             try:
-                if hasattr(self.cache, 'store_classification'):
-                    ttl_seconds = self.config.get('cache_ttl', 3600)
-                    ttl_hours = max(1, int(ttl_seconds / 3600))
-                    await self.cache.store_classification(
-                        {'name1': _n1, 'name2': _n2},
-                        {'similarity': float(similarity)},
-                        classification_type='entity_similarity',
-                        ttl_hours=ttl_hours,
-                        confidence_score=float(similarity),
-                        model_version='v1'
-                    )
-                else:
-                    set_fn = getattr(self.cache, 'set', None)
-                    if set_fn:
-                        await set_fn(f"entity_similarity:{cache_key}", float(similarity), self.config.get('cache_ttl', 3600))
+                ttl_seconds = self.config.get('cache_ttl', 3600)
+                ttl_hours = max(1, int(ttl_seconds / 3600))
+                await self.cache.store_classification(
+                    {'name1': _n1, 'name2': _n2},
+                    {'similarity': float(similarity)},
+                    classification_type='entity_similarity',
+                    ttl_hours=ttl_hours,
+                    confidence_score=float(similarity),
+                    model_version='v1'
+                )
+                logger.debug(f"✅ Similarity cached: {name1} <-> {name2} = {similarity:.2f}")
             except Exception as e:
-                logger.warning(f"Similarity external cache store failed: {e}")
-        # Always keep a fast local cache too
-        self.similarity_cache[cache_key] = similarity
-        if len(self.similarity_cache) > 10000:  # Limit cache size
-            # Remove oldest entries
-            oldest_keys = list(self.similarity_cache.keys())[:1000]
-            for key in oldest_keys:
-                del self.similarity_cache[key]
+                logger.warning(f"Similarity cache store failed: {e}")
         
         return similarity
     
@@ -707,26 +712,58 @@ class EntityResolverOptimized:
             self.metrics['processing_times'] = self.metrics['processing_times'][-1000:]
     
     async def _update_learning_system(self, result: Dict[str, Any], entity_name: str, entity_type: str, platform: str):
-        """Update learning system with resolution results"""
-        if not self.config['enable_learning']:
+        """
+        CRITICAL FIX: Persist resolution results to resolution_log table for learning.
+        This enables cross-session learning and user feedback integration.
+        """
+        if not self.config['enable_learning'] or not self.supabase:
             return
         
-        learning_entry = {
-            'resolution_id': result['resolution_id'],
-            'entity_name': entity_name,
-            'entity_type': entity_type,
-            'platform': platform,
-            'confidence': result['confidence'],
-            'method': result['method'],
-            'identifiers': result['identifiers'],
-            'timestamp': datetime.utcnow().isoformat()
-        }
-        
-        self.resolution_history.append(learning_entry)
-        
-        # Keep only recent history
-        if len(self.resolution_history) > self.config['learning_window']:
-            self.resolution_history = self.resolution_history[-self.config['learning_window']:]
+        try:
+            # Extract metadata from result
+            metadata = result.get('metadata', {})
+            user_id = metadata.get('user_id')
+            source_file = metadata.get('source_file', '')
+            row_id = metadata.get('row_id', '')
+            
+            if not user_id:
+                logger.warning("Cannot persist learning: user_id not found in result metadata")
+                return
+            
+            # Prepare resolution log entry
+            resolution_log_entry = {
+                'user_id': user_id,
+                'resolution_id': result['resolution_id'],
+                'entity_name': entity_name,
+                'entity_type': entity_type,
+                'platform': platform,
+                'resolved_entity_id': result.get('entity_id'),
+                'resolved_name': result.get('resolved_name', entity_name),
+                'resolution_method': result['method'],
+                'confidence': float(result['confidence']),
+                'name_similarity': float(result.get('similarity', result['confidence'])),
+                'identifier_similarity': 0.0,  # Will be calculated if identifiers match
+                'phonetic_match': result.get('phonetic_match', False),
+                'source_file': source_file,
+                'row_id': row_id,
+                'identifiers': result.get('identifiers', {}),
+                'processing_time_ms': int(result.get('processing_time', 0) * 1000),
+                'cache_hit': False,  # This was not a cache hit since we're logging it
+                'resolved_at': datetime.utcnow().isoformat(),
+                'metadata': {
+                    'match_type': result.get('match_type'),
+                    'match_method': result.get('match_method'),
+                    'resolution_details': metadata
+                }
+            }
+            
+            # Insert into resolution_log table
+            self.supabase.table('resolution_log').insert(resolution_log_entry).execute()
+            logger.debug(f"✅ Resolution logged to database: {entity_name} -> {result.get('resolved_name')}")
+            
+        except Exception as e:
+            # Don't fail resolution if logging fails
+            logger.warning(f"Failed to persist resolution to database: {e}")
     
     async def _log_resolution_audit(self, resolution_id: str, result: Dict[str, Any], user_id: str):
         """Log resolution audit information"""
@@ -757,11 +794,6 @@ class EntityResolverOptimized:
             'fuzzy_match_rate': self.metrics['fuzzy_matches'] / self.metrics['resolutions_performed'] if self.metrics['resolutions_performed'] > 0 else 0.0,
             'new_entity_rate': self.metrics['new_entities_created'] / self.metrics['resolutions_performed'] if self.metrics['resolutions_performed'] > 0 else 0.0,
             'learning_enabled': self.config['enable_learning'],
-            'recent_resolutions': len(self.resolution_history),
-            'similarity_cache_size': len(self.similarity_cache)
+            'caching_strategy': 'centralized_ai_cache',
+            'note': 'Using AIClassificationCache for persistent, shared caching'
         }
-    
-    def clear_similarity_cache(self):
-        """Clear the similarity cache"""
-        self.similarity_cache.clear()
-        logger.info("Similarity cache cleared")

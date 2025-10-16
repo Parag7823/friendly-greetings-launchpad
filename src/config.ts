@@ -1,5 +1,18 @@
 // Environment-based configuration for API endpoints
 export const config = {
+  supabase: {
+    url: import.meta.env.VITE_SUPABASE_URL || '',
+    anonKey: import.meta.env.VITE_SUPABASE_ANON_KEY || '',
+  },
+  api: {
+    baseUrl: import.meta.env.VITE_API_URL || 'http://localhost:8000',
+  },
+  websocket: {
+    // CRITICAL FIX: Configurable polling interval for different environments
+    pollingInterval: parseInt(import.meta.env.VITE_POLLING_INTERVAL || '1500', 10), // milliseconds
+    reconnectAttempts: parseInt(import.meta.env.VITE_WS_RECONNECT_ATTEMPTS || '5', 10),
+    reconnectBaseDelay: parseInt(import.meta.env.VITE_WS_RECONNECT_BASE_DELAY || '1000', 10), // milliseconds
+  },
   // API base URL - defaults to production, can be overridden with VITE_API_URL
   apiUrl: import.meta.env.VITE_API_URL || 'https://friendly-greetings-launchpad-amey.onrender.com',
   

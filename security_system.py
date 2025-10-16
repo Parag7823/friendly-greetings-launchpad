@@ -561,6 +561,63 @@ class SecurityValidator:
         endpoint = request_data.get('endpoint', '')
         return endpoint not in public_endpoints
     
+    def validate_file_metadata(self, filename: str, file_size: int = 0, 
+                              content_type: str = None) -> Tuple[bool, List[str]]:
+        """
+        Validate file metadata before processing.
+        
+        Args:
+            filename: Name of the file
+            file_size: Size of the file in bytes
+            content_type: MIME type of the file
+            
+        Returns:
+            Tuple of (is_valid, list_of_violations)
+        """
+        violations = []
+        
+        # Check file size (500MB limit)
+        MAX_FILE_SIZE = 500 * 1024 * 1024  # 500MB
+        if file_size > MAX_FILE_SIZE:
+            violations.append(f"File too large: {file_size / 1024 / 1024:.2f}MB (max: 500MB)")
+        
+        # Check file extension
+        allowed_extensions = ['.xlsx', '.xls', '.csv', '.pdf', '.png', '.jpg', '.jpeg', 
+                            '.gif', '.bmp', '.webp', '.svg', '.ods', '.zip', '.7z', '.rar']
+        filename_lower = filename.lower()
+        if not any(filename_lower.endswith(ext) for ext in allowed_extensions):
+            violations.append(f"Invalid file type. Allowed extensions: {', '.join(allowed_extensions)}")
+        
+        # Check content type if provided
+        if content_type:
+            allowed_mimes = [
+                'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',  # .xlsx
+                'application/vnd.ms-excel',  # .xls
+                'application/zip',  # .xlsx (also detected as zip)
+                'text/csv',  # .csv
+                'text/plain',  # .csv (sometimes detected as plain text)
+                'application/pdf',  # .pdf
+                'image/png',  # .png
+                'image/jpeg',  # .jpg, .jpeg
+                'image/gif',  # .gif
+                'image/bmp',  # .bmp
+                'image/webp',  # .webp
+                'image/svg+xml',  # .svg
+                'application/vnd.oasis.opendocument.spreadsheet',  # .ods
+                'application/x-7z-compressed',  # .7z
+                'application/x-rar-compressed',  # .rar
+                'application/octet-stream'  # Generic binary (fallback)
+            ]
+            if content_type not in allowed_mimes:
+                violations.append(f"Invalid content type: {content_type}")
+        
+        # Sanitize filename to prevent path traversal
+        sanitized_filename = self.input_sanitizer.sanitize_string(filename)
+        if '..' in filename or '/' in filename or '\\' in filename:
+            violations.append("Filename contains invalid path characters")
+        
+        return len(violations) == 0, violations
+    
     def get_security_statistics(self) -> Dict[str, Any]:
         """Get security statistics"""
         violation_counts = {}

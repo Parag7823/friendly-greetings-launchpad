@@ -314,6 +314,9 @@ from observability_system import StructuredLogger, MetricsCollector, Observabili
 # Import security system for input validation and protection
 from security_system import SecurityValidator, InputSanitizer, SecurityContext
 
+# Import provenance tracking for complete data lineage
+from provenance_tracker import provenance_tracker, calculate_row_hash, create_lineage_path, append_lineage_step
+
 # Import production duplicate detection service
 # Configure advanced logging first
 logging.basicConfig(
@@ -702,10 +705,17 @@ app = FastAPI(
     openapi_url="/openapi.json"
 )
 
-# Enhanced CORS middleware with security considerations
+# Enhanced# CRITICAL FIX: CORS middleware with environment-based configuration
+# Prevents CSRF attacks in production by restricting origins
+ALLOWED_ORIGINS = os.getenv('CORS_ALLOWED_ORIGINS', '*').split(',')
+if ALLOWED_ORIGINS == ['*']:
+    logger.warning("⚠️  CORS is configured with wildcard '*' - this should only be used in development!")
+else:
+    logger.info(f"✅ CORS configured with specific origins: {ALLOWED_ORIGINS}")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=ALLOWED_ORIGINS,  # Configured via CORS_ALLOWED_ORIGINS env var
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -1564,7 +1574,17 @@ async def _zohomail_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> D
         raise HTTPException(status_code=500, detail='Zoho Mail sync failed')
 
 async def _quickbooks_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> Dict[str, Any]:
-    """QuickBooks ingestion: fetch Invoices, Bills, and Payments via QBO Query API and persist as external_items."""
+    """
+    QuickBooks ingestion: fetch Invoices, Bills, and Payments via QBO Query API.
+    
+    ✅ UNIFIED PIPELINE: This function now uses the main ExcelProcessor pipeline to ensure:
+    - Multi-phased duplicate detection
+    - Advanced data enrichment
+    - Standardized entity resolution
+    - Consistent data semantics across all data sources
+    
+    Data flow: API → CSV format → ExcelProcessor → raw_events (with full enrichment)
+    """
     provider_key = NANGO_QUICKBOOKS_INTEGRATION_ID
     connection_id = req.connection_id
     user_id = req.user_id
@@ -1684,6 +1704,18 @@ async def _quickbooks_sync_run(nango: NangoClient, req: ConnectorSyncRequest) ->
                             'total_amount': meta.get('TotalAmt'),
                             'name': meta.get('Name')
                         }
+                        
+                        # ✅ PROVENANCE: Generate provenance for QuickBooks data
+                        source_filename = f"quickbooks:{it.get('provider_id')}"
+                        row_hash = calculate_row_hash(source_filename, row_idx, payload)
+                        lineage_path = create_lineage_path(initial_step="api_sync")
+                        lineage_path = append_lineage_step(
+                            lineage_path,
+                            step="api_fetch",
+                            operation="quickbooks_api",
+                            metadata={'provider_id': it.get('provider_id'), 'txn_type': txn_type}
+                        )
+                        
                         event = {
                             'user_id': user_id,
                             'file_id': None,
@@ -1694,7 +1726,7 @@ async def _quickbooks_sync_run(nango: NangoClient, req: ConnectorSyncRequest) ->
                             'payload': payload,
                             'row_index': row_idx,
                             'sheet_name': None,
-                            'source_filename': f"quickbooks:{it.get('provider_id')}",
+                            'source_filename': source_filename,
                             'uploader': user_id,
                             'ingest_ts': (it.get('source_ts') or datetime.utcnow().isoformat()),
                             'status': 'processed',
@@ -1705,7 +1737,11 @@ async def _quickbooks_sync_run(nango: NangoClient, req: ConnectorSyncRequest) ->
                                 'provider_id': it.get('provider_id')
                             },
                             'entities': {},
-                            'relationships': {}
+                            'relationships': {},
+                            # ✅ PROVENANCE FIELDS
+                            'row_hash': row_hash,
+                            'lineage_path': lineage_path,
+                            'created_by': 'system:quickbooks_sync'
                         }
                         out.append(event)
                         row_idx += 1
@@ -1908,16 +1944,85 @@ async def _quickbooks_sync_run(nango: NangoClient, req: ConnectorSyncRequest) ->
             except Exception as batch_err:
                 logger.error(f"QuickBooks payment batch transaction failed: {batch_err}")
         
-        # Normalize accounting items into raw_events
+        # UNIFIED PIPELINE: Process all fetched data through main ExcelProcessor
         try:
             _t0 = time.time()
-            norm = await _normalize_new_items_qbo()
-            stats['normalized_events'] = norm.get('normalized_events', 0)
-            NORMALIZATION_EVENTS.labels(provider='quickbooks').inc(stats['normalized_events'])
-            NORMALIZATION_DURATION.labels(provider='quickbooks').observe(max(0.0, time.time() - _t0))
-            structured_logger.info("Normalization complete", {"provider": "quickbooks", "normalized_events": stats['normalized_events']})
+            
+            # Collect all QuickBooks data for unified processing
+            all_qbo_data = []
+            
+            # Fetch all external_items for this sync
+            ext_items_res = supabase.table('external_items').select(
+                'id, provider_id, kind, metadata, source_ts'
+            ).eq('user_connection_id', user_connection_id).eq('status', 'fetched').limit(1000).execute()
+            
+            items = ext_items_res.data or []
+            
+            # Filter by correlation_id if present
+            if req.correlation_id:
+                items = [it for it in items 
+                        if (it.get('metadata') or {}).get('correlation_id') == req.correlation_id]
+            
+            if items:
+                # Convert external_items to standardized format for CSV
+                for it in items:
+                    meta = it.get('metadata') or {}
+                    if isinstance(meta, str):
+                        try:
+                            meta = json.loads(meta)
+                        except Exception:
+                            meta = {}
+                    
+                    # Create standardized record
+                    record = {
+                        'transaction_id': it.get('provider_id'),
+                        'transaction_type': meta.get('TxnType', 'Transaction'),
+                        'document_number': meta.get('DocNumber', ''),
+                        'transaction_date': meta.get('TxnDate', ''),
+                        'total_amount': meta.get('TotalAmt', 0),
+                        'entity_name': meta.get('Name', ''),
+                        'source': 'QuickBooks',
+                        'source_timestamp': it.get('source_ts', datetime.utcnow().isoformat())
+                    }
+                    all_qbo_data.append(record)
+                
+                # Process through unified pipeline
+                logger.info(f"🔄 Processing {len(all_qbo_data)} QuickBooks records through unified pipeline...")
+                pipeline_result = await _process_api_data_through_pipeline(
+                    user_id=user_id,
+                    data=all_qbo_data,
+                    source_platform='QuickBooks',
+                    sync_run_id=sync_run_id,
+                    user_connection_id=user_connection_id
+                )
+                
+                stats['normalized_events'] = pipeline_result.get('processed_rows', 0)
+                stats['pipeline_job_id'] = pipeline_result.get('job_id')
+                
+                # Mark external_items as processed
+                for it in items:
+                    try:
+                        supabase.table('external_items').update({
+                            'status': 'processed',
+                            'metadata': {**(it.get('metadata') or {}), 'processed_at': datetime.utcnow().isoformat()}
+                        }).eq('id', it['id']).execute()
+                    except Exception:
+                        pass
+                
+                NORMALIZATION_EVENTS.labels(provider='quickbooks').inc(stats['normalized_events'])
+                NORMALIZATION_DURATION.labels(provider='quickbooks').observe(max(0.0, time.time() - _t0))
+                structured_logger.info("Unified pipeline processing complete", {
+                    "provider": "quickbooks",
+                    "processed_rows": stats['normalized_events'],
+                    "job_id": stats.get('pipeline_job_id')
+                })
+            else:
+                logger.info("No QuickBooks items to process")
+                stats['normalized_events'] = 0
+                
         except Exception as e:
-            logger.warning(f"QuickBooks normalization skipped due to error: {e}")
+            logger.error(f"QuickBooks unified pipeline processing failed: {e}")
+            stats['normalized_events'] = 0
 
         # Complete QuickBooks sync in transaction
         try:
@@ -1971,9 +2076,17 @@ async def _quickbooks_sync_run(nango: NangoClient, req: ConnectorSyncRequest) ->
         raise HTTPException(status_code=500, detail='QuickBooks sync failed')
 
 async def _xero_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> Dict[str, Any]:
-    """Xero ingestion: fetch Invoices, Contacts, Payments and persist as external_items.
-
+    """
+    Xero ingestion: fetch Invoices, Contacts, Payments and persist as external_items.
     Requires tenantId header; we discover via `connections` when missing and persist to metadata.
+    
+    ✅ UNIFIED PIPELINE: This function now uses the main ExcelProcessor pipeline to ensure:
+    - Multi-phased duplicate detection
+    - Advanced data enrichment
+    - Standardized entity resolution
+    - Consistent data semantics across all data sources
+    
+    Data flow: API → CSV format → ExcelProcessor → raw_events (with full enrichment)
     """
     provider_key = NANGO_XERO_INTEGRATION_ID
     connection_id = req.connection_id
@@ -2121,6 +2234,18 @@ async def _xero_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> Dict[
                             'name': meta.get('Name'),
                             'email': meta.get('EmailAddress')
                         }
+                        
+                        # ✅ PROVENANCE: Generate provenance for Xero data
+                        source_filename = f"xero:{it.get('provider_id')}"
+                        row_hash = calculate_row_hash(source_filename, row_idx, payload)
+                        lineage_path = create_lineage_path(initial_step="api_sync")
+                        lineage_path = append_lineage_step(
+                            lineage_path,
+                            step="api_fetch",
+                            operation="xero_api",
+                            metadata={'provider_id': it.get('provider_id'), 'txn_type': txn_type}
+                        )
+                        
                         event = {
                             'user_id': user_id,
                             'file_id': None,
@@ -2131,7 +2256,7 @@ async def _xero_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> Dict[
                             'payload': payload,
                             'row_index': row_idx,
                             'sheet_name': None,
-                            'source_filename': f"xero:{it.get('provider_id')}",
+                            'source_filename': source_filename,
                             'uploader': user_id,
                             'ingest_ts': (it.get('source_ts') or datetime.utcnow().isoformat()),
                             'status': 'processed',
@@ -2141,6 +2266,10 @@ async def _xero_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> Dict[
                                 'subcategory': kind,
                                 'provider_id': it.get('provider_id')
                             },
+                            # ✅ PROVENANCE FIELDS
+                            'row_hash': row_hash,
+                            'lineage_path': lineage_path,
+                            'created_by': 'system:xero_sync',
                             'entities': {},
                             'relationships': {}
                         }
@@ -2366,16 +2495,86 @@ async def _xero_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> Dict[
                 break
             page_p += 1
 
-        # Normalize accounting items into raw_events
+        # UNIFIED PIPELINE: Process all fetched data through main ExcelProcessor
         try:
             _t0x = time.time()
-            norm = await _normalize_new_items_xero()
-            stats['normalized_events'] = norm.get('normalized_events', 0)
-            NORMALIZATION_EVENTS.labels(provider='xero').inc(stats['normalized_events'])
-            NORMALIZATION_DURATION.labels(provider='xero').observe(max(0.0, time.time() - _t0x))
-            structured_logger.info("Normalization complete", {"provider": "xero", "normalized_events": stats['normalized_events']})
+            
+            # Collect all Xero data for unified processing
+            all_xero_data = []
+            
+            # Fetch all external_items for this sync
+            ext_items_res = supabase.table('external_items').select(
+                'id, provider_id, kind, metadata, source_ts'
+            ).eq('user_connection_id', user_connection_id).eq('status', 'fetched').limit(1000).execute()
+            
+            items = ext_items_res.data or []
+            
+            # Filter by correlation_id if present
+            if req.correlation_id:
+                items = [it for it in items 
+                        if (it.get('metadata') or {}).get('correlation_id') == req.correlation_id]
+            
+            if items:
+                # Convert external_items to standardized format for CSV
+                for it in items:
+                    meta = it.get('metadata') or {}
+                    if isinstance(meta, str):
+                        try:
+                            meta = json.loads(meta)
+                        except Exception:
+                            meta = {}
+                    
+                    # Create standardized record
+                    record = {
+                        'transaction_id': it.get('provider_id'),
+                        'transaction_type': meta.get('TxnType') or meta.get('type', 'Transaction'),
+                        'document_number': meta.get('InvoiceNumber') or meta.get('DocNumber', ''),
+                        'transaction_date': meta.get('Date') or meta.get('UpdatedDateUTC', ''),
+                        'total_amount': meta.get('Total') or meta.get('Amount', 0),
+                        'entity_name': meta.get('Name', ''),
+                        'email': meta.get('EmailAddress', ''),
+                        'source': 'Xero',
+                        'source_timestamp': it.get('source_ts', datetime.utcnow().isoformat())
+                    }
+                    all_xero_data.append(record)
+                
+                # Process through unified pipeline
+                logger.info(f"🔄 Processing {len(all_xero_data)} Xero records through unified pipeline...")
+                pipeline_result = await _process_api_data_through_pipeline(
+                    user_id=user_id,
+                    data=all_xero_data,
+                    source_platform='Xero',
+                    sync_run_id=sync_run_id,
+                    user_connection_id=user_connection_id
+                )
+                
+                stats['normalized_events'] = pipeline_result.get('processed_rows', 0)
+                stats['pipeline_job_id'] = pipeline_result.get('job_id')
+                
+                # Mark external_items as processed
+                for it in items:
+                    try:
+                        supabase.table('external_items').update({
+                            'status': 'processed',
+                            'metadata': {**(it.get('metadata') or {}), 'processed_at': datetime.utcnow().isoformat()}
+                        }).eq('id', it['id']).execute()
+                    except Exception:
+                        pass
+                
+                NORMALIZATION_EVENTS.labels(provider='xero').inc(stats['normalized_events'])
+                NORMALIZATION_DURATION.labels(provider='xero').observe(max(0.0, time.time() - _t0x))
+                structured_logger.info("Unified pipeline processing complete", {
+                    "provider": "xero",
+                    "processed_rows": stats['normalized_events'],
+                    "job_id": stats.get('pipeline_job_id')
+                })
+            else:
+                logger.info("No Xero items to process")
+                stats['normalized_events'] = 0
+                
         except Exception as e:
-            logger.warning(f"Xero normalization skipped due to error: {e}")
+            logger.error(f"Xero unified pipeline processing failed: {e}")
+            stats['normalized_events'] = 0
 
         # Complete Xero sync in transaction
         try:
@@ -2882,31 +3081,26 @@ async def _xero_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> Dict[
             raise Exception("Fallback processing failed")
             
         except Exception as e:
-            logger.error(f"Fallback processing also failed: {e}")
+            logger.error(f"Fallback processing failed: {e}")
             raise
-
 
 class VendorStandardizer:
     """Handles vendor name standardization and cleaning"""
     
-    def __init__(self, openai_client):
+    def __init__(self, openai_client, cache_client=None):
         self.openai = openai_client
-        # Implement proper cache with size limits and TTL
-        self.vendor_cache = {}
-        self.cache_max_size = 1000  # Maximum number of cached items
-        self.cache_ttl = 3600  # 1 hour TTL
-        self.cache_access_times = {}  # Track access times for LRU
-        self.cache_creation_times = {}  # Track creation times for TTL
+        # Use centralized AIClassificationCache for persistent, shared caching
+        self.cache = cache_client or safe_get_ai_cache()
         self.common_suffixes = [
             ' inc', ' corp', ' llc', ' ltd', ' co', ' company', ' pvt', ' private',
             ' limited', ' corporation', ' incorporated', ' enterprises', ' solutions',
             ' services', ' systems', ' technologies', ' tech', ' group', ' holdings',
             'inc', 'corp', 'llc', 'ltd', 'co', 'company', 'pvt', 'private',
-            'limited', 'corporation', 'incorporated', 'enterprises', 'solutions',
-            'services', 'systems', 'technologies', 'tech', 'group', 'holdings',
+            ' limited', ' corporation', ' incorporated', ' enterprises', ' solutions',
+            ' services', ' systems', ' technologies', ' tech', ' group', ' holdings',
             'inc.', 'corp.', 'llc.', 'ltd.', 'co.', 'company.', 'pvt.', 'private.',
-            'limited.', 'corporation.', 'incorporated.', 'enterprises.', 'solutions.',
-            'services.', 'systems.', 'technologies.', 'tech.', 'group.', 'holdings.'
+            ' limited.', ' corporation.', ' incorporated.', ' enterprises.', ' solutions.',
+            ' services.', ' systems.', ' technologies.', ' tech.', ' group.', ' holdings.'
         ]
     
     async def standardize_vendor(self, vendor_name: str, platform: str = None) -> Dict[str, Any]:
@@ -2921,11 +3115,23 @@ class VendorStandardizer:
                     "cleaning_method": "empty"
                 }
             
-            # Check cache first with proper cache management
-            cache_key = f"{vendor_name}_{platform}"
-            cached_result = self._get_from_cache(cache_key)
-            if cached_result:
-                return cached_result
+            # Check centralized cache first (persistent, shared across workers)
+            cache_content = {
+                'vendor_name': vendor_name,
+                'platform': platform or 'unknown'
+            }
+            
+            if self.cache:
+                try:
+                    cached_result = await self.cache.get_cached_classification(
+                        cache_content,
+                        classification_type='vendor_standardization'
+                    )
+                    if cached_result:
+                        logger.debug(f"✅ Vendor cache hit: {vendor_name}")
+                        return cached_result
+                except Exception as e:
+                    logger.warning(f"Cache retrieval failed: {e}")
             
             # Rule-based cleaning first
             cleaned_name = self._rule_based_cleaning(vendor_name)
@@ -2938,12 +3144,38 @@ class VendorStandardizer:
                     "confidence": 0.8,
                     "cleaning_method": "rule_based"
                 }
-                self._set_in_cache(cache_key, result)
+                # Store in centralized cache
+                if self.cache:
+                    try:
+                        await self.cache.store_classification(
+                            cache_content,
+                            result,
+                            classification_type='vendor_standardization',
+                            ttl_hours=48,
+                            confidence_score=0.8,
+                            model_version='rule_based'
+                        )
+                    except Exception as e:
+                        logger.warning(f"Cache storage failed: {e}")
                 return result
             
             # Use AI for complex cases
             ai_result = await self._ai_standardization(vendor_name, platform)
-            self._set_in_cache(cache_key, ai_result)
+            
+            # Store AI result in centralized cache
+            if self.cache:
+                try:
+                    await self.cache.store_classification(
+                        cache_content,
+                        ai_result,
+                        classification_type='vendor_standardization',
+                        ttl_hours=48,
+                        confidence_score=ai_result.get('confidence', 0.7),
+                        model_version='gpt-4o-mini'
+                    )
+                except Exception as e:
+                    logger.warning(f"Cache storage failed: {e}")
+            
             return ai_result
             
         except Exception as e:
@@ -2955,412 +3187,28 @@ class VendorStandardizer:
                 "cleaning_method": "fallback"
             }
     
-    def _rule_based_cleaning(self, vendor_name: str) -> str:
-        """Rule-based vendor name cleaning"""
-        try:
-            if not vendor_name or not isinstance(vendor_name, str):
-                return vendor_name or ""
-            
-            # Convert to lowercase and clean
-            cleaned = vendor_name.lower().strip()
-            
-            # Remove common suffixes (with word boundary check)
-            for suffix in self.common_suffixes:
-                # Check if suffix exists at the end
-                if cleaned.endswith(suffix):
-                    # Ensure it's a word boundary (not part of another word)
-                    if len(cleaned) > len(suffix):
-                        char_before = cleaned[-(len(suffix) + 1)]
-                        # Allow removal if preceded by space, punctuation, or if it's the whole string
-                        if char_before.isspace() or char_before in '.,;:':
-                            cleaned = cleaned[:-len(suffix)]
-                    else:
-                        # If suffix is the whole string, don't remove it
-                        if len(cleaned) > len(suffix):
-                            cleaned = cleaned[:-len(suffix)]
-            
-            # Remove extra whitespace and punctuation
-            cleaned = ' '.join(cleaned.split())
-            cleaned = cleaned.strip('.,;:')
-            
-            # Remove trailing punctuation from individual words
-            words = cleaned.split()
-            cleaned_words = []
-            for word in words:
-                # Remove trailing punctuation but keep internal punctuation (like .com)
-                if word.endswith(('.', ',', ';', ':')):
-                    word = word[:-1]
-                cleaned_words.append(word)
-            cleaned = ' '.join(cleaned_words)
-            
-            # Handle proper casing for known companies
-            cleaned = self._apply_proper_casing(cleaned)
-            
-            # Handle comprehensive abbreviations (expanded from 7 to 50+ entries)
-            abbreviations = {
-                # Major tech companies
-                'Ggl': 'Google', 'Goog': 'Google',
-                'Msoft': 'Microsoft', 'Msft': 'Microsoft',
-                'Amzn': 'Amazon', 'Amz': 'Amazon',
-                'Aapl': 'Apple',
-                'Nflx': 'Netflix',
-                'Tsla': 'Tesla',
-                'Meta': 'Meta', 'Fb': 'Meta',
-                'Nvda': 'NVIDIA', 'Nvidia': 'NVIDIA',
-                'Intel': 'Intel', 'Intc': 'Intel',
-                'IBM': 'IBM', 'Ibm': 'IBM',
-                'Oracle': 'Oracle', 'Orcl': 'Oracle',
-                'Salesforce': 'Salesforce', 'Crm': 'Salesforce',
-                'Adobe': 'Adobe', 'Adbe': 'Adobe',
-                'PayPal': 'PayPal', 'Pypl': 'PayPal',
-                'Zoom': 'Zoom', 'Zm': 'Zoom',
-                'Slack': 'Slack',
-                'Dropbox': 'Dropbox', 'Dbx': 'Dropbox',
-                'Twitter': 'Twitter', 'Twtr': 'Twitter', 'X': 'Twitter',
-                'Uber': 'Uber',
-                'Lyft': 'Lyft',
-                'Airbnb': 'Airbnb', 'Abnb': 'Airbnb',
-                'Spotify': 'Spotify', 'Spot': 'Spotify',
-                'Snapchat': 'Snapchat', 'Snap': 'Snapchat',
-                'Pinterest': 'Pinterest', 'Pins': 'Pinterest',
-                'Square': 'Square', 'Sq': 'Square', 'Block': 'Square',
-                'Stripe': 'Stripe',
-                'Shopify': 'Shopify', 'Shop': 'Shopify',
-                'Palantir': 'Palantir', 'Pltr': 'Palantir',
-                'Snowflake': 'Snowflake', 'Snow': 'Snowflake',
-                'CrowdStrike': 'CrowdStrike', 'Crwd': 'CrowdStrike',
-                'Okta': 'Okta',
-                'Zendesk': 'Zendesk',
-                'Atlassian': 'Atlassian', 'Team': 'Atlassian',
-                'ServiceNow': 'ServiceNow', 'Now': 'ServiceNow',
-                'Workday': 'Workday', 'Wday': 'Workday',
-                'VMware': 'VMware', 'Vmw': 'VMware',
-                'Red Hat': 'Red Hat', 'Rht': 'Red Hat',
-                'Splunk': 'Splunk', 'Splk': 'Splunk',
-                'MongoDB': 'MongoDB', 'Mdb': 'MongoDB',
-                'Elastic': 'Elastic', 'Estc': 'Elastic',
-                'Datadog': 'Datadog', 'Ddog': 'Datadog',
-                'New Relic': 'New Relic', 'Newr': 'New Relic',
-                'GitHub': 'GitHub',
-                'GitLab': 'GitLab', 'Gltb': 'GitLab',
-                'HashiCorp': 'HashiCorp', 'Hcp': 'HashiCorp',
-                'Confluent': 'Confluent', 'Cflt': 'Confluent',
-                'Cloudflare': 'Cloudflare', 'Net': 'Cloudflare',
-                'Fastly': 'Fastly', 'Fsly': 'Fastly',
-                'Akamai': 'Akamai', 'Akam': 'Akamai'
-            }
-            
-            if cleaned in abbreviations:
-                cleaned = abbreviations[cleaned]
-            
-            return cleaned
-            
-        except Exception as e:
-            logger.error(f"Rule-based cleaning failed: {e}")
-            return vendor_name
-    
-    async def _ai_standardization(self, vendor_name: str, platform: str = None) -> Dict[str, Any]:
-        """AI-powered vendor name standardization"""
-        try:
-            # Sanitize inputs to prevent prompt injection
-            sanitized_vendor = self._sanitize_for_prompt(vendor_name)
-            sanitized_platform = self._sanitize_for_prompt(platform or 'unknown')
-            
-            prompt = f"""
-            Standardize this vendor name to a clean, canonical form.
-            
-            VENDOR NAME: {sanitized_vendor}
-            PLATFORM: {sanitized_platform}
-            
-            Rules:
-            1. Remove legal suffixes (Inc, Corp, LLC, Ltd, etc.)
-            2. Standardize common company names
-            3. Handle abbreviations and variations
-            4. Return a clean, professional name
-            
-            Examples:
-            - "Google LLC" → "Google"
-            - "Microsoft Corporation" → "Microsoft"
-            - "AMAZON.COM INC" → "Amazon"
-            - "Apple Inc." → "Apple"
-            - "Netflix, Inc." → "Netflix"
-            
-            Return ONLY a valid JSON object:
-            {{
-                "standard_name": "cleaned_vendor_name",
-                "confidence": 0.95,
-                "reasoning": "brief_explanation"
-            }}
-            """
-            
-            # AI call with rate limiting and retry logic
-            response = await self._make_ai_call_with_retry(prompt)
-            
-            result = response.choices[0].message.content.strip()
-            
-            # Clean and parse JSON
-            cleaned_result = result.strip()
-            if cleaned_result.startswith('```json'):
-                cleaned_result = cleaned_result[7:]
-            if cleaned_result.endswith('```'):
-                cleaned_result = cleaned_result[:-3]
-            
-            parsed = json.loads(cleaned_result)
-            
-            return {
-                "vendor_raw": vendor_name,
-                "vendor_standard": parsed.get('standard_name', vendor_name),
-                "confidence": parsed.get('confidence', 0.7),
-                "cleaning_method": "ai_powered",
-                "reasoning": parsed.get('reasoning', 'AI standardization')
-            }
-            
-        except Exception as e:
-            logger.error(f"AI vendor standardization failed: {e}")
-            return {
-                "vendor_raw": vendor_name,
-                "vendor_standard": vendor_name,
-                "confidence": 0.5,
-                "cleaning_method": "ai_fallback"
-            }
-    
-    def _sanitize_for_prompt(self, text: str) -> str:
-        """Sanitize text to prevent prompt injection attacks"""
-        if not text:
-            return ""
-        
-        # Remove or escape dangerous prompt injection patterns
-        dangerous_patterns = [
-            "ignore previous instructions",
-            "forget everything",
-            "you are now",
-            "system:",
-            "assistant:",
-            "user:",
-            "```",
-            "---",
-            "===",
-            "###",
-            "**",
-            "__",
-            "\\n\\n",
-            "\\r\\n",
-            "\\t"
-        ]
-        
-        sanitized = str(text)
-        
-        # Remove dangerous patterns (case insensitive)
-        for pattern in dangerous_patterns:
-            sanitized = sanitized.replace(pattern.lower(), "")
-            sanitized = sanitized.replace(pattern.upper(), "")
-            sanitized = sanitized.replace(pattern, "")
-        
-        # Limit length to prevent prompt flooding
-        if len(sanitized) > 200:
-            sanitized = sanitized[:200] + "..."
-        
-        # Remove any remaining newlines and excessive whitespace
-        sanitized = " ".join(sanitized.split())
-        
-        return sanitized.strip()
-    
-    def _is_effectively_empty(self, text: str) -> bool:
-        """Check if text is effectively empty (including Unicode whitespace)"""
-        if not text:
-            return True
-        
-        # Remove all types of whitespace including Unicode
-        import unicodedata
-        normalized = unicodedata.normalize('NFKC', text)
-        stripped = ''.join(c for c in normalized if not unicodedata.category(c).startswith('Z'))
-        
-        return len(stripped.strip()) == 0
-    
-    def _apply_proper_casing(self, text: str) -> str:
-        """Apply proper casing while preserving known company name formatting"""
-        if not text:
-            return text
-        
-        # Known companies with special casing
-        special_casing = {
-            'ebay': 'eBay', 'iphone': 'iPhone', 'ipad': 'iPad', 'imac': 'iMac',
-            'itunes': 'iTunes', 'ios': 'iOS', 'macos': 'macOS', 'watchos': 'watchOS',
-            'tvos': 'tvOS', 'ipados': 'iPadOS', 'xcode': 'Xcode', 'safari': 'Safari',
-            'quicktime': 'QuickTime', 'final cut': 'Final Cut', 'logic pro': 'Logic Pro',
-            'garageband': 'GarageBand', 'keynote': 'Keynote', 'pages': 'Pages',
-            'numbers': 'Numbers', 'icloud': 'iCloud', 'itunes': 'iTunes',
-            'apple pay': 'Apple Pay', 'apple watch': 'Apple Watch', 'airpods': 'AirPods',
-            'airtag': 'AirTag', 'homepod': 'HomePod', 'appletv': 'Apple TV',
-            'macbook': 'MacBook', 'macbook air': 'MacBook Air', 'macbook pro': 'MacBook Pro',
-            'imac': 'iMac', 'mac pro': 'Mac Pro', 'mac mini': 'Mac mini',
-            'mac studio': 'Mac Studio', 'studio display': 'Studio Display',
-            'pro display': 'Pro Display XDR', 'magic mouse': 'Magic Mouse',
-            'magic keyboard': 'Magic Keyboard', 'magic trackpad': 'Magic Trackpad',
-            'apple pencil': 'Apple Pencil', 'airplay': 'AirPlay', 'airdrop': 'AirDrop',
-            'handoff': 'Handoff', 'continuity': 'Continuity', 'universal control': 'Universal Control',
-            'sidecar': 'Sidecar', 'screen time': 'Screen Time', 'find my': 'Find My',
-            'apple id': 'Apple ID', 'app store': 'App Store', 'mac app store': 'Mac App Store',
-            'testflight': 'TestFlight', 'xcode cloud': 'Xcode Cloud', 'swift': 'Swift',
-            'swiftui': 'SwiftUI', 'objective-c': 'Objective-C', 'cocoa': 'Cocoa',
-            'cocoa touch': 'Cocoa Touch', 'core data': 'Core Data', 'core animation': 'Core Animation',
-            'core graphics': 'Core Graphics', 'core image': 'Core Image', 'metal': 'Metal',
-            'metal performance shaders': 'Metal Performance Shaders', 'arkit': 'ARKit',
-            'core ml': 'Core ML', 'create ml': 'Create ML', 'turi create': 'Turi Create',
-            'tensorflow': 'TensorFlow', 'pytorch': 'PyTorch', 'keras': 'Keras',
-            'scikit-learn': 'scikit-learn', 'numpy': 'NumPy', 'pandas': 'pandas',
-            'matplotlib': 'Matplotlib', 'seaborn': 'Seaborn', 'plotly': 'Plotly',
-            'bokeh': 'Bokeh', 'altair': 'Altair', 'ggplot': 'ggplot2',
-            'd3': 'D3.js', 'react': 'React', 'vue': 'Vue.js', 'angular': 'Angular',
-            'node': 'Node.js', 'express': 'Express.js', 'koa': 'Koa.js',
-            'next': 'Next.js', 'nuxt': 'Nuxt.js', 'gatsby': 'Gatsby',
-            'webpack': 'Webpack', 'rollup': 'Rollup', 'parcel': 'Parcel',
-            'vite': 'Vite', 'esbuild': 'esbuild', 'swc': 'SWC',
-            'babel': 'Babel', 'typescript': 'TypeScript', 'flow': 'Flow',
-            'eslint': 'ESLint', 'prettier': 'Prettier', 'husky': 'Husky',
-            'lint-staged': 'lint-staged', 'jest': 'Jest', 'mocha': 'Mocha',
-            'chai': 'Chai', 'cypress': 'Cypress', 'playwright': 'Playwright',
-            'puppeteer': 'Puppeteer', 'selenium': 'Selenium', 'webdriver': 'WebDriver',
-            'karma': 'Karma', 'jasmine': 'Jasmine', 'qunit': 'QUnit',
-            'ava': 'AVA', 'tape': 'Tape', 'tap': 'TAP',
-            'vitest': 'Vitest', 'vitesse': 'Vitesse', 'vite-ssg': 'Vite SSG',
-            'vuepress': 'VuePress', 'gridsome': 'Gridsome', 'sapper': 'Sapper',
-            'svelte': 'Svelte', 'sveltekit': 'SvelteKit', 'alpine': 'Alpine.js',
-            'stimulus': 'Stimulus', 'hotwire': 'Hotwire', 'turbo': 'Turbo',
-            'strada': 'Strada', 'phoenix': 'Phoenix', 'liveview': 'LiveView',
-            'rails': 'Ruby on Rails', 'sinatra': 'Sinatra', 'hanami': 'Hanami',
-            'padrino': 'Padrino', 'grape': 'Grape', 'rack': 'Rack',
-            'puma': 'Puma', 'unicorn': 'Unicorn', 'passenger': 'Passenger',
-            'thin': 'Thin', 'webrick': 'WEBrick', 'mongrel': 'Mongrel',
-            'django': 'Django', 'flask': 'Flask', 'fastapi': 'FastAPI',
-            'tornado': 'Tornado', 'bottle': 'Bottle', 'cherrypy': 'CherryPy',
-            'pyramid': 'Pyramid', 'falcon': 'Falcon', 'sanic': 'Sanic',
-            'quart': 'Quart', 'starlette': 'Starlette', 'uvicorn': 'Uvicorn',
-            'gunicorn': 'Gunicorn', 'waitress': 'Waitress', 'mod_wsgi': 'mod_wsgi',
-            'psycopg2': 'psycopg2', 'sqlalchemy': 'SQLAlchemy', 'alembic': 'Alembic',
-            'peewee': 'Peewee', 'pony': 'Pony ORM', 'tortoise': 'Tortoise ORM',
-            'databases': 'Databases', 'asyncpg': 'asyncpg', 'aiopg': 'aiopg',
-            'aiomysql': 'aiomysql', 'aioredis': 'aioredis', 'motor': 'Motor',
-            'pymongo': 'PyMongo', 'mongoengine': 'MongoEngine', 'beanie': 'Beanie',
-            'redis': 'Redis', 'memcached': 'Memcached', 'celery': 'Celery',
-            'rq': 'RQ', 'dramatiq': 'Dramatiq', 'huey': 'Huey',
-            'kombu': 'Kombu', 'pika': 'Pika', 'aiormq': 'aiormq',
-            'aio-pika': 'aio-pika', 'rabbitmq': 'RabbitMQ', 'apache kafka': 'Apache Kafka',
-            'kafka-python': 'kafka-python', 'aiokafka': 'aiokafka', 'confluent-kafka': 'confluent-kafka',
-            'pulsar': 'Apache Pulsar', 'nats': 'NATS', 'zeromq': 'ZeroMQ',
-            'pyzmq': 'PyZMQ', 'asyncio': 'asyncio', 'aiohttp': 'aiohttp',
-            'httpx': 'HTTPX', 'requests': 'Requests', 'urllib3': 'urllib3',
-            'urllib': 'urllib', 'urllib2': 'urllib2', 'httplib': 'httplib',
-            'httplib2': 'httplib2', 'pycurl': 'PycURL', 'requests-oauthlib': 'requests-oauthlib',
-            'authlib': 'Authlib', 'python-jose': 'python-jose', 'pyjwt': 'PyJWT',
-            'cryptography': 'cryptography', 'pycryptodome': 'PyCryptodome', 'nacl': 'PyNaCl',
-            'passlib': 'Passlib', 'bcrypt': 'bcrypt', 'argon2': 'argon2-cffi',
-            'scrypt': 'scrypt', 'pbkdf2': 'pbkdf2', 'hmac': 'HMAC',
-            'hashlib': 'hashlib', 'secrets': 'secrets', 'uuid': 'uuid',
-            'datetime': 'datetime', 'time': 'time', 'calendar': 'calendar',
-            'pytz': 'pytz', 'dateutil': 'python-dateutil', 'arrow': 'Arrow',
-            'moment': 'moment.js', 'dayjs': 'Day.js', 'luxon': 'Luxon',
-            'chrono': 'Chrono', 'fecha': 'fecha', 'date-fns': 'date-fns',
-            'moment-timezone': 'moment-timezone', 'timezone': 'timezone', 'tzdata': 'tzdata',
-            'babel': 'Babel', 'gettext': 'gettext', 'fluent': 'Fluent',
-            'i18next': 'i18next', 'react-i18next': 'react-i18next', 'vue-i18n': 'vue-i18n',
-            'angular-i18n': 'angular-i18n', 'ember-i18n': 'ember-i18n', 'svelte-i18n': 'svelte-i18n',
-            'polyglot': 'Polyglot.js', 'jed': 'Jed', 'globalize': 'Globalize',
-            'formatjs': 'Format.js', 'react-intl': 'react-intl', 'vue-intl': 'vue-intl',
-            'angular-l10n': 'angular-l10n', 'ember-intl': 'ember-intl', 'svelte-intl': 'svelte-intl',
-            'lingui': 'Lingui', 'next-intl': 'next-intl', 'nuxt-i18n': 'nuxt-i18n',
-            'gatsby-plugin-intl': 'gatsby-plugin-intl', 'next-i18next': 'next-i18next',
-            'react-i18next': 'react-i18next', 'vue-i18next': 'vue-i18next',
-            'angular-i18next': 'angular-i18next', 'ember-i18next': 'ember-i18next',
-            'svelte-i18next': 'svelte-i18next', 'preact-i18next': 'preact-i18next',
-            'inferno-i18next': 'inferno-i18next', 'mithril-i18next': 'mithril-i18next',
-            'hyperapp-i18next': 'hyperapp-i18next', 'lit-i18next': 'lit-i18next',
-            'stencil-i18next': 'stencil-i18next', 'alpine-i18next': 'alpine-i18next',
-            'stimulus-i18next': 'stimulus-i18next', 'hotwire-i18next': 'hotwire-i18next',
-            'turbo-i18next': 'turbo-i18next', 'strada-i18next': 'strada-i18next'
-        }
-        
-        # Check for exact matches first
-        if text.lower() in special_casing:
-            return special_casing[text.lower()]
-        
-        # Apply title case for other words
-        return text.title()
-    
-    def _get_from_cache(self, cache_key: str) -> Optional[Dict[str, Any]]:
-        """Get value from cache with TTL and LRU management"""
-        import time
-        
-        if cache_key not in self.vendor_cache:
-            return None
-        
-        # Check TTL
-        current_time = time.time()
-        if current_time - self.cache_creation_times.get(cache_key, 0) > self.cache_ttl:
-            # Expired, remove from cache
-            self._remove_from_cache(cache_key)
-            return None
-        
-        # Update access time for LRU
-        self.cache_access_times[cache_key] = current_time
-        return self.vendor_cache[cache_key]
-    
-    def _set_in_cache(self, cache_key: str, value: Dict[str, Any]) -> None:
-        """Set value in cache with size management"""
-        import time
-        
-        current_time = time.time()
-        
-        # If cache is full, remove least recently used item
-        if len(self.vendor_cache) >= self.cache_max_size:
-            self._evict_lru()
-        
-        # Add to cache
-        self.vendor_cache[cache_key] = value
-        self.cache_access_times[cache_key] = current_time
-        self.cache_creation_times[cache_key] = current_time
-    
-    def _remove_from_cache(self, cache_key: str) -> None:
-        """Remove item from cache and tracking dictionaries"""
-        self.vendor_cache.pop(cache_key, None)
-        self.cache_access_times.pop(cache_key, None)
-        self.cache_creation_times.pop(cache_key, None)
-    
-    def _evict_lru(self) -> None:
-        """Evict least recently used item from cache"""
-        if not self.cache_access_times:
-            return
-        
-        # Find least recently used item
-        lru_key = min(self.cache_access_times.keys(), 
-                     key=lambda k: self.cache_access_times[k])
-        
-        # Remove it
-        self._remove_from_cache(lru_key)
-    
-    def clear_cache(self) -> None:
-        """Clear all cache entries"""
-        self.vendor_cache.clear()
-        self.cache_access_times.clear()
-        self.cache_creation_times.clear()
-    
-    def get_cache_stats(self) -> Dict[str, Any]:
-        """Get cache statistics"""
-        import time
-        current_time = time.time()
-        
-        # Count expired entries
-        expired_count = 0
-        for cache_key, creation_time in self.cache_creation_times.items():
-            if current_time - creation_time > self.cache_ttl:
-                expired_count += 1
+    async def get_cache_stats(self) -> Dict[str, Any]:
+        """Get cache statistics from centralized cache"""
+        if self.cache and hasattr(self.cache, 'get_cache_stats'):
+            try:
+                stats = await self.cache.get_cache_stats()
+                # Filter for vendor_standardization stats
+                vendor_stats = {
+                    'classification_type': 'vendor_standardization',
+                    'total_entries': stats.get('total_classifications', 0),
+                    'cache_hit_rate': stats.get('cache_hit_rate', 0.0),
+                    'cost_savings': stats.get('cost_savings_usd', 0.0)
+                }
+                return vendor_stats
+            except Exception as e:
+                logger.warning(f"Failed to get cache stats: {e}")
         
         return {
-            'total_entries': len(self.vendor_cache),
-            'max_size': self.cache_max_size,
-            'ttl_seconds': self.cache_ttl,
-            'expired_entries': expired_count,
-            'cache_utilization': len(self.vendor_cache) / self.cache_max_size
+            'classification_type': 'vendor_standardization',
+            'total_entries': 0,
+            'cache_hit_rate': 0.0,
+            'cost_savings': 0.0,
+            'note': 'Using centralized AIClassificationCache'
         }
     
     async def _make_ai_call_with_retry(self, prompt: str, max_retries: int = 3) -> Any:
@@ -3772,7 +3620,7 @@ class DataEnrichmentProcessor:
         
         # Initialize components with error handling
         try:
-            self.vendor_standardizer = VendorStandardizer(openai_client)
+            self.vendor_standardizer = VendorStandardizer(openai_client, cache_client=safe_get_ai_cache())
             self.platform_id_extractor = PlatformIDExtractor()
             self.universal_extractors = UniversalExtractors(cache_client=safe_get_ai_cache())
             # FIX #1: Don't initialize platform detector here - will be passed from Phase 3
@@ -4021,6 +3869,130 @@ class DataEnrichmentProcessor:
         logger.info(f"Batch enrichment completed: {len(enriched_results)} rows processed")
         return enriched_results
     
+    async def _get_field_mappings(self, user_id: str, column_names: List[str], 
+                                  platform: str = None, document_type: str = None) -> Dict[str, str]:
+        """
+        Get field mappings from database for smart field extraction.
+        Returns dict mapping target_field -> source_column
+        """
+        if not user_id:
+            return {}
+        
+        try:
+            # Query field_mappings table for this user
+            from supabase_client import get_supabase_client
+            supabase = get_supabase_client()
+            
+            mappings = {}
+            for column in column_names:
+                try:
+                    # Call the get_field_mapping function
+                    result = supabase.rpc('get_field_mapping', {
+                        'p_user_id': user_id,
+                        'p_source_column': column,
+                        'p_platform': platform,
+                        'p_document_type': document_type
+                    }).execute()
+                    
+                    if result.data and len(result.data) > 0:
+                        mapping = result.data[0]
+                        target_field = mapping.get('target_field')
+                        if target_field:
+                            mappings[target_field] = column
+                            logger.debug(f"✅ Field mapping found: {column} -> {target_field}")
+                except Exception as e:
+                    logger.debug(f"No mapping found for column {column}: {e}")
+                    continue
+            
+            return mappings
+            
+        except Exception as e:
+            logger.warning(f"Failed to get field mappings: {e}")
+            return {}
+    
+    async def _extract_amount_smart(self, row_data: Dict, field_mappings: Dict[str, str]) -> float:
+        """Extract amount using smart field mapping"""
+        try:
+            # Check if we have a learned mapping for 'amount'
+            if 'amount' in field_mappings:
+                mapped_column = field_mappings['amount']
+                if mapped_column in row_data:
+                    value = row_data[mapped_column]
+                    if isinstance(value, (int, float)):
+                        return float(value)
+                    elif isinstance(value, str):
+                        cleaned = re.sub(r'[^\d.-]', '', value)
+                        return float(cleaned) if cleaned else 0.0
+            
+            # Fallback to hardcoded patterns
+            return self._extract_amount(row_data)
+        except:
+            return 0.0
+    
+    async def _extract_vendor_name_smart(self, row_data: Dict, column_names: List[str], 
+                                        field_mappings: Dict[str, str]) -> str:
+        """Extract vendor name using smart field mapping"""
+        try:
+            # Check if we have a learned mapping for 'vendor'
+            if 'vendor' in field_mappings:
+                mapped_column = field_mappings['vendor']
+                if mapped_column in row_data:
+                    return str(row_data[mapped_column])
+            
+            # Fallback to hardcoded patterns
+            return self._extract_vendor_name(row_data, column_names)
+        except:
+            return ""
+    
+    async def _extract_date_smart(self, row_data: Dict, field_mappings: Dict[str, str]) -> str:
+        """Extract date using smart field mapping"""
+        try:
+            # Check if we have a learned mapping for 'date'
+            if 'date' in field_mappings:
+                mapped_column = field_mappings['date']
+                if mapped_column in row_data:
+                    value = row_data[mapped_column]
+                    # Try to parse the date
+                    if isinstance(value, str):
+                        from dateutil import parser
+                        parsed_date = parser.parse(value)
+                        return parsed_date.strftime('%Y-%m-%d')
+                    elif hasattr(value, 'strftime'):
+                        return value.strftime('%Y-%m-%d')
+            
+            # Fallback to hardcoded patterns
+            return self._extract_date(row_data)
+        except:
+            return datetime.now().strftime('%Y-%m-%d')
+    
+    async def _extract_description_smart(self, row_data: Dict, field_mappings: Dict[str, str]) -> str:
+        """Extract description using smart field mapping"""
+        try:
+            # Check if we have a learned mapping for 'description'
+            if 'description' in field_mappings:
+                mapped_column = field_mappings['description']
+                if mapped_column in row_data:
+                    return str(row_data[mapped_column])
+            
+            # Fallback to hardcoded patterns
+            return self._extract_description(row_data)
+        except:
+            return ""
+    
+    async def _extract_currency_smart(self, row_data: Dict, field_mappings: Dict[str, str]) -> str:
+        """Extract currency using smart field mapping"""
+        try:
+            # Check if we have a learned mapping for 'currency'
+            if 'currency' in field_mappings:
+                mapped_column = field_mappings['currency']
+                if mapped_column in row_data:
+                    return str(row_data[mapped_column])
+            
+            # Fallback to default or hardcoded patterns
+            return row_data.get('currency', 'USD')
+        except:
+            return 'USD'
+    
     def _extract_amount(self, row_data: Dict) -> float:
         """Extract amount from row data"""
         try:
@@ -4225,25 +4197,36 @@ class DataEnrichmentProcessor:
             logger.warning(f"Cache storage failed for {enrichment_id}: {e}")
     
     async def _extract_core_fields(self, validated_data: Dict) -> Dict[str, Any]:
-        """Extract and validate core fields with confidence scoring"""
+        """Extract and validate core fields with confidence scoring and smart field mapping"""
         row_data = validated_data['row_data']
         column_names = validated_data['column_names']
+        platform_info = validated_data.get('platform_info', {})
+        file_context = validated_data.get('file_context', {})
+        user_id = file_context.get('user_id')
         
         try:
-            # Extract amount
-            amount = self._extract_amount(row_data)
+            # CRITICAL FIX: Check field_mappings table for user-specific mappings
+            field_mappings = await self._get_field_mappings(
+                user_id, 
+                column_names, 
+                platform_info.get('platform'),
+                platform_info.get('document_type')
+            )
             
-            # Extract vendor name
-            vendor_name = self._extract_vendor_name(row_data, column_names)
+            # Extract amount using smart mapping
+            amount = await self._extract_amount_smart(row_data, field_mappings)
             
-            # Extract date
-            date = self._extract_date(row_data)
+            # Extract vendor name using smart mapping
+            vendor_name = await self._extract_vendor_name_smart(row_data, column_names, field_mappings)
             
-            # Extract description
-            description = self._extract_description(row_data)
+            # Extract date using smart mapping
+            date = await self._extract_date_smart(row_data, field_mappings)
             
-            # Extract currency (default to USD)
-            currency = row_data.get('currency', 'USD')
+            # Extract description using smart mapping
+            description = await self._extract_description_smart(row_data, field_mappings)
+            
+            # Extract currency (default to USD) using smart mapping
+            currency = await self._extract_currency_smart(row_data, field_mappings)
             
             # Calculate confidence based on field completeness
             fields_found = sum([
@@ -5332,240 +5315,6 @@ class DataEnrichmentProcessor:
         logger.info("Document analysis cache cleared")
 
 
-class PlatformDetector:
-    """Enhanced platform detection for financial systems"""
-    
-    def __init__(self):
-        self.platform_patterns = {
-            'gusto': {
-                'keywords': ['gusto', 'payroll', 'employee', 'salary', 'wage', 'paystub'],
-                'columns': ['employee_name', 'employee_id', 'pay_period', 'gross_pay', 'net_pay', 'tax_deductions', 'benefits'],
-                'data_patterns': ['employee_ssn', 'pay_rate', 'hours_worked', 'overtime', 'federal_tax', 'state_tax'],
-                'confidence_threshold': 0.7,
-                'description': 'Payroll and HR platform'
-            },
-            'quickbooks': {
-                'keywords': ['quickbooks', 'qb', 'accounting', 'invoice', 'bill', 'qbo'],
-                'columns': ['account', 'memo', 'amount', 'date', 'type', 'ref_number', 'split'],
-                'data_patterns': ['account_number', 'class', 'customer', 'vendor', 'journal_entry'],
-                'confidence_threshold': 0.7,
-                'description': 'Accounting software'
-            },
-            'xero': {
-                'keywords': ['xero', 'invoice', 'contact', 'account', 'xero'],
-                'columns': ['contact_name', 'invoice_number', 'amount', 'date', 'reference', 'tracking'],
-                'data_patterns': ['contact_id', 'invoice_id', 'tax_amount', 'line_amount', 'tracking_category'],
-                'confidence_threshold': 0.7,
-                'description': 'Cloud accounting platform'
-            },
-            'razorpay': {
-                'keywords': ['razorpay', 'payment', 'transaction', 'merchant', 'settlement'],
-                'columns': ['transaction_id', 'merchant_id', 'amount', 'status', 'created_at', 'payment_id'],
-                'data_patterns': ['order_id', 'currency', 'method', 'description', 'fee_amount'],
-                'confidence_threshold': 0.7,
-                'description': 'Payment gateway'
-            },
-            'freshbooks': {
-                'keywords': ['freshbooks', 'invoice', 'time_tracking', 'client', 'project'],
-                'columns': ['client_name', 'invoice_number', 'amount', 'date', 'project', 'time_logged'],
-                'data_patterns': ['client_id', 'project_id', 'rate', 'hours', 'service_type'],
-                'confidence_threshold': 0.7,
-                'description': 'Invoicing and time tracking'
-            },
-            'wave': {
-                'keywords': ['wave', 'accounting', 'invoice', 'business'],
-                'columns': ['account_name', 'description', 'amount', 'date', 'category'],
-                'data_patterns': ['account_id', 'transaction_id', 'balance', 'wave_specific'],
-                'confidence_threshold': 0.7,
-                'description': 'Free accounting software'
-            },
-            'sage': {
-                'keywords': ['sage', 'accounting', 'business', 'sage50', 'sage100'],
-                'columns': ['account', 'description', 'amount', 'date', 'reference'],
-                'data_patterns': ['account_number', 'journal_entry', 'period', 'sage_specific'],
-                'confidence_threshold': 0.7,
-                'description': 'Business management software'
-            },
-            'netsuite': {
-                'keywords': ['netsuite', 'erp', 'enterprise', 'suite'],
-                'columns': ['account', 'memo', 'amount', 'date', 'entity', 'subsidiary'],
-                'data_patterns': ['internal_id', 'tran_id', 'line_id', 'netsuite_specific'],
-                'confidence_threshold': 0.7,
-                'description': 'Enterprise resource planning'
-            },
-            'stripe': {
-                'keywords': ['stripe', 'payment', 'charge', 'customer', 'subscription'],
-                'columns': ['charge_id', 'customer_id', 'amount', 'status', 'created', 'currency'],
-                'data_patterns': ['payment_intent', 'transfer_id', 'fee_amount', 'payment_method'],
-                'confidence_threshold': 0.7,
-                'description': 'Payment processing platform'
-            },
-            'square': {
-                'keywords': ['square', 'payment', 'transaction', 'merchant'],
-                'columns': ['transaction_id', 'merchant_id', 'amount', 'status', 'created_at'],
-                'data_patterns': ['location_id', 'device_id', 'tender_type', 'square_specific'],
-                'confidence_threshold': 0.7,
-                'description': 'Point of sale and payments'
-            },
-            'paypal': {
-                'keywords': ['paypal', 'payment', 'transaction', 'merchant'],
-                'columns': ['transaction_id', 'merchant_id', 'amount', 'status', 'created_at'],
-                'data_patterns': ['paypal_id', 'fee_amount', 'currency', 'payment_type'],
-                'confidence_threshold': 0.7,
-                'description': 'Online payment system'
-            },
-            'shopify': {
-                'keywords': ['shopify', 'order', 'product', 'sales', 'ecommerce'],
-                'columns': ['order_id', 'product_name', 'amount', 'date', 'customer'],
-                'data_patterns': ['shopify_id', 'product_id', 'variant_id', 'fulfillment_status'],
-                'confidence_threshold': 0.7,
-                'description': 'E-commerce platform'
-            },
-            'zoho': {
-                'keywords': ['zoho', 'books', 'invoice', 'accounting'],
-                'columns': ['contact_name', 'invoice_number', 'amount', 'date', 'reference'],
-                'data_patterns': ['zoho_id', 'organization_id', 'zoho_specific'],
-                'confidence_threshold': 0.7,
-                'description': 'Business software suite'
-            }
-        }
-    
-    def detect_platform(self, df: pd.DataFrame, filename: str) -> Dict[str, Any]:
-        """Enhanced platform detection with multiple analysis methods"""
-        filename_lower = filename.lower()
-        columns_lower = [col.lower() for col in df.columns]
-        
-        best_match = {
-            'platform': 'unknown',
-            'confidence': 0.0,
-            'matched_columns': [],
-            'matched_patterns': [],
-            'reasoning': 'No clear platform match found',
-            'description': 'Unknown platform'
-        }
-        
-        for platform, patterns in self.platform_patterns.items():
-            confidence = 0.0
-            matched_columns = []
-            matched_patterns = []
-            
-            # 1. Filename keyword matching (25% weight)
-            filename_matches = 0
-            for keyword in patterns['keywords']:
-                if keyword in filename_lower:
-                    filename_matches += 1
-                    confidence += 0.25 / len(patterns['keywords'])
-            
-            # 2. Column name matching (40% weight)
-            column_matches = 0
-            for expected_col in patterns['columns']:
-                for actual_col in columns_lower:
-                    if expected_col in actual_col or actual_col in expected_col:
-                        matched_columns.append(actual_col)
-                        column_matches += 1
-                        confidence += 0.4 / len(patterns['columns'])
-            
-            # 3. Data pattern analysis (20% weight)
-            if len(matched_columns) > 0:
-                confidence += 0.2
-            
-            # 4. Data content analysis (15% weight)
-            sample_data = df.head(3).astype(str).values.flatten()
-            sample_text = ' '.join(sample_data).lower()
-            
-            for pattern in patterns.get('data_patterns', []):
-                if pattern in sample_text:
-                    confidence += 0.15 / len(patterns.get('data_patterns', []))
-                    matched_patterns.append(pattern)
-            
-            # 5. Platform-specific terminology detection
-            platform_terms = self._detect_platform_terminology(df, platform)
-            if platform_terms:
-                confidence += 0.1
-                matched_patterns.extend(platform_terms)
-            
-            if confidence > best_match['confidence']:
-                best_match = {
-                    'platform': platform,
-                    'confidence': min(confidence, 1.0),
-                    'matched_columns': matched_columns,
-                    'matched_patterns': matched_patterns,
-                    'reasoning': self._generate_reasoning(platform, filename_matches, column_matches, len(matched_patterns)),
-                    'description': patterns['description']
-                }
-        
-        return best_match
-    
-    def _detect_platform_terminology(self, df: pd.DataFrame, platform: str) -> List[str]:
-        """Detect platform-specific terminology in the data"""
-        platform_terms = []
-        
-        if platform == 'quickbooks':
-            # QB-specific terms
-            qb_terms = ['ref number', 'split', 'class', 'customer', 'vendor', 'journal entry']
-            for term in qb_terms:
-                if any(term in str(col).lower() for col in df.columns):
-                    platform_terms.append(f"qb_term: {term}")
-        
-        elif platform == 'xero':
-            # Xero-specific terms
-            xero_terms = ['tracking', 'reference', 'contact', 'line amount']
-            for term in xero_terms:
-                if any(term in str(col).lower() for col in df.columns):
-                    platform_terms.append(f"xero_term: {term}")
-        
-        elif platform == 'gusto':
-            # Gusto-specific terms
-            gusto_terms = ['pay period', 'gross pay', 'net pay', 'tax deductions', 'benefits']
-            for term in gusto_terms:
-                if any(term in str(col).lower() for col in df.columns):
-                    platform_terms.append(f"gusto_term: {term}")
-        
-        elif platform == 'stripe':
-            # Stripe-specific terms
-            stripe_terms = ['charge id', 'payment intent', 'transfer id', 'fee amount']
-            for term in stripe_terms:
-                if any(term in str(col).lower() for col in df.columns):
-                    platform_terms.append(f"stripe_term: {term}")
-        
-        return platform_terms
-    
-    def _generate_reasoning(self, platform: str, filename_matches: int, column_matches: int, pattern_matches: int) -> str:
-        """Generate detailed reasoning for platform detection"""
-        reasoning_parts = []
-        
-        if filename_matches > 0:
-            reasoning_parts.append(f"Filename contains {filename_matches} {platform} keywords")
-        
-        if column_matches > 0:
-            reasoning_parts.append(f"Matched {column_matches} column patterns typical of {platform}")
-        
-        if pattern_matches > 0:
-            reasoning_parts.append(f"Detected {pattern_matches} {platform}-specific data patterns")
-        
-        if not reasoning_parts:
-            return f"No clear indicators for {platform}"
-        
-        return f"{platform} detected: {'; '.join(reasoning_parts)}"
-    
-    def get_platform_info(self, platform: str) -> Dict[str, Any]:
-        """Get detailed information about a platform"""
-        if platform in self.platform_patterns:
-            return {
-                'name': platform,
-                'description': self.platform_patterns[platform]['description'],
-                'typical_columns': self.platform_patterns[platform]['columns'],
-                'keywords': self.platform_patterns[platform]['keywords'],
-                'confidence_threshold': self.platform_patterns[platform]['confidence_threshold']
-            }
-        return {
-            'name': platform,
-            'description': 'Unknown platform',
-            'typical_columns': [],
-            'keywords': [],
-            'confidence_threshold': 0.0
-        }
-
 class AIRowClassifier:
     """
     AI-powered row classification for financial data processing.
@@ -6218,7 +5967,68 @@ class RowProcessor:
             file_context=file_context
         )
         
-        # Create the event payload with enhanced metadata
+        # ✅ PROVENANCE: Generate complete provenance tracking
+        # Calculate row hash for tamper detection
+        row_hash = calculate_row_hash(
+            source_filename=file_context['filename'],
+            row_index=row_index,
+            payload=row_data  # Use original row data, not enriched
+        )
+        
+        # Create lineage path tracking all transformations
+        lineage_path = create_lineage_path(initial_step="file_upload")
+        
+        # Add platform detection step
+        lineage_path = append_lineage_step(
+            lineage_path,
+            step="platform_detection",
+            operation="ai_detect_platform",
+            metadata={
+                'platform': platform_info.get('platform', 'unknown'),
+                'confidence': platform_info.get('confidence', 0.0),
+                'method': 'universal_platform_detector'
+            }
+        )
+        
+        # Add AI classification step
+        if ai_classification:
+            lineage_path = append_lineage_step(
+                lineage_path,
+                step="classification",
+                operation="ai_classify",
+                metadata={
+                    'kind': enriched_payload.get('kind', 'transaction'),
+                    'category': enriched_payload.get('category', 'other'),
+                    'confidence': enriched_payload.get('ai_confidence', 0.5),
+                    'model': 'universal_document_classifier'
+                }
+            )
+        
+        # Add enrichment steps
+        if enriched_payload.get('currency'):
+            lineage_path = append_lineage_step(
+                lineage_path,
+                step="enrichment",
+                operation="currency_normalize",
+                metadata={
+                    'original_currency': enriched_payload.get('currency'),
+                    'amount_original': enriched_payload.get('amount_original'),
+                    'amount_usd': enriched_payload.get('amount_usd')
+                }
+            )
+        
+        if enriched_payload.get('vendor_standard'):
+            lineage_path = append_lineage_step(
+                lineage_path,
+                step="enrichment",
+                operation="vendor_standardize",
+                metadata={
+                    'vendor_raw': enriched_payload.get('vendor_raw'),
+                    'vendor_standard': enriched_payload.get('vendor_standard')
+                }
+            )
+        
+        # Create the event payload with enhanced metadata AND provenance
         event = {
             "provider": "excel-upload",
             "kind": enriched_payload.get('kind', 'transaction'),
@@ -6244,7 +6054,11 @@ class RowProcessor:
                 "reasoning": enriched_payload.get('ai_reasoning', ''),
                 "sheet_name": sheet_name,
                 "file_context": file_context
-            }
+            },
+            # ✅ PROVENANCE FIELDS
+            "row_hash": row_hash,
+            "lineage_path": lineage_path,
+            "created_by": provenance_tracker.format_created_by(user_id=file_context['user_id'])
         }
         
         return event
@@ -6306,10 +6120,10 @@ class ExcelProcessor:
         self.openai = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
         self.platform_detector = PlatformDetector()
         
-        # Initialize universal components
+        # Initialize universal components with supabase_client for persistent learning
         self.universal_field_detector = UniversalFieldDetector()
-        self.universal_platform_detector = UniversalPlatformDetector(self.openai, cache_client=safe_get_ai_cache())
-        self.universal_document_classifier = UniversalDocumentClassifier(self.openai, cache_client=safe_get_ai_cache())
+        self.universal_platform_detector = UniversalPlatformDetector(self.openai, cache_client=safe_get_ai_cache(), supabase_client=supabase)
+        self.universal_document_classifier = UniversalDocumentClassifier(self.openai, cache_client=safe_get_ai_cache(), supabase_client=supabase)
         self.universal_extractors = UniversalExtractors(cache_client=safe_get_ai_cache())
         
         # Entity resolver and AI classifier will be initialized per request with Supabase client
@@ -7331,6 +7145,28 @@ class ExcelProcessor:
                     batch_df = chunk_data.iloc[batch_idx:batch_idx + optimal_batch_size]
                     
                     try:
+                        # CRITICAL FIX: Use batch enrichment for 5x speedup
+                        # Convert batch_df rows to list of dicts for batch processing
+                        batch_rows_data = []
+                        batch_row_indices = []
+                        
+                        for row_tuple in batch_df.itertuples(index=True, name='Row'):
+                            row_index = row_tuple.Index
+                            row = batch_df.loc[row_index]
+                            row_dict = row.to_dict()
+                            batch_rows_data.append(row_dict)
+                            batch_row_indices.append(row_index)
+                        
+                        # Batch classify rows (single AI call for entire batch)
+                        batch_classifications = await self.batch_classifier.classify_rows_batch(
+                            batch_rows_data, platform_info, column_names, user_id
+                        )
+                        
+                        # Batch enrich rows (concurrent processing with semaphore)
+                        batch_enriched = await self.enrichment_processor.enrich_batch_data(
+                            batch_rows_data, platform_info, column_names, batch_classifications, file_context
+                        )
+                        
                         # Build vectorized platform guesses for this batch (fast, no-LLM)
                         row_platform_series = None
                         try:
@@ -7353,41 +7189,34 @@ class ExcelProcessor:
                             logger.warning(f"Vectorized platform classification failed: {v_err}")
                             row_platform_series = None
 
-                        # FIX #6: Use itertuples() instead of iterrows() for 5-10x speedup
-                        # iterrows() creates a new Series for each row (slow)
-                        # itertuples() returns named tuples (much faster)
-                        for row_tuple in batch_df.itertuples(index=True, name='Row'):
+                        # Process enriched batch results into events
+                        for idx, (row_index, enriched_payload, classification) in enumerate(zip(
+                            batch_row_indices, batch_enriched, batch_classifications
+                        )):
                             try:
-                                # Convert named tuple back to Series for compatibility
-                                row_index = row_tuple.Index
                                 row = batch_df.loc[row_index]
                                 
-                                # Create event for this row
+                                # Create event for this row using enriched data
                                 event = await self.row_processor.process_row(
                                     row, row_index, sheet_name, platform_info, file_context, column_names
                                 )
                                 
-                                # Fast cached classification with 90% cost reduction
-                                classification = await self._fast_classify_row_cached(row, platform_info, column_names)
+                                # Update event with batch classification and enrichment results
                                 event['classification_metadata'].update(classification)
+                                
+                                # CRITICAL: Use batch-enriched payload (already processed)
+                                event['payload'] = enriched_payload
 
                                 # Apply vectorized row-level platform guess
                                 if row_platform_series is not None:
                                     try:
                                         row_guess = row_platform_series.get(row_index)
+                                        if isinstance(row_guess, str) and row_guess:
+                                            event['classification_metadata']['platform_guess'] = row_guess
+                                            if event.get('source_platform') in ('unknown', 'general', None, ''):
+                                                event['source_platform'] = row_guess
                                     except Exception:
-                                        row_guess = None
-                                    if isinstance(row_guess, str) and row_guess:
-                                        # expose guess in classification metadata
-                                        event['classification_metadata'] = event.get('classification_metadata', {})
-                                        event['classification_metadata']['platform_guess'] = row_guess
-                                        # set source_platform when unknown/general
-                                        src_plat = event.get('source_platform') or 'unknown'
-                                        if src_plat in ('unknown', 'general', None, ''):
-                                            event['source_platform'] = row_guess
-                                
-                                # Store event in raw_events table with enrichment fields
-                                enriched_payload = event['payload']  # This is now the enriched payload
+                                        pass
                                 
                                 # Clean the enriched payload to ensure all datetime objects are converted
                                 cleaned_enriched_payload = serialize_datetime_objects(enriched_payload)
@@ -9578,38 +9407,13 @@ async def check_duplicate_endpoint(request: dict):
             logger.warning(f"Security validation error for duplicate check: {sec_e}")
             raise HTTPException(status_code=401, detail="Unauthorized or invalid session")
         
-        # MISMATCH FIX #1: Use ProductionDuplicateDetectionService for advanced multi-phase detection
+        # CONSISTENCY FIX: Always use ProductionDuplicateDetectionService for consistent duplicate detection
+        # No fallback to simple hash check - fail explicitly if service unavailable
         try:
             if not PRODUCTION_DUPLICATE_SERVICE_AVAILABLE:
-                # Fallback to simple hash check if production service unavailable
-                dup_res = supabase.table('raw_records').select(
-                    'id, file_name, created_at, content'
-                ).eq('user_id', user_id).eq('file_hash', file_hash).limit(10).execute()
-                
-                duplicates = dup_res.data or []
-                
-                if duplicates:
-                    duplicate_files = [{
-                        "id": d.get("id"),
-                        "filename": d.get("file_name"),
-                        "uploaded_at": d.get("created_at"),
-                        "total_rows": (d.get("content") or {}).get("total_rows", 0)
-                    } for d in duplicates]
-                    
-                    latest = max(duplicate_files, key=lambda x: x["uploaded_at"] or "")
-                    latest_str = (latest.get('uploaded_at') or '')[:10]
-                    latest_name = latest.get('filename') or file_name
-                    
-                    return {
-                        "is_duplicate": True,
-                        "duplicate_type": "exact",
-                        "duplicate_files": duplicate_files,
-                        "latest_duplicate": latest,
-                        "recommendation": "replace_or_skip",
-                        "message": f"Identical file '{latest_name}' was uploaded on {latest_str}. Do you want to replace it or skip this upload?"
-                    }
-                
-                return {"is_duplicate": False}
+                error_msg = "Duplicate detection service is unavailable. Please try again later."
+                logger.error(f"ProductionDuplicateDetectionService not available for duplicate check")
+                raise HTTPException(status_code=503, detail=error_msg)
             
             # Use production service for advanced detection (exact + near + content duplicates)
             duplicate_service = ProductionDuplicateDetectionService(supabase)
@@ -9683,6 +9487,19 @@ async def process_excel_endpoint(request: dict):
         except Exception as sec_e:
             logger.warning(f"Security validation error for job {job_id}: {sec_e}")
             raise HTTPException(status_code=401, detail="Unauthorized or invalid session")
+        
+        # File metadata validation at entry point (before downloading)
+        # Get file size from request if provided, otherwise will validate after download
+        file_size_hint = request.get('file_size', 0)
+        file_valid, file_violations = security_validator.validate_file_metadata(
+            filename=filename,
+            file_size=file_size_hint if file_size_hint > 0 else 0,
+            content_type=request.get('content_type')
+        )
+        if not file_valid:
+            error_msg = f"Invalid file: {'; '.join(file_violations)}"
+            logger.warning(f"File validation failed for job {job_id}: {error_msg}")
+            raise HTTPException(status_code=400, detail=error_msg)
 
         # Early duplicate check based on file hash
         # NOTE: We verify the hash server-side after download for security
@@ -9839,7 +9656,7 @@ async def process_excel_endpoint(request: dict):
                     # File already downloaded for hash verification
                     logger.info(f"Reusing downloaded file for job {job_id} (already verified hash)")
                 
-                # SECURITY FIX: Validate file size before processing (prevent OOM)
+                # Secondary file size validation (defense in depth - primary validation at endpoint entry)
                 MAX_FILE_SIZE = 500 * 1024 * 1024  # 500MB
                 if len(file_bytes) > MAX_FILE_SIZE:
                     error_msg = f"File too large: {len(file_bytes) / 1024 / 1024:.2f}MB (max: 500MB)"
@@ -10422,6 +10239,133 @@ async def start_pdf_processing_job(user_id: str, job_id: str, storage_path: str,
         except Exception:
             pass
 
+async def _convert_api_data_to_csv_format(data: List[Dict[str, Any]], source_platform: str) -> Tuple[bytes, str]:
+    """
+    Convert API data (QuickBooks, Xero, etc.) to CSV format for unified processing.
+    This ensures all data goes through the same ExcelProcessor pipeline.
+    
+    Args:
+        data: List of dictionaries containing API response data
+        source_platform: Platform name (e.g., 'QuickBooks', 'Xero')
+    
+    Returns:
+        Tuple of (csv_bytes, filename)
+    """
+    try:
+        if not data:
+            raise ValueError("No data to convert")
+        
+        # Convert to DataFrame for consistent formatting
+        df = pd.DataFrame(data)
+        
+        # Generate CSV in memory
+        csv_buffer = io.StringIO()
+        df.to_csv(csv_buffer, index=False)
+        csv_bytes = csv_buffer.getvalue().encode('utf-8')
+        
+        # Generate filename with timestamp
+        timestamp = datetime.utcnow().strftime('%Y%m%d_%H%M%S')
+        filename = f"{source_platform.lower()}_sync_{timestamp}.csv"
+        
+        logger.info(f"✅ Converted {len(data)} {source_platform} records to CSV format ({len(csv_bytes)} bytes)")
+        return csv_bytes, filename
+        
+    except Exception as e:
+        logger.error(f"Failed to convert {source_platform} API data to CSV: {e}")
+        raise
+
+async def _process_api_data_through_pipeline(
+    user_id: str,
+    data: List[Dict[str, Any]],
+    source_platform: str,
+    sync_run_id: str,
+    user_connection_id: str
+) -> Dict[str, Any]:
+    """
+    Process API data through the main ExcelProcessor pipeline.
+    This ensures consistent duplicate detection, enrichment, and entity resolution.
+    
+    Args:
+        user_id: User ID
+        data: List of API records
+        source_platform: Platform name
+        sync_run_id: Sync run ID for tracking
+        user_connection_id: User connection ID
+    
+    Returns:
+        Processing results with stats
+    """
+    try:
+        # Convert API data to CSV format
+        csv_bytes, filename = await _convert_api_data_to_csv_format(data, source_platform)
+        
+        # Calculate file hash for duplicate detection
+        file_hash = hashlib.sha256(csv_bytes).hexdigest()
+        
+        # Store CSV in Supabase Storage
+        storage_path = f"{user_id}/connector_syncs/{source_platform.lower()}/{filename}"
+        try:
+            storage = supabase.storage.from_("finely-upload")
+            storage.upload(storage_path, csv_bytes, {"content-type": "text/csv"})
+            logger.info(f"✅ Uploaded {source_platform} CSV to storage: {storage_path}")
+        except Exception as e:
+            logger.error(f"Failed to upload {source_platform} CSV to storage: {e}")
+            raise
+        
+        # Create ingestion job for tracking
+        job_id = str(uuid.uuid4())
+        try:
+            supabase.table('ingestion_jobs').insert({
+                'id': job_id,
+                'user_id': user_id,
+                'file_name': filename,
+                'file_size': len(csv_bytes),
+                'file_hash': file_hash,
+                'source': f'connector_{source_platform.lower()}',
+                'status': 'processing',
+                'created_at': datetime.utcnow().isoformat()
+            }).execute()
+        except Exception as e:
+            logger.warning(f"Failed to create ingestion_job for {source_platform}: {e}")
+        
+        # Initialize ExcelProcessor
+        excel_processor = ExcelProcessor()
+        
+        # Process through main pipeline
+        logger.info(f"🔄 Processing {source_platform} data through main ExcelProcessor pipeline...")
+        result = await excel_processor.process_file(
+            file_content=csv_bytes,
+            filename=filename,
+            user_id=user_id,
+            job_id=job_id,
+            file_hash=file_hash,
+            source_platform=source_platform
+        )
+        
+        # Update ingestion job status
+        try:
+            supabase.table('ingestion_jobs').update({
+                'status': 'completed',
+                'updated_at': datetime.utcnow().isoformat()
+            }).eq('id', job_id).execute()
+        except Exception as e:
+            logger.warning(f"Failed to update ingestion_job status: {e}")
+        
+        logger.info(f"✅ {source_platform} data processed through main pipeline: {result.get('total_rows', 0)} rows")
+        
+        return {
+            'status': 'success',
+            'job_id': job_id,
+            'file_hash': file_hash,
+            'total_rows': result.get('total_rows', 0),
+            'processed_rows': result.get('processed_rows', 0),
+            'storage_path': storage_path
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to process {source_platform} data through pipeline: {e}")
+        raise
+
 async def _gmail_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> Dict[str, Any]:
     provider_key = req.integration_id or NANGO_GMAIL_INTEGRATION_ID
     connection_id = req.connection_id
@@ -10493,10 +10437,11 @@ async def _gmail_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> Dict
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"Gmail profile check failed: {e}")
 
-        # FIX #3: Implement true incremental sync using Gmail historyId
+        # INCREMENTAL SYNC FIX: TRUE incremental sync using Gmail History API
         # Check for existing cursor to determine if this is incremental or full sync
         last_history_id = None
         use_incremental = False
+        current_history_id = None  # Will be captured from API response
         
         if req.mode != 'historical':
             try:
@@ -10518,46 +10463,105 @@ async def _gmail_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> Dict
                         days_since_sync = (datetime.utcnow() - last_sync_time).days
                         if days_since_sync <= 30:
                             use_incremental = True
-                            logger.info(f"✅ Gmail incremental sync enabled (historyId={last_history_id}, {days_since_sync} days since last sync)")
+                            logger.info(f"✅ Gmail TRUE incremental sync enabled via History API (historyId={last_history_id}, {days_since_sync} days since last sync)")
             except Exception as e:
                 logger.warning(f"Failed to check incremental sync eligibility: {e}")
         
-        # Determine query based on sync mode
-        if use_incremental and last_history_id:
-            # Incremental: Use Gmail History API (more efficient)
-            # Note: Gmail History API requires implementation in nango_client.py
-            # For now, use optimized query with shorter lookback
-            lookback_days = 7  # Only fetch last week for incremental
-            q = f"has:attachment newer_than:{lookback_days}d"
-            logger.info(f"📊 Gmail incremental sync: fetching last {lookback_days} days")
-        else:
-            # Full sync: Use configured lookback or default
-            lookback_days = max(1, int(req.lookback_days or 365))
-            q = f"has:attachment newer_than:{lookback_days}d"
-            logger.info(f"📊 Gmail full sync: fetching last {lookback_days} days")
-
-        page_token = None
-        max_per_page = max(1, min(int(req.max_results or 100), 500))
         # Concurrency for attachment downloads
         max_concurrency = int(os.environ.get('CONNECTOR_CONCURRENCY', '5') or '5')
         sem = asyncio.Semaphore(max(1, min(max_concurrency, 10)))
+        
+        message_ids = []
+        
+        # Determine sync strategy based on mode
+        if use_incremental and last_history_id:
+            # ✅ TRUE INCREMENTAL: Use Gmail History API for delta sync
+            logger.info(f"📊 Gmail TRUE incremental sync: using History API to fetch only changes since historyId={last_history_id}")
+            
+            try:
+                history_page_token = None
+                max_per_page = max(1, min(int(req.max_results or 100), 500))
+                
+                while True:
+                    # Stop early if nearing free-plan limits
+                    if stats['actions_used'] > 900 or stats['records_fetched'] > 4500:
+                        break
+                    
+                    # Fetch history changes since last sync
+                    history_response = await nango.list_gmail_history(
+                        provider_key, 
+                        connection_id, 
+                        start_history_id=last_history_id,
+                        max_results=max_per_page,
+                        page_token=history_page_token
+                    )
+                    stats['actions_used'] += 1
+                    
+                    # Capture current historyId for next sync
+                    current_history_id = history_response.get('historyId')
+                    
+                    # Extract message IDs from history records
+                    history_records = history_response.get('history') or []
+                    for record in history_records:
+                        # messagesAdded contains new messages
+                        messages_added = record.get('messagesAdded') or []
+                        for msg_added in messages_added:
+                            msg = msg_added.get('message') or {}
+                            msg_id = msg.get('id')
+                            if msg_id:
+                                message_ids.append(msg_id)
+                    
+                    # Check for next page
+                    history_page_token = history_response.get('nextPageToken')
+                    if not history_page_token:
+                        break
+                
+                logger.info(f"✅ History API returned {len(message_ids)} new messages since last sync")
+                
+            except Exception as history_err:
+                # Fallback to full sync if History API fails
+                logger.warning(f"History API failed, falling back to full sync: {history_err}")
+                use_incremental = False
+                message_ids = []
+        
+        if not use_incremental:
+            # Full sync: Use traditional message list query
+            lookback_days = max(1, int(req.lookback_days or 365))
+            q = f"has:attachment newer_than:{lookback_days}d"
+            logger.info(f"📊 Gmail full sync: fetching last {lookback_days} days")
+            
+            page_token = None
+            max_per_page = max(1, min(int(req.max_results or 100), 500))
+            
+            while True:
+                # Stop early if nearing free-plan limits
+                if stats['actions_used'] > 900 or stats['records_fetched'] > 4500:
+                    break
 
-        while True:
-            # Stop early if nearing free-plan record or action limits
-            if stats['actions_used'] > 900 or stats['records_fetched'] > 4500:
-                break
+                page = await nango.list_gmail_messages(provider_key, connection_id, q=q, page_token=page_token, max_results=max_per_page)
+                stats['actions_used'] += 1
 
-            page = await nango.list_gmail_messages(provider_key, connection_id, q=q, page_token=page_token, max_results=max_per_page)
-            stats['actions_used'] += 1
+                page_message_ids = [m.get('id') for m in (page.get('messages') or []) if m.get('id')]
+                if not page_message_ids:
+                    break
+                    
+                message_ids.extend(page_message_ids)
+                
+                # Check for next page
+                page_token = page.get('nextPageToken')
+                if not page_token:
+                    break
+        
+        # Process all collected message IDs
+        if not message_ids:
+            logger.info("No new messages to process")
+        else:
+            logger.info(f"Processing {len(message_ids)} messages for attachments")
 
-            message_ids = [m.get('id') for m in (page.get('messages') or []) if m.get('id')]
-            if not message_ids:
-                break
+        # Batch collection for all messages
+        page_batch_items = []
 
-            # Batch collection for this page
-            page_batch_items = []
-
-            for mid in message_ids:
+        for mid in message_ids:
                 try:
                     msg = await nango.get_gmail_message(provider_key, connection_id, mid)
                     stats['actions_used'] += 1
@@ -10655,35 +10659,31 @@ async def _gmail_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> Dict
                 except Exception as item_e:
                     logger.warning(f"Failed to process message {mid}: {item_e}")
                     errors.append(str(item_e))
-
-            # Batch insert all items from this page using transaction
-            if page_batch_items:
-                try:
-                    transaction_manager = get_transaction_manager()
-                    async with transaction_manager.transaction(
-                        user_id=user_id,
-                        operation_type="connector_sync_batch"
-                    ) as tx:
-                        # Insert all items in batch within transaction
-                        for item in page_batch_items:
-                            try:
-                                await tx.insert('external_items', item)
-                                stats['records_fetched'] += 1
-                            except Exception as insert_err:
-                                # Handle duplicate key conflicts gracefully
-                                if 'duplicate key' in str(insert_err).lower() or 'unique' in str(insert_err).lower():
-                                    stats['skipped'] += 1
-                                else:
-                                    logger.error(f"Failed to insert external_item: {insert_err}")
-                                    stats['skipped'] += 1
-                    # Transaction committed successfully
-                except Exception as batch_err:
-                    logger.error(f"Batch insert transaction failed: {batch_err}")
-                    errors.append(f"Batch insert failed: {str(batch_err)[:100]}")
-
-            page_token = page.get('nextPageToken')
-            if not page_token:
-                break
+        
+        # Batch insert all items from this page using transaction
+        if page_batch_items:
+            try:
+                transaction_manager = get_transaction_manager()
+                async with transaction_manager.transaction(
+                    user_id=user_id,
+                    operation_type="connector_sync_batch"
+                ) as tx:
+                    # Insert all items in batch within transaction
+                    for item in page_batch_items:
+                        try:
+                            await tx.insert('external_items', item)
+                            stats['records_fetched'] += 1
+                        except Exception as insert_err:
+                            # Handle duplicate key conflicts gracefully
+                            if 'duplicate key' in str(insert_err).lower() or 'unique' in str(insert_err).lower():
+                                stats['skipped'] += 1
+                            else:
+                                logger.error(f"Failed to insert external_item: {insert_err}")
+                                stats['skipped'] += 1
+                # Transaction committed successfully
+            except Exception as batch_err:
+                logger.error(f"Batch insert transaction failed: {batch_err}")
+                errors.append(f"Batch insert failed: {str(batch_err)[:100]}")
 
         run_status = 'succeeded' if not errors else ('partial' if stats['records_fetched'] > 0 else 'failed')
         
@@ -10703,13 +10703,13 @@ async def _gmail_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> Dict
                 }, {'id': sync_run_id})
                 
                 # FIX #3: Update last_synced_at and save historyId for incremental sync
-                # Get current historyId from Gmail profile for next incremental sync
-                current_history_id = None
-                try:
-                    profile = await nango.get_gmail_profile(provider_key, connection_id)
-                    current_history_id = profile.get('historyId')
-                except Exception:
-                    pass
+                # If we didn't get historyId from History API, fetch from profile
+                if not current_history_id:
+                    try:
+                        profile = await nango.get_gmail_profile(provider_key, connection_id)
+                        current_history_id = profile.get('historyId')
+                    except Exception:
+                        pass
                 
                 # Fetch current metadata
                 uc_current = supabase.table('user_connections').select('metadata').eq('nango_connection_id', connection_id).limit(1).execute()
@@ -11779,7 +11779,7 @@ async def nango_webhook(request: Request):
                         asyncio.create_task(_xero_sync_run(nango, req))
                         JOBS_ENQUEUED.labels(provider=NANGO_XERO_INTEGRATION_ID, mode='incremental').inc()
             except Exception as e:
-                logger.warning(f"Failed to trigger incremental sync from webhook: {e}")
+                logger.error(f"Failed to trigger incremental sync from webhook: {e}")
 
         return {'status': 'received', 'signature_valid': bool(signature_valid)}
     except Exception as e:
@@ -12047,14 +12047,22 @@ async def websocket_progress_endpoint(websocket: WebSocket, job_id: str):
     except Exception:
         await websocket_manager.disconnect(job_id)
 
-class WebSocketProgressManager:
-    """Enhanced WebSocket manager for universal components progress updates"""
+class UniversalWebSocketManager:
+    """
+    Enhanced WebSocket manager for universal components progress updates.
+    
+    CRITICAL FIX: Includes ping/pong heartbeat mechanism to detect and remove stale connections.
+    """
     
     def __init__(self):
         self.active_connections: Dict[str, WebSocket] = {}
         # Backward-compat in-memory cache; authoritative state is Redis when configured
         self.job_status: Dict[str, Dict[str, Any]] = {}
         self.redis = None
+        # CRITICAL FIX: Track last pong time for each connection
+        self.last_pong_time: Dict[str, float] = {}
+        self.heartbeat_interval = 30  # Send ping every 30 seconds
+        self.heartbeat_timeout = 60  # Consider dead if no pong for 60 seconds
 
     def set_redis(self, redis_client):
         self.redis = redis_client
@@ -12097,6 +12105,8 @@ class WebSocketProgressManager:
         """Accept WebSocket connection and register job"""
         await websocket.accept()
         self.active_connections[job_id] = websocket
+        # CRITICAL FIX: Initialize heartbeat tracking
+        self.last_pong_time[job_id] = time.time()
         base = await self._get_state(job_id) or {}
         await self.merge_job_state(job_id, {
             **base,
@@ -12119,6 +12129,9 @@ class WebSocketProgressManager:
                 logger.warning(f"Error closing WebSocket for job {job_id}: {e}")
             finally:
                 del self.active_connections[job_id]
+                # CRITICAL FIX: Clean up heartbeat tracking
+                if job_id in self.last_pong_time:
+                    del self.last_pong_time[job_id]
         
         # Do not delete job status; retain for polling clients and post-mortem reads
         
@@ -12227,6 +12240,75 @@ class WebSocketProgressManager:
         except Exception as e:
             logger.error(f"Failed to send error for job {job_id}: {e}")
             return False
+    
+    async def send_ping(self, job_id: str) -> bool:
+        """
+        CRITICAL FIX: Send ping to client to check if connection is alive.
+        Part of heartbeat mechanism to detect stale connections.
+        """
+        try:
+            if job_id in self.active_connections:
+                websocket = self.active_connections[job_id]
+                await websocket.send_json({
+                    "type": "ping",
+                    "timestamp": datetime.utcnow().isoformat()
+                })
+                return True
+            return False
+        except Exception as e:
+            logger.warning(f"Failed to send ping to job {job_id}: {e}")
+            # Connection is likely dead, remove it
+            await self.disconnect(job_id)
+            return False
+    
+    async def handle_pong(self, job_id: str):
+        """
+        CRITICAL FIX: Handle pong response from client.
+        Updates last_pong_time to indicate connection is alive.
+        """
+        self.last_pong_time[job_id] = time.time()
+        logger.debug(f"Received pong from job {job_id}")
+    
+    async def cleanup_stale_connections(self):
+        """
+        CRITICAL FIX: Remove stale connections that haven't responded to pings.
+        This prevents memory leaks from zombie connections.
+        """
+        current_time = time.time()
+        stale_jobs = []
+        
+        for job_id, last_pong in list(self.last_pong_time.items()):
+            if current_time - last_pong > self.heartbeat_timeout:
+                stale_jobs.append(job_id)
+        
+        for job_id in stale_jobs:
+            logger.warning(f"Removing stale WebSocket connection for job {job_id} (no pong for {self.heartbeat_timeout}s)")
+            await self.disconnect(job_id)
+        
+        return len(stale_jobs)
+    
+    async def heartbeat_task(self):
+        """
+        CRITICAL FIX: Background task that sends pings and cleans up stale connections.
+        Should be run as a background task in the application lifespan.
+        """
+        while True:
+            try:
+                # Send pings to all active connections
+                for job_id in list(self.active_connections.keys()):
+                    await self.send_ping(job_id)
+                
+                # Clean up stale connections
+                stale_count = await self.cleanup_stale_connections()
+                if stale_count > 0:
+                    logger.info(f"Cleaned up {stale_count} stale WebSocket connections")
+                
+                # Wait before next heartbeat
+                await asyncio.sleep(self.heartbeat_interval)
+                
+            except Exception as e:
+                logger.error(f"Error in WebSocket heartbeat task: {e}")
+                await asyncio.sleep(self.heartbeat_interval)
     
     async def get_job_status(self, job_id: str) -> Optional[Dict[str, Any]]:
         """Get current job status"""

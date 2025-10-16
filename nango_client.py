@@ -142,6 +142,61 @@ class NangoClient:
             # Try urlsafe decode as fallback
             return base64.urlsafe_b64decode(b64)
 
+    async def list_gmail_history(self, provider_config_key: str, connection_id: str, 
+                                 start_history_id: str, max_results: int = 100,
+                                 page_token: Optional[str] = None) -> Dict[str, Any]:
+        """List Gmail history changes since a given historyId.
+        
+        This is the true incremental sync API that returns only changes (new messages, 
+        deleted messages, label changes) since the last sync.
+        
+        API: GET /gmail/v1/users/me/history
+        Docs: https://developers.google.com/gmail/api/reference/rest/v1/users.history/list
+        
+        Args:
+            provider_config_key: Nango provider config key
+            connection_id: Nango connection ID
+            start_history_id: History ID to start from (from previous sync)
+            max_results: Maximum number of history records to return (default 100)
+            page_token: Token for pagination (optional)
+            
+        Returns:
+            Dict containing:
+                - history: List of history records
+                - historyId: Current history ID (save for next sync)
+                - nextPageToken: Token for next page (if more results exist)
+        """
+        url = f"{self.base_url}/proxy/gmail/v1/users/me/history"
+        params = {
+            "startHistoryId": start_history_id,
+            "maxResults": max_results,
+            "historyTypes": ["messageAdded"]  # Only track new messages with attachments
+        }
+        if page_token:
+            params["pageToken"] = page_token
+            
+        _PROVIDER = 'gmail'
+        _METHOD = 'GET'
+        t0 = None
+        try:
+            t0 = time.time()
+        except Exception:
+            pass
+            
+        resp = await self._request_with_retry(
+            'GET', url, timeout=60.0,
+            params=params, headers=self._headers(provider_config_key, connection_id)
+        )
+        
+        try:
+            self.NANGO_API_CALLS.labels(provider=_PROVIDER, method=_METHOD, status=str(resp.status_code)).inc()
+            if t0 is not None:
+                self.NANGO_API_LATENCY.labels(provider=_PROVIDER, method=_METHOD).observe(time.time() - t0)
+        except Exception:
+            pass
+            
+        return resp.json()
+
     # ------------------------- Generic Proxy Helpers -------------------------
     # Prometheus metrics
     NANGO_API_CALLS = Counter('nango_api_calls_total', 'Nango proxy API calls', ['provider', 'method', 'status'])

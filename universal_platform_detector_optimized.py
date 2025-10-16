@@ -48,9 +48,10 @@ class UniversalPlatformDetectorOptimized:
     - Real-time platform updates
     """
     
-    def __init__(self, openai_client=None, cache_client=None, config=None):
+    def __init__(self, openai_client=None, cache_client=None, supabase_client=None, config=None):
         self.openai = openai_client
         self.cache = cache_client
+        self.supabase = supabase_client
         self.config = config or self._get_default_config()
         
         # Comprehensive platform database
@@ -69,11 +70,11 @@ class UniversalPlatformDetectorOptimized:
             'processing_times': []
         }
         
-        # Learning system
+        # Learning system - now persists to database
         self.learning_enabled = True
-        self.detection_history = []
+        self.detection_history = []  # Keep small in-memory buffer for immediate access
         
-        logger.info("✅ UniversalPlatformDetectorOptimized initialized with production-grade features")
+        logger.info("✅ UniversalPlatformDetectorOptimized initialized with production-grade features and persistent learning")
     
     def _get_default_config(self) -> Dict[str, Any]:
         """Get default configuration"""
@@ -759,8 +760,8 @@ class UniversalPlatformDetectorOptimized:
         if len(self.metrics['processing_times']) > 1000:
             self.metrics['processing_times'] = self.metrics['processing_times'][-1000:]
     
-    async def _update_learning_system(self, result: Dict[str, Any], payload: Dict, filename: str):
-        """Update learning system with detection results"""
+    async def _update_learning_system(self, result: Dict[str, Any], payload: Dict, filename: str, user_id: str = None):
+        """Update learning system with detection results - now persists to database"""
         if not self.config['enable_learning']:
             return
         
@@ -775,11 +776,38 @@ class UniversalPlatformDetectorOptimized:
             'timestamp': datetime.utcnow().isoformat()
         }
         
+        # Keep small in-memory buffer for immediate access
         self.detection_history.append(learning_entry)
+        if len(self.detection_history) > 100:  # Keep only last 100 in memory
+            self.detection_history = self.detection_history[-100:]
         
-        # Keep only recent history
-        if len(self.detection_history) > self.config['learning_window']:
-            self.detection_history = self.detection_history[-self.config['learning_window']:]
+        # CRITICAL FIX: Persist to database for permanent learning
+        if self.supabase and user_id:
+            try:
+                detection_log_entry = {
+                    'user_id': user_id,
+                    'detection_id': result['detection_id'],
+                    'detection_type': 'platform',
+                    'detected_value': result['platform'],
+                    'confidence': float(result['confidence']),
+                    'method': result['method'],
+                    'indicators': result['indicators'],
+                    'payload_keys': list(payload.keys()) if isinstance(payload, dict) else [],
+                    'filename': filename,
+                    'detected_at': datetime.utcnow().isoformat(),
+                    'metadata': {
+                        'processing_time': result.get('processing_time'),
+                        'fallback_used': result.get('fallback_used', False)
+                    }
+                }
+                
+                # Insert into detection_log table (async, non-blocking)
+                self.supabase.table('detection_log').insert(detection_log_entry).execute()
+                logger.debug(f"✅ Platform detection logged to database: {result['platform']}")
+                
+            except Exception as e:
+                # Don't fail detection if logging fails
+                logger.warning(f"Failed to persist platform detection to database: {e}")
     
     async def _log_detection_audit(self, detection_id: str, result: Dict[str, Any], user_id: str):
         """Log detection audit information"""

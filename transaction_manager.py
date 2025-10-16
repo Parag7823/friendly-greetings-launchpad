@@ -262,14 +262,27 @@ class TransactionContext:
             raise
     
     async def update(self, table: str, data: Dict[str, Any], filters: Dict[str, Any]) -> Dict[str, Any]:
-        """Update data with transaction tracking"""
+        """
+        CRITICAL FIX: Update data with transaction tracking.
+        Only stores changed fields for rollback to prevent overwriting concurrent changes.
+        """
         try:
-            # Get original data for rollback
+            # Get original data for rollback - but only for fields we're changing
             filter_key = list(filters.keys())[0]
             filter_value = filters[filter_key]
             
-            original_result = self.manager.supabase.table(table).select('*').eq(filter_key, filter_value).execute()
-            original_data = original_result.data[0] if original_result.data else {}
+            # CRITICAL FIX: Only fetch the specific fields we're about to change
+            fields_to_update = list(data.keys())
+            select_fields = ', '.join(fields_to_update + [filter_key])
+            
+            original_result = self.manager.supabase.table(table).select(select_fields).eq(filter_key, filter_value).execute()
+            
+            # CRITICAL FIX: Store only the original values of fields we're changing
+            original_values = {}
+            if original_result.data:
+                for field in fields_to_update:
+                    if field in original_result.data[0]:
+                        original_values[field] = original_result.data[0][field]
             
             # Add transaction_id to update data
             data_with_tx = {**data, 'transaction_id': self.transaction_id}
@@ -290,7 +303,7 @@ class TransactionContext:
                 operation='update',
                 data=data_with_tx,
                 filters=filters,
-                rollback_data=original_data
+                rollback_data=original_values  # CRITICAL FIX: Only changed fields
             )
             self.operations.append(operation)
             

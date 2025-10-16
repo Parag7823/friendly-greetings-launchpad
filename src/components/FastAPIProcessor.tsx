@@ -141,7 +141,7 @@ export class FastAPIProcessor {
     }
   }
 
-  private setupWebSocketConnection(jobId: string): Promise<any> {
+  private async connectWebSocket(jobId: string): Promise<any> {
     return new Promise((resolve, reject) => {
       // Build WS URL from centralized config
       const wsUrl = `${config.wsUrl}/ws/${jobId}`;
@@ -218,13 +218,53 @@ export class FastAPIProcessor {
       };
 
       ws.onclose = (event) => {
-        // WebSocket connection closed
+        // CRITICAL FIX: Implement reconnection logic before falling back to polling
         cleanup();
         if (event.code !== 1000 && event.reason !== 'Processing completed' && !isCleanedUp) {
-          reject(new Error('WebSocket connection closed unexpectedly'));
+          // Try to reconnect before giving up
+          this.attemptWebSocketReconnection(jobId, resolve, reject, 0);
         }
       };
     });
+  }
+
+  private async attemptWebSocketReconnection(
+    jobId: string, 
+    resolve: (value: any) => void, 
+    reject: (reason?: any) => void,
+    attemptNumber: number
+  ): Promise<void> {
+    /**
+     * CRITICAL FIX: Exponential backoff reconnection strategy.
+     * Prevents permanent downgrade to polling after temporary network issues.
+     * 
+     * Reconnection attempts: 1s, 2s, 4s, 8s, 16s (max 5 attempts)
+     * Only falls back to polling after all attempts fail.
+     */
+    const MAX_RECONNECT_ATTEMPTS = config.websocket.reconnectAttempts;
+    const BASE_DELAY = config.websocket.reconnectBaseDelay;
+    
+    if (attemptNumber >= MAX_RECONNECT_ATTEMPTS) {
+      console.warn(`WebSocket reconnection failed after ${MAX_RECONNECT_ATTEMPTS} attempts - falling back to polling`);
+      reject(new Error('WebSocket connection closed unexpectedly - will use polling fallback'));
+      return;
+    }
+    
+    // Calculate exponential backoff delay
+    const delay = BASE_DELAY * Math.pow(2, attemptNumber);
+    console.log(`Attempting WebSocket reconnection ${attemptNumber + 1}/${MAX_RECONNECT_ATTEMPTS} in ${delay}ms...`);
+    
+    await new Promise(resolve => setTimeout(resolve, delay));
+    
+    try {
+      // Attempt to reconnect
+      const result = await this.connectWebSocket(jobId);
+      resolve(result);
+    } catch (error) {
+      // Reconnection failed, try again
+      console.warn(`WebSocket reconnection attempt ${attemptNumber + 1} failed:`, error);
+      this.attemptWebSocketReconnection(jobId, resolve, reject, attemptNumber + 1);
+    }
   }
 
   private async pollForResults(jobId: string, initialResponse: any): Promise<any> {
@@ -253,8 +293,8 @@ export class FastAPIProcessor {
           }
         }
         
-        // Wait ~1.5 seconds before next poll for snappier updates
-        await new Promise(resolve => setTimeout(resolve, 1500));
+        // CRITICAL FIX: Use configurable polling interval from config
+        await new Promise(resolve => setTimeout(resolve, config.websocket.pollingInterval));
         attempts++;
         
       } catch (error) {
@@ -447,7 +487,7 @@ export class FastAPIProcessor {
         try {
           // Try WebSocket connection with timeout (60 seconds)
           backendResult = await Promise.race([
-            this.setupWebSocketConnection(jobData.id),
+            this.connectWebSocket(jobData.id),
             new Promise((_, reject) => 
               setTimeout(() => reject(new Error('WebSocket timeout')), 60000) // 60 second timeout for large files
             )
