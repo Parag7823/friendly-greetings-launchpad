@@ -17,7 +17,6 @@ import {
 import { useAuth } from './AuthProvider';
 import { supabase } from '@/integrations/supabase/client';
 import { Badge } from './ui/badge';
-import { ScrollArea } from './ui/scroll-area';
 import { Separator } from './ui/separator';
 import { cn } from '@/lib/utils';
 
@@ -86,21 +85,28 @@ export const DataUniverse = () => {
     return () => clearInterval(interval);
   }, [user?.id]);
 
-  // Load uploaded files
+  // Load uploaded files from ingestion_jobs table
   useEffect(() => {
     const loadUploads = async () => {
       if (!user?.id) return;
       
       try {
         const { data, error } = await supabase
-          .from('uploaded_files')
-          .select('id, filename, upload_timestamp, status, total_rows')
+          .from('ingestion_jobs')
+          .select('id, source_filename, created_at, status, total_rows_processed')
           .eq('user_id', user.id)
-          .order('upload_timestamp', { ascending: false })
+          .order('created_at', { ascending: false })
           .limit(10);
         
         if (!error && data) {
-          setUploads(data);
+          // Map ingestion_jobs to UploadedFile format
+          setUploads(data.map(job => ({
+            id: job.id,
+            filename: job.source_filename || 'Unknown',
+            upload_timestamp: job.created_at,
+            status: job.status,
+            total_rows: job.total_rows_processed || 0
+          })));
         }
       } catch (error) {
         console.error('Failed to load uploads:', error);
@@ -190,7 +196,7 @@ export const DataUniverse = () => {
         </p>
       </div>
 
-      <ScrollArea className="flex-1">
+      <div className="flex-1 overflow-y-auto">
         <div className="p-2 space-y-1">
           {/* Connectors Section */}
           <div>
@@ -357,7 +363,7 @@ export const DataUniverse = () => {
             )}
           </div>
         </div>
-      </ScrollArea>
+      </div>
     </div>
   );
 };
