@@ -56,9 +56,6 @@ export default {
 					DEFAULT: 'hsl(var(--card))',
 					foreground: 'hsl(var(--card-foreground))'
 				},
-				// Finley AI Custom Colors
-				'finley-accent': 'hsl(var(--finley-accent))',
-				'finley-light-accent': 'hsl(var(--finley-light-accent))',
 			},
 			borderRadius: {
 				lg: 'var(--radius)',
