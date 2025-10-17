@@ -1,36 +1,42 @@
-// src/App.tsx
-import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
-import Sidebar from './components/Sidebar';
-import ContextIntelligence from './components/ContextIntelligence';
-import ReasoningCanvas from './components/ReasoningCanvas';
 import { Toaster } from "@/components/ui/toaster";
+import { Toaster as Sonner } from "@/components/ui/sonner";
+import { TooltipProvider } from "@/components/ui/tooltip";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { AuthProvider } from "@/components/AuthProvider";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
+import Index from "./pages/Index";
+import IntegrationTest from "./pages/IntegrationTest";
+import NotFound from "./pages/NotFound";
+import Integrations from "./pages/Integrations";
+import SyncHistory from "./pages/SyncHistory";
 
-function App() {
-  return (
-    <>
-      <div className="h-screen w-screen bg-background text-foreground flex">
-        <PanelGroup direction="horizontal">
-          {/* Left Panel (Sidebar) */}
-          <Panel defaultSize={20} minSize={15} maxSize={30}>
-            <Sidebar />
-          </Panel>
-          <PanelResizeHandle className="w-1 bg-border hover:bg-primary transition-colors" />
+const queryClient = new QueryClient();
 
-          {/* Center Panel (Context Intelligence) */}
-          <Panel defaultSize={50} minSize={30}>
-            <ContextIntelligence />
-          </Panel>
-          <PanelResizeHandle className="w-1 bg-border hover:bg-primary transition-colors" />
-
-          {/* Right Panel (Reasoning Canvas) */}
-          <Panel defaultSize={30} minSize={20}>
-            <ReasoningCanvas />
-          </Panel>
-        </PanelGroup>
-      </div>
-      <Toaster />
-    </>
-  );
-}
+const App = () => (
+  <ErrorBoundary>
+    <QueryClientProvider client={queryClient}>
+      <AuthProvider>
+        <TooltipProvider>
+          <Toaster />
+          <Sonner />
+          <BrowserRouter>
+            <Routes>
+              <Route path="/" element={<Index />} />
+              <Route path="/chat" element={<Index />} />
+              <Route path="/connectors" element={<Index />} />
+              <Route path="/connectors/:connectionId/history" element={<SyncHistory />} />
+              <Route path="/upload" element={<Index />} />
+              <Route path="/integrations" element={<Integrations />} />
+              <Route path="/test" element={<IntegrationTest />} />
+              {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
+              <Route path="*" element={<NotFound />} />
+            </Routes>
+          </BrowserRouter>
+        </TooltipProvider>
+      </AuthProvider>
+    </QueryClientProvider>
+  </ErrorBoundary>
+);
 
 export default App;
