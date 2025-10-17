@@ -5,44 +5,44 @@
 
 @layer base {
   :root {
-    /* Tcore Branding Colors */
-    --background: 180 44% 7%;      /* Offblack #091717 */
-    --foreground: 45 67% 97%;      /* Paper White #FBFAF4 */
+    /* Finley AI Dark Theme - Premium Black */
+    --background: 0 0% 0%;           /* #000000 - Solid black */
+    --foreground: 0 0% 100%;         /* #FFFFFF - Pure white text */
     
-    --card: 180 30% 10%;           /* #111d1d */
-    --card-foreground: 45 67% 97%; /* Paper White #FBFAF4 */
+    --card: 0 0% 4%;                 /* #0A0A0A - Slightly lighter black for cards */
+    --card-foreground: 0 0% 100%;    /* #FFFFFF - White text on cards */
     
-    --popover: 180 30% 10%;        /* #111d1d */
-    --popover-foreground: 45 67% 97%; /* Paper White #FBFAF4 */
+    --popover: 0 0% 4%;              /* #0A0A0A - Dark popover background */
+    --popover-foreground: 0 0% 100%; /* #FFFFFF - White text in popovers */
     
-    --primary: 188 63% 34%;        /* True Turquoise #20808D */
-    --primary-foreground: 45 67% 97%; /* Paper White #FBFAF4 */
+    --primary: 0 0% 100%;            /* #FFFFFF - White for primary buttons */
+    --primary-foreground: 0 0% 0%;   /* #000000 - Black text on white buttons */
     
-    --secondary: 188 50% 25%;      /* #1f636e */
-    --secondary-foreground: 45 67% 97%; /* Paper White #FBFAF4 */
+    --secondary: 0 0% 8%;            /* #141414 - Dark gray for secondary */
+    --secondary-foreground: 0 0% 100%; /* #FFFFFF - White text on secondary */
     
-    --muted: 180 20% 15%;          /* #1e2b2b */
-    --muted-foreground: 180 10% 60%; /* #8c9999 */
+    --muted: 0 0% 8%;                /* #141414 - Muted background */
+    --muted-foreground: 0 0% 63%;    /* #A0A0A0 - Muted text */
     
-    --accent: 188 63% 34%;         /* True Turquoise #20808D */
-    --accent-foreground: 45 67% 97%; /* Paper White #FBFAF4 */
+    --accent: 0 0% 8%;               /* #141414 - Accent background */
+    --accent-foreground: 0 0% 96%;   /* #F4F4F4 - Light accent text */
     
     --destructive: 0 84% 60%;        /* Red for errors */
     --destructive-foreground: 0 0% 98%; /* Light text on destructive */
     
-    --border: 180 25% 12%;         /* #162222 */
-    --input: 180 25% 12%;          /* #162222 */
-    --ring: 188 63% 34%;           /* True Turquoise #20808D */
+    --border: 0 0% 12%;              /* #1F1F1F - Subtle borders */
+    --input: 0 0% 12%;               /* #1F1F1F - Input backgrounds */
+    --ring: 0 0% 63%;                /* #A0A0A0 - Focus rings */
     
     --radius: 0.5rem;               /* 8px border radius */
     
-    /* Tcore Custom Variables */
-    --brand-offblack: 180 44% 7%;
-    --brand-paper-white: 45 67% 97%;
-    --brand-true-turquoise: 188 63% 34%;
+    /* Finley AI Custom Variables */
+    --finley-accent: 0 0% 63%;       /* #A0A0A0 - Brand accent */
+    --finley-light-accent: 0 0% 96%; /* #F4F4F4 - Light accent */
+    --finley-shadow: 0 0% 0%;        /* Pure black for shadows */
     
     /* Gradients */
-    --gradient-primary: linear-gradient(135deg, hsl(var(--primary)), hsl(var(--brand-paper-white)));
+    --gradient-primary: linear-gradient(135deg, hsl(var(--primary)), hsl(var(--finley-light-accent)));
     --gradient-subtle: linear-gradient(180deg, hsl(var(--background)), hsl(var(--card)));
     
     /* Animations */

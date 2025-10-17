@@ -2,10 +2,7 @@ import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Menu } from 'lucide-react';
 import { FinleySidebar } from './FinleySidebar';
-import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
-import { ContextIntelligence } from './ContextIntelligence';
-import { ReasoningCanvas } from './ReasoningCanvas';
-import { Notifications } from './Notifications';
+import { ChatInterface } from './ChatInterface';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from './AuthProvider';
 import { Button } from './ui/button';
@@ -51,8 +48,6 @@ export const FinleyLayout = () => {
       setCurrentView('marketplace');
     } else if (path.startsWith('/upload')) {
       setCurrentView('upload');
-    } else if (path.startsWith('/notifications')) {
-      setCurrentView('notifications');
     } else {
       setCurrentView('chat');
     }
@@ -64,8 +59,6 @@ export const FinleyLayout = () => {
         return '/connectors';
       case 'upload':
         return '/upload';
-      case 'notifications':
-        return '/notifications';
       case 'chat':
       default:
         return '/chat';
@@ -166,15 +159,15 @@ export const FinleyLayout = () => {
       </motion.div>
       
       {/* Main Content */}
-      <PanelGroup direction="horizontal" className="flex-1">
-        <Panel defaultSize={40} minSize={20}>
-          {currentView === 'notifications' ? <Notifications /> : <ContextIntelligence />}
-        </Panel>
-        <PanelResizeHandle className="w-1 bg-border transition-colors hover:bg-primary" />
-        <Panel defaultSize={60} minSize={30}>
-          <ReasoningCanvas />
-        </Panel>
-      </PanelGroup>
+      <div className="flex-1 flex flex-col min-h-0">
+        {/* Chat Interface */}
+        <div className="flex-1 min-h-0">
+          <ChatInterface 
+            currentView={currentView}
+            onNavigate={handleNavigate}
+          />
+        </div>
+      </div>
     </div>
   );
 };

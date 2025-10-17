@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { 
-  Bell,
+  MessageSquarePlus, 
   Plug, 
   Upload, 
   MessageSquare, 
@@ -298,6 +298,20 @@ export const FinleySidebar = ({ onClose, onNavigate, currentView = 'chat', isCol
                 
       {/* Navigation Items */}
       <div className={`flex-1 space-y-1.5 ${isCollapsed ? 'px-1.5' : 'px-4'}`}>
+        {/* New Chat */}
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant={currentView === 'chat' ? 'secondary' : 'ghost'}
+              className={`w-full h-9 rounded-lg ${isCollapsed ? 'justify-center px-0' : 'justify-start px-2'}`}
+              onClick={handleNewChat}
+            >
+              <MessageSquarePlus className="w-4 h-4" />
+              {!isCollapsed && <span className="font-medium text-sm ml-2">New Chat</span>}
+            </Button>
+          </TooltipTrigger>
+          {isCollapsed && <TooltipContent side="right"><p>New Chat</p></TooltipContent>}
+        </Tooltip>
 
         {/* Connector Marketplace */}
         <Tooltip>
@@ -327,21 +341,6 @@ export const FinleySidebar = ({ onClose, onNavigate, currentView = 'chat', isCol
             </Button>
           </TooltipTrigger>
           {isCollapsed && <TooltipContent side="right"><p>Upload File</p></TooltipContent>}
-        </Tooltip>
-
-        {/* Notifications */}
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              variant={currentView === 'notifications' ? 'secondary' : 'ghost'}
-              className={`w-full h-9 rounded-lg ${isCollapsed ? 'justify-center px-0' : 'justify-start px-2'}`}
-              onClick={() => onNavigate?.('notifications')}
-            >
-              <Bell className="w-4 h-4" />
-              {!isCollapsed && <span className="font-medium text-sm ml-2">Notifications</span>}
-            </Button>
-          </TooltipTrigger>
-          {isCollapsed && <TooltipContent side="right"><p>Notifications</p></TooltipContent>}
         </Tooltip>
 
         {/* Chat History Section */}
