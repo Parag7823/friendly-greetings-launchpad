@@ -12315,7 +12315,7 @@ class UniversalWebSocketManager:
         return await self._get_state(job_id)
 
 # Initialize enhanced WebSocket manager
-websocket_manager = WebSocketProgressManager()
+websocket_manager = UniversalWebSocketManager()
 
 
 async def start_processing_job(user_id: str, job_id: str, storage_path: str, filename: str,
