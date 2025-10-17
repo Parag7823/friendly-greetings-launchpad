@@ -59,7 +59,7 @@ COPY observability_system.py .
 COPY security_system.py .
 COPY nango_client.py .
 COPY arq_worker.py .
-COPY provenance_tracker.py
+COPY provenance_tracker.py .
  
 # Copy built frontend from frontend stage
 COPY --from=frontend-builder /app/frontend/dist ./dist
