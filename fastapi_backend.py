@@ -797,7 +797,7 @@ async def lifespan(app: FastAPI):
                     error_recovery = get_error_recovery_system()
                     result = await error_recovery.cleanup_websocket_connections(manager)
                     if result.success:
-                        logger.info(f"✅ WebSocket cleanup: {result.message}")
+                        logger.info(f"✅ WebSocket cleanup: {len(result.cleaned_records)} connections cleaned")
                 except Exception as e:
                     logger.error(f"❌ WebSocket cleanup failed: {e}")
         
