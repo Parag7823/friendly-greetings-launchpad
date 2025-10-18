@@ -2626,6 +2626,370 @@ async def _xero_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> Dict[
         supabase.table('sync_runs').update({'status': 'failed', 'finished_at': datetime.utcnow().isoformat(), 'error': str(e), 'stats': json.dumps(stats)}).eq('id', sync_run_id).execute()
         JOBS_PROCESSED.labels(provider=provider_key, status='failed').inc()
         raise HTTPException(status_code=500, detail='Xero sync failed')
+
+async def _zoho_books_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> Dict[str, Any]:
+    """
+    Zoho Books ingestion: fetch Invoices, Bills, and Contacts via Zoho Books API.
+    
+    ✅ UNIFIED PIPELINE: Uses the main ExcelProcessor pipeline for:
+    - Multi-phased duplicate detection
+    - Advanced data enrichment
+    - Standardized entity resolution
+    - Consistent data semantics across all data sources
+    
+    Data flow: API → CSV format → ExcelProcessor → raw_events (with full enrichment)
+    """
+    provider_key = NANGO_ZOHO_BOOKS_INTEGRATION_ID
+    connection_id = req.connection_id
+    user_id = req.user_id
+    stats = {'records_fetched': 0, 'actions_used': 0, 'attachments_saved': 0, 'queued_jobs': 0, 'skipped': 0}
+
+    # Ensure connector and user_connection
+    conn_row = supabase.table('connectors').select('id').eq('provider', provider_key).limit(1).execute()
+    connector_id = conn_row.data[0]['id'] if conn_row.data else None
+    if not connector_id:
+        try:
+            res = supabase.table('connectors').insert({
+                'provider': provider_key,
+                'integration_id': provider_key,
+                'auth_type': 'OAUTH2',
+                'scopes': json.dumps([]),
+                'endpoints_needed': json.dumps([]),
+                'enabled': True
+            }).execute()
+            connector_id = (res.data[0]['id'] if res and res.data else None)
+        except Exception as e:
+            logger.warning(f"Zoho Books connectors upsert failed: {e}")
+    try:
+        supabase.table('user_connections').insert({
+            'user_id': user_id,
+            'connector_id': connector_id,
+            'nango_connection_id': connection_id,
+            'status': 'active',
+            'sync_mode': 'pull'
+        }).execute()
+    except Exception:
+        pass
+    uc_row = supabase.table('user_connections').select('id, metadata').eq('nango_connection_id', connection_id).limit(1).execute()
+    user_connection_id = uc_row.data[0]['id'] if uc_row.data else None
+    uc_meta = (uc_row.data[0].get('metadata') if uc_row.data else {}) or {}
+    if isinstance(uc_meta, str):
+        try:
+            uc_meta = json.loads(uc_meta)
+        except Exception:
+            uc_meta = {}
+
+    # Start sync run
+    sync_run_id = str(uuid.uuid4())
+    try:
+        transaction_manager = get_transaction_manager()
+        async with transaction_manager.transaction(
+            user_id=user_id,
+            operation_type="connector_sync_start"
+        ) as tx:
+            await tx.insert('sync_runs', {
+                'id': sync_run_id,
+                'user_id': user_id,
+                'user_connection_id': user_connection_id,
+                'type': req.mode,
+                'status': 'running',
+                'started_at': datetime.utcnow().isoformat(),
+                'stats': json.dumps(stats)
+            })
+    except Exception:
+        pass
+
+    try:
+        # Resolve organization_id (similar to Xero's tenantId)
+        organization_id = uc_meta.get('organization_id') or uc_meta.get('organizationId')
+        if not organization_id:
+            # Try to discover organization from Zoho Books API
+            orgs = await nango.proxy_get('zoho-books', 'organizations', connection_id=connection_id, provider_config_key=provider_key)
+            stats['actions_used'] += 1
+            if isinstance(orgs, dict):
+                org_list = orgs.get('organizations') or []
+                if org_list and isinstance(org_list, list):
+                    organization_id = org_list[0].get('organization_id')
+        
+        if not organization_id:
+            raise HTTPException(status_code=400, detail='Zoho Books organization_id not set; provide via /api/connectors/metadata')
+        
+        # Persist discovered organization_id
+        if 'organization_id' not in uc_meta:
+            try:
+                transaction_manager = get_transaction_manager()
+                async with transaction_manager.transaction(
+                    user_id=user_id,
+                    operation_type="connector_metadata_update"
+                ) as tx:
+                    await tx.update('user_connections', {
+                        'metadata': {**uc_meta, 'organization_id': organization_id}
+                    }, {'nango_connection_id': connection_id})
+                    logger.info(f"✅ Updated Zoho Books metadata: organization_id={organization_id}")
+            except Exception as e:
+                logger.error(f"❌ Failed to update Zoho Books metadata: {e}")
+                raise HTTPException(status_code=500, detail=f"Failed to persist organization_id: {e}")
+
+        limit = max(1, min(req.max_results or 100, 500))
+
+        async def zoho_books_get(path: str, params: Dict[str, Any] | None = None) -> Dict[str, Any]:
+            params = params or {}
+            params['organization_id'] = organization_id
+            page = await nango.proxy_get('zoho-books', path, params=params, connection_id=connection_id, provider_config_key=provider_key)
+            stats['actions_used'] += 1
+            return page
+
+        # Fetch Invoices
+        fetched = 0
+        page_no = 1
+        while fetched < limit:
+            inv_page = await zoho_books_get('invoices', params={'page': page_no, 'per_page': 100})
+            invoices = inv_page.get('invoices') or []
+            if not invoices:
+                break
+            batch_items: List[Dict[str, Any]] = []
+            for inv in invoices:
+                pid = inv.get('invoice_id')
+                if not pid:
+                    stats['skipped'] += 1
+                    continue
+                meta = {
+                    'TxnType': 'Invoice',
+                    'InvoiceNumber': inv.get('invoice_number'),
+                    'Date': inv.get('date'),
+                    'Total': inv.get('total'),
+                    'Status': inv.get('status'),
+                    'CustomerName': inv.get('customer_name'),
+                    'correlation_id': req.correlation_id,
+                }
+                item = {
+                    'user_id': user_id,
+                    'user_connection_id': user_connection_id,
+                    'provider_id': f"Invoice:{pid}",
+                    'kind': 'txn',
+                    'source_ts': inv.get('date'),
+                    'hash': None,
+                    'storage_path': None,
+                    'metadata': meta,
+                    'status': 'fetched'
+                }
+                batch_items.append(item)
+                fetched += 1
+                if fetched >= limit:
+                    break
+            if batch_items:
+                try:
+                    transaction_manager = get_transaction_manager()
+                    async with transaction_manager.transaction(
+                        user_id=user_id,
+                        operation_type="connector_sync_batch"
+                    ) as tx:
+                        for item in batch_items:
+                            try:
+                                await tx.insert('external_items', item)
+                                stats['records_fetched'] += 1
+                            except Exception as insert_err:
+                                if 'duplicate key' in str(insert_err).lower() or 'unique' in str(insert_err).lower():
+                                    stats['skipped'] += 1
+                                else:
+                                    logger.error(f"Zoho Books invoice insert failed: {insert_err}")
+                                    stats['skipped'] += 1
+                except Exception as batch_err:
+                    logger.error(f"Zoho Books invoice batch transaction failed: {batch_err}")
+            if fetched >= limit:
+                break
+            page_no += 1
+
+        # Fetch Bills
+        fetched_b = 0
+        page_b = 1
+        while fetched_b < limit:
+            bill_page = await zoho_books_get('bills', params={'page': page_b, 'per_page': 100})
+            bills = bill_page.get('bills') or []
+            if not bills:
+                break
+            batch_items = []
+            for bill in bills:
+                pid = bill.get('bill_id')
+                if not pid:
+                    stats['skipped'] += 1
+                    continue
+                meta = {
+                    'TxnType': 'Bill',
+                    'BillNumber': bill.get('bill_number'),
+                    'Date': bill.get('date'),
+                    'Total': bill.get('total'),
+                    'Status': bill.get('status'),
+                    'VendorName': bill.get('vendor_name'),
+                    'correlation_id': req.correlation_id,
+                }
+                item = {
+                    'user_id': user_id,
+                    'user_connection_id': user_connection_id,
+                    'provider_id': f"Bill:{pid}",
+                    'kind': 'txn',
+                    'source_ts': bill.get('date'),
+                    'hash': None,
+                    'storage_path': None,
+                    'metadata': meta,
+                    'status': 'fetched'
+                }
+                batch_items.append(item)
+                fetched_b += 1
+                if fetched_b >= limit:
+                    break
+            if batch_items:
+                try:
+                    transaction_manager = get_transaction_manager()
+                    async with transaction_manager.transaction(
+                        user_id=user_id,
+                        operation_type="connector_sync_batch"
+                    ) as tx:
+                        for item in batch_items:
+                            try:
+                                await tx.insert('external_items', item)
+                                stats['records_fetched'] += 1
+                            except Exception as insert_err:
+                                if 'duplicate key' in str(insert_err).lower() or 'unique' in str(insert_err).lower():
+                                    stats['skipped'] += 1
+                                else:
+                                    logger.error(f"Zoho Books bill insert failed: {insert_err}")
+                                    stats['skipped'] += 1
+                except Exception as batch_err:
+                    logger.error(f"Zoho Books bill batch transaction failed: {batch_err}")
+            if fetched_b >= limit:
+                break
+            page_b += 1
+
+        # Process through unified pipeline
+        try:
+            _t0z = time.time()
+            
+            all_zoho_data = []
+            
+            # Fetch all external_items for this sync
+            ext_items_res = supabase.table('external_items').select(
+                'id, provider_id, kind, metadata, source_ts'
+            ).eq('user_connection_id', user_connection_id).eq('status', 'fetched').limit(1000).execute()
+            
+            items = ext_items_res.data or []
+            
+            # Filter by correlation_id if present
+            if req.correlation_id:
+                items = [it for it in items 
+                        if (it.get('metadata') or {}).get('correlation_id') == req.correlation_id]
+            
+            if items:
+                # Convert external_items to standardized format
+                for it in items:
+                    meta = it.get('metadata') or {}
+                    if isinstance(meta, str):
+                        try:
+                            meta = json.loads(meta)
+                        except Exception:
+                            meta = {}
+                    
+                    record = {
+                        'transaction_id': it.get('provider_id'),
+                        'transaction_type': meta.get('TxnType', 'Transaction'),
+                        'document_number': meta.get('InvoiceNumber') or meta.get('BillNumber', ''),
+                        'transaction_date': meta.get('Date', ''),
+                        'total_amount': meta.get('Total', 0),
+                        'entity_name': meta.get('CustomerName') or meta.get('VendorName', ''),
+                        'email': meta.get('Email', ''),
+                        'source': 'Zoho Books',
+                        'source_timestamp': it.get('source_ts', datetime.utcnow().isoformat())
+                    }
+                    all_zoho_data.append(record)
+                
+                # Process through unified pipeline
+                logger.info(f"🔄 Processing {len(all_zoho_data)} Zoho Books records through unified pipeline...")
+                pipeline_result = await _process_api_data_through_pipeline(
+                    user_id=user_id,
+                    data=all_zoho_data,
+                    source_platform='Zoho Books',
+                    sync_run_id=sync_run_id,
+                    user_connection_id=user_connection_id
+                )
+                
+                stats['normalized_events'] = pipeline_result.get('processed_rows', 0)
+                stats['pipeline_job_id'] = pipeline_result.get('job_id')
+                
+                # Mark external_items as processed
+                for it in items:
+                    try:
+                        supabase.table('external_items').update({
+                            'status': 'processed',
+                            'metadata': {**(it.get('metadata') or {}), 'processed_at': datetime.utcnow().isoformat()}
+                        }).eq('id', it['id']).execute()
+                    except Exception:
+                        pass
+                
+                NORMALIZATION_EVENTS.labels(provider='zoho-books').inc(stats['normalized_events'])
+                NORMALIZATION_DURATION.labels(provider='zoho-books').observe(max(0.0, time.time() - _t0z))
+                structured_logger.info("Unified pipeline processing complete", {
+                    "provider": "zoho-books",
+                    "processed_rows": stats['normalized_events'],
+                    "job_id": stats.get('pipeline_job_id')
+                })
+            else:
+                logger.info("No Zoho Books items to process")
+                stats['normalized_events'] = 0
+                
+        except Exception as e:
+            logger.error(f"Zoho Books unified pipeline processing failed: {e}")
+            stats['normalized_events'] = 0
+
+        # Complete sync
+        try:
+            transaction_manager = get_transaction_manager()
+            async with transaction_manager.transaction(
+                user_id=user_id,
+                operation_type="connector_sync_completion"
+            ) as tx:
+                await tx.update('sync_runs', {
+                    'status': 'succeeded',
+                    'finished_at': datetime.utcnow().isoformat(),
+                    'stats': json.dumps(stats)
+                }, {'id': sync_run_id})
+                await tx.update('user_connections', {
+                    'last_synced_at': datetime.utcnow().isoformat()
+                }, {'nango_connection_id': connection_id})
+        except Exception as completion_err:
+            logger.error(f"Failed to update Zoho Books sync completion status: {completion_err}")
+        try:
+            JOBS_PROCESSED.labels(provider=provider_key, status='succeeded').inc()
+        except Exception:
+            pass
+        return {'status': 'succeeded', 'sync_run_id': sync_run_id, 'stats': stats}
+    except HTTPException:
+        supabase.table('sync_runs').update({'status': 'failed', 'finished_at': datetime.utcnow().isoformat(), 'stats': json.dumps(stats)}).eq('id', sync_run_id).execute()
+        JOBS_PROCESSED.labels(provider=provider_key, status='failed').inc()
+        raise
+    except Exception as e:
+        logger.error(f"Zoho Books sync failed: {e}")
+        
+        # Error recovery
+        try:
+            recovery_system = get_error_recovery_system()
+            error_context = ErrorContext(
+                error_id=str(uuid.uuid4()),
+                user_id=user_id,
+                job_id=sync_run_id,
+                transaction_id=None,
+                operation_type='zoho_books_sync',
+                error_message=str(e),
+                error_details={'sync_run_id': sync_run_id, 'connection_id': connection_id, 'provider': provider_key, 'correlation_id': req.correlation_id},
+                severity=ErrorSeverity.HIGH,
+                occurred_at=datetime.utcnow()
+            )
+            await recovery_system.handle_processing_error(error_context)
+        except Exception as recovery_error:
+            logger.error(f"Error recovery failed: {recovery_error}")
+        
+        supabase.table('sync_runs').update({'status': 'failed', 'finished_at': datetime.utcnow().isoformat(), 'error': str(e), 'stats': json.dumps(stats)}).eq('id', sync_run_id).execute()
+        JOBS_PROCESSED.labels(provider=provider_key, status='failed').inc()
+        raise HTTPException(status_code=500, detail='Zoho Books sync failed')
     
     async def _process_excel_streaming(self, file_content: bytes, filename: str, progress_callback=None) -> Dict[str, pd.DataFrame]:
         """Process Excel files using true streaming approach for large files"""
@@ -9877,7 +10241,6 @@ NANGO_ZOHO_MAIL_INTEGRATION_ID = os.environ.get("NANGO_ZOHO_MAIL_INTEGRATION_ID"
 NANGO_ZOHO_BOOKS_INTEGRATION_ID = os.environ.get("NANGO_ZOHO_BOOKS_INTEGRATION_ID", "zoho-books")
 NANGO_QUICKBOOKS_INTEGRATION_ID = os.environ.get("NANGO_QUICKBOOKS_INTEGRATION_ID", "quickbooks-sandbox")
 NANGO_XERO_INTEGRATION_ID = os.environ.get("NANGO_XERO_INTEGRATION_ID", "xero")
-NANGO_SAGE_INTEGRATION_ID = os.environ.get("NANGO_SAGE_INTEGRATION_ID", "sage-accounting")
 
 class ConnectorInitiateRequest(BaseModel):
     provider: str  # expect 'google-mail' for Gmail
@@ -10054,6 +10417,7 @@ async def _enqueue_file_processing(user_id: str, filename: str, storage_path: st
         try:
             supabase.table('ingestion_jobs').insert(job_data).execute()
         except Exception:
+            # ignore duplicates
             pass
         # Dispatch via ARQ when enabled, else Celery, else inline
         if _queue_backend() == 'arq':
@@ -10953,6 +11317,7 @@ async def _dropbox_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> Di
                             stats['queued_jobs'] += 1
                     
                     return item
+
             except Exception as e:
                 errors.append(str(e))
                 return None
@@ -11312,7 +11677,7 @@ async def _gdrive_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> Dic
 
 @app.post("/api/connectors/providers")
 async def list_providers(request: dict):
-    """List supported providers for connectors (Gmail, Zoho Mail, Dropbox, Google Drive, Zoho Books, QuickBooks, Xero, Sage)."""
+    """List supported providers for connectors (Gmail, Zoho Mail, Dropbox, Google Drive, Zoho Books, QuickBooks, Xero)."""
     try:
         user_id = (request or {}).get('user_id') or ''
         session_token = (request or {}).get('session_token')
@@ -11326,8 +11691,7 @@ async def list_providers(request: dict):
                 {'provider': 'google-drive', 'display_name': 'Google Drive', 'integration_id': NANGO_GOOGLE_DRIVE_INTEGRATION_ID, 'auth_type': 'OAUTH2', 'scopes': ['https://www.googleapis.com/auth/drive.readonly'], 'endpoints': ['drive/v3/files']},
                 {'provider': 'zoho-books', 'display_name': 'Zoho Books', 'integration_id': NANGO_ZOHO_BOOKS_INTEGRATION_ID, 'auth_type': 'OAUTH2', 'scopes': [], 'endpoints': []},
                 {'provider': 'quickbooks-sandbox', 'display_name': 'QuickBooks (Sandbox)', 'integration_id': NANGO_QUICKBOOKS_INTEGRATION_ID, 'auth_type': 'OAUTH2', 'scopes': [], 'endpoints': []},
-                {'provider': 'xero', 'display_name': 'Xero', 'integration_id': NANGO_XERO_INTEGRATION_ID, 'auth_type': 'OAUTH2', 'scopes': [], 'endpoints': []},
-                {'provider': 'sage-accounting', 'display_name': 'Sage Accounting', 'integration_id': NANGO_SAGE_INTEGRATION_ID, 'auth_type': 'OAUTH2', 'scopes': [], 'endpoints': []}
+                {'provider': 'xero', 'display_name': 'Xero', 'integration_id': NANGO_XERO_INTEGRATION_ID, 'auth_type': 'OAUTH2', 'scopes': [], 'endpoints': []}
             ]
         }
     except HTTPException:
@@ -11350,7 +11714,6 @@ async def initiate_connector(req: ConnectorInitiateRequest):
             'quickbooks': NANGO_QUICKBOOKS_INTEGRATION_ID,
             'quickbooks-sandbox': NANGO_QUICKBOOKS_INTEGRATION_ID,
             'xero': NANGO_XERO_INTEGRATION_ID,
-            'sage-accounting': NANGO_SAGE_INTEGRATION_ID,
         }
         integ = provider_map.get(req.provider)
         if not integ:
@@ -11373,7 +11736,7 @@ async def connectors_sync(req: ConnectorSyncRequest):
         # Validate provider enum
         allowed = {NANGO_GMAIL_INTEGRATION_ID, NANGO_DROPBOX_INTEGRATION_ID, NANGO_GOOGLE_DRIVE_INTEGRATION_ID,
                    NANGO_ZOHO_MAIL_INTEGRATION_ID, NANGO_ZOHO_BOOKS_INTEGRATION_ID, NANGO_QUICKBOOKS_INTEGRATION_ID,
-                   NANGO_XERO_INTEGRATION_ID, NANGO_SAGE_INTEGRATION_ID}
+                   NANGO_XERO_INTEGRATION_ID}
         if integ not in allowed:
             raise HTTPException(status_code=400, detail="Unsupported provider integration_id")
 
@@ -11429,6 +11792,13 @@ async def connectors_sync(req: ConnectorSyncRequest):
                 JOBS_ENQUEUED.labels(provider=integ, mode=req.mode).inc()
                 return {"status": "queued", "provider": integ, "mode": req.mode}
             return await _xero_sync_run(nango, req)
+        elif integ == NANGO_ZOHO_BOOKS_INTEGRATION_ID:
+            if _queue_backend() == 'arq':
+                pool = await get_arq_pool()
+                await pool.enqueue_job('zoho_books_sync', req.model_dump())
+                JOBS_ENQUEUED.labels(provider=integ, mode=req.mode).inc()
+                return {"status": "queued", "provider": integ, "mode": req.mode}
+            return await _zoho_books_sync_run(nango, req)
         else:
             raise HTTPException(status_code=400, detail="Provider sync not yet implemented")
     except HTTPException:
@@ -11544,6 +11914,63 @@ async def list_user_connections(req: UserConnectionsRequest):
         logger.error(f"List user connections failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+async def _process_webhook_delta_items(user_id: str, user_connection_id: str, provider: str, changed_items: List[Dict], correlation_id: str) -> int:
+    """Process specific changed items from webhook delta (optimized for real-time updates)."""
+    processed = 0
+    try:
+        transaction_manager = get_transaction_manager()
+        async with transaction_manager.transaction(user_id=user_id, operation_type="webhook_delta_processing") as tx:
+            for item in changed_items:
+                # Extract common fields
+                item_id = item.get('id') or item.get('invoice_id') or item.get('InvoiceID') or item.get('message_id')
+                if not item_id:
+                    continue
+                
+                # Build external_item record
+                meta = {'correlation_id': correlation_id, 'webhook_delta': True, **item}
+                ext_item = {
+                    'user_id': user_id,
+                    'user_connection_id': user_connection_id,
+                    'provider_id': str(item_id),
+                    'kind': 'txn',
+                    'source_ts': item.get('date') or item.get('updated_at') or datetime.utcnow().isoformat(),
+                    'metadata': meta,
+                    'status': 'fetched'
+                }
+                
+                try:
+                    await tx.insert('external_items', ext_item)
+                    processed += 1
+                except Exception as e:
+                    if 'duplicate' not in str(e).lower():
+                        logger.warning(f"Delta item insert failed: {e}")
+            
+            # Trigger normalization for delta items
+            if processed > 0:
+                items_res = supabase.table('external_items').select('id, provider_id, metadata').eq('user_connection_id', user_connection_id).eq('status', 'fetched').limit(100).execute()
+                delta_items = [it for it in (items_res.data or []) if (it.get('metadata') or {}).get('correlation_id') == correlation_id]
+                
+                if delta_items:
+                    # Convert to standardized format and process through pipeline
+                    records = []
+                    for it in delta_items:
+                        meta = it.get('metadata') or {}
+                        records.append({
+                            'transaction_id': it.get('provider_id'),
+                            'transaction_type': meta.get('type', 'Transaction'),
+                            'total_amount': meta.get('total') or meta.get('amount', 0),
+                            'transaction_date': meta.get('date', ''),
+                            'source': provider
+                        })
+                    
+                    if records:
+                        await _process_api_data_through_pipeline(user_id, records, provider, str(uuid.uuid4()), user_connection_id)
+        
+        return processed
+    except Exception as e:
+        logger.error(f"Webhook delta processing error: {e}")
+        return 0
+
 @app.post("/api/webhooks/nango")
 async def nango_webhook(request: Request):
     """Nango webhook receiver with HMAC verification and idempotency.
@@ -11618,22 +12045,44 @@ async def nango_webhook(request: Request):
             try:
                 # Check if webhook contains delta/changed items
                 webhook_data = payload.get('data', {})
-                changed_items = webhook_data.get('items', []) or webhook_data.get('changes', [])
+                changed_items = webhook_data.get('items', []) or webhook_data.get('changes', []) or webhook_data.get('records', [])
                 
-                # If webhook has specific changed items, process them directly (delta processing)
-                if changed_items and len(changed_items) < 50:  # Only for small deltas
-                    logger.info(f"🔄 Webhook delta processing: {len(changed_items)} items")
-                    # TODO: Implement process_webhook_delta_items() for direct item processing
-                    # For now, fall through to incremental sync which is still efficient
-                
-                # Lookup connector integration id
+                # Lookup connector integration id first
                 uc = supabase.table('user_connections').select('id, connector_id').eq('nango_connection_id', connection_id).limit(1).execute()
+                user_connection_id = None
                 if uc.data:
+                    user_connection_id = uc.data[0]['id']
                     connector_id = uc.data[0]['connector_id']
                     conn = supabase.table('connectors').select('provider, integration_id').eq('id', connector_id).limit(1).execute()
                     provider = (conn.data[0]['integration_id'] if conn.data else NANGO_GMAIL_INTEGRATION_ID)
                 else:
                     provider = NANGO_GMAIL_INTEGRATION_ID
+                
+                # ✅ DELTA PROCESSING: If webhook has specific changed items, process them directly
+                if changed_items and len(changed_items) <= 50 and user_connection_id:  # Only for small deltas
+                    logger.info(f"⚡ Webhook delta processing: {len(changed_items)} items from {provider}")
+                    try:
+                        delta_processed = await _process_webhook_delta_items(
+                            user_id=user_id,
+                            user_connection_id=user_connection_id,
+                            provider=provider,
+                            changed_items=changed_items,
+                            correlation_id=correlation_id
+                        )
+                        if delta_processed:
+                            logger.info(f"✅ Delta processing complete: {delta_processed} items processed")
+                            # Update webhook status
+                            try:
+                                supabase.table('webhook_events').update({
+                                    'status': 'processed',
+                                    'processed_at': datetime.utcnow().isoformat()
+                                }).eq('event_id', event_id).execute()
+                            except Exception:
+                                pass
+                            return {'status': 'processed', 'delta_items': delta_processed, 'signature_valid': True}
+                    except Exception as delta_err:
+                        logger.warning(f"Delta processing failed, falling back to incremental sync: {delta_err}")
+                        # Fall through to incremental sync
                 
                 logger.info(f"📨 Webhook trigger: provider={provider}, mode=incremental, correlation={correlation_id}")
 
@@ -11778,6 +12227,29 @@ async def nango_webhook(request: Request):
                         nango = NangoClient(base_url=NANGO_BASE_URL)
                         asyncio.create_task(_xero_sync_run(nango, req))
                         JOBS_ENQUEUED.labels(provider=NANGO_XERO_INTEGRATION_ID, mode='incremental').inc()
+                elif provider == NANGO_ZOHO_BOOKS_INTEGRATION_ID:
+                    req = ConnectorSyncRequest(
+                        user_id=user_id,
+                        connection_id=connection_id,
+                        integration_id=NANGO_ZOHO_BOOKS_INTEGRATION_ID,
+                        mode='incremental',
+                        max_results=100,
+                        correlation_id=correlation_id
+                    )
+                    if _queue_backend() == 'arq':
+                        try:
+                            pool = await get_arq_pool()
+                            await pool.enqueue_job('zoho_books_sync', req.model_dump())
+                            JOBS_ENQUEUED.labels(provider=NANGO_ZOHO_BOOKS_INTEGRATION_ID, mode='incremental').inc()
+                        except Exception as e:
+                            logger.warning(f"ARQ dispatch failed in webhook: {e}")
+                            nango = NangoClient(base_url=NANGO_BASE_URL)
+                            asyncio.create_task(_zoho_books_sync_run(nango, req))
+                            JOBS_ENQUEUED.labels(provider=NANGO_ZOHO_BOOKS_INTEGRATION_ID, mode='incremental').inc()
+                    else:
+                        nango = NangoClient(base_url=NANGO_BASE_URL)
+                        asyncio.create_task(_zoho_books_sync_run(nango, req))
+                        JOBS_ENQUEUED.labels(provider=NANGO_ZOHO_BOOKS_INTEGRATION_ID, mode='incremental').inc()
             except Exception as e:
                 logger.error(f"Failed to trigger incremental sync from webhook: {e}")
 

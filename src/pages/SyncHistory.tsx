@@ -35,6 +35,7 @@ export default function SyncHistory() {
     const map: Record<string, { slug: string; color: string; name: string }> = {
       "google-mail": { slug: "gmail", color: "EA4335", name: "Gmail" },
       "zoho-mail": { slug: "zoho", color: "C8202F", name: "Zoho Mail" },
+      "zoho-books": { slug: "zoho", color: "C8202F", name: "Zoho Books" },
       dropbox: { slug: "dropbox", color: "0061FF", name: "Dropbox" },
       "google-drive": { slug: "googledrive", color: "1A73E8", name: "Google Drive" },
       quickbooks: { slug: "intuitquickbooks", color: "2CA01C", name: "QuickBooks" },

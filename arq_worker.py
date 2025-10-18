@@ -15,6 +15,7 @@ from fastapi_backend import (
     _zohomail_sync_run,
     _quickbooks_sync_run,
     _xero_sync_run,
+    _zoho_books_sync_run,
     start_processing_job,
     start_pdf_processing_job,
     supabase,
@@ -26,6 +27,7 @@ from fastapi_backend import (
     NANGO_ZOHO_MAIL_INTEGRATION_ID,
     NANGO_QUICKBOOKS_INTEGRATION_ID,
     NANGO_XERO_INTEGRATION_ID,
+    NANGO_ZOHO_BOOKS_INTEGRATION_ID,
 )
 
 
@@ -134,6 +136,17 @@ async def xero_sync(ctx, req: Dict[str, Any]) -> Dict[str, Any]:
         delay = await _retry_or_dlq(ctx, NANGO_XERO_INTEGRATION_ID, req, e, max_retries=4, base_delay=45)
         if delay is None:
             return {"status": "failed", "provider": NANGO_XERO_INTEGRATION_ID}
+        raise Retry(defer=delay)
+
+
+async def zoho_books_sync(ctx, req: Dict[str, Any]) -> Dict[str, Any]:
+    nango = NangoClient()
+    try:
+        return await _zoho_books_sync_run(nango, ConnectorSyncRequest(**req))
+    except Exception as e:
+        delay = await _retry_or_dlq(ctx, NANGO_ZOHO_BOOKS_INTEGRATION_ID, req, e, max_retries=4, base_delay=45)
+        if delay is None:
+            return {"status": "failed", "provider": NANGO_ZOHO_BOOKS_INTEGRATION_ID}
         raise Retry(defer=delay)
 
 
@@ -269,6 +282,7 @@ class WorkerSettings:
         zoho_mail_sync,
         quickbooks_sync,
         xero_sync,
+        zoho_books_sync,
         process_spreadsheet,
         process_pdf,
         detect_relationships,  # New background task for relationship detection

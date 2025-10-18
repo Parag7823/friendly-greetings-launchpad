@@ -23,12 +23,14 @@ from fastapi_backend import (
     _zohomail_sync_run,
     _quickbooks_sync_run,
     _xero_sync_run,
+    _zoho_books_sync_run,
     NANGO_GMAIL_INTEGRATION_ID,
     NANGO_DROPBOX_INTEGRATION_ID,
     NANGO_GOOGLE_DRIVE_INTEGRATION_ID,
     NANGO_ZOHO_MAIL_INTEGRATION_ID,
     NANGO_QUICKBOOKS_INTEGRATION_ID,
     NANGO_XERO_INTEGRATION_ID,
+    NANGO_ZOHO_BOOKS_INTEGRATION_ID,
 )
 
 logger = logging.getLogger(__name__)
@@ -167,6 +169,14 @@ def sync_xero_connections() -> Dict[str, Any]:
     return asyncio.run(_sync_active_connections('Xero', NANGO_XERO_INTEGRATION_ID, _xero_sync_run))
 
 
+@celery_app.task(name='celery_tasks.sync_zoho_books_connections')
+def sync_zoho_books_connections() -> Dict[str, Any]:
+    """Periodic task: Sync all active Zoho Books connections (runs daily)"""
+    import asyncio
+    logger.info("🔄 Starting periodic Zoho Books sync task")
+    return asyncio.run(_sync_active_connections('Zoho Books', NANGO_ZOHO_BOOKS_INTEGRATION_ID, _zoho_books_sync_run))
+
+
 # --------------- Maintenance Tasks ---------------
 
 @celery_app.task(name='celery_tasks.refresh_materialized_views')
@@ -251,6 +261,7 @@ __all__ = [
     'sync_zohomail_connections',
     'sync_quickbooks_connections',
     'sync_xero_connections',
+    'sync_zoho_books_connections',
     'refresh_materialized_views',
     'cleanup_old_failures',
 ]
