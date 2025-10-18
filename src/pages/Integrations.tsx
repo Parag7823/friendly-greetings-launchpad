@@ -162,6 +162,7 @@ const Integrations = () => {
       'xero': <FileText className="w-8 h-8 text-blue-700" />,
       'stripe': <CreditCard className="w-8 h-8 text-purple-600" />,
       'razorpay': <Wallet className="w-8 h-8 text-blue-800" />,
+      'paypal': <CreditCard className="w-8 h-8 text-blue-900" />,
     };
     return iconMap[provider] || <Database className="w-8 h-8 text-gray-600" />;
   };
@@ -228,7 +229,29 @@ const Integrations = () => {
             onAction={handleExcelAction}
           />
 
-          {providers.map((provider) => {
+          {/* Payment Gateways */}
+          <h3 className="text-md font-semibold col-span-1 sm:col-span-2 lg:col-span-3 mt-6 mb-2">Payment Gateways</h3>
+          {providers.filter(p => ['stripe', 'paypal', 'razorpay'].includes(p.provider)).map((provider) => {
+            const connected = isConnected(provider.integration_id);
+            const connection = getConnection(provider.integration_id);
+            
+            return (
+              <IntegrationCard
+                key={provider.provider}
+                icon={getProviderIcon(provider.provider)}
+                title={provider.display_name}
+                description={`Connect your ${provider.display_name} account to sync financial data automatically.`}
+                actionLabel={connected ? "Manage" : "Connect"}
+                onAction={() => connected && connection ? handleManageConnection(connection) : handleConnect(provider)}
+                disabled={connectingProvider === provider.provider}
+                statusLabel={connected ? "Connected" : undefined}
+              />
+            );
+          })}
+
+          {/* Other Integrations */}
+          <h3 className="text-md font-semibold col-span-1 sm:col-span-2 lg:col-span-3 mt-6 mb-2">Other Integrations</h3>
+          {providers.filter(p => !['stripe', 'paypal', 'razorpay'].includes(p.provider)).map((provider) => {
             const connected = isConnected(provider.integration_id);
             const connection = getConnection(provider.integration_id);
             

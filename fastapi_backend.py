@@ -12241,7 +12241,8 @@ async def list_providers(request: dict):
                 {'provider': 'quickbooks-sandbox', 'display_name': 'QuickBooks (Sandbox)', 'integration_id': NANGO_QUICKBOOKS_INTEGRATION_ID, 'auth_type': 'OAUTH2', 'scopes': [], 'endpoints': []},
                 {'provider': 'xero', 'display_name': 'Xero', 'integration_id': NANGO_XERO_INTEGRATION_ID, 'auth_type': 'OAUTH2', 'scopes': [], 'endpoints': []},
                 {'provider': 'stripe', 'display_name': 'Stripe', 'integration_id': NANGO_STRIPE_INTEGRATION_ID, 'auth_type': 'OAUTH2', 'scopes': [], 'endpoints': ['v1/charges', 'v1/invoices']},
-                {'provider': 'razorpay', 'display_name': 'Razorpay', 'integration_id': NANGO_RAZORPAY_INTEGRATION_ID, 'auth_type': 'BASIC', 'scopes': [], 'endpoints': ['v1/payments', 'v1/orders']}
+                {'provider': 'razorpay', 'display_name': 'Razorpay', 'integration_id': NANGO_RAZORPAY_INTEGRATION_ID, 'auth_type': 'BASIC', 'scopes': [], 'endpoints': ['v1/payments', 'v1/orders']},
+                {'provider': 'paypal', 'display_name': 'PayPal', 'integration_id': 'paypal', 'auth_type': 'OAUTH2', 'scopes': [], 'endpoints': []}
             ]
         }
     except HTTPException:
