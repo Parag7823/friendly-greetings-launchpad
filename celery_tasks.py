@@ -24,6 +24,8 @@ from fastapi_backend import (
     _quickbooks_sync_run,
     _xero_sync_run,
     _zoho_books_sync_run,
+    _stripe_sync_run,
+    _razorpay_sync_run,
     NANGO_GMAIL_INTEGRATION_ID,
     NANGO_DROPBOX_INTEGRATION_ID,
     NANGO_GOOGLE_DRIVE_INTEGRATION_ID,
@@ -31,6 +33,8 @@ from fastapi_backend import (
     NANGO_QUICKBOOKS_INTEGRATION_ID,
     NANGO_XERO_INTEGRATION_ID,
     NANGO_ZOHO_BOOKS_INTEGRATION_ID,
+    NANGO_STRIPE_INTEGRATION_ID,
+    NANGO_RAZORPAY_INTEGRATION_ID,
 )
 
 logger = logging.getLogger(__name__)
@@ -175,6 +179,22 @@ def sync_zoho_books_connections() -> Dict[str, Any]:
     import asyncio
     logger.info("🔄 Starting periodic Zoho Books sync task")
     return asyncio.run(_sync_active_connections('Zoho Books', NANGO_ZOHO_BOOKS_INTEGRATION_ID, _zoho_books_sync_run))
+
+
+@celery_app.task(name='celery_tasks.sync_stripe_connections')
+def sync_stripe_connections() -> Dict[str, Any]:
+    """Periodic task: Sync all active Stripe connections (runs daily)"""
+    import asyncio
+    logger.info("🔄 Starting periodic Stripe sync task")
+    return asyncio.run(_sync_active_connections('Stripe', NANGO_STRIPE_INTEGRATION_ID, _stripe_sync_run))
+
+
+@celery_app.task(name='celery_tasks.sync_razorpay_connections')
+def sync_razorpay_connections() -> Dict[str, Any]:
+    """Periodic task: Sync all active Razorpay connections (runs daily)"""
+    import asyncio
+    logger.info("🔄 Starting periodic Razorpay sync task")
+    return asyncio.run(_sync_active_connections('Razorpay', NANGO_RAZORPAY_INTEGRATION_ID, _razorpay_sync_run))
 
 
 # --------------- Maintenance Tasks ---------------

@@ -16,6 +16,8 @@ from fastapi_backend import (
     _quickbooks_sync_run,
     _xero_sync_run,
     _zoho_books_sync_run,
+    _stripe_sync_run,
+    _razorpay_sync_run,
     start_processing_job,
     start_pdf_processing_job,
     supabase,
@@ -28,6 +30,8 @@ from fastapi_backend import (
     NANGO_QUICKBOOKS_INTEGRATION_ID,
     NANGO_XERO_INTEGRATION_ID,
     NANGO_ZOHO_BOOKS_INTEGRATION_ID,
+    NANGO_STRIPE_INTEGRATION_ID,
+    NANGO_RAZORPAY_INTEGRATION_ID,
 )
 
 
@@ -147,6 +151,28 @@ async def zoho_books_sync(ctx, req: Dict[str, Any]) -> Dict[str, Any]:
         delay = await _retry_or_dlq(ctx, NANGO_ZOHO_BOOKS_INTEGRATION_ID, req, e, max_retries=4, base_delay=45)
         if delay is None:
             return {"status": "failed", "provider": NANGO_ZOHO_BOOKS_INTEGRATION_ID}
+        raise Retry(defer=delay)
+
+
+async def stripe_sync(ctx, req: Dict[str, Any]) -> Dict[str, Any]:
+    nango = NangoClient()
+    try:
+        return await _stripe_sync_run(nango, ConnectorSyncRequest(**req))
+    except Exception as e:
+        delay = await _retry_or_dlq(ctx, NANGO_STRIPE_INTEGRATION_ID, req, e, max_retries=4, base_delay=45)
+        if delay is None:
+            return {"status": "failed", "provider": NANGO_STRIPE_INTEGRATION_ID}
+        raise Retry(defer=delay)
+
+
+async def razorpay_sync(ctx, req: Dict[str, Any]) -> Dict[str, Any]:
+    nango = NangoClient()
+    try:
+        return await _razorpay_sync_run(nango, ConnectorSyncRequest(**req))
+    except Exception as e:
+        delay = await _retry_or_dlq(ctx, NANGO_RAZORPAY_INTEGRATION_ID, req, e, max_retries=4, base_delay=45)
+        if delay is None:
+            return {"status": "failed", "provider": NANGO_RAZORPAY_INTEGRATION_ID}
         raise Retry(defer=delay)
 
 
@@ -283,6 +309,8 @@ class WorkerSettings:
         quickbooks_sync,
         xero_sync,
         zoho_books_sync,
+        stripe_sync,
+        razorpay_sync,
         process_spreadsheet,
         process_pdf,
         detect_relationships,  # New background task for relationship detection

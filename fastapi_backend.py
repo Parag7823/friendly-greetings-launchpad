@@ -12816,6 +12816,52 @@ async def nango_webhook(request: Request):
                         nango = NangoClient(base_url=NANGO_BASE_URL)
                         asyncio.create_task(_zoho_books_sync_run(nango, req))
                         JOBS_ENQUEUED.labels(provider=NANGO_ZOHO_BOOKS_INTEGRATION_ID, mode='incremental').inc()
+                elif provider == NANGO_STRIPE_INTEGRATION_ID:
+                    req = ConnectorSyncRequest(
+                        user_id=user_id,
+                        connection_id=connection_id,
+                        integration_id=NANGO_STRIPE_INTEGRATION_ID,
+                        mode='incremental',
+                        max_results=100,
+                        correlation_id=correlation_id
+                    )
+                    if _queue_backend() == 'arq':
+                        try:
+                            pool = await get_arq_pool()
+                            await pool.enqueue_job('stripe_sync', req.model_dump())
+                            JOBS_ENQUEUED.labels(provider=NANGO_STRIPE_INTEGRATION_ID, mode='incremental').inc()
+                        except Exception as e:
+                            logger.warning(f"ARQ dispatch failed in webhook: {e}")
+                            nango = NangoClient(base_url=NANGO_BASE_URL)
+                            asyncio.create_task(_stripe_sync_run(nango, req))
+                            JOBS_ENQUEUED.labels(provider=NANGO_STRIPE_INTEGRATION_ID, mode='incremental').inc()
+                    else:
+                        nango = NangoClient(base_url=NANGO_BASE_URL)
+                        asyncio.create_task(_stripe_sync_run(nango, req))
+                        JOBS_ENQUEUED.labels(provider=NANGO_STRIPE_INTEGRATION_ID, mode='incremental').inc()
+                elif provider == NANGO_RAZORPAY_INTEGRATION_ID:
+                    req = ConnectorSyncRequest(
+                        user_id=user_id,
+                        connection_id=connection_id,
+                        integration_id=NANGO_RAZORPAY_INTEGRATION_ID,
+                        mode='incremental',
+                        max_results=100,
+                        correlation_id=correlation_id
+                    )
+                    if _queue_backend() == 'arq':
+                        try:
+                            pool = await get_arq_pool()
+                            await pool.enqueue_job('razorpay_sync', req.model_dump())
+                            JOBS_ENQUEUED.labels(provider=NANGO_RAZORPAY_INTEGRATION_ID, mode='incremental').inc()
+                        except Exception as e:
+                            logger.warning(f"ARQ dispatch failed in webhook: {e}")
+                            nango = NangoClient(base_url=NANGO_BASE_URL)
+                            asyncio.create_task(_razorpay_sync_run(nango, req))
+                            JOBS_ENQUEUED.labels(provider=NANGO_RAZORPAY_INTEGRATION_ID, mode='incremental').inc()
+                    else:
+                        nango = NangoClient(base_url=NANGO_BASE_URL)
+                        asyncio.create_task(_razorpay_sync_run(nango, req))
+                        JOBS_ENQUEUED.labels(provider=NANGO_RAZORPAY_INTEGRATION_ID, mode='incremental').inc()
             except Exception as e:
                 logger.error(f"Failed to trigger incremental sync from webhook: {e}")
 
