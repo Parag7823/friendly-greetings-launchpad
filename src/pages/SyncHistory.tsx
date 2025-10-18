@@ -41,6 +41,8 @@ export default function SyncHistory() {
       quickbooks: { slug: "intuitquickbooks", color: "2CA01C", name: "QuickBooks" },
       "quickbooks-sandbox": { slug: "intuitquickbooks", color: "2CA01C", name: "QuickBooks (Sandbox)" },
       xero: { slug: "xero", color: "13B5EA", name: "Xero" },
+      stripe: { slug: "stripe", color: "635BFF", name: "Stripe" },
+      razorpay: { slug: "razorpay", color: "0C2451", name: "Razorpay" },
     };
     return map[integ] || { slug: "cloud", color: "6B7280", name: integ || "Connection" };
   }, [header]);

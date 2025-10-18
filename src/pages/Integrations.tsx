@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { FileSpreadsheet, Mail, Database, BookOpen, DollarSign, FileText, HardDrive, Cloud } from "lucide-react";
+import { FileSpreadsheet, Mail, Database, BookOpen, DollarSign, FileText, HardDrive, Cloud, CreditCard, Wallet } from "lucide-react";
 import IntegrationCard from "@/components/IntegrationCard";
 import { useAuth } from "@/components/AuthProvider";
 import { config } from "@/config";
@@ -160,6 +160,8 @@ const Integrations = () => {
       'zoho-books': <BookOpen className="w-8 h-8 text-orange-600" />,
       'quickbooks-sandbox': <DollarSign className="w-8 h-8 text-green-600" />,
       'xero': <FileText className="w-8 h-8 text-blue-700" />,
+      'stripe': <CreditCard className="w-8 h-8 text-purple-600" />,
+      'razorpay': <Wallet className="w-8 h-8 text-blue-800" />,
     };
     return iconMap[provider] || <Database className="w-8 h-8 text-gray-600" />;
   };
