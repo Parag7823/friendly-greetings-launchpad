@@ -24,7 +24,7 @@ const App = () => (
             <Routes>
               <Route path="/" element={<Index />} />
               <Route path="/chat" element={<Index />} />
-              <Route path="/connectors" element={<Index />} />
+              <Route path="/connectors" element={<Integrations />} />
               <Route path="/connectors/:connectionId/history" element={<SyncHistory />} />
               <Route path="/upload" element={<Index />} />
               <Route path="/integrations" element={<Integrations />} />

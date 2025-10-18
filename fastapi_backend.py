@@ -10967,22 +10967,61 @@ async def _enqueue_file_processing(user_id: str, filename: str, storage_path: st
         except Exception:
             # ignore duplicates
             pass
-        # Dispatch via ARQ when enabled, else Celery, else inline
+        # Dispatch via ARQ when enabled, else Celery
         if _queue_backend() == 'arq':
             try:
                 pool = await get_arq_pool()
                 await pool.enqueue_job('process_spreadsheet', user_id, filename, storage_path, job_id)
+                logger.info(f"✅ Spreadsheet processing job {job_id} queued successfully via ARQ")
             except Exception as e:
-                logger.warning(f"ARQ dispatch failed, falling back to inline: {e}")
-                asyncio.create_task(start_processing_job(user_id, job_id, storage_path, filename))
+                logger.error(f"❌ ARQ dispatch failed for spreadsheet processing: {e}")
+                # Update job status to failed
+                try:
+                    supabase.table('ingestion_jobs').update({
+                        'status': 'failed',
+                        'error_message': 'Background worker unavailable',
+                        'updated_at': datetime.utcnow().isoformat()
+                    }).eq('id', job_id).execute()
+                except Exception:
+                    pass
+                raise HTTPException(
+                    status_code=503,
+                    detail="Background worker unavailable. Please try again in a few moments."
+                )
         elif _use_celery() and task_spreadsheet_processing:
             try:
                 task_spreadsheet_processing.apply_async(args=[user_id, filename, storage_path, job_id])
+                logger.info(f"✅ Spreadsheet processing job {job_id} queued successfully via Celery")
             except Exception as e:
-                logger.warning(f"Celery dispatch failed, falling back to inline task: {e}")
-                asyncio.create_task(start_processing_job(user_id, job_id, storage_path, filename))
+                logger.error(f"❌ Celery dispatch failed for spreadsheet processing: {e}")
+                # Update job status to failed
+                try:
+                    supabase.table('ingestion_jobs').update({
+                        'status': 'failed',
+                        'error_message': 'Background worker unavailable',
+                        'updated_at': datetime.utcnow().isoformat()
+                    }).eq('id', job_id).execute()
+                except Exception:
+                    pass
+                raise HTTPException(
+                    status_code=503,
+                    detail="Background worker unavailable. Please try again in a few moments."
+                )
         else:
-            asyncio.create_task(start_processing_job(user_id, job_id, storage_path, filename))
+            # No background worker configured
+            logger.error("❌ No background worker configured for spreadsheet processing")
+            try:
+                supabase.table('ingestion_jobs').update({
+                    'status': 'failed',
+                    'error_message': 'Background worker not configured',
+                    'updated_at': datetime.utcnow().isoformat()
+                }).eq('id', job_id).execute()
+            except Exception:
+                pass
+            raise HTTPException(
+                status_code=503,
+                detail="Background worker not configured. Please contact support."
+            )
         return job_id
     except Exception as e:
         logger.error(f"Failed to enqueue processing: {e}")
@@ -11008,17 +11047,56 @@ async def _enqueue_pdf_processing(user_id: str, filename: str, storage_path: str
             try:
                 pool = await get_arq_pool()
                 await pool.enqueue_job('process_pdf', user_id, filename, storage_path, job_id)
+                logger.info(f"✅ PDF processing job {job_id} queued successfully via ARQ")
             except Exception as e:
-                logger.warning(f"ARQ dispatch failed for PDF, falling back: {e}")
-                asyncio.create_task(start_pdf_processing_job(user_id, job_id, storage_path, filename))
+                logger.error(f"❌ ARQ dispatch failed for PDF processing: {e}")
+                # Update job status to failed
+                try:
+                    supabase.table('ingestion_jobs').update({
+                        'status': 'failed',
+                        'error_message': 'Background worker unavailable',
+                        'updated_at': datetime.utcnow().isoformat()
+                    }).eq('id', job_id).execute()
+                except Exception:
+                    pass
+                raise HTTPException(
+                    status_code=503,
+                    detail="Background worker unavailable. Please try again in a few moments."
+                )
         elif _use_celery() and task_pdf_processing:
             try:
                 task_pdf_processing.apply_async(args=[user_id, filename, storage_path, job_id])
+                logger.info(f"✅ PDF processing job {job_id} queued successfully via Celery")
             except Exception as e:
-                logger.warning(f"Celery dispatch failed for PDF, falling back: {e}")
-                asyncio.create_task(start_pdf_processing_job(user_id, job_id, storage_path, filename))
+                logger.error(f"❌ Celery dispatch failed for PDF processing: {e}")
+                # Update job status to failed
+                try:
+                    supabase.table('ingestion_jobs').update({
+                        'status': 'failed',
+                        'error_message': 'Background worker unavailable',
+                        'updated_at': datetime.utcnow().isoformat()
+                    }).eq('id', job_id).execute()
+                except Exception:
+                    pass
+                raise HTTPException(
+                    status_code=503,
+                    detail="Background worker unavailable. Please try again in a few moments."
+                )
         else:
-            asyncio.create_task(start_pdf_processing_job(user_id, job_id, storage_path, filename))
+            # No background worker configured
+            logger.error("❌ No background worker configured for PDF processing")
+            try:
+                supabase.table('ingestion_jobs').update({
+                    'status': 'failed',
+                    'error_message': 'Background worker not configured',
+                    'updated_at': datetime.utcnow().isoformat()
+                }).eq('id', job_id).execute()
+            except Exception:
+                pass
+            raise HTTPException(
+                status_code=503,
+                detail="Background worker not configured. Please contact support."
+            )
         return job_id
     except Exception as e:
         logger.error(f"Failed to enqueue PDF processing: {e}")
@@ -12298,74 +12376,177 @@ async def connectors_sync(req: ConnectorSyncRequest):
         nango = NangoClient(base_url=NANGO_BASE_URL)
         if integ == NANGO_GMAIL_INTEGRATION_ID:
             if _queue_backend() == 'arq':
-                pool = await get_arq_pool()
-                await pool.enqueue_job('gmail_sync', req.model_dump())
-                JOBS_ENQUEUED.labels(provider=integ, mode=req.mode).inc()
-                return {"status": "queued", "provider": integ, "mode": req.mode}
+                try:
+                    pool = await get_arq_pool()
+                    await pool.enqueue_job('gmail_sync', req.model_dump())
+                    JOBS_ENQUEUED.labels(provider=integ, mode=req.mode).inc()
+                    return {"status": "queued", "provider": integ, "mode": req.mode}
+                except Exception as e:
+                    logger.error(f"ARQ dispatch failed for Gmail sync: {e}")
+                    raise HTTPException(
+                        status_code=503,
+                        detail="Background worker unavailable. Please try again in a few moments."
+                    )
             if _use_celery() and task_gmail_sync:
                 try:
                     task_gmail_sync.apply_async(args=[req.model_dump()])
                     JOBS_ENQUEUED.labels(provider=integ, mode=req.mode).inc()
                     return {"status": "queued", "provider": integ, "mode": req.mode}
                 except Exception as e:
-                    logger.warning(f"Celery dispatch for Gmail sync failed, falling back inline: {e}")
-            return await _gmail_sync_run(nango, req)
+                    logger.error(f"Celery dispatch for Gmail sync failed: {e}")
+                    raise HTTPException(
+                        status_code=503,
+                        detail="Background worker unavailable. Please try again in a few moments."
+                    )
+            # No background worker configured - return error
+            raise HTTPException(
+                status_code=503,
+                detail="Background worker not configured. Please contact support."
+            )
         elif integ == NANGO_DROPBOX_INTEGRATION_ID:
             if _queue_backend() == 'arq':
-                pool = await get_arq_pool()
-                await pool.enqueue_job('dropbox_sync', req.model_dump())
-                JOBS_ENQUEUED.labels(provider=integ, mode=req.mode).inc()
-                return {"status": "queued", "provider": integ, "mode": req.mode}
-            return await _dropbox_sync_run(nango, req)
+                try:
+                    pool = await get_arq_pool()
+                    await pool.enqueue_job('dropbox_sync', req.model_dump())
+                    JOBS_ENQUEUED.labels(provider=integ, mode=req.mode).inc()
+                    return {"status": "queued", "provider": integ, "mode": req.mode}
+                except Exception as e:
+                    logger.error(f"ARQ dispatch failed for Dropbox sync: {e}")
+                    raise HTTPException(
+                        status_code=503,
+                        detail="Background worker unavailable. Please try again in a few moments."
+                    )
+            # No background worker configured - return error
+            raise HTTPException(
+                status_code=503,
+                detail="Background worker not configured. Please contact support."
+            )
         elif integ == NANGO_GOOGLE_DRIVE_INTEGRATION_ID:
             if _queue_backend() == 'arq':
-                pool = await get_arq_pool()
-                await pool.enqueue_job('gdrive_sync', req.model_dump())
-                JOBS_ENQUEUED.labels(provider=integ, mode=req.mode).inc()
-                return {"status": "queued", "provider": integ, "mode": req.mode}
-            return await _gdrive_sync_run(nango, req)
+                try:
+                    pool = await get_arq_pool()
+                    await pool.enqueue_job('gdrive_sync', req.model_dump())
+                    JOBS_ENQUEUED.labels(provider=integ, mode=req.mode).inc()
+                    return {"status": "queued", "provider": integ, "mode": req.mode}
+                except Exception as e:
+                    logger.error(f"ARQ dispatch failed for Google Drive sync: {e}")
+                    raise HTTPException(
+                        status_code=503,
+                        detail="Background worker unavailable. Please try again in a few moments."
+                    )
+            # No background worker configured - return error
+            raise HTTPException(
+                status_code=503,
+                detail="Background worker not configured. Please contact support."
+            )
         elif integ == NANGO_ZOHO_MAIL_INTEGRATION_ID:
             if _queue_backend() == 'arq':
-                pool = await get_arq_pool()
-                await pool.enqueue_job('zoho_mail_sync', req.model_dump())
-                JOBS_ENQUEUED.labels(provider=integ, mode=req.mode).inc()
-                return {"status": "queued", "provider": integ, "mode": req.mode}
-            return await _zohomail_sync_run(nango, req)
+                try:
+                    pool = await get_arq_pool()
+                    await pool.enqueue_job('zoho_mail_sync', req.model_dump())
+                    JOBS_ENQUEUED.labels(provider=integ, mode=req.mode).inc()
+                    return {"status": "queued", "provider": integ, "mode": req.mode}
+                except Exception as e:
+                    logger.error(f"ARQ dispatch failed for Zoho Mail sync: {e}")
+                    raise HTTPException(
+                        status_code=503,
+                        detail="Background worker unavailable. Please try again in a few moments."
+                    )
+            # No background worker configured - return error
+            raise HTTPException(
+                status_code=503,
+                detail="Background worker not configured. Please contact support."
+            )
         elif integ == NANGO_QUICKBOOKS_INTEGRATION_ID:
             if _queue_backend() == 'arq':
-                pool = await get_arq_pool()
-                await pool.enqueue_job('quickbooks_sync', req.model_dump())
-                JOBS_ENQUEUED.labels(provider=integ, mode=req.mode).inc()
-                return {"status": "queued", "provider": integ, "mode": req.mode}
-            return await _quickbooks_sync_run(nango, req)
+                try:
+                    pool = await get_arq_pool()
+                    await pool.enqueue_job('quickbooks_sync', req.model_dump())
+                    JOBS_ENQUEUED.labels(provider=integ, mode=req.mode).inc()
+                    return {"status": "queued", "provider": integ, "mode": req.mode}
+                except Exception as e:
+                    logger.error(f"ARQ dispatch failed for QuickBooks sync: {e}")
+                    raise HTTPException(
+                        status_code=503,
+                        detail="Background worker unavailable. Please try again in a few moments."
+                    )
+            # No background worker configured - return error
+            raise HTTPException(
+                status_code=503,
+                detail="Background worker not configured. Please contact support."
+            )
         elif integ == NANGO_XERO_INTEGRATION_ID:
             if _queue_backend() == 'arq':
-                pool = await get_arq_pool()
-                await pool.enqueue_job('xero_sync', req.model_dump())
-                JOBS_ENQUEUED.labels(provider=integ, mode=req.mode).inc()
-                return {"status": "queued", "provider": integ, "mode": req.mode}
-            return await _xero_sync_run(nango, req)
+                try:
+                    pool = await get_arq_pool()
+                    await pool.enqueue_job('xero_sync', req.model_dump())
+                    JOBS_ENQUEUED.labels(provider=integ, mode=req.mode).inc()
+                    return {"status": "queued", "provider": integ, "mode": req.mode}
+                except Exception as e:
+                    logger.error(f"ARQ dispatch failed for Xero sync: {e}")
+                    raise HTTPException(
+                        status_code=503,
+                        detail="Background worker unavailable. Please try again in a few moments."
+                    )
+            # No background worker configured - return error
+            raise HTTPException(
+                status_code=503,
+                detail="Background worker not configured. Please contact support."
+            )
         elif integ == NANGO_ZOHO_BOOKS_INTEGRATION_ID:
             if _queue_backend() == 'arq':
-                pool = await get_arq_pool()
-                await pool.enqueue_job('zoho_books_sync', req.model_dump())
-                JOBS_ENQUEUED.labels(provider=integ, mode=req.mode).inc()
-                return {"status": "queued", "provider": integ, "mode": req.mode}
-            return await _zoho_books_sync_run(nango, req)
+                try:
+                    pool = await get_arq_pool()
+                    await pool.enqueue_job('zoho_books_sync', req.model_dump())
+                    JOBS_ENQUEUED.labels(provider=integ, mode=req.mode).inc()
+                    return {"status": "queued", "provider": integ, "mode": req.mode}
+                except Exception as e:
+                    logger.error(f"ARQ dispatch failed for Zoho Books sync: {e}")
+                    raise HTTPException(
+                        status_code=503,
+                        detail="Background worker unavailable. Please try again in a few moments."
+                    )
+            # No background worker configured - return error
+            raise HTTPException(
+                status_code=503,
+                detail="Background worker not configured. Please contact support."
+            )
         elif integ == NANGO_STRIPE_INTEGRATION_ID:
             if _queue_backend() == 'arq':
-                pool = await get_arq_pool()
-                await pool.enqueue_job('stripe_sync', req.model_dump())
-                JOBS_ENQUEUED.labels(provider=integ, mode=req.mode).inc()
-                return {"status": "queued", "provider": integ, "mode": req.mode}
-            return await _stripe_sync_run(nango, req)
+                try:
+                    pool = await get_arq_pool()
+                    await pool.enqueue_job('stripe_sync', req.model_dump())
+                    JOBS_ENQUEUED.labels(provider=integ, mode=req.mode).inc()
+                    return {"status": "queued", "provider": integ, "mode": req.mode}
+                except Exception as e:
+                    logger.error(f"ARQ dispatch failed for Stripe sync: {e}")
+                    raise HTTPException(
+                        status_code=503,
+                        detail="Background worker unavailable. Please try again in a few moments."
+                    )
+            # No background worker configured - return error
+            raise HTTPException(
+                status_code=503,
+                detail="Background worker not configured. Please contact support."
+            )
         elif integ == NANGO_RAZORPAY_INTEGRATION_ID:
             if _queue_backend() == 'arq':
-                pool = await get_arq_pool()
-                await pool.enqueue_job('razorpay_sync', req.model_dump())
-                JOBS_ENQUEUED.labels(provider=integ, mode=req.mode).inc()
-                return {"status": "queued", "provider": integ, "mode": req.mode}
-            return await _razorpay_sync_run(nango, req)
+                try:
+                    pool = await get_arq_pool()
+                    await pool.enqueue_job('razorpay_sync', req.model_dump())
+                    JOBS_ENQUEUED.labels(provider=integ, mode=req.mode).inc()
+                    return {"status": "queued", "provider": integ, "mode": req.mode}
+                except Exception as e:
+                    logger.error(f"ARQ dispatch failed for Razorpay sync: {e}")
+                    raise HTTPException(
+                        status_code=503,
+                        detail="Background worker unavailable. Please try again in a few moments."
+                    )
+            # No background worker configured - return error
+            raise HTTPException(
+                status_code=503,
+                detail="Background worker not configured. Please contact support."
+            )
         else:
             raise HTTPException(status_code=400, detail="Provider sync not yet implemented")
     except HTTPException:
