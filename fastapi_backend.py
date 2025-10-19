@@ -12272,13 +12272,17 @@ async def initiate_connector(req: ConnectorInitiateRequest):
         integ = provider_map.get(req.provider)
         if not integ:
             raise HTTPException(status_code=400, detail="Unsupported provider")
+        
+        logger.info(f"Creating Nango Connect session for provider={req.provider}, integration_id={integ}, user_id={req.user_id}")
         nango = NangoClient(base_url=NANGO_BASE_URL)
         session = await nango.create_connect_session(end_user={'id': req.user_id}, allowed_integrations=[integ])
+        
+        logger.info(f"Nango Connect session created: {json.dumps(session)}")
         return {'status': 'ok', 'integration_id': integ, 'connect_session': session}
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Initiate connector failed: {e}")
+        logger.error(f"Initiate connector failed for provider={req.provider}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/connectors/sync")

@@ -112,8 +112,13 @@ const Integrations = () => {
       }
 
       const data = await resp.json();
+      console.log('Nango Connect Response:', data);
+      
       const session = data?.connect_session || {};
+      console.log('Connect Session:', session);
+      
       const url = session.connect_url || session.url || session.authorization_url || session.hosted_url;
+      console.log('Authorization URL:', url);
       
       if (url) {
         window.open(url as string, '_blank', 'noopener,noreferrer');
@@ -127,6 +132,7 @@ const Integrations = () => {
           fetchProvidersAndConnections();
         }, 3000);
       } else {
+        console.error('No URL found in session:', session);
         throw new Error('No authorization URL received');
       }
     } catch (error) {
