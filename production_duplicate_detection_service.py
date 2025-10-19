@@ -27,15 +27,15 @@ import logging
 import os
 import re
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from difflib import SequenceMatcher
 from enum import Enum
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 import pandas as pd
 from supabase import Client
-from difflib import SequenceMatcher
 
 # Configure structured logging
 logger = logging.getLogger(__name__)

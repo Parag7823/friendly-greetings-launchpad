@@ -576,6 +576,11 @@ class SecurityValidator:
         """
         violations = []
         
+        # Check filename length (255 character limit)
+        MAX_FILENAME_LENGTH = 255
+        if len(filename) > MAX_FILENAME_LENGTH:
+            violations.append(f"Filename too long: {len(filename)} characters (max: {MAX_FILENAME_LENGTH})")
+        
         # Check file size (500MB limit)
         MAX_FILE_SIZE = 500 * 1024 * 1024  # 500MB
         if file_size > MAX_FILE_SIZE:
