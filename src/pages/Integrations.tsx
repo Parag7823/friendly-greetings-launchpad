@@ -112,29 +112,30 @@ const Integrations = () => {
       }
 
       const data = await resp.json();
-      console.log('Nango Connect Response:', data);
-      
       const session = data?.connect_session || {};
-      console.log('Connect Session:', session);
-      
       const url = session.connect_url || session.url || session.authorization_url || session.hosted_url;
-      console.log('Authorization URL:', url);
       
-      if (url) {
-        window.open(url as string, '_blank', 'noopener,noreferrer');
-        toast({
-          title: "Connection Initiated",
-          description: `Opening ${provider.display_name} authorization window...`,
-        });
-        
-        // Refresh connections after a delay
-        setTimeout(() => {
-          fetchProvidersAndConnections();
-        }, 3000);
-      } else {
-        console.error('No URL found in session:', session);
-        throw new Error('No authorization URL received');
+      if (!url) {
+        console.error('No authorization URL in response:', data);
+        throw new Error('No authorization URL received from server');
       }
+      
+      // Open Nango Connect UI in new window
+      const connectWindow = window.open(url as string, '_blank', 'width=600,height=800,noopener,noreferrer');
+      
+      if (!connectWindow) {
+        throw new Error('Failed to open authorization window. Please allow popups for this site.');
+      }
+      
+      toast({
+        title: "Connection Initiated",
+        description: `Opening ${provider.display_name} authorization window...`,
+      });
+      
+      // Refresh connections after a delay to check if connection was successful
+      setTimeout(() => {
+        fetchProvidersAndConnections();
+      }, 3000);
     } catch (error) {
       console.error('Connection error:', error);
       toast({

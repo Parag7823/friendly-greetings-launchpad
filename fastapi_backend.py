@@ -12278,7 +12278,29 @@ async def initiate_connector(req: ConnectorInitiateRequest):
         session = await nango.create_connect_session(end_user={'id': req.user_id}, allowed_integrations=[integ])
         
         logger.info(f"Nango Connect session created: {json.dumps(session)}")
-        return {'status': 'ok', 'integration_id': integ, 'connect_session': session}
+        
+        # Extract token from Nango response and construct Connect URL
+        session_data = session.get('data', {})
+        token = session_data.get('token')
+        
+        if not token:
+            logger.error(f"No token in Nango session response: {session}")
+            raise HTTPException(status_code=500, detail="Failed to create Nango Connect session")
+        
+        # Construct the Nango Connect URL
+        connect_url = f"https://connect.nango.dev?session_token={token}"
+        
+        # Return response with connect_url for frontend compatibility
+        return {
+            'status': 'ok',
+            'integration_id': integ,
+            'connect_session': {
+                'token': token,
+                'expires_at': session_data.get('expires_at'),
+                'connect_url': connect_url,
+                'url': connect_url  # Alternative field name for compatibility
+            }
+        }
     except HTTPException:
         raise
     except Exception as e:
