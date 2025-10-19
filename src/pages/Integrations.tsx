@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { FileSpreadsheet, Mail, Database, BookOpen, DollarSign, FileText, HardDrive, Cloud, CreditCard, Wallet } from "lucide-react";
+import { FileSpreadsheet, Mail, Database, BookOpen, DollarSign, FileText, HardDrive, Cloud, CreditCard, Wallet, Banknote } from "lucide-react";
 import IntegrationCard from "@/components/IntegrationCard";
 import { useAuth } from "@/components/AuthProvider";
 import { config } from "@/config";
@@ -13,6 +13,7 @@ interface Provider {
   auth_type: string;
   scopes: string[];
   endpoints: string[];
+  category?: string;
 }
 
 interface UserConnection {
@@ -162,7 +163,7 @@ const Integrations = () => {
       'xero': <FileText className="w-8 h-8 text-blue-700" />,
       'stripe': <CreditCard className="w-8 h-8 text-purple-600" />,
       'razorpay': <Wallet className="w-8 h-8 text-blue-800" />,
-      'paypal': <CreditCard className="w-8 h-8 text-blue-900" />,
+      'paypal': <Banknote className="w-8 h-8 text-blue-600" />,
     };
     return iconMap[provider] || <Database className="w-8 h-8 text-gray-600" />;
   };
@@ -218,8 +219,57 @@ const Integrations = () => {
         </section>
       )}
 
+      {/* Payment Gateways Section */}
       <section className="p-6">
-        <h2 className="text-lg font-semibold mb-4">Available Integrations</h2>
+        <h2 className="text-lg font-semibold mb-4">Payment Gateways</h2>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          {providers.filter(p => p.category === 'payment').map((provider) => {
+            const connected = isConnected(provider.integration_id);
+            const connection = getConnection(provider.integration_id);
+            
+            return (
+              <IntegrationCard
+                key={provider.provider}
+                icon={getProviderIcon(provider.provider)}
+                title={provider.display_name}
+                description={`Connect your ${provider.display_name} account to sync payment data automatically.`}
+                actionLabel={connected ? "Manage" : "Connect"}
+                onAction={() => connected && connection ? handleManageConnection(connection) : handleConnect(provider)}
+                disabled={connectingProvider === provider.provider}
+                statusLabel={connected ? "Connected" : undefined}
+              />
+            );
+          })}
+        </div>
+      </section>
+
+      {/* Accounting Platforms Section */}
+      <section className="p-6">
+        <h2 className="text-lg font-semibold mb-4">Accounting Platforms</h2>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          {providers.filter(p => p.category === 'accounting').map((provider) => {
+            const connected = isConnected(provider.integration_id);
+            const connection = getConnection(provider.integration_id);
+            
+            return (
+              <IntegrationCard
+                key={provider.provider}
+                icon={getProviderIcon(provider.provider)}
+                title={provider.display_name}
+                description={`Connect your ${provider.display_name} account to sync accounting data automatically.`}
+                actionLabel={connected ? "Manage" : "Connect"}
+                onAction={() => connected && connection ? handleManageConnection(connection) : handleConnect(provider)}
+                disabled={connectingProvider === provider.provider}
+                statusLabel={connected ? "Connected" : undefined}
+              />
+            );
+          })}
+        </div>
+      </section>
+
+      {/* Cloud & Storage Section */}
+      <section className="p-6">
+        <h2 className="text-lg font-semibold mb-4">Cloud & Storage</h2>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           <IntegrationCard
             icon={<FileSpreadsheet className="w-8 h-8 text-green-600" aria-hidden />}
@@ -229,9 +279,7 @@ const Integrations = () => {
             onAction={handleExcelAction}
           />
 
-          {/* Payment Gateways */}
-          <h3 className="text-md font-semibold col-span-1 sm:col-span-2 lg:col-span-3 mt-6 mb-2">Payment Gateways</h3>
-          {providers.filter(p => ['stripe', 'paypal', 'razorpay'].includes(p.provider)).map((provider) => {
+          {providers.filter(p => p.category === 'storage' || p.category === 'email').map((provider) => {
             const connected = isConnected(provider.integration_id);
             const connection = getConnection(provider.integration_id);
             
@@ -240,47 +288,7 @@ const Integrations = () => {
                 key={provider.provider}
                 icon={getProviderIcon(provider.provider)}
                 title={provider.display_name}
-                description={`Connect your ${provider.display_name} account to sync financial data automatically.`}
-                actionLabel={connected ? "Manage" : "Connect"}
-                onAction={() => connected && connection ? handleManageConnection(connection) : handleConnect(provider)}
-                disabled={connectingProvider === provider.provider}
-                statusLabel={connected ? "Connected" : undefined}
-              />
-            );
-          })}
-
-          {/* Accounting Platforms */}
-          <h3 className="text-md font-semibold col-span-1 sm:col-span-2 lg:col-span-3 mt-6 mb-2">Accounting Platforms</h3>
-          {providers.filter(p => ['quickbooks-sandbox', 'xero', 'zoho-books'].includes(p.provider)).map((provider) => {
-            const connected = isConnected(provider.integration_id);
-            const connection = getConnection(provider.integration_id);
-            
-            return (
-              <IntegrationCard
-                key={provider.provider}
-                icon={getProviderIcon(provider.provider)}
-                title={provider.display_name}
-                description={`Connect your ${provider.display_name} account to sync financial data automatically.`}
-                actionLabel={connected ? "Manage" : "Connect"}
-                onAction={() => connected && connection ? handleManageConnection(connection) : handleConnect(provider)}
-                disabled={connectingProvider === provider.provider}
-                statusLabel={connected ? "Connected" : undefined}
-              />
-            );
-          })}
-
-          {/* Cloud & Storage */}
-          <h3 className="text-md font-semibold col-span-1 sm:col-span-2 lg:col-span-3 mt-6 mb-2">Cloud & Storage</h3>
-          {providers.filter(p => ['google-mail', 'zoho-mail', 'dropbox', 'google-drive'].includes(p.provider)).map((provider) => {
-            const connected = isConnected(provider.integration_id);
-            const connection = getConnection(provider.integration_id);
-            
-            return (
-              <IntegrationCard
-                key={provider.provider}
-                icon={getProviderIcon(provider.provider)}
-                title={provider.display_name}
-                description={`Connect your ${provider.display_name} account to sync financial data automatically.`}
+                description={`Connect your ${provider.display_name} account to sync files and data automatically.`}
                 actionLabel={connected ? "Manage" : "Connect"}
                 onAction={() => connected && connection ? handleManageConnection(connection) : handleConnect(provider)}
                 disabled={connectingProvider === provider.provider}
