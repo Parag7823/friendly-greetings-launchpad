@@ -7,8 +7,3 @@ services:
     dockerContext: .
     healthCheckPath: /
     autoDeploy: true
-    buildCommand: docker build -t finley-ai .
-    startCommand: python fastapi_backend.py
-    envVars:
-      - key: PORT
-        value: 8000
