@@ -614,7 +614,7 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
               <div className="fixed inset-0 bg-[#1a1a1a]/50 z-50 flex items-center justify-center p-4">
                 <div className="bg-background rounded-lg max-w-4xl w-full max-h-[80vh] overflow-hidden">
                   <div className="p-4 border-b border-border flex items-center justify-between">
-                    <h2 className="text-lg font-semibold">Processing Files</h2>
+                    <h2 className="text-lg font-semibold">Processing {uploadingFiles.length} File{uploadingFiles.length > 1 ? 's' : ''}</h2>
                     <Button
                       variant="ghost"
                       size="icon"
@@ -627,7 +627,25 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
                     </Button>
                   </div>
                   <div className="p-4 overflow-y-auto">
-                    <EnhancedFileUpload />
+                    <EnhancedFileUpload 
+                      initialFiles={uploadingFiles}
+                      onUploadComplete={() => {
+                        // Add success message to chat
+                        const successMessage = {
+                          id: `msg-${Date.now()}-success`,
+                          text: `✅ Successfully processed ${uploadingFiles.length} file${uploadingFiles.length > 1 ? 's' : ''}! You can now ask questions about your data.`,
+                          isUser: false,
+                          timestamp: new Date()
+                        };
+                        setMessages(prev => [...prev, successMessage]);
+                        
+                        // Close modal after a brief delay
+                        setTimeout(() => {
+                          setShowInlineUpload(false);
+                          setUploadingFiles([]);
+                        }, 1500);
+                      }}
+                    />
                   </div>
                 </div>
               </div>

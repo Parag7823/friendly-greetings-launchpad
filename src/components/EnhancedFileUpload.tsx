@@ -27,7 +27,12 @@ interface UploadedFile {
   sheets?: any[];
 }
 
-export const EnhancedFileUpload: React.FC = () => {
+interface EnhancedFileUploadProps {
+  initialFiles?: File[];
+  onUploadComplete?: () => void;
+}
+
+export const EnhancedFileUpload: React.FC<EnhancedFileUploadProps> = ({ initialFiles, onUploadComplete }) => {
   const { user } = useAuth();
   const [files, setFiles] = useState<FileRowData[]>([]);
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
@@ -67,6 +72,13 @@ export const EnhancedFileUpload: React.FC = () => {
 
   const { toast } = useToast();
   const { processFileWithFastAPI } = useFastAPIProcessor();
+
+  // Auto-process initialFiles when provided
+  React.useEffect(() => {
+    if (initialFiles && initialFiles.length > 0) {
+      handleFilesSelected(initialFiles);
+    }
+  }, [initialFiles]);
 
   // FIX #3: Expand file type validation to match backend capabilities
   const validateFile = (file: File): { isValid: boolean; error?: string } => {
@@ -346,7 +358,12 @@ export const EnhancedFileUpload: React.FC = () => {
     
     await processQueue();
     setIsProcessing(false);
-  }, [toast]);
+    
+    // Call completion callback if provided
+    if (onUploadComplete) {
+      onUploadComplete();
+    }
+  }, [toast, onUploadComplete]);
 
   const handleCancel = useCallback(async (fileId: string) => {
     const fileData = files.find(f => f.id === fileId);
