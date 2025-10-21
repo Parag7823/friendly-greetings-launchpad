@@ -65,7 +65,7 @@ export const UploadBox: React.FC<UploadBoxProps> = ({
       <input
         id="file-upload-input"
         type="file"
-        accept=".xlsx,.xls,.csv"
+        accept=".xlsx,.xls,.csv,.pdf,.png,.jpg,.jpeg,.gif,.webp,.bmp,.tiff,.tif"
         multiple
         onChange={handleFileSelect}
         className="hidden"
@@ -116,7 +116,7 @@ export const UploadBox: React.FC<UploadBoxProps> = ({
             </p>
             <div className="flex items-center justify-center gap-2 text-xs text-muted-foreground">
               <FileSpreadsheet className="w-3 h-3" />
-              <span>.xlsx, .xls, .csv • Max 50MB each</span>
+              <span>Excel, CSV, PDF, Images • Max 500MB each</span>
             </div>
           </div>
         </div>

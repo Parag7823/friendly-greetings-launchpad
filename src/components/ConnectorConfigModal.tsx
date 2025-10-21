@@ -7,6 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { ChevronDown, ChevronUp, ExternalLink } from "lucide-react";
 import { Link } from "react-router-dom";
+import { config } from "@/config";
 
 interface ConnectorConfigModalProps {
   open: boolean;
@@ -56,7 +57,11 @@ export default function ConnectorConfigModal({ open, onOpenChange, connectionId,
       const sessionToken = sessionData?.session?.access_token;
       const params = new URLSearchParams({ connection_id: connectionId, user_id: userId });
       if (sessionToken) params.set("session_token", sessionToken);
-      const resp = await fetch(`/api/connectors/status?${params.toString()}`);
+      const resp = await fetch(`${config.apiUrl}/api/connectors/status?${params.toString()}`, {
+        headers: {
+          ...(sessionToken && { 'Authorization': `Bearer ${sessionToken}` })
+        }
+      });
       if (!resp.ok) throw new Error("Failed to load connection status");
       const data = await resp.json();
       setDetails(data || null);
@@ -87,9 +92,12 @@ export default function ConnectorConfigModal({ open, onOpenChange, connectionId,
       const { data: sessionData } = await supabase.auth.getSession();
       const sessionToken = sessionData?.session?.access_token;
       // Reuse initiate endpoint to start reauth for same integration
-      const resp = await fetch("/api/connectors/initiate", {
+      const resp = await fetch(`${config.apiUrl}/api/connectors/initiate`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { 
+          "Content-Type": "application/json",
+          ...(sessionToken && { 'Authorization': `Bearer ${sessionToken}` })
+        },
         body: JSON.stringify({ provider: integrationId, user_id: userId || "", session_token: sessionToken })
       });
       if (!resp.ok) {
@@ -189,9 +197,12 @@ export default function ConnectorConfigModal({ open, onOpenChange, connectionId,
                             setSavingFreq(true);
                             const { data: sessionData } = await supabase.auth.getSession();
                             const sessionToken = sessionData?.session?.access_token;
-                            const resp = await fetch('/api/connectors/frequency', {
+                            const resp = await fetch(`${config.apiUrl}/api/connectors/frequency`, {
                               method: 'POST',
-                              headers: { 'Content-Type': 'application/json' },
+                              headers: { 
+                                'Content-Type': 'application/json',
+                                ...(sessionToken && { 'Authorization': `Bearer ${sessionToken}` })
+                              },
                               body: JSON.stringify({ user_id: userId, connection_id: connectionId, minutes: Number(freqValue || 60), session_token: sessionToken })
                             });
                             if (!resp.ok) throw new Error('Failed to update frequency');
@@ -252,9 +263,12 @@ export default function ConnectorConfigModal({ open, onOpenChange, connectionId,
                             const updates: any = {};
                             if (realmId !== undefined) updates.realmId = realmId;
                             if (tenantId !== undefined) updates.tenantId = tenantId;
-                            const resp = await fetch('/api/connectors/metadata', {
+                            const resp = await fetch(`${config.apiUrl}/api/connectors/metadata`, {
                               method: 'POST',
-                              headers: { 'Content-Type': 'application/json' },
+                              headers: { 
+                                'Content-Type': 'application/json',
+                                ...(sessionToken && { 'Authorization': `Bearer ${sessionToken}` })
+                              },
                               body: JSON.stringify({ user_id: userId, connection_id: connectionId, updates, session_token: sessionToken })
                             });
                             if (!resp.ok) throw new Error('Failed to save metadata');

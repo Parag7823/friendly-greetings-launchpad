@@ -1,5 +1,6 @@
 import { useCallback, useRef, useEffect } from 'react';
 import { useToast } from '@/hooks/use-toast';
+import { config } from '@/config';
 
 interface WebSocketProgressData {
   step: string;
@@ -32,8 +33,8 @@ export const useWebSocketProgress = (options: UseWebSocketProgressOptions = {}) 
       return; // Already connected
     }
 
-    const wsUrl = `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/ws/${jobId}`;
-    // Connecting to WebSocket for progress updates
+    const wsUrl = `${config.wsUrl}/ws/${jobId}`;
+    // Connecting to WebSocket for progress updates (using config.wsUrl for cross-origin support)
 
     const ws = new WebSocket(wsUrl);
     wsRef.current = ws;

@@ -4,6 +4,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
+import { config } from "@/config";
 
 const IntegrationTest = () => {
   const [supabaseStatus, setSupabaseStatus] = useState<'testing' | 'success' | 'error'>('testing');
@@ -11,9 +12,6 @@ const IntegrationTest = () => {
   const [supabaseData, setSupabaseData] = useState<any[]>([]);
   const [fastApiResponse, setFastApiResponse] = useState<string>('');
   const { toast } = useToast();
-
-  // Updated with your actual Render FastAPI URL
-  const FASTAPI_URL = "https://friendly-greetings-launchpad.onrender.com";
 
   useEffect(() => {
     testSupabaseConnection();
@@ -50,7 +48,7 @@ const IntegrationTest = () => {
     setFastApiStatus('testing');
     try {
       // Test API health endpoint
-      const response = await fetch(`${FASTAPI_URL}/health`, {
+      const response = await fetch(`${config.apiUrl}/health`, {
         method: 'GET',
         headers: {
           'Content-Type': 'application/json',
@@ -80,28 +78,25 @@ const IntegrationTest = () => {
 
   const testCompleteFlow = async () => {
     try {
-      // Test creating a test ingestion job via API
-      const response = await fetch(`${FASTAPI_URL}/api/v1/test`, {
-        method: 'POST',
+      // Call a real backend verification endpoint
+      const response = await fetch(`${config.apiUrl}/api/v1/system/critical-fixes-status`, {
+        method: 'GET',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          message: "Integration test",
-          timestamp: new Date().toISOString()
-        }),
       });
 
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
       const result = await response.json();
+      setFastApiResponse(JSON.stringify(result, null, 2));
       
       toast({
         title: "Complete Flow Test",
-        description: "FastAPI → Supabase integration working!",
+        description: "FastAPI verification endpoint responded successfully.",
       });
 
-      // Refresh Supabase data to see the new record
+      // Also re-test Supabase connectivity
       setTimeout(testSupabaseConnection, 1000);
     } catch (error) {
       toast({

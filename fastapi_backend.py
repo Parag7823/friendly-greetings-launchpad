@@ -10203,6 +10203,73 @@ async def delete_chat(request: dict):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.post("/generate-chat-title")
+async def generate_chat_title(request: dict):
+    """
+    Generate a chat title from the first message using AI.
+    
+    Called by frontend when creating a new chat.
+    """
+    try:
+        message = request.get('message')
+        user_id = request.get('user_id')
+        
+        if not message or not user_id:
+            raise HTTPException(status_code=400, detail="Missing message or user_id")
+        
+        structured_logger.info("Generate chat title request", {
+            "user_id": user_id,
+            "message_length": len(message)
+        })
+        
+        # Use GPT-4 to generate a concise title
+        from openai import AsyncOpenAI
+        openai_client = AsyncOpenAI(api_key=os.getenv('OPENAI_API_KEY'))
+        
+        response = await openai_client.chat.completions.create(
+            model="gpt-4",
+            messages=[
+                {
+                    "role": "system",
+                    "content": "Generate a concise, descriptive title (max 6 words) for this financial question. Return ONLY the title, no quotes or extra text."
+                },
+                {
+                    "role": "user",
+                    "content": message
+                }
+            ],
+            temperature=0.7,
+            max_tokens=20
+        )
+        
+        title = response.choices[0].message.content.strip()
+        
+        # Generate chat_id
+        chat_id = f"chat_{datetime.utcnow().strftime('%Y%m%d%H%M%S')}_{user_id[:8]}"
+        
+        structured_logger.info("Chat title generated", {
+            "user_id": user_id,
+            "chat_id": chat_id,
+            "title": title
+        })
+        
+        return {
+            "chat_id": chat_id,
+            "title": title,
+            "status": "success"
+        }
+        
+    except Exception as e:
+        structured_logger.error("Generate chat title error", error=e)
+        # Fallback to timestamp-based title
+        chat_id = f"chat_{datetime.utcnow().strftime('%Y%m%d%H%M%S')}"
+        return {
+            "chat_id": chat_id,
+            "title": f"Chat {datetime.utcnow().strftime('%b %d, %Y')}",
+            "status": "fallback"
+        }
+
+
 @app.post("/chat")
 async def chat_endpoint(request: dict):
     """

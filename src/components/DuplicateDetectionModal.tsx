@@ -322,7 +322,7 @@ export const DuplicateDetectionModal: React.FC<DuplicateDetectionModalProps> = (
   );
 
   return (
-    <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 animate-fade-in">
+    <div className="fixed inset-0 bg-[#1a1a1a]/80 backdrop-blur-sm flex items-center justify-center z-50 animate-fade-in">
       <div className="bg-card border border-border rounded-2xl shadow-2xl max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto animate-scale-in">
         <div className="p-8">
           {phase === 'basic_duplicate' && renderBasicDuplicate()}

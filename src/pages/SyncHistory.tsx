@@ -3,6 +3,7 @@ import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/components/ui/use-toast";
 import { Button } from "@/components/ui/button";
+import { config } from "@/config";
 
 interface RunItem {
   id: string;
@@ -71,7 +72,11 @@ export default function SyncHistory() {
         page_size: String(pageSize),
       });
       if (sessionToken) params.set("session_token", sessionToken);
-      const resp = await fetch(`/api/connectors/history?${params.toString()}`);
+      const resp = await fetch(`${config.apiUrl}/api/connectors/history?${params.toString()}`, {
+        headers: {
+          ...(sessionToken && { 'Authorization': `Bearer ${sessionToken}` })
+        }
+      });
       if (!resp.ok) throw new Error("Failed to load history");
       const data = await resp.json();
       setRuns(Array.isArray(data?.runs) ? data.runs : []);
@@ -80,7 +85,11 @@ export default function SyncHistory() {
       // Also fetch header details from status endpoint
       const params2 = new URLSearchParams({ connection_id: connectionId, user_id: user?.id || "" });
       if (sessionToken) params2.set("session_token", sessionToken);
-      const resp2 = await fetch(`/api/connectors/status?${params2.toString()}`);
+      const resp2 = await fetch(`${config.apiUrl}/api/connectors/status?${params2.toString()}`, {
+        headers: {
+          ...(sessionToken && { 'Authorization': `Bearer ${sessionToken}` })
+        }
+      });
       if (resp2.ok) {
         const s = await resp2.json();
         setHeader(s?.connection || null);

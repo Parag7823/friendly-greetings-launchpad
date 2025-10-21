@@ -24,7 +24,7 @@ export const ThemeAwareCard = ({
   return (
     <div 
       className={cn(
-        'bg-[#0A0A0A] border rounded-md text-white transition-colors',
+        'bg-[#1a1a1a] border rounded-md text-white transition-colors',
         borderColors[variant],
         onClick && 'cursor-pointer',
         className

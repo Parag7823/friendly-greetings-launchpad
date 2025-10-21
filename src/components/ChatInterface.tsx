@@ -1,13 +1,17 @@
-import { MessageCircle, Send, Upload, Plug, FileSpreadsheet, Receipt, Database } from 'lucide-react';
-import { useState, useEffect } from 'react';
+import { MessageCircle, Send, Upload, Plug, FileSpreadsheet, Receipt, Database, Layers } from 'lucide-react';
+import { useState, useEffect, useRef } from 'react';
 import { EnhancedFileUpload } from './EnhancedFileUpload';
+import { InlineUploadZone } from './InlineUploadZone';
+import { DataSourcesPanel } from './DataSourcesPanel';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
+import { Button } from './ui/button';
 import { useAuth } from './AuthProvider';
 import IntegrationCard from './IntegrationCard';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/components/ui/use-toast';
 import ConnectorConfigModal from './ConnectorConfigModal';
 import { useSearchParams } from 'react-router-dom';
+import { config } from '@/config';
 
 interface ChatInterfaceProps {
   currentView?: string;
@@ -30,6 +34,9 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
   const [syncing, setSyncing] = useState<string | null>(null);
   const [configOpen, setConfigOpen] = useState(false);
   const [configConnId, setConfigConnId] = useState<string | null>(null);
+  const [showDataSources, setShowDataSources] = useState(false);
+  const [showInlineUpload, setShowInlineUpload] = useState(false);
+  const [uploadingFiles, setUploadingFiles] = useState<File[]>([]);
 
   // Load connector providers when opening marketplace
   useEffect(() => {
@@ -39,7 +46,7 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
         setLoadingProviders(true);
         const { data: sessionData } = await supabase.auth.getSession();
         const sessionToken = sessionData?.session?.access_token;
-        const resp = await fetch('/api/connectors/providers', {
+        const resp = await fetch(`${config.apiUrl}/api/connectors/providers`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ user_id: user?.id || '', session_token: sessionToken })
@@ -62,7 +69,7 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
       setConnecting(providerKey);
       const { data: sessionData } = await supabase.auth.getSession();
       const sessionToken = sessionData?.session?.access_token;
-      const resp = await fetch('/api/connectors/initiate', {
+      const resp = await fetch(`${config.apiUrl}/api/connectors/initiate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ provider: providerKey, user_id: user?.id || '', session_token: sessionToken })
@@ -108,7 +115,7 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
       setLoadingConnections(true);
       const { data: sessionData } = await supabase.auth.getSession();
       const sessionToken = sessionData?.session?.access_token;
-      const resp = await fetch('/api/connectors/user-connections', {
+      const resp = await fetch(`${config.apiUrl}/api/connectors/user-connections`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ user_id: user?.id || '', session_token: sessionToken }),
@@ -166,7 +173,7 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
       setSyncing(connectionId);
       const { data: sessionData } = await supabase.auth.getSession();
       const sessionToken = sessionData?.session?.access_token;
-      const resp = await fetch('/api/connectors/sync', {
+      const resp = await fetch(`${config.apiUrl}/api/connectors/sync`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -228,14 +235,19 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
         // If this is a new chat, generate a title and create chat entry
         if (isNewChat) {
           try {
-            const titleResponse = await fetch('/generate-chat-title', {
+            const { data: sessionData } = await supabase.auth.getSession();
+            const sessionToken = sessionData?.session?.access_token;
+            
+            const titleResponse = await fetch(`${config.apiUrl}/generate-chat-title`, {
               method: 'POST',
               headers: {
                 'Content-Type': 'application/json',
+                ...(sessionToken && { 'Authorization': `Bearer ${sessionToken}` })
               },
               body: JSON.stringify({
                 message: currentMessage,
-                user_id: user?.id || 'anonymous'
+                user_id: user?.id || 'anonymous',
+                session_token: sessionToken
               })
             });
             
@@ -267,15 +279,20 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
         }
         
         // Send message to backend
-        const response = await fetch('/chat', {
+        const { data: sessionData } = await supabase.auth.getSession();
+        const sessionToken = sessionData?.session?.access_token;
+        
+        const response = await fetch(`${config.apiUrl}/chat`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
+            ...(sessionToken && { 'Authorization': `Bearer ${sessionToken}` })
           },
           body: JSON.stringify({
             message: currentMessage,
             user_id: user?.id || 'anonymous',
-            chat_id: chatId
+            chat_id: chatId,
+            session_token: sessionToken
           })
         });
         
@@ -308,21 +325,22 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
     }
   };
 
+  const handleInlineFilesSelected = (files: File[]) => {
+    setUploadingFiles(files);
+    setShowInlineUpload(true);
+    
+    // Add a system message to chat
+    const uploadMessage = {
+      id: `msg-${Date.now()}-upload`,
+      text: `📤 Uploading ${files.length} file${files.length > 1 ? 's' : ''}: ${files.map(f => f.name).join(', ')}`,
+      isUser: false,
+      timestamp: new Date()
+    };
+    setMessages(prev => [...prev, uploadMessage]);
+  };
+
   const renderCurrentView = () => {
     switch (currentView) {
-      case 'upload':
-        return (
-          <div className="h-full overflow-y-auto">
-            <div className="p-4">
-              <div className="mb-4">
-                <h1 className="text-xl font-semibold text-foreground mb-1">Upload Financial Documents</h1>
-                <p className="text-sm text-muted-foreground">Upload your Excel, CSV, or other financial files for AI analysis</p>
-              </div>
-              <EnhancedFileUpload />
-            </div>
-          </div>
-        );
-      
       case 'marketplace':
         return (
           <div className="h-full overflow-y-auto">
@@ -477,19 +495,63 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
       
       case 'chat':
       default:
-  return (
-    <div className="finley-chat flex flex-col h-full">
-      {/* Chat Messages Area */}
+        return (
+          <div className="finley-chat flex flex-col h-full relative">
+            {/* Data Sources Button - Fixed top right */}
+            <div className="absolute top-4 right-4 z-10">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setShowDataSources(true)}
+                className="shadow-lg"
+              >
+                <Layers className="w-4 h-4 mr-2" />
+                Data Sources
+              </Button>
+            </div>
+
+            {/* Chat Messages Area */}
             <div className="flex-1 overflow-y-auto p-4">
               {messages.length === 0 ? (
                 <div className="h-full flex items-center justify-center">
-        <div className="text-center">
-                    <h1 className="text-2xl font-semibold text-foreground tracking-tight mb-2">
-                      Finance Meets Intelligence
-          </h1>
-                    <p className="text-muted-foreground text-base">
-                      Ask me anything about your financial data
-                    </p>
+                  <div className="max-w-2xl w-full space-y-6 px-4">
+                    <div className="text-center">
+                      <h1 className="text-2xl font-semibold text-foreground tracking-tight mb-2">
+                        Finance Meets Intelligence
+                      </h1>
+                      <p className="text-muted-foreground text-base mb-6">
+                        I can help you understand your financial data. Let's get started!
+                      </p>
+                    </div>
+
+                    {/* Inline Upload Zone */}
+                    <InlineUploadZone onFilesSelected={handleInlineFilesSelected} />
+
+                    {/* Quick Actions */}
+                    <div className="grid grid-cols-2 gap-3">
+                      <Button
+                        variant="outline"
+                        className="h-auto py-4 flex flex-col items-center gap-2"
+                        onClick={() => onNavigate?.('marketplace')}
+                      >
+                        <Plug className="w-5 h-5" />
+                        <div className="text-center">
+                          <div className="text-sm font-medium">Connect Apps</div>
+                          <div className="text-xs text-muted-foreground">QuickBooks, Xero, Gmail</div>
+                        </div>
+                      </Button>
+                      <Button
+                        variant="outline"
+                        className="h-auto py-4 flex flex-col items-center gap-2"
+                        onClick={() => setShowDataSources(true)}
+                      >
+                        <Layers className="w-5 h-5" />
+                        <div className="text-center">
+                          <div className="text-sm font-medium">View Sources</div>
+                          <div className="text-xs text-muted-foreground">Manage your data</div>
+                        </div>
+                      </Button>
+                    </div>
                   </div>
                 </div>
               ) : (
@@ -503,45 +565,75 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
                         className={`max-w-[80%] rounded-md px-3 py-2 border ${
                           msg.isUser
                             ? 'bg-primary text-primary-foreground border-primary'
-                            : 'bg-[#0A0A0A] text-white border-white/10'
+                            : 'bg-[#1a1a1a] text-white border-white/10'
                         }`}
                       >
                         <p className="text-xs">{msg.text}</p>
                         <p className="text-[10px] opacity-70 mt-1">
                           {msg.timestamp.toLocaleTimeString()}
                         </p>
-        </div>
+                      </div>
                     </div>
                   ))}
                 </div>
               )}
-      </div>
-      
-      {/* Chat Input Area - Fixed at bottom */}
-      <div className="border-t border-border p-3 bg-background">
-        <div className="w-full">
-          <div className="relative">
-            <input
-              type="text"
-              value={message}
-              onChange={(e) => setMessage(e.target.value)}
-              onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
+            </div>
+            
+            {/* Chat Input Area - Fixed at bottom */}
+            <div className="border-t border-border p-3 bg-background">
+              <div className="w-full">
+                <div className="relative">
+                  <input
+                    type="text"
+                    value={message}
+                    onChange={(e) => setMessage(e.target.value)}
+                    onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
                     placeholder="Ask anything about your financial data..."
                     className="w-full bg-card border border-border rounded-lg px-3 py-2 pr-10 text-sm text-foreground placeholder-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring transition-all duration-200"
-            />
-            
-            <button
-              onClick={handleSendMessage}
-              disabled={!message.trim()}
+                  />
+                  
+                  <button
+                    onClick={handleSendMessage}
+                    disabled={!message.trim()}
                     className="absolute right-2 top-1/2 -translate-y-1/2 w-7 h-7 bg-primary text-primary-foreground rounded-md flex items-center justify-center transition-all duration-200 hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              <Send className="w-3.5 h-3.5" />
-            </button>
+                  >
+                    <Send className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Data Sources Panel */}
+            <DataSourcesPanel 
+              isOpen={showDataSources} 
+              onClose={() => setShowDataSources(false)} 
+            />
+
+            {/* Upload Modal (when files selected) */}
+            {showInlineUpload && uploadingFiles.length > 0 && (
+              <div className="fixed inset-0 bg-[#1a1a1a]/50 z-50 flex items-center justify-center p-4">
+                <div className="bg-background rounded-lg max-w-4xl w-full max-h-[80vh] overflow-hidden">
+                  <div className="p-4 border-b border-border flex items-center justify-between">
+                    <h2 className="text-lg font-semibold">Processing Files</h2>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => {
+                        setShowInlineUpload(false);
+                        setUploadingFiles([]);
+                      }}
+                    >
+                      <span className="text-xl">×</span>
+                    </Button>
+                  </div>
+                  <div className="p-4 overflow-y-auto">
+                    <EnhancedFileUpload />
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
-        </div>
-      </div>
-    </div>
-  );
+        );
     }
   };
 

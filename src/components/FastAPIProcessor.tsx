@@ -315,6 +315,7 @@ export class FastAPIProcessor {
     onJobId?: (jobId: string, fileHash: string) => void
   ): Promise<FastAPIProcessingResult> {
     let jobData: any = null;
+    const startTime = performance.now(); // Track processing start time
     
     try {
       this.updateProgress('upload', 'Checking for duplicates...', 5);
@@ -535,7 +536,7 @@ export class FastAPIProcessor {
           summary: backendResult.results?.analysis || 'Analysis completed successfully.',
           sheets,
           customPromptSuggestions: [],
-          processingTime: Date.now() - performance.now()
+          processingTime: performance.now() - startTime
         };
 
         return result;

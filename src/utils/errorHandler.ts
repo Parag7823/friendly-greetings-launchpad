@@ -8,6 +8,7 @@
  */
 
 import { useToast } from '@/hooks/use-toast';
+import { config } from '@/config';
 
 // Get toast function (will be called from component context)
 let toastFn: ReturnType<typeof useToast>['toast'] | null = null;
@@ -182,7 +183,7 @@ export class UnifiedErrorHandler {
       }
 
       // Send error report to backend
-      await fetch('/api/error-report', {
+      await fetch(`${config.apiUrl}/api/error-report`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

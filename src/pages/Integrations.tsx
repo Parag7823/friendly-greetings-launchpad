@@ -50,6 +50,7 @@ const Integrations = () => {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          ...(token && { 'Authorization': `Bearer ${token}` })
         },
         body: JSON.stringify({
           user_id: user?.id || '',
@@ -67,6 +68,7 @@ const Integrations = () => {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          ...(token && { 'Authorization': `Bearer ${token}` })
         },
         body: JSON.stringify({
           user_id: user?.id || '',
@@ -99,6 +101,7 @@ const Integrations = () => {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          ...(token && { 'Authorization': `Bearer ${token}` })
         },
         body: JSON.stringify({
           provider: provider.provider,

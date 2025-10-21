@@ -159,7 +159,7 @@ export const EnhancedFileUpload: React.FC = () => {
                 recommendation: 'replace_or_skip',
                 duplicate_files: normalizedFiles
               },
-              deltaAnalysis: extra.delta_analysis || prev.data.deltaAnalysis
+              deltaAnalysis: extra.delta_analysis ? { delta_analysis: extra.delta_analysis } : prev.data.deltaAnalysis
             }
           }));
         }
@@ -221,9 +221,9 @@ export const EnhancedFileUpload: React.FC = () => {
               message: result.message || 'Duplicate or similar file detected!',
               filename: file.name,
               recommendation: result.duplicate_analysis?.recommendation || 'replace_or_skip',
-              duplicateFiles: result.duplicate_analysis?.duplicate_files || []
+              duplicate_files: result.duplicate_analysis?.duplicate_files || []
             },
-            deltaAnalysis: (result as any).delta_analysis || null
+            deltaAnalysis: (result as any).delta_analysis ? { delta_analysis: (result as any).delta_analysis } : null
           }
         }));
         
@@ -408,6 +408,7 @@ export const EnhancedFileUpload: React.FC = () => {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          ...(session?.access_token && { 'Authorization': `Bearer ${session.access_token}` })
         },
         body: JSON.stringify({
           job_id: duplicateModal.context.jobId,
@@ -538,40 +539,15 @@ export const EnhancedFileUpload: React.FC = () => {
   const handleVersionRecommendationFeedback = async (accepted: boolean, feedback?: string) => {
     if (!duplicateModal.data.recommendation) return;
 
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-      const response = await fetch(`${config.apiUrl}/version-recommendation-feedback`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          recommendation_id: duplicateModal.data.recommendation.id,
-          user_id: user?.id || 'anonymous',
-          accepted: accepted,
-          feedback: feedback,
-          session_token: session?.access_token
-        })
-      });
-
-      if (response.ok) {
-        setDuplicateModal(prev => ({ ...prev, isOpen: false }));
-        toast({
-          title: accepted ? "Recommendation Accepted" : "Feedback Submitted",
-          description: accepted
-            ? "Processing will continue with the recommended version"
-            : "Thank you for your feedback.",
-        });
-      } else {
-        throw new Error('Failed to submit feedback');
-      }
-    } catch (error) {
-      toast({
-        title: "Error",
-        description: "Failed to submit feedback",
-        variant: "destructive"
-      });
-    }
+    // Note: Backend endpoint /version-recommendation-feedback was removed
+    // as version_recommendations table is deprecated. Simplified to just close modal.
+    setDuplicateModal(prev => ({ ...prev, isOpen: false }));
+    toast({
+      title: accepted ? "Recommendation Noted" : "Feedback Noted",
+      description: accepted
+        ? "Processing will continue with the recommended version"
+        : "Thank you for your feedback.",
+    });
   };
 
   return (
@@ -586,7 +562,7 @@ export const EnhancedFileUpload: React.FC = () => {
         </CardHeader>
         <CardContent>
           <div 
-            className={`bg-[#0A0A0A] border-2 border-dashed border-white/10 rounded-lg p-8 text-center hover:border-white/20 transition-colors ${isProcessing ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+            className={`bg-[#1a1a1a] border-2 border-dashed border-white/10 rounded-lg p-8 text-center hover:border-white/20 transition-colors ${isProcessing ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
             onClick={() => !isProcessing && document.getElementById('file-upload')?.click()}
           >
             <Upload className="mx-auto h-12 w-12 text-white/70 mb-4" />
@@ -594,13 +570,13 @@ export const EnhancedFileUpload: React.FC = () => {
               Click to upload or drag and drop
             </p>
             <p className="text-xs text-white/60">
-              Excel (.xlsx, .xls) or CSV files up to 500MB
+              Excel, CSV, PDF, or image files up to 500MB
             </p>
             <input
               id="file-upload"
               type="file"
               multiple
-              accept=".xlsx,.xls,.csv"
+              accept=".xlsx,.xls,.csv,.pdf,.png,.jpg,.jpeg,.gif,.webp,.bmp,.tiff,.tif"
               onChange={(e) => e.target.files && handleFilesSelected(Array.from(e.target.files))}
               className="hidden"
               disabled={isProcessing}
@@ -615,7 +591,7 @@ export const EnhancedFileUpload: React.FC = () => {
           <CardContent className="p-6">
             <div className="space-y-3 max-h-96 overflow-y-auto">
               {files.map((fileData) => (
-                <div key={fileData.id} className="flex items-center justify-between p-3 bg-[#0A0A0A] border border-white/10 rounded-lg">
+                <div key={fileData.id} className="flex items-center justify-between p-3 bg-[#1a1a1a] border border-white/10 rounded-lg">
                   <div className="flex items-center gap-3 flex-1">
                     <FileText className="h-5 w-5 text-white/70" />
                     <div className="flex-1">
@@ -653,7 +629,7 @@ export const EnhancedFileUpload: React.FC = () => {
               {uploadedFiles.map((file) => (
                 <div
                   key={file.id}
-                  className="flex items-center justify-between p-3 rounded-lg bg-[#0A0A0A] border border-white/10"
+                  className="flex items-center justify-between p-3 rounded-lg bg-[#1a1a1a] border border-white/10"
                 >
                   <div className="flex items-center gap-3">
                     <div className="w-8 h-8 rounded-full bg-green-500/20 flex items-center justify-center">

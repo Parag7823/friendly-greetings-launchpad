@@ -23,7 +23,7 @@ export const IntegrationCard = ({ icon, title, description, actionLabel, onActio
   if (variant === 'list') {
     return (
       <Card
-        className={`w-full rounded-md shadow-sm bg-[#0A0A0A] border border-white/10 hover:border-white/20 transition-colors ${disabled ? 'opacity-70 cursor-not-allowed' : ''} ${className}`}
+        className={`w-full rounded-md shadow-sm bg-[#1a1a1a] border border-white/10 hover:border-white/20 transition-colors ${disabled ? 'opacity-70 cursor-not-allowed' : ''} ${className}`}
         aria-disabled={disabled}
       >
         <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 p-4">

@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react';
 import { 
   MessageSquarePlus, 
   Plug, 
-  Upload, 
   MessageSquare, 
   X,
   Check,
@@ -14,6 +13,8 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from './ui/t
 import { ChatContextMenu } from './ChatContextMenu';
 import { ShareModal } from './ShareModal';
 import { useAuth } from './AuthProvider';
+import { supabase } from '@/integrations/supabase/client';
+import { config } from '../config';
 
 interface ChatHistory {
   id: string;
@@ -61,14 +62,21 @@ export const FinleySidebar = ({ onClose, onNavigate, currentView = 'chat', isCol
       // Also try to load from database (for persistence across devices)
       try {
         if (!user?.id) return; // Wait for user to be available
-        const response = await fetch(`/chat-history/${user.id}`);
+        const { data: sessionData } = await supabase.auth.getSession();
+        const sessionToken = sessionData?.session?.access_token;
+        
+        const response = await fetch(`${config.apiUrl}/chat-history/${user.id}`, {
+          headers: {
+            ...(sessionToken && { 'Authorization': `Bearer ${sessionToken}` })
+          }
+        });
         if (response.ok) {
           const data = await response.json();
           if (data.chats && data.chats.length > 0) {
             const dbHistory = data.chats.map((chat: any) => ({
-              id: chat.chat_id,
+              id: chat.id,
               title: chat.title || 'New Chat',
-              timestamp: new Date(chat.updated_at || chat.created_at),
+              timestamp: new Date(chat.created_at),
               messages: chat.messages || []
             }));
             
@@ -122,11 +130,6 @@ export const FinleySidebar = ({ onClose, onNavigate, currentView = 'chat', isCol
     onClose?.();
   };
 
-  const handleUploadFile = () => {
-    onNavigate?.('upload');
-    onClose?.();
-  };
-
   const handleConnectorMarketplace = () => {
     onNavigate?.('marketplace');
     onClose?.();
@@ -155,14 +158,18 @@ export const FinleySidebar = ({ onClose, onNavigate, currentView = 'chat', isCol
     const newTitle = editingTitle.trim();
     
     try {
-      const response = await fetch('/chat/rename', {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const sessionToken = sessionData?.session?.access_token;
+      
+      const response = await fetch(`${config.apiUrl}/chat/rename`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
+          ...(sessionToken && { 'Authorization': `Bearer ${sessionToken}` })
         },
         body: JSON.stringify({
           chat_id: editingChatId,
-          new_title: newTitle,
+          title: newTitle,
           user_id: user?.id || 'anonymous'
         })
       });
@@ -208,10 +215,14 @@ export const FinleySidebar = ({ onClose, onNavigate, currentView = 'chat', isCol
 
   const handleDelete = async (chatId: string) => {
     try {
-      const response = await fetch('/chat/delete', {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const sessionToken = sessionData?.session?.access_token;
+      
+      const response = await fetch(`${config.apiUrl}/chat/delete`, {
         method: 'DELETE',
         headers: {
           'Content-Type': 'application/json',
+          ...(sessionToken && { 'Authorization': `Bearer ${sessionToken}` })
         },
         body: JSON.stringify({
           chat_id: chatId,
@@ -313,7 +324,7 @@ export const FinleySidebar = ({ onClose, onNavigate, currentView = 'chat', isCol
           {isCollapsed && <TooltipContent side="right"><p>New Chat</p></TooltipContent>}
         </Tooltip>
 
-        {/* Connector Marketplace */}
+        {/* Integrations */}
         <Tooltip>
           <TooltipTrigger asChild>
             <Button
@@ -322,25 +333,10 @@ export const FinleySidebar = ({ onClose, onNavigate, currentView = 'chat', isCol
               onClick={handleConnectorMarketplace}
             >
               <Plug className="w-4 h-4" />
-              {!isCollapsed && <span className="font-medium text-sm ml-2">Connector Marketplace</span>}
+              {!isCollapsed && <span className="font-medium text-sm ml-2">Integrations</span>}
             </Button>
           </TooltipTrigger>
-          {isCollapsed && <TooltipContent side="right"><p>Connector Marketplace</p></TooltipContent>}
-        </Tooltip>
-
-        {/* Upload File */}
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              variant={currentView === 'upload' ? 'secondary' : 'ghost'}
-              className={`w-full h-9 rounded-lg ${isCollapsed ? 'justify-center px-0' : 'justify-start px-2'}`}
-              onClick={handleUploadFile}
-            >
-              <Upload className="w-4 h-4" />
-              {!isCollapsed && <span className="font-medium text-sm ml-2">Upload File</span>}
-            </Button>
-          </TooltipTrigger>
-          {isCollapsed && <TooltipContent side="right"><p>Upload File</p></TooltipContent>}
+          {isCollapsed && <TooltipContent side="right"><p>Integrations</p></TooltipContent>}
         </Tooltip>
 
         {/* Chat History Section */}

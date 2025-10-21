@@ -26,7 +26,6 @@ const App = () => (
               <Route path="/chat" element={<Index />} />
               <Route path="/connectors" element={<Integrations />} />
               <Route path="/connectors/:connectionId/history" element={<SyncHistory />} />
-              <Route path="/upload" element={<Index />} />
               <Route path="/integrations" element={<Integrations />} />
               <Route path="/test" element={<IntegrationTest />} />
               {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}

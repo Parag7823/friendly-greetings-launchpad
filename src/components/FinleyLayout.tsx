@@ -46,8 +46,6 @@ export const FinleyLayout = () => {
     const path = location.pathname || '/';
     if (path.startsWith('/connectors')) {
       setCurrentView('marketplace');
-    } else if (path.startsWith('/upload')) {
-      setCurrentView('upload');
     } else {
       setCurrentView('chat');
     }
@@ -57,8 +55,6 @@ export const FinleyLayout = () => {
     switch (view) {
       case 'marketplace':
         return '/connectors';
-      case 'upload':
-        return '/upload';
       case 'chat':
       default:
         return '/chat';
@@ -118,7 +114,7 @@ export const FinleyLayout = () => {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/50 z-40 lg:hidden"
+            className="fixed inset-0 bg-[#1a1a1a]/50 z-40 lg:hidden"
             onClick={() => setIsSidebarOpen(false)}
           />
         )}
