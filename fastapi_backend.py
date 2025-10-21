@@ -157,7 +157,7 @@ async def get_arq_pool():
         logger.info(f"✅ ARQ connection pool created and cached for reuse")
         return _arq_pool
 
-from openai import OpenAI
+from anthropic import Anthropic
 try:
     # Prefer external module if available
     from nango_client import NangoClient
@@ -843,17 +843,17 @@ async def metrics_endpoint():
         logger.error(f"/metrics failed: {e}")
         raise HTTPException(status_code=500, detail="metrics unavailable")
 
-# Initialize OpenAI client with error handling
+# Initialize Anthropic client with error handling
 try:
-    openai_api_key = os.environ.get("OPENAI_API_KEY")
-    if not openai_api_key:
-        raise ValueError("OPENAI_API_KEY environment variable is required")
+    anthropic_api_key = os.getenv('ANTHROPIC_API_KEY')
+    if not anthropic_api_key:
+        raise ValueError("ANTHROPIC_API_KEY environment variable is required")
     
-    openai = OpenAI(api_key=openai_api_key)
-    logger.info("✅ OpenAI client initialized successfully")
+    anthropic_client = Anthropic(api_key=anthropic_api_key)
+    logger.info("✅ Anthropic client initialized successfully")
 except Exception as e:
-    logger.error(f"❌ Failed to initialize OpenAI client: {e}")
-    openai = None
+    logger.error(f"❌ Failed to initialize Anthropic client: {e}")
+    anthropic_client = None
 
 # Initialize Supabase client and critical systems
 try:
@@ -6850,7 +6850,7 @@ class BatchAIRowClassifier:
 class RowProcessor:
     """Processes individual rows and creates events"""
     
-    def __init__(self, platform_detector: PlatformDetector, ai_classifier, enrichment_processor):
+    def __init__(self, platform_detector: UniversalPlatformDetector, ai_classifier, enrichment_processor):
         self.platform_detector = platform_detector
         self.ai_classifier = ai_classifier
         self.enrichment_processor = enrichment_processor
@@ -7027,22 +7027,21 @@ class ExcelProcessor:
     """
     
     def __init__(self):
-        self.openai = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
-        self.platform_detector = PlatformDetector()
+        self.anthropic = Anthropic(api_key=os.getenv('ANTHROPIC_API_KEY'))
         
         # Initialize universal components with supabase_client for persistent learning
         self.universal_field_detector = UniversalFieldDetector()
-        self.universal_platform_detector = UniversalPlatformDetector(self.openai, cache_client=safe_get_ai_cache(), supabase_client=supabase)
-        self.universal_document_classifier = UniversalDocumentClassifier(self.openai, cache_client=safe_get_ai_cache(), supabase_client=supabase)
+        self.universal_platform_detector = UniversalPlatformDetector(self.anthropic, cache_client=safe_get_ai_cache(), supabase_client=supabase)
+        self.universal_document_classifier = UniversalDocumentClassifier(self.anthropic, cache_client=safe_get_ai_cache(), supabase_client=supabase)
         self.universal_extractors = UniversalExtractors(cache_client=safe_get_ai_cache())
         
         # Entity resolver and AI classifier will be initialized per request with Supabase client
         self.entity_resolver = None
         self.ai_classifier = None
         self.row_processor = None
-        self.batch_classifier = BatchAIRowClassifier(self.openai)
+        self.batch_classifier = BatchAIRowClassifier(self.anthropic)
         # Initialize data enrichment processor
-        self.enrichment_processor = DataEnrichmentProcessor(self.openai)
+        self.enrichment_processor = DataEnrichmentProcessor(self.anthropic)
         
         # Financial field patterns for auto-detection
         self.financial_patterns = {
@@ -8461,9 +8460,9 @@ class ExcelProcessor:
         # Relationship detection - now always available (imported at top)
         try:
             # Initialize relationship detector
-            from openai import AsyncOpenAI
-            openai_client = AsyncOpenAI(api_key=os.getenv('OPENAI_API_KEY'))
-            relationship_detector = EnhancedRelationshipDetector(openai_client, supabase)
+            from anthropic import AsyncAnthropic
+            anthropic_client = AsyncAnthropic(api_key=os.getenv('ANTHROPIC_API_KEY'))
+            relationship_detector = EnhancedRelationshipDetector(anthropic_client, supabase)
 
             # CRITICAL FIX #5: Add timeout and file_id scope to prevent hanging on large datasets
             import asyncio
@@ -10223,26 +10222,22 @@ async def generate_chat_title(request: dict):
         })
         
         # Use GPT-4 to generate a concise title
-        from openai import AsyncOpenAI
-        openai_client = AsyncOpenAI(api_key=os.getenv('OPENAI_API_KEY'))
+        from anthropic import AsyncAnthropic
+        anthropic_client = AsyncAnthropic(api_key=os.getenv('ANTHROPIC_API_KEY'))
         
-        response = await openai_client.chat.completions.create(
-            model="gpt-4",
+        response = await anthropic_client.messages.create(
+            model="claude-haiku-4-20250514",
+            max_tokens=50,
+            system="Generate a concise, descriptive title (max 6 words) for this financial question. Return ONLY the title, no quotes or extra text.",
             messages=[
-                {
-                    "role": "system",
-                    "content": "Generate a concise, descriptive title (max 6 words) for this financial question. Return ONLY the title, no quotes or extra text."
-                },
                 {
                     "role": "user",
                     "content": message
                 }
-            ],
-            temperature=0.7,
-            max_tokens=20
+            ]
         )
         
-        title = response.choices[0].message.content.strip()
+        title = response.content[0].text.strip()
         
         # Generate chat_id
         chat_id = f"chat_{datetime.utcnow().strftime('%Y%m%d%H%M%S')}_{user_id[:8]}"
@@ -10293,12 +10288,12 @@ async def chat_endpoint(request: dict):
         
         # Initialize intelligent chat orchestrator
         from intelligent_chat_orchestrator import IntelligentChatOrchestrator
-        from openai import AsyncOpenAI
+        from anthropic import AsyncAnthropic
         
-        openai_client = AsyncOpenAI(api_key=os.getenv('OPENAI_API_KEY'))
+        anthropic_client = AsyncAnthropic(api_key=os.getenv('ANTHROPIC_API_KEY'))
         
         orchestrator = IntelligentChatOrchestrator(
-            openai_client=openai_client,
+            openai_client=anthropic_client,
             supabase_client=supabase,
             cache_client=safe_get_ai_cache()
         )
@@ -10370,7 +10365,7 @@ async def detect_platform_endpoint(request: PlatformDetectionRequest):
     """Detect platform using UniversalPlatformDetector"""
     try:
         # Initialize platform detector (with AI cache)
-        platform_detector = UniversalPlatformDetector(openai_client=openai, cache_client=safe_get_ai_cache())
+        platform_detector = UniversalPlatformDetector(openai_client=anthropic_client, cache_client=safe_get_ai_cache())
         
         # Detect platform
         result = await platform_detector.detect_platform_universal(
@@ -10818,7 +10813,7 @@ async def process_excel_universal_endpoint(
         # Initialize components
         excel_processor = ExcelProcessor()
         field_detector = UniversalFieldDetector()
-        platform_detector = UniversalPlatformDetector(openai_client=openai, cache_client=safe_get_ai_cache())
+        platform_detector = UniversalPlatformDetector(openai_client=anthropic_client, cache_client=safe_get_ai_cache())
         document_classifier = UniversalDocumentClassifier(cache_client=safe_get_ai_cache())
         data_extractor = UniversalExtractors(cache_client=safe_get_ai_cache())
         
@@ -10894,7 +10889,7 @@ async def get_component_metrics():
     try:
         # Initialize components
         field_detector = UniversalFieldDetector()
-        platform_detector = UniversalPlatformDetector(openai_client=openai, cache_client=safe_get_ai_cache())
+        platform_detector = UniversalPlatformDetector(openai_client=anthropic_client, cache_client=safe_get_ai_cache())
         document_classifier = UniversalDocumentClassifier(cache_client=safe_get_ai_cache())
         data_extractor = UniversalExtractors(cache_client=safe_get_ai_cache())
         
@@ -13729,7 +13724,7 @@ async def process_with_websocket_endpoint(
         # Initialize components
         excel_processor = ExcelProcessor()
         field_detector = UniversalFieldDetector()
-        platform_detector = UniversalPlatformDetector(openai_client=openai, cache_client=safe_get_ai_cache())
+        platform_detector = UniversalPlatformDetector(openai_client=anthropic_client, cache_client=safe_get_ai_cache())
         document_classifier = UniversalDocumentClassifier(cache_client=safe_get_ai_cache())
         data_extractor = UniversalExtractors(cache_client=safe_get_ai_cache())
         
@@ -14381,7 +14376,7 @@ async def get_health_status():
                     test_instance = UniversalFieldDetector()
                     monitoring_system.update_health_status(component, 'healthy', {'initialized': True})
                 elif component == 'UniversalPlatformDetector':
-                    test_instance = UniversalPlatformDetector(openai_client=openai, cache_client=safe_get_ai_cache())
+                    test_instance = UniversalPlatformDetector(openai_client=anthropic_client, cache_client=safe_get_ai_cache())
                     monitoring_system.update_health_status(component, 'healthy', {'initialized': True})
                 elif component == 'UniversalDocumentClassifier':
                     test_instance = UniversalDocumentClassifier(cache_client=safe_get_ai_cache())
