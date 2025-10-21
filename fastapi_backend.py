@@ -10427,7 +10427,18 @@ async def process_excel_endpoint(request: dict):
             if file_bytes is None:
                 file_bytes = file_resp
             file_downloaded_successfully = True
-            logger.info(f"File downloaded successfully for job {job_id}, size: {len(file_bytes) if file_bytes else 0} bytes")
+            
+            # FIX ISSUE #2: Check file size immediately after download (before processing)
+            actual_file_size = len(file_bytes) if file_bytes else 0
+            MAX_FILE_SIZE = 500 * 1024 * 1024  # 500MB
+            if actual_file_size > MAX_FILE_SIZE:
+                error_msg = f"File too large: {actual_file_size / 1024 / 1024:.2f}MB (max: 500MB)"
+                logger.error(f"File size exceeded for job {job_id}: {actual_file_size} bytes")
+                raise HTTPException(status_code=400, detail=error_msg)
+            
+            logger.info(f"File downloaded successfully for job {job_id}, size: {actual_file_size} bytes")
+        except HTTPException:
+            raise
         except Exception as e:
             logger.error(f"Storage download failed for hash verification: {e}")
             # Continue without duplicate check if download fails
@@ -10974,15 +10985,15 @@ async def _enqueue_file_processing(user_id: str, filename: str, storage_path: st
                 await pool.enqueue_job('process_spreadsheet', user_id, filename, storage_path, job_id)
             except Exception as e:
                 logger.warning(f"ARQ dispatch failed, falling back to inline: {e}")
-                asyncio.create_task(start_processing_job(user_id, job_id, storage_path, filename))
+                asyncio.create_task(start_processing_job(user_id, job_id, storage_path, filename, file_bytes_cached=file_bytes))
         elif _use_celery() and task_spreadsheet_processing:
             try:
                 task_spreadsheet_processing.apply_async(args=[user_id, filename, storage_path, job_id])
             except Exception as e:
                 logger.warning(f"Celery dispatch failed, falling back to inline task: {e}")
-                asyncio.create_task(start_processing_job(user_id, job_id, storage_path, filename))
+                asyncio.create_task(start_processing_job(user_id, job_id, storage_path, filename, file_bytes_cached=file_bytes))
         else:
-            asyncio.create_task(start_processing_job(user_id, job_id, storage_path, filename))
+            asyncio.create_task(start_processing_job(user_id, job_id, storage_path, filename, file_bytes_cached=file_bytes))
         return job_id
     except Exception as e:
         logger.error(f"Failed to enqueue processing: {e}")
@@ -12307,94 +12318,111 @@ async def initiate_connector(req: ConnectorInitiateRequest):
         logger.error(f"Initiate connector failed for provider={req.provider}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
+async def _dispatch_connector_sync(
+    integration_id: str,
+    req: ConnectorSyncRequest,
+    nango: NangoClient
+) -> Dict[str, Any]:
+    """
+    FIX ISSUE #5: Centralized sync dispatch logic for all providers.
+    
+    Eliminates code duplication across:
+    - /api/connectors/sync endpoint
+    - /api/connectors/scheduler/run endpoint  
+    - Celery periodic tasks
+    
+    Tries ARQ → Celery → Returns HTTP 503 (NO inline fallback!)
+    
+    Args:
+        integration_id: Nango integration ID (e.g., 'google-mail')
+        req: ConnectorSyncRequest with user_id, connection_id, mode, etc.
+        nango: NangoClient instance
+        
+    Returns:
+        {"status": "queued", "provider": integration_id, "mode": mode}
+        
+    Raises:
+        HTTPException(503): If no worker available or dispatch fails
+    """
+    # Map integration_id to ARQ task name and sync function
+    provider_config = {
+        NANGO_GMAIL_INTEGRATION_ID: ('gmail_sync', _gmail_sync_run),
+        NANGO_DROPBOX_INTEGRATION_ID: ('dropbox_sync', _dropbox_sync_run),
+        NANGO_GOOGLE_DRIVE_INTEGRATION_ID: ('gdrive_sync', _gdrive_sync_run),
+        NANGO_ZOHO_MAIL_INTEGRATION_ID: ('zoho_mail_sync', _zohomail_sync_run),
+        NANGO_QUICKBOOKS_INTEGRATION_ID: ('quickbooks_sync', _quickbooks_sync_run),
+        NANGO_XERO_INTEGRATION_ID: ('xero_sync', _xero_sync_run),
+        NANGO_ZOHO_BOOKS_INTEGRATION_ID: ('zoho_books_sync', _zoho_books_sync_run),
+        NANGO_STRIPE_INTEGRATION_ID: ('stripe_sync', _stripe_sync_run),
+        NANGO_RAZORPAY_INTEGRATION_ID: ('razorpay_sync', _razorpay_sync_run),
+    }
+    
+    if integration_id not in provider_config:
+        raise HTTPException(status_code=400, detail=f"Unsupported provider: {integration_id}")
+    
+    arq_task_name, sync_func = provider_config[integration_id]
+    
+    # Try ARQ worker first
+    if _queue_backend() == 'arq':
+        try:
+            pool = await get_arq_pool()
+            await pool.enqueue_job(arq_task_name, req.model_dump())
+            JOBS_ENQUEUED.labels(provider=integration_id, mode=req.mode).inc()
+            logger.info(f"✅ Queued {integration_id} sync via ARQ: {req.correlation_id}")
+            return {"status": "queued", "provider": integration_id, "mode": req.mode}
+        except Exception as e:
+            logger.error(f"❌ ARQ dispatch failed for {integration_id}: {e}")
+            raise HTTPException(
+                status_code=503,
+                detail="Background worker unavailable. Please try again in a few moments."
+            )
+    
+    # Try Celery worker
+    if _use_celery():
+        celery_task_map = {
+            NANGO_GMAIL_INTEGRATION_ID: task_gmail_sync,
+        }
+        task = celery_task_map.get(integration_id)
+        if task:
+            try:
+                task.apply_async(args=[req.model_dump()])
+                JOBS_ENQUEUED.labels(provider=integration_id, mode=req.mode).inc()
+                logger.info(f"✅ Queued {integration_id} sync via Celery: {req.correlation_id}")
+                return {"status": "queued", "provider": integration_id, "mode": req.mode}
+            except Exception as e:
+                logger.error(f"❌ Celery dispatch failed for {integration_id}: {e}")
+                raise HTTPException(
+                    status_code=503,
+                    detail="Background worker unavailable. Please try again in a few moments."
+                )
+    
+    # No worker configured - fail fast
+    logger.error(f"❌ No worker configured for {integration_id} sync")
+    raise HTTPException(
+        status_code=503,
+        detail="Background worker not configured. Please contact support."
+    )
+
+
 @app.post("/api/connectors/sync")
 async def connectors_sync(req: ConnectorSyncRequest):
-    """Run a sync via Nango (historical or incremental) for supported providers."""
+    """
+    Run a sync via Nango (historical or incremental) for supported providers.
+    
+    FIX ISSUE #4 & #5: Now uses centralized dispatch function.
+    - No inline fallback execution (returns HTTP 503 if worker unavailable)
+    - Single source of truth for all 9 providers
+    """
     await _require_security('connectors-sync', req.user_id, req.session_token)
     try:
         integ = (req.integration_id or NANGO_GMAIL_INTEGRATION_ID)
-        # Validate provider enum
-        allowed = {NANGO_GMAIL_INTEGRATION_ID, NANGO_DROPBOX_INTEGRATION_ID, NANGO_GOOGLE_DRIVE_INTEGRATION_ID,
-                   NANGO_ZOHO_MAIL_INTEGRATION_ID, NANGO_ZOHO_BOOKS_INTEGRATION_ID, NANGO_QUICKBOOKS_INTEGRATION_ID,
-                   NANGO_XERO_INTEGRATION_ID, NANGO_STRIPE_INTEGRATION_ID, NANGO_RAZORPAY_INTEGRATION_ID}
-        if integ not in allowed:
-            raise HTTPException(status_code=400, detail="Unsupported provider integration_id")
-
+        
         # Ensure correlation id
         req.correlation_id = req.correlation_id or str(uuid.uuid4())
+        
+        # Use centralized dispatch function (FIX ISSUE #5)
         nango = NangoClient(base_url=NANGO_BASE_URL)
-        if integ == NANGO_GMAIL_INTEGRATION_ID:
-            if _queue_backend() == 'arq':
-                pool = await get_arq_pool()
-                await pool.enqueue_job('gmail_sync', req.model_dump())
-                JOBS_ENQUEUED.labels(provider=integ, mode=req.mode).inc()
-                return {"status": "queued", "provider": integ, "mode": req.mode}
-            if _use_celery() and task_gmail_sync:
-                try:
-                    task_gmail_sync.apply_async(args=[req.model_dump()])
-                    JOBS_ENQUEUED.labels(provider=integ, mode=req.mode).inc()
-                    return {"status": "queued", "provider": integ, "mode": req.mode}
-                except Exception as e:
-                    logger.warning(f"Celery dispatch for Gmail sync failed, falling back inline: {e}")
-            return await _gmail_sync_run(nango, req)
-        elif integ == NANGO_DROPBOX_INTEGRATION_ID:
-            if _queue_backend() == 'arq':
-                pool = await get_arq_pool()
-                await pool.enqueue_job('dropbox_sync', req.model_dump())
-                JOBS_ENQUEUED.labels(provider=integ, mode=req.mode).inc()
-                return {"status": "queued", "provider": integ, "mode": req.mode}
-            return await _dropbox_sync_run(nango, req)
-        elif integ == NANGO_GOOGLE_DRIVE_INTEGRATION_ID:
-            if _queue_backend() == 'arq':
-                pool = await get_arq_pool()
-                await pool.enqueue_job('gdrive_sync', req.model_dump())
-                JOBS_ENQUEUED.labels(provider=integ, mode=req.mode).inc()
-                return {"status": "queued", "provider": integ, "mode": req.mode}
-            return await _gdrive_sync_run(nango, req)
-        elif integ == NANGO_ZOHO_MAIL_INTEGRATION_ID:
-            if _queue_backend() == 'arq':
-                pool = await get_arq_pool()
-                await pool.enqueue_job('zoho_mail_sync', req.model_dump())
-                JOBS_ENQUEUED.labels(provider=integ, mode=req.mode).inc()
-                return {"status": "queued", "provider": integ, "mode": req.mode}
-            return await _zohomail_sync_run(nango, req)
-        elif integ == NANGO_QUICKBOOKS_INTEGRATION_ID:
-            if _queue_backend() == 'arq':
-                pool = await get_arq_pool()
-                await pool.enqueue_job('quickbooks_sync', req.model_dump())
-                JOBS_ENQUEUED.labels(provider=integ, mode=req.mode).inc()
-                return {"status": "queued", "provider": integ, "mode": req.mode}
-            return await _quickbooks_sync_run(nango, req)
-        elif integ == NANGO_XERO_INTEGRATION_ID:
-            if _queue_backend() == 'arq':
-                pool = await get_arq_pool()
-                await pool.enqueue_job('xero_sync', req.model_dump())
-                JOBS_ENQUEUED.labels(provider=integ, mode=req.mode).inc()
-                return {"status": "queued", "provider": integ, "mode": req.mode}
-            return await _xero_sync_run(nango, req)
-        elif integ == NANGO_ZOHO_BOOKS_INTEGRATION_ID:
-            if _queue_backend() == 'arq':
-                pool = await get_arq_pool()
-                await pool.enqueue_job('zoho_books_sync', req.model_dump())
-                JOBS_ENQUEUED.labels(provider=integ, mode=req.mode).inc()
-                return {"status": "queued", "provider": integ, "mode": req.mode}
-            return await _zoho_books_sync_run(nango, req)
-        elif integ == NANGO_STRIPE_INTEGRATION_ID:
-            if _queue_backend() == 'arq':
-                pool = await get_arq_pool()
-                await pool.enqueue_job('stripe_sync', req.model_dump())
-                JOBS_ENQUEUED.labels(provider=integ, mode=req.mode).inc()
-                return {"status": "queued", "provider": integ, "mode": req.mode}
-            return await _stripe_sync_run(nango, req)
-        elif integ == NANGO_RAZORPAY_INTEGRATION_ID:
-            if _queue_backend() == 'arq':
-                pool = await get_arq_pool()
-                await pool.enqueue_job('razorpay_sync', req.model_dump())
-                JOBS_ENQUEUED.labels(provider=integ, mode=req.mode).inc()
-                return {"status": "queued", "provider": integ, "mode": req.mode}
-            return await _razorpay_sync_run(nango, req)
-        else:
-            raise HTTPException(status_code=400, detail="Provider sync not yet implemented")
+        return await _dispatch_connector_sync(integ, req, nango)
     except HTTPException:
         raise
     except Exception as e:
@@ -13433,7 +13461,8 @@ websocket_manager = UniversalWebSocketManager()
 async def start_processing_job(user_id: str, job_id: str, storage_path: str, filename: str,
                                duplicate_decision: Optional[str] = None,
                                existing_file_id: Optional[str] = None,
-                               original_file_hash: Optional[str] = None):
+                               original_file_hash: Optional[str] = None,
+                               file_bytes_cached: Optional[bytes] = None):
     try:
         # Bind job to user for WebSocket authorization
         base = (await websocket_manager.get_job_status(job_id)) or {}
@@ -13447,27 +13476,38 @@ async def start_processing_job(user_id: str, job_id: str, storage_path: str, fil
             status = await websocket_manager.get_job_status(job_id)
             return (status or {}).get("status") == "cancelled"
 
-        await websocket_manager.send_overall_update(
-            job_id=job_id,
-            status="processing",
-            message="📥 Downloading file from storage...",
-            progress=5
-        )
-        if await is_cancelled():
-            return
+        # FIX ISSUE #1: Reuse already-downloaded file bytes if available
+        file_bytes = file_bytes_cached
+        
+        if file_bytes is None:
+            await websocket_manager.send_overall_update(
+                job_id=job_id,
+                status="processing",
+                message="📥 Downloading file from storage...",
+                progress=5
+            )
+            if await is_cancelled():
+                return
 
-        file_bytes = None
-        try:
-            storage = supabase.storage.from_("finely-upload")
-            file_resp = storage.download(storage_path)
-            file_bytes = file_resp if isinstance(file_resp, (bytes, bytearray)) else getattr(file_resp, 'data', None)
-            if file_bytes is None:
-                file_bytes = file_resp
-        except Exception as e:
-            logger.error(f"Storage download failed: {e}")
-            await websocket_manager.send_error(job_id, f"Download failed: {e}")
-            await websocket_manager.merge_job_state(job_id, {**((await websocket_manager.get_job_status(job_id)) or {}), "status": "failed", "error": str(e)})
-            return
+            try:
+                storage = supabase.storage.from_("finely-upload")
+                file_resp = storage.download(storage_path)
+                file_bytes = file_resp if isinstance(file_resp, (bytes, bytearray)) else getattr(file_resp, 'data', None)
+                if file_bytes is None:
+                    file_bytes = file_resp
+            except Exception as e:
+                logger.error(f"Storage download failed: {e}")
+                await websocket_manager.send_error(job_id, f"Download failed: {e}")
+                await websocket_manager.merge_job_state(job_id, {**((await websocket_manager.get_job_status(job_id)) or {}), "status": "failed", "error": str(e)})
+                return
+        else:
+            logger.info(f"Reusing cached file bytes for job {job_id} (avoiding re-download)")
+            await websocket_manager.send_overall_update(
+                job_id=job_id,
+                status="processing",
+                message="✅ Using cached file (no re-download needed)...",
+                progress=5
+            )
 
         await websocket_manager.send_overall_update(
             job_id=job_id,

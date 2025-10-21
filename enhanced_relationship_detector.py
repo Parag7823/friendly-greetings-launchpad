@@ -22,6 +22,30 @@ from supabase import create_client, Client
 
 logger = logging.getLogger(__name__)
 
+# Import semantic relationship extractor for AI-powered semantic analysis
+try:
+    from semantic_relationship_extractor import SemanticRelationshipExtractor
+    SEMANTIC_EXTRACTOR_AVAILABLE = True
+except ImportError:
+    SEMANTIC_EXTRACTOR_AVAILABLE = False
+    logger.warning("SemanticRelationshipExtractor not available. Semantic analysis will be disabled.")
+
+# Import causal inference engine for Bradford Hill criteria and causal analysis
+try:
+    from causal_inference_engine import CausalInferenceEngine
+    CAUSAL_INFERENCE_AVAILABLE = True
+except ImportError:
+    CAUSAL_INFERENCE_AVAILABLE = False
+    logger.warning("CausalInferenceEngine not available. Causal analysis will be disabled.")
+
+# Import temporal pattern learner for pattern learning and prediction
+try:
+    from temporal_pattern_learner import TemporalPatternLearner
+    TEMPORAL_PATTERN_LEARNER_AVAILABLE = True
+except ImportError:
+    TEMPORAL_PATTERN_LEARNER_AVAILABLE = False
+    logger.warning("TemporalPatternLearner not available. Temporal pattern learning will be disabled.")
+
 class EnhancedRelationshipDetector:
     """Enhanced relationship detector that actually finds relationships between events"""
     
@@ -29,6 +53,38 @@ class EnhancedRelationshipDetector:
         self.openai = openai_client
         self.supabase = supabase_client
         self.cache = cache_client  # Use centralized cache, no local cache
+        
+        # Initialize semantic relationship extractor for AI-powered analysis
+        if SEMANTIC_EXTRACTOR_AVAILABLE:
+            self.semantic_extractor = SemanticRelationshipExtractor(
+                openai_client=openai_client,
+                supabase_client=supabase_client,
+                cache_client=cache_client
+            )
+            logger.info("✅ Semantic relationship extractor initialized")
+        else:
+            self.semantic_extractor = None
+            logger.warning("⚠️ Semantic relationship extractor not available")
+        
+        # Initialize causal inference engine for Bradford Hill criteria analysis
+        if CAUSAL_INFERENCE_AVAILABLE:
+            self.causal_engine = CausalInferenceEngine(
+                supabase_client=supabase_client
+            )
+            logger.info("✅ Causal inference engine initialized")
+        else:
+            self.causal_engine = None
+            logger.warning("⚠️ Causal inference engine not available")
+        
+        # Initialize temporal pattern learner for pattern learning and prediction
+        if TEMPORAL_PATTERN_LEARNER_AVAILABLE:
+            self.temporal_learner = TemporalPatternLearner(
+                supabase_client=supabase_client
+            )
+            logger.info("✅ Temporal pattern learner initialized")
+        else:
+            self.temporal_learner = None
+            logger.warning("⚠️ Temporal pattern learner not available")
         
     async def detect_all_relationships(self, user_id: str, file_id: Optional[str] = None) -> Dict[str, Any]:
         """
@@ -57,6 +113,19 @@ class EnhancedRelationshipDetector:
             if all_relationships:
                 await self._store_relationships(all_relationships, user_id)
             
+            # PHASE 2B: Enrich relationships with semantic analysis
+            semantic_enrichment_stats = await self._enrich_relationships_with_semantics(
+                all_relationships, user_id
+            )
+            
+            # PHASE 3: Causal inference using Bradford Hill criteria
+            causal_analysis_stats = await self._analyze_causal_relationships(
+                all_relationships, user_id
+            )
+            
+            # PHASE 4: Temporal pattern learning and prediction
+            temporal_learning_stats = await self._learn_temporal_patterns(user_id)
+            
             logger.info(f"Relationship detection completed: {len(all_relationships)} relationships found")
             
             return {
@@ -64,10 +133,16 @@ class EnhancedRelationshipDetector:
                 "total_relationships": len(all_relationships),
                 "cross_document_relationships": len(cross_file_relationships),
                 "within_file_relationships": len(within_file_relationships),
+                "semantic_enrichment": semantic_enrichment_stats,
+                "causal_analysis": causal_analysis_stats,
+                "temporal_learning": temporal_learning_stats,
                 "processing_stats": {
                     "relationship_types_found": list(set([r.get('relationship_type', 'unknown') for r in all_relationships])),
                     "method": "database_joins",
-                    "complexity": "O(N log N) instead of O(N²)"
+                    "complexity": "O(N log N) instead of O(N²)",
+                    "semantic_analysis_enabled": self.semantic_extractor is not None,
+                    "causal_analysis_enabled": self.causal_engine is not None,
+                    "temporal_learning_enabled": self.temporal_learner is not None
                 },
                 "message": "Relationship detection completed successfully using database-level optimization"
             }
@@ -882,6 +957,262 @@ class EnhancedRelationshipDetector:
             return False
         
         return True
+    
+    async def _enrich_relationships_with_semantics(
+        self, 
+        relationships: List[Dict], 
+        user_id: str
+    ) -> Dict[str, Any]:
+        """
+        PHASE 2B: Enrich detected relationships with AI-powered semantic analysis.
+        
+        This adds:
+        - Natural language descriptions of relationships
+        - Temporal causality detection (cause vs correlation)
+        - Business logic pattern identification
+        - Relationship embeddings for similarity search
+        - Explainable confidence scoring
+        
+        Args:
+            relationships: List of detected relationships
+            user_id: User ID for context
+        
+        Returns:
+            Statistics about semantic enrichment
+        """
+        if not self.semantic_extractor or not relationships:
+            return {
+                'enabled': False,
+                'total_relationships': len(relationships),
+                'enriched_count': 0,
+                'message': 'Semantic enrichment not available or no relationships to enrich'
+            }
+        
+        try:
+            enriched_count = 0
+            failed_count = 0
+            
+            # Get events for context
+            event_ids = set()
+            for rel in relationships:
+                event_ids.add(rel['source_event_id'])
+                event_ids.add(rel['target_event_id'])
+            
+            # Fetch events from database
+            events_dict = await self._fetch_events_by_ids(list(event_ids), user_id)
+            
+            # Process relationships in batches
+            batch_size = 5  # Conservative batch size for API rate limits
+            for i in range(0, len(relationships), batch_size):
+                batch = relationships[i:i + batch_size]
+                
+                for rel in batch:
+                    try:
+                        source_event = events_dict.get(rel['source_event_id'])
+                        target_event = events_dict.get(rel['target_event_id'])
+                        
+                        if not source_event or not target_event:
+                            logger.warning(f"Missing events for relationship {rel.get('source_event_id')} -> {rel.get('target_event_id')}")
+                            failed_count += 1
+                            continue
+                        
+                        # Extract semantic relationship
+                        semantic_rel = await self.semantic_extractor.extract_semantic_relationships(
+                            source_event=source_event,
+                            target_event=target_event,
+                            context_events=None,  # Could add surrounding events for better context
+                            existing_relationship=rel
+                        )
+                        
+                        if semantic_rel:
+                            enriched_count += 1
+                            logger.debug(
+                                f"✅ Enriched relationship: {semantic_rel.relationship_type} "
+                                f"(confidence: {semantic_rel.confidence:.2f})"
+                            )
+                        else:
+                            failed_count += 1
+                            
+                    except Exception as e:
+                        logger.error(f"Failed to enrich relationship: {e}")
+                        failed_count += 1
+                        continue
+            
+            # Get metrics from semantic extractor
+            extractor_metrics = self.semantic_extractor.get_metrics()
+            
+            return {
+                'enabled': True,
+                'total_relationships': len(relationships),
+                'enriched_count': enriched_count,
+                'failed_count': failed_count,
+                'success_rate': enriched_count / len(relationships) if relationships else 0.0,
+                'cache_hit_rate': extractor_metrics.get('cache_hit_rate', 0.0),
+                'avg_confidence': extractor_metrics.get('avg_confidence', 0.0),
+                'causality_distribution': extractor_metrics.get('causality_distribution', {}),
+                'business_logic_distribution': extractor_metrics.get('business_logic_distribution', {}),
+                'message': f'Semantic enrichment completed: {enriched_count}/{len(relationships)} relationships enriched'
+            }
+            
+        except Exception as e:
+            logger.error(f"Semantic enrichment failed: {e}")
+            return {
+                'enabled': True,
+                'total_relationships': len(relationships),
+                'enriched_count': 0,
+                'error': str(e),
+                'message': 'Semantic enrichment failed'
+            }
+    
+    async def _fetch_events_by_ids(self, event_ids: List[str], user_id: str) -> Dict[str, Dict]:
+        """Fetch events by IDs and return as dictionary"""
+        try:
+            if not event_ids:
+                return {}
+            
+            # Fetch events from database
+            result = self.supabase.table('raw_events').select(
+                'id, source_platform, document_type, amount_usd, source_ts, '
+                'vendor_standard, payload, created_at'
+            ).in_('id', event_ids).eq('user_id', user_id).execute()
+            
+            if not result.data:
+                return {}
+            
+            # Convert to dictionary keyed by event ID
+            events_dict = {event['id']: event for event in result.data}
+            
+            return events_dict
+            
+        except Exception as e:
+            logger.error(f"Failed to fetch events: {e}")
+            return {}
+    
+    async def _analyze_causal_relationships(
+        self,
+        relationships: List[Dict],
+        user_id: str
+    ) -> Dict[str, Any]:
+        """
+        PHASE 3: Analyze relationships for causality using Bradford Hill criteria.
+        
+        This determines which relationships are truly causal (cause-effect)
+        vs merely correlated.
+        
+        Args:
+            relationships: List of detected relationships
+            user_id: User ID for context
+        
+        Returns:
+            Statistics about causal analysis
+        """
+        if not self.causal_engine or not relationships:
+            return {
+                'enabled': False,
+                'total_relationships': len(relationships),
+                'causal_count': 0,
+                'message': 'Causal analysis not available or no relationships to analyze'
+            }
+        
+        try:
+            # Extract relationship IDs
+            relationship_ids = [rel.get('id') for rel in relationships if rel.get('id')]
+            
+            if not relationship_ids:
+                return {
+                    'enabled': True,
+                    'total_relationships': len(relationships),
+                    'causal_count': 0,
+                    'message': 'No relationship IDs found for causal analysis'
+                }
+            
+            # Run causal analysis
+            result = await self.causal_engine.analyze_causal_relationships(
+                user_id=user_id,
+                relationship_ids=relationship_ids
+            )
+            
+            return {
+                'enabled': True,
+                'total_relationships': result.get('total_analyzed', 0),
+                'causal_count': result.get('causal_count', 0),
+                'causal_percentage': result.get('causal_percentage', 0.0),
+                'avg_causal_score': result.get('avg_causal_score', 0.0),
+                'message': result.get('message', 'Causal analysis completed')
+            }
+            
+        except Exception as e:
+            logger.error(f"Causal analysis failed: {e}")
+            return {
+                'enabled': True,
+                'total_relationships': len(relationships),
+                'causal_count': 0,
+                'error': str(e),
+                'message': 'Causal analysis failed'
+            }
+    
+    async def _learn_temporal_patterns(self, user_id: str) -> Dict[str, Any]:
+        """
+        PHASE 4: Learn temporal patterns and predict missing relationships.
+        
+        This analyzes historical relationship timings to:
+        - Learn patterns (e.g., "invoices paid in 30±5 days")
+        - Detect seasonal cycles
+        - Predict missing relationships
+        - Identify temporal anomalies
+        
+        Args:
+            user_id: User ID for context
+        
+        Returns:
+            Statistics about temporal pattern learning
+        """
+        if not self.temporal_learner:
+            return {
+                'enabled': False,
+                'patterns_learned': 0,
+                'predictions_made': 0,
+                'anomalies_detected': 0,
+                'message': 'Temporal pattern learning not available'
+            }
+        
+        try:
+            # Learn all patterns
+            patterns_result = await self.temporal_learner.learn_all_patterns(user_id)
+            
+            # Predict missing relationships
+            predictions_result = await self.temporal_learner.predict_missing_relationships(user_id)
+            
+            # Detect temporal anomalies
+            anomalies_result = await self.temporal_learner.detect_temporal_anomalies(user_id)
+            
+            return {
+                'enabled': True,
+                'patterns_learned': patterns_result.get('total_patterns', 0),
+                'predictions_made': predictions_result.get('total_predictions', 0),
+                'overdue_predictions': predictions_result.get('overdue_count', 0),
+                'anomalies_detected': anomalies_result.get('total_anomalies', 0),
+                'critical_anomalies': anomalies_result.get('critical_count', 0),
+                'patterns': patterns_result.get('patterns', []),
+                'predictions': predictions_result.get('predictions', []),
+                'anomalies': anomalies_result.get('anomalies', []),
+                'message': (
+                    f"Temporal learning completed: {patterns_result.get('total_patterns', 0)} patterns learned, "
+                    f"{predictions_result.get('total_predictions', 0)} predictions made, "
+                    f"{anomalies_result.get('total_anomalies', 0)} anomalies detected"
+                )
+            }
+            
+        except Exception as e:
+            logger.error(f"Temporal pattern learning failed: {e}")
+            return {
+                'enabled': True,
+                'patterns_learned': 0,
+                'predictions_made': 0,
+                'anomalies_detected': 0,
+                'error': str(e),
+                'message': 'Temporal pattern learning failed'
+            }
 
 # Test function
 async def test_enhanced_relationship_detection(user_id: str = "550e8400-e29b-41d4-a716-446655440000"):

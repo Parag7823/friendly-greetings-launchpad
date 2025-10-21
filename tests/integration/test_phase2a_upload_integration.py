@@ -69,9 +69,16 @@ class TestFileHashAndUpload:
     @pytest.fixture
     def test_user_id(self, supabase_client):
         """Get or create test user"""
-        # Sign in anonymously
-        auth_response = supabase_client.auth.sign_in_anonymously()
-        user_id = auth_response.user.id if auth_response.user else "test-user"
+        # Sign in anonymously (correct method name)
+        try:
+            auth_response = supabase_client.auth.sign_in_with_password({
+                "email": "test@example.com",
+                "password": "test-password-123"
+            })
+            user_id = auth_response.user.id if auth_response.user else "test-user-anonymous"
+        except:
+            # Fallback to anonymous user ID
+            user_id = "test-user-anonymous"
         print(f"✅ Test user ID: {user_id}")
         return user_id
     
@@ -159,28 +166,45 @@ class TestDuplicateDetectionAPI:
     """
     
     @pytest.fixture
-    def test_user_id(self):
-        """Generate test user ID"""
-        return f"test-user-{datetime.utcnow().timestamp()}"
+    def supabase_client(self):
+        """Create REAL Supabase client"""
+        return create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
+    
+    @pytest.fixture
+    def test_user_and_token(self, supabase_client):
+        """Get test user ID and session token"""
+        try:
+            auth_response = supabase_client.auth.sign_in_with_password({
+                "email": "test@example.com",
+                "password": "test-password-123"
+            })
+            user_id = auth_response.user.id if auth_response.user else "test-user-anonymous"
+            session_token = auth_response.session.access_token if auth_response.session else None
+            return user_id, session_token
+        except:
+            return "test-user-anonymous", None
     
     @pytest.mark.asyncio
-    async def test_check_duplicate_no_match(self, test_user_id):
+    async def test_check_duplicate_no_match(self, test_user_and_token):
         """
         Test duplicate check when no duplicate exists.
         
         REAL TEST: Calls deployed backend API
         """
+        user_id, session_token = test_user_and_token
+        
         # Given: Unique file hash
         file_hash = hashlib.sha256(f"unique-file-{datetime.utcnow().timestamp()}".encode()).hexdigest()
         
-        # When: Check for duplicates
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        # When: Check for duplicates (increased timeout for cold start)
+        async with httpx.AsyncClient(timeout=60.0) as client:
             response = await client.post(
                 f"{BACKEND_URL}/check-duplicate",
                 json={
-                    "user_id": test_user_id,
+                    "user_id": user_id,
                     "file_hash": file_hash,
-                    "file_name": "test_unique.xlsx"
+                    "file_name": "test_unique.xlsx",
+                    "session_token": session_token
                 }
             )
         
@@ -191,18 +215,21 @@ class TestDuplicateDetectionAPI:
         print(f"✅ No duplicate found (as expected)")
     
     @pytest.mark.asyncio
-    async def test_check_duplicate_api_validation(self, test_user_id):
+    async def test_check_duplicate_api_validation(self, test_user_and_token):
         """
         Test API validation for duplicate check.
         
         REAL TEST: Verifies backend validates inputs
         """
+        user_id, session_token = test_user_and_token
+        
         # When: Call API with missing parameters
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with httpx.AsyncClient(timeout=60.0) as client:
             response = await client.post(
                 f"{BACKEND_URL}/check-duplicate",
                 json={
-                    "user_id": test_user_id
+                    "user_id": user_id,
+                    "session_token": session_token
                     # Missing file_hash
                 }
             )
@@ -230,8 +257,14 @@ class TestCompleteUploadFlow:
     @pytest.fixture
     def test_user_id(self, supabase_client):
         """Get test user"""
-        auth_response = supabase_client.auth.sign_in_anonymously()
-        return auth_response.user.id if auth_response.user else "test-user"
+        try:
+            auth_response = supabase_client.auth.sign_in_with_password({
+                "email": "test@example.com",
+                "password": "test-password-123"
+            })
+            return auth_response.user.id if auth_response.user else "test-user-anonymous"
+        except:
+            return "test-user-anonymous"
     
     @pytest.mark.asyncio
     async def test_complete_upload_flow_no_duplicate(self, supabase_client, test_user_id):
@@ -247,6 +280,16 @@ class TestCompleteUploadFlow:
         REAL TEST: Uses all real services
         """
         print(f"\n🔍 Testing complete upload flow (no duplicate)")
+        
+        # Get session token
+        try:
+            auth_response = supabase_client.auth.sign_in_with_password({
+                "email": "test@example.com",
+                "password": "test-password-123"
+            })
+            session_token = auth_response.session.access_token if auth_response.session else None
+        except:
+            session_token = None
         
         # Step 1: Create test file
         file_content = b"Invoice,Amount\nTest Corp,2500.00"
@@ -268,13 +311,14 @@ class TestCompleteUploadFlow:
             print(f"   Step 2: File uploaded to storage: {storage_path}")
             
             # Step 3: Check for duplicates via API
-            async with httpx.AsyncClient(timeout=30.0) as client:
+            async with httpx.AsyncClient(timeout=60.0) as client:
                 dup_response = await client.post(
                     f"{BACKEND_URL}/check-duplicate",
                     json={
                         "user_id": test_user_id,
                         "file_hash": file_hash,
-                        "file_name": filename
+                        "file_name": filename,
+                        "session_token": session_token
                     }
                 )
             
