@@ -821,21 +821,10 @@ Respond with ONLY a JSON object: {"type": "question_type", "confidence": 0.0-1.0
     ):
         """Store chat message in database"""
         try:
-            # Store user message
             self.supabase.table('chat_messages').insert({
                 'user_id': user_id,
                 'chat_id': chat_id or f"chat_{datetime.utcnow().strftime('%Y%m%d')}",
                 'message': question,
-                'role': 'user',
-                'created_at': datetime.utcnow().isoformat()
-            }).execute()
-            
-            # Store assistant response
-            self.supabase.table('chat_messages').insert({
-                'user_id': user_id,
-                'chat_id': chat_id or f"chat_{datetime.utcnow().strftime('%Y%m%d')}",
-                'message': response.answer,
-                'role': 'assistant',
                 'response': response.answer,
                 'question_type': response.question_type.value,
                 'confidence': response.confidence,

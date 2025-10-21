@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Menu } from 'lucide-react';
 import { FinleySidebar } from './FinleySidebar';
-import { IntelligentChatInterface } from './IntelligentChatInterface';
+import { ChatInterface } from './ChatInterface';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from './AuthProvider';
 import { Button } from './ui/button';
@@ -11,6 +11,7 @@ export const FinleyLayout = () => {
   const { user, loading, signInAnonymously } = useAuth();
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(true);
+  const [currentView, setCurrentView] = useState('chat');
   const [currentChatId, setCurrentChatId] = useState<string | null>(null);
   const location = useLocation();
   const navigate = useNavigate();
@@ -40,11 +41,35 @@ export const FinleyLayout = () => {
     };
   }, []);
 
-  // Simplified - no view switching needed, everything is in chat
-  const handleNavigate = () => {
-    // All navigation happens through chat now
-    if (location.pathname !== '/') {
-      navigate('/');
+  // Sync view with route path
+  useEffect(() => {
+    const path = location.pathname || '/';
+    if (path.startsWith('/connectors')) {
+      setCurrentView('marketplace');
+    } else if (path.startsWith('/upload')) {
+      setCurrentView('upload');
+    } else {
+      setCurrentView('chat');
+    }
+  }, [location.pathname]);
+
+  const routeForView = (view: string) => {
+    switch (view) {
+      case 'marketplace':
+        return '/connectors';
+      case 'upload':
+        return '/upload';
+      case 'chat':
+      default:
+        return '/chat';
+    }
+  };
+
+  const handleNavigate = (view: string) => {
+    setCurrentView(view);
+    const target = routeForView(view);
+    if (location.pathname !== target) {
+      navigate(target);
     }
   };
 
@@ -112,6 +137,7 @@ export const FinleyLayout = () => {
             <FinleySidebar 
               onClose={() => setIsSidebarOpen(false)} 
               onNavigate={handleNavigate}
+              currentView={currentView}
               currentChatId={currentChatId}
             />
           </motion.div>
@@ -126,14 +152,21 @@ export const FinleyLayout = () => {
       >
         <FinleySidebar 
           onNavigate={handleNavigate}
+          currentView={currentView}
           isCollapsed={isSidebarCollapsed}
           currentChatId={currentChatId}
         />
       </motion.div>
       
-      {/* Main Content - Single Intelligent Chat Interface */}
+      {/* Main Content */}
       <div className="flex-1 flex flex-col min-h-0">
-        <IntelligentChatInterface />
+        {/* Chat Interface */}
+        <div className="flex-1 min-h-0">
+          <ChatInterface 
+            currentView={currentView}
+            onNavigate={handleNavigate}
+          />
+        </div>
       </div>
     </div>
   );
