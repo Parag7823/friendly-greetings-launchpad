@@ -10203,6 +10203,70 @@ async def delete_chat(request: dict):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.post("/chat")
+async def chat_endpoint(request: dict):
+    """
+    Main chat endpoint - connects frontend to intelligent chat orchestrator.
+    
+    This is the brain of Finley AI that routes questions to intelligence engines.
+    """
+    try:
+        message = request.get('message')
+        user_id = request.get('user_id')
+        chat_id = request.get('chat_id')
+        
+        if not message or not user_id:
+            raise HTTPException(status_code=400, detail="Missing message or user_id")
+        
+        structured_logger.info("Chat request received", {
+            "user_id": user_id,
+            "chat_id": chat_id,
+            "message_length": len(message)
+        })
+        
+        # Initialize intelligent chat orchestrator
+        from intelligent_chat_orchestrator import IntelligentChatOrchestrator
+        from openai import AsyncOpenAI
+        
+        openai_client = AsyncOpenAI(api_key=os.getenv('OPENAI_API_KEY'))
+        
+        orchestrator = IntelligentChatOrchestrator(
+            openai_client=openai_client,
+            supabase_client=supabase,
+            cache_client=safe_get_ai_cache()
+        )
+        
+        # Process the question
+        response = await orchestrator.process_question(
+            question=message,
+            user_id=user_id,
+            chat_id=chat_id
+        )
+        
+        structured_logger.info("Chat response generated", {
+            "user_id": user_id,
+            "question_type": response.question_type.value,
+            "confidence": response.confidence
+        })
+        
+        # Return response in format expected by frontend
+        return {
+            "response": response.answer,
+            "timestamp": datetime.utcnow().isoformat(),
+            "question_type": response.question_type.value,
+            "confidence": response.confidence,
+            "data": response.data,
+            "actions": response.actions,
+            "visualizations": response.visualizations,
+            "follow_up_questions": response.follow_up_questions,
+            "status": "success"
+        }
+        
+    except Exception as e:
+        structured_logger.error("Chat endpoint error", error=e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.post("/api/detect-fields")
 async def detect_fields_endpoint(request: FieldDetectionRequest):
     """Detect field types using UniversalFieldDetector"""

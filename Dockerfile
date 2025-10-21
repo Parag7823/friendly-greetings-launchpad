@@ -63,6 +63,7 @@ COPY enhanced_relationship_detector.py .
 COPY semantic_relationship_extractor.py .
 COPY causal_inference_engine.py .
 COPY temporal_pattern_learner.py .
+COPY intelligent_chat_orchestrator.py .
 COPY database_optimization_utils.py .
 COPY production_duplicate_detection_service.py .
 COPY transaction_manager.py .
