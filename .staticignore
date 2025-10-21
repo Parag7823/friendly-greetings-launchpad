@@ -1,0 +1,5 @@
+# Ignore Python backend files for Static Site deployment
+requirements.txt
+*.py
+Dockerfile
+render.yaml
