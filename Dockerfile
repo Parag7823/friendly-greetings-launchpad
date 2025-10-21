@@ -25,19 +25,31 @@ FROM python:3.11-slim
 
 # Force cache invalidation - updated packages
 # Install system dependencies for python-magic, Tesseract (OCR), Java (Tabula), and basic functionality
+# Added gfortran and build-essential for scipy compilation
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libmagic1 \
     tesseract-ocr \
     default-jre \
     gcc \
+    g++ \
+    gfortran \
+    build-essential \
+    libopenblas-dev \
+    liblapack-dev \
     libglib2.0-0 \
     libgomp1 \
+    pkg-config \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
 # Copy Python requirements and install
 COPY requirements.txt .
+
+# Upgrade pip and install wheel to use pre-built binaries when possible
+RUN pip install --upgrade pip wheel setuptools
+
+# Install Python dependencies with pre-built wheels when available
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy all necessary Python files and modules
