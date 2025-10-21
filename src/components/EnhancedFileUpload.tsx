@@ -586,14 +586,14 @@ export const EnhancedFileUpload: React.FC = () => {
         </CardHeader>
         <CardContent>
           <div 
-            className={`border-2 border-dashed rounded-lg p-8 text-center hover:border-primary transition-colors ${isProcessing ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+            className={`bg-[#0A0A0A] border-2 border-dashed border-white/10 rounded-lg p-8 text-center hover:border-white/20 transition-colors ${isProcessing ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
             onClick={() => !isProcessing && document.getElementById('file-upload')?.click()}
           >
-            <Upload className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
-            <p className="text-sm text-muted-foreground mb-2">
+            <Upload className="mx-auto h-12 w-12 text-white/70 mb-4" />
+            <p className="text-sm text-white mb-2">
               Click to upload or drag and drop
             </p>
-            <p className="text-xs text-muted-foreground">
+            <p className="text-xs text-white/60">
               Excel (.xlsx, .xls) or CSV files up to 500MB
             </p>
             <input
@@ -615,20 +615,20 @@ export const EnhancedFileUpload: React.FC = () => {
           <CardContent className="p-6">
             <div className="space-y-3 max-h-96 overflow-y-auto">
               {files.map((fileData) => (
-                <div key={fileData.id} className="flex items-center justify-between p-3 bg-muted rounded-lg">
+                <div key={fileData.id} className="flex items-center justify-between p-3 bg-[#0A0A0A] border border-white/10 rounded-lg">
                   <div className="flex items-center gap-3 flex-1">
-                    <FileText className="h-5 w-5" />
+                    <FileText className="h-5 w-5 text-white/70" />
                     <div className="flex-1">
-                      <p className="text-sm font-medium">{fileData.file.name}</p>
-                      <p className="text-xs text-muted-foreground">{fileData.status}</p>
+                      <p className="text-sm font-medium text-white">{fileData.file.name}</p>
+                      <p className="text-xs text-white/60">{fileData.status}</p>
                     </div>
                   </div>
                   {fileData.status === 'completed' && <CheckCircle className="h-5 w-5 text-green-500" />}
                   {fileData.status === 'error' && <XCircle className="h-5 w-5 text-red-500" />}
-                  {fileData.status === 'processing' && <Loader2 className="h-5 w-5 animate-spin" />}
+                  {fileData.status === 'processing' && <Loader2 className="h-5 w-5 animate-spin text-white" />}
                   <button
                     onClick={() => handleRemove(fileData.id)}
-                    className="ml-2 p-1 hover:bg-background rounded"
+                    className="ml-2 p-1 hover:bg-white/10 rounded text-white/70"
                   >
                     <X className="h-4 w-4" />
                   </button>
@@ -653,15 +653,15 @@ export const EnhancedFileUpload: React.FC = () => {
               {uploadedFiles.map((file) => (
                 <div
                   key={file.id}
-                  className="flex items-center justify-between p-3 rounded-lg bg-muted/30 border"
+                  className="flex items-center justify-between p-3 rounded-lg bg-[#0A0A0A] border border-white/10"
                 >
                   <div className="flex items-center gap-3">
                     <div className="w-8 h-8 rounded-full bg-green-500/20 flex items-center justify-center">
                       <span className="text-green-500 text-sm font-medium">✓</span>
                     </div>
                     <div>
-                      <p className="font-medium text-sm">{file.name}</p>
-                      <p className="text-xs text-muted-foreground">
+                      <p className="font-medium text-sm text-white">{file.name}</p>
+                      <p className="text-xs text-white/60">
                         Completed {file.uploadedAt.toLocaleString()}
                         {file.sheets && ` • ${file.sheets.length} sheets`}
                       </p>
@@ -669,7 +669,7 @@ export const EnhancedFileUpload: React.FC = () => {
                   </div>
                   <button
                     onClick={() => handleRemove(file.id)}
-                    className="text-muted-foreground hover:text-destructive transition-colors"
+                    className="text-white/60 hover:text-red-500 transition-colors"
                   >
                     Remove
                   </button>

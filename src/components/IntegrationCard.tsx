@@ -23,16 +23,16 @@ export const IntegrationCard = ({ icon, title, description, actionLabel, onActio
   if (variant === 'list') {
     return (
       <Card
-        className={`w-full rounded-2xl shadow-sm ${disabled ? 'opacity-70 cursor-not-allowed' : ''} ${className}`}
+        className={`w-full rounded-md shadow-sm bg-[#0A0A0A] border border-white/10 hover:border-white/20 transition-colors ${disabled ? 'opacity-70 cursor-not-allowed' : ''} ${className}`}
         aria-disabled={disabled}
       >
         <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 p-4">
-          <div className="shrink-0 w-10 h-10 rounded-full bg-muted flex items-center justify-center overflow-hidden">
+          <div className="shrink-0 w-10 h-10 rounded-full bg-white/5 flex items-center justify-center overflow-hidden">
             {icon}
           </div>
           <div className="flex-1 min-w-0">
-            <div className="text-base font-semibold text-foreground truncate">{title}</div>
-            <div className="text-sm text-muted-foreground leading-snug mt-0.5 line-clamp-2">{description}</div>
+            <div className="text-base font-semibold text-white truncate">{title}</div>
+            <div className="text-sm text-white/60 leading-snug mt-0.5 line-clamp-2">{description}</div>
           </div>
           <div className="sm:ml-auto flex items-center gap-2">
             {secondaryActionLabel && onSecondaryAction && (

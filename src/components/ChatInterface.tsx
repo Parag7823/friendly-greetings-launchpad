@@ -500,10 +500,10 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
                       className={`flex ${msg.isUser ? 'justify-end' : 'justify-start'}`}
                     >
                       <div
-                        className={`max-w-[80%] rounded-xl px-3 py-2 ${
+                        className={`max-w-[80%] rounded-md px-3 py-2 border ${
                           msg.isUser
-                            ? 'bg-primary text-primary-foreground'
-                            : 'bg-muted text-foreground'
+                            ? 'bg-primary text-primary-foreground border-primary'
+                            : 'bg-[#0A0A0A] text-white border-white/10'
                         }`}
                       >
                         <p className="text-xs">{msg.text}</p>
