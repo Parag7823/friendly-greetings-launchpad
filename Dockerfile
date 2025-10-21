@@ -44,13 +44,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app
 
 # Copy Python requirements and install
-COPY requirements.txt .
+COPY backend-requirements.txt .
 
 # Upgrade pip and install wheel to use pre-built binaries when possible
 RUN pip install --upgrade pip wheel setuptools
 
 # Install Python dependencies with pre-built wheels when available
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r backend-requirements.txt
 
 # Copy all necessary Python files and modules
 COPY fastapi_backend.py .
