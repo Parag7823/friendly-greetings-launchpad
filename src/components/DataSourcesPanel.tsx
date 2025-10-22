@@ -310,9 +310,9 @@ export const DataSourcesPanel = ({ isOpen, onClose }: DataSourcesPanelProps) => 
                 </Card>
               )}
 
-              {/* Uploaded Files */}
-              <Card>
-                <CardHeader className="pb-3">
+              {/* Section A: Uploaded Files - Fixed Height with Independent Scroll */}
+              <Card className="flex flex-col h-[250px]">
+                <CardHeader className="pb-3 flex-shrink-0">
                   <div className="flex items-center gap-2">
                     <FileSpreadsheet className="w-4 h-4 text-muted-foreground" />
                     <CardTitle className="text-sm">Uploaded Files</CardTitle>
@@ -321,7 +321,7 @@ export const DataSourcesPanel = ({ isOpen, onClose }: DataSourcesPanelProps) => 
                     Recent file uploads
                   </CardDescription>
                 </CardHeader>
-                <CardContent className="space-y-2">
+                <CardContent className="flex-1 overflow-y-auto space-y-2 min-h-0">
                   {uploadedFiles.length === 0 ? (
                     <p className="text-xs text-muted-foreground">No files uploaded yet</p>
                   ) : (
@@ -350,9 +350,9 @@ export const DataSourcesPanel = ({ isOpen, onClose }: DataSourcesPanelProps) => 
                 </CardContent>
               </Card>
 
-              {/* Connected Integrations */}
-              <Card>
-                <CardHeader className="pb-3">
+              {/* Section B: Integrations - Fixed Height with Independent Scroll */}
+              <Card className="flex flex-col h-[280px]">
+                <CardHeader className="pb-3 flex-shrink-0">
                   <div className="flex items-center gap-2">
                     <Plug className="w-4 h-4 text-muted-foreground" />
                     <CardTitle className="text-sm">Integrations</CardTitle>
@@ -361,7 +361,7 @@ export const DataSourcesPanel = ({ isOpen, onClose }: DataSourcesPanelProps) => 
                     Connected data sources
                   </CardDescription>
                 </CardHeader>
-                <CardContent className="space-y-2">
+                <CardContent className="flex-1 overflow-y-auto space-y-2 min-h-0">
                   {loading ? (
                     <p className="text-xs text-muted-foreground">Loading...</p>
                   ) : connections.length === 0 ? (
@@ -395,12 +395,12 @@ export const DataSourcesPanel = ({ isOpen, onClose }: DataSourcesPanelProps) => 
                 </CardContent>
               </Card>
 
-              {/* Quick Stats */}
-              <Card>
+              {/* Section C: Quick Stats - Fixed Height, No Scroll */}
+              <Card className="h-[140px]">
                 <CardHeader className="pb-3">
                   <CardTitle className="text-sm">Quick Stats</CardTitle>
                 </CardHeader>
-                <CardContent className="space-y-2">
+                <CardContent className="space-y-3">
                   <div className="flex justify-between text-xs">
                     <span className="text-muted-foreground">Total Files</span>
                     <span className="font-medium">{uploadedFiles.length}</span>

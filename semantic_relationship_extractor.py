@@ -88,8 +88,8 @@ class SemanticRelationshipExtractor:
     - Explainable confidence scoring
     """
     
-    def __init__(self, openai_client: AsyncOpenAI, supabase_client=None, cache_client=None, config=None):
-        self.openai = openai_client
+    def __init__(self, openai_client: AsyncAnthropic, supabase_client=None, cache_client=None, config=None):
+        self.anthropic = openai_client
         self.supabase = supabase_client
         self.cache = cache_client
         self.config = config or self._get_default_config()
@@ -395,26 +395,20 @@ Provide ONLY the JSON response, no additional text."""
         try:
             self.metrics['ai_calls'] += 1
             
-            response = await self.openai.chat.completions.create(
-                model=self.config['semantic_model'],
+            response = await self.anthropic.messages.create(
+                model="claude-haiku-4-20250514",
+                system="You are a financial relationship analyst. Provide accurate, well-reasoned analysis in JSON format.",
                 messages=[
-                    {
-                        "role": "system",
-                        "content": "You are a financial relationship analyst. Provide accurate, well-reasoned analysis in JSON format."
-                    },
                     {
                         "role": "user",
                         "content": prompt
                     }
                 ],
-                response_format={"type": "json_object"},
-                temperature=self.config['temperature'],
-                max_tokens=self.config['max_tokens'],
-                timeout=self.config['timeout_seconds']
+                max_tokens=self.config['max_tokens']
             )
             
             # Parse JSON response
-            result_text = response.choices[0].message.content
+            result_text = response.content[0].text
             result = json.loads(result_text)
             
             # Validate required fields
@@ -446,12 +440,11 @@ Provide ONLY the JSON response, no additional text."""
                 f"{' '.join(semantic_result['key_factors'])}"
             )
             
-            response = await self.openai.embeddings.create(
-                model=self.config['embedding_model'],
-                input=embedding_text
-            )
-            
-            return response.data[0].embedding
+            # Note: Anthropic doesn't have embeddings API
+            # TODO: Use a separate embedding service (OpenAI, Cohere, etc.) if needed
+            # For now, return None to disable embedding functionality
+            logger.warning("Embedding generation disabled - Anthropic doesn't support embeddings")
+            return None
             
         except Exception as e:
             logger.error(f"Embedding generation failed: {e}")
