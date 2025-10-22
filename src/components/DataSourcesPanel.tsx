@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { FileSpreadsheet, Plug, RefreshCw, CheckCircle2, AlertCircle, ChevronDown, ChevronRight, X, Loader2, Mail, HardDrive, Calculator, CreditCard } from 'lucide-react';
+import { FileSpreadsheet, Plug, RefreshCw, CheckCircle2, AlertCircle, ChevronDown, ChevronRight, X, Loader2, Mail, HardDrive, Calculator, CreditCard, Trash2 } from 'lucide-react';
 import { Card } from './ui/card';
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
@@ -180,7 +180,7 @@ export const DataSourcesPanel = ({ isOpen, onClose }: DataSourcesPanelProps) => 
       try {
         const { data, error } = await supabase
           .from('ingestion_jobs')
-          .select('id, filename, status, created_at, progress')
+          .select('id, filename, status, created_at, progress, error_message')
           .eq('user_id', user.id)
           .order('created_at', { ascending: false })
           .limit(20);
@@ -302,6 +302,38 @@ export const DataSourcesPanel = ({ isOpen, onClose }: DataSourcesPanelProps) => 
     return connections.find(c => c.integration_id === provider || c.provider === provider);
   };
 
+  const handleDeleteFile = async (fileId: string, filename: string) => {
+    if (!confirm(`Are you sure you want to delete "${filename}"? This action cannot be undone.`)) {
+      return;
+    }
+
+    try {
+      // Delete from database
+      const { error } = await supabase
+        .from('ingestion_jobs')
+        .delete()
+        .eq('id', fileId)
+        .eq('user_id', user?.id);
+
+      if (error) throw error;
+
+      // Update local state
+      setUploadedFiles(prev => prev.filter(f => f.id !== fileId));
+
+      toast({
+        title: 'File Deleted',
+        description: `"${filename}" has been deleted successfully.`
+      });
+    } catch (e) {
+      console.error('Failed to delete file', e);
+      toast({
+        title: 'Delete Failed',
+        description: 'Unable to delete file. Please try again.',
+        variant: 'destructive'
+      });
+    }
+  };
+
   const integrationsByCategory = INTEGRATIONS.reduce((acc, integration) => {
     if (!acc[integration.category]) {
       acc[integration.category] = [];
@@ -396,22 +428,40 @@ export const DataSourcesPanel = ({ isOpen, onClose }: DataSourcesPanelProps) => 
                           )}
                         </div>
                         
-                        <div className="ml-3 flex-shrink-0">
-                          {isProcessing && (
-                            <Badge variant="secondary" className="text-[10px]">
-                              Processing...
-                            </Badge>
-                          )}
-                          {isCompleted && (
-                            <Badge variant="default" className="text-[10px] bg-green-500/10 text-green-600 border-green-500/20">
-                              ✓ Completed
-                            </Badge>
-                          )}
-                          {isFailed && (
-                            <Badge variant="destructive" className="text-[10px]">
-                              Failed
-                            </Badge>
-                          )}
+                        <div className="ml-3 flex items-center gap-2 flex-shrink-0">
+                          <div>
+                            {isProcessing && (
+                              <Badge variant="secondary" className="text-[10px]">
+                                Processing...
+                              </Badge>
+                            )}
+                            {isCompleted && (
+                              <Badge variant="default" className="text-[10px] bg-green-500/10 text-green-600 border-green-500/20">
+                                ✓ Completed
+                              </Badge>
+                            )}
+                            {isFailed && (
+                              <div className="flex flex-col items-end gap-1">
+                                <Badge variant="destructive" className="text-[10px]">
+                                  Failed
+                                </Badge>
+                                {file.error_message && (
+                                  <p className="text-[9px] text-destructive/70 max-w-[150px] text-right truncate" title={file.error_message}>
+                                    {file.error_message}
+                                  </p>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                          
+                          {/* Delete button */}
+                          <button
+                            onClick={() => handleDeleteFile(file.id, file.filename)}
+                            className="p-1 hover:bg-destructive/10 rounded transition-colors group"
+                            title="Delete file"
+                          >
+                            <Trash2 className="w-3.5 h-3.5 text-muted-foreground group-hover:text-destructive transition-colors" />
+                          </button>
                         </div>
                       </div>
                     );

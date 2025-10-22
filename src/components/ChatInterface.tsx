@@ -407,32 +407,6 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
 
                     {/* Inline Upload Zone */}
                     <InlineUploadZone onFilesSelected={handleInlineFilesSelected} />
-
-                    {/* Quick Actions */}
-                    <div className="grid grid-cols-2 gap-3">
-                      <Button
-                        variant="outline"
-                        className="h-auto py-4 flex flex-col items-center gap-2"
-                        onClick={() => setShowDataSources(true)}
-                      >
-                        <Plug className="w-5 h-5" />
-                        <div className="text-center">
-                          <div className="text-sm font-medium">Connect Apps</div>
-                          <div className="text-xs text-muted-foreground">QuickBooks, Xero, Gmail</div>
-                        </div>
-                      </Button>
-                      <Button
-                        variant="outline"
-                        className="h-auto py-4 flex flex-col items-center gap-2"
-                        onClick={() => setShowDataSources(true)}
-                      >
-                        <Layers className="w-5 h-5" />
-                        <div className="text-center">
-                          <div className="text-sm font-medium">View Sources</div>
-                          <div className="text-xs text-muted-foreground">Manage your data</div>
-                        </div>
-                      </Button>
-                    </div>
                   </div>
                 </div>
               ) : (
