@@ -175,12 +175,23 @@ export const DataSourcesPanel = ({ isOpen, onClose }: DataSourcesPanelProps) => 
       }
     };
 
-    if (isOpen) {
+    if (isOpen && user?.id) {
       loadConnections();
-      const interval = setInterval(loadConnections, 30000); // Refresh every 30s
-      return () => clearInterval(interval);
+      // Faster polling when connecting to catch new connections quickly
+      const interval = setInterval(loadConnections, connecting ? 3000 : 15000);
+      
+      // Refresh when window regains focus (user returns from Nango popup)
+      const handleFocus = () => {
+        loadConnections();
+      };
+      window.addEventListener('focus', handleFocus);
+      
+      return () => {
+        clearInterval(interval);
+        window.removeEventListener('focus', handleFocus);
+      };
     }
-  }, [user?.id, isOpen]);
+  }, [user?.id, isOpen, connecting]);
 
   // Load uploaded files with real-time polling
   useEffect(() => {
@@ -243,11 +254,39 @@ export const DataSourcesPanel = ({ isOpen, onClose }: DataSourcesPanelProps) => 
       const connectUrl = data?.connect_session?.url || data?.connect_session?.connect_url;
 
       if (connectUrl) {
-        window.open(connectUrl, '_blank', 'noopener,noreferrer');
+        // Open popup and monitor when it closes
+        const popup = window.open(connectUrl, '_blank', 'width=600,height=700,noopener,noreferrer');
+        
         toast({
           title: 'Connection Started',
           description: 'Complete the authorization in the popup window'
         });
+        
+        // Poll to detect when popup closes, then refresh connections
+        if (popup) {
+          const pollTimer = setInterval(() => {
+            if (popup.closed) {
+              clearInterval(pollTimer);
+              // Refresh connections after popup closes
+              setTimeout(async () => {
+                const { data: sessionData } = await supabase.auth.getSession();
+                const sessionToken = sessionData?.session?.access_token;
+                const response = await fetch(`${config.apiUrl}/api/connectors/user-connections`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    user_id: user?.id,
+                    session_token: sessionToken
+                  })
+                });
+                if (response.ok) {
+                  const data = await response.json();
+                  setConnections(data.connections || []);
+                }
+              }, 1000);
+            }
+          }, 500);
+        }
       } else {
         throw new Error('No authorization URL returned');
       }
@@ -545,7 +584,11 @@ export const DataSourcesPanel = ({ isOpen, onClose }: DataSourcesPanelProps) => 
                                   return (
                                     <div
                                       key={integration.id}
-                                      className="flex items-center justify-between p-3 border border-border rounded-md hover:bg-muted/30 transition-colors"
+                                      className={`flex items-center justify-between p-3 border rounded-md hover:bg-muted/30 transition-all ${
+                                        connected 
+                                          ? 'border-2 border-emerald-500/50 bg-emerald-500/5 shadow-sm shadow-emerald-500/20' 
+                                          : 'border-border'
+                                      }`}
                                     >
                                       <div className="flex items-center gap-3 flex-1 min-w-0">
                                         <div className="text-muted-foreground">
