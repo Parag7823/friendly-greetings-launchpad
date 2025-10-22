@@ -364,10 +364,10 @@ export const DataSourcesPanel = ({ isOpen, onClose }: DataSourcesPanelProps) => 
           </Button>
         </div>
 
-        <div className="flex-1 overflow-y-auto">
-          <div className="p-4 space-y-6">
-            {/* Unified Uploaded Files Section - Shows all files with their current state */}
-            <div>
+        <div className="flex-1 flex flex-col overflow-hidden">
+          {/* Uploaded Files Section - Independent Scroll */}
+          <div className="border-b border-border">
+            <div className="p-4">
               <div className="flex items-center gap-2 mb-3">
                 <FileSpreadsheet className="w-4 h-4 text-muted-foreground" />
                 <h3 className="text-sm font-medium">Uploaded Files</h3>
@@ -380,7 +380,7 @@ export const DataSourcesPanel = ({ isOpen, onClose }: DataSourcesPanelProps) => 
               {uploadedFiles.length === 0 ? (
                 <p className="text-xs text-muted-foreground">No files uploaded yet</p>
               ) : (
-                <div className="space-y-2">
+                <div className="max-h-[300px] overflow-y-auto pr-2 space-y-2 scrollbar-thin scrollbar-thumb-muted scrollbar-track-transparent">
                   {uploadedFiles.map((file) => {
                     const isProcessing = file.status === 'processing' || file.status === 'pending';
                     const isCompleted = file.status === 'completed';
@@ -469,9 +469,11 @@ export const DataSourcesPanel = ({ isOpen, onClose }: DataSourcesPanelProps) => 
                 </div>
               )}
             </div>
+          </div>
 
-            {/* Integrations Section */}
-            <div>
+          {/* Integrations Section - Independent Scroll */}
+          <div className="flex-1 overflow-y-auto">
+            <div className="p-4">
               <div className="flex items-center gap-2 mb-3">
                 <Plug className="w-4 h-4 text-muted-foreground" />
                 <h3 className="text-sm font-medium">Integrations</h3>
@@ -482,7 +484,7 @@ export const DataSourcesPanel = ({ isOpen, onClose }: DataSourcesPanelProps) => 
                   <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
                 </div>
               ) : (
-                <div className="space-y-4">
+                <div className="space-y-4 pr-2">
                   {Object.entries(integrationsByCategory).map(([category, integrations]) => {
                     const categoryInfo = CATEGORY_INFO[category as keyof typeof CATEGORY_INFO];
                     const isExpanded = expandedCategories.has(category);
