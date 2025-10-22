@@ -173,7 +173,7 @@ export const DataSourcesPanel = ({ isOpen, onClose }: DataSourcesPanelProps) => 
     }
   }, [user?.id, isOpen]);
 
-  // Load uploaded files
+  // Load uploaded files with real-time polling
   useEffect(() => {
     const loadFiles = async () => {
       if (!user?.id) return;
@@ -183,7 +183,7 @@ export const DataSourcesPanel = ({ isOpen, onClose }: DataSourcesPanelProps) => 
           .select('id, filename, status, created_at, progress')
           .eq('user_id', user.id)
           .order('created_at', { ascending: false })
-          .limit(10);
+          .limit(20);
 
         if (!error && data) {
           setUploadedFiles(data);
@@ -194,7 +194,9 @@ export const DataSourcesPanel = ({ isOpen, onClose }: DataSourcesPanelProps) => 
     };
 
     if (isOpen) {
-      loadFiles();
+      loadFiles(); // Initial load
+      const interval = setInterval(loadFiles, 3000); // Poll every 3 seconds for real-time updates
+      return () => clearInterval(interval);
     }
   }, [user?.id, isOpen]);
 
@@ -332,29 +334,88 @@ export const DataSourcesPanel = ({ isOpen, onClose }: DataSourcesPanelProps) => 
 
         <div className="flex-1 overflow-y-auto">
           <div className="p-4 space-y-6">
-            {/* Uploaded Files Section */}
+            {/* Unified Uploaded Files Section - Shows all files with their current state */}
             <div>
               <div className="flex items-center gap-2 mb-3">
                 <FileSpreadsheet className="w-4 h-4 text-muted-foreground" />
-                <h3 className="text-sm font-medium">Recent Uploads</h3>
+                <h3 className="text-sm font-medium">Uploaded Files</h3>
+                {uploadedFiles.length > 0 && (
+                  <Badge variant="outline" className="text-[10px]">
+                    {uploadedFiles.length}
+                  </Badge>
+                )}
               </div>
               {uploadedFiles.length === 0 ? (
                 <p className="text-xs text-muted-foreground">No files uploaded yet</p>
               ) : (
                 <div className="space-y-2">
-                  {uploadedFiles.slice(0, 5).map((file) => (
-                    <div key={file.id} className="flex items-center justify-between p-2 bg-muted/50 rounded-md">
-                      <div className="flex-1 min-w-0">
-                        <p className="text-xs font-medium truncate">{file.filename}</p>
-                        <p className="text-[10px] text-muted-foreground">
-                          {new Date(file.created_at).toLocaleDateString()}
-                        </p>
+                  {uploadedFiles.map((file) => {
+                    const isProcessing = file.status === 'processing' || file.status === 'pending';
+                    const isCompleted = file.status === 'completed';
+                    const isFailed = file.status === 'failed';
+                    const progress = file.progress || 0;
+                    
+                    return (
+                      <div 
+                        key={file.id} 
+                        className="flex items-center justify-between p-3 bg-muted/50 rounded-md border border-border hover:bg-muted/70 transition-colors"
+                      >
+                        <div className="flex-1 min-w-0 space-y-1">
+                          <div className="flex items-center gap-2">
+                            <p className="text-xs font-medium truncate">{file.filename}</p>
+                            {isProcessing && (
+                              <Loader2 className="w-3 h-3 animate-spin text-primary flex-shrink-0" />
+                            )}
+                            {isCompleted && (
+                              <CheckCircle2 className="w-3 h-3 text-green-500 flex-shrink-0" />
+                            )}
+                            {isFailed && (
+                              <AlertCircle className="w-3 h-3 text-destructive flex-shrink-0" />
+                            )}
+                          </div>
+                          
+                          <div className="flex items-center gap-2">
+                            <p className="text-[10px] text-muted-foreground">
+                              {new Date(file.created_at).toLocaleString()}
+                            </p>
+                            {isProcessing && progress > 0 && (
+                              <span className="text-[10px] text-primary font-medium">
+                                {progress}%
+                              </span>
+                            )}
+                          </div>
+                          
+                          {/* Progress bar for processing files */}
+                          {isProcessing && (
+                            <div className="w-full h-1 bg-muted rounded-full overflow-hidden">
+                              <div 
+                                className="h-full bg-primary transition-all duration-300"
+                                style={{ width: `${progress}%` }}
+                              />
+                            </div>
+                          )}
+                        </div>
+                        
+                        <div className="ml-3 flex-shrink-0">
+                          {isProcessing && (
+                            <Badge variant="secondary" className="text-[10px]">
+                              Processing...
+                            </Badge>
+                          )}
+                          {isCompleted && (
+                            <Badge variant="default" className="text-[10px] bg-green-500/10 text-green-600 border-green-500/20">
+                              ✓ Completed
+                            </Badge>
+                          )}
+                          {isFailed && (
+                            <Badge variant="destructive" className="text-[10px]">
+                              Failed
+                            </Badge>
+                          )}
+                        </div>
                       </div>
-                      <Badge variant={file.status === 'completed' ? 'default' : 'secondary'} className="text-[10px]">
-                        {file.status}
-                      </Badge>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </div>
