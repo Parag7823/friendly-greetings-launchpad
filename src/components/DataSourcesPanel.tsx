@@ -524,21 +524,26 @@ export const DataSourcesPanel = ({ isOpen, onClose }: DataSourcesPanelProps) => 
                                             )}
                                           </Button>
                                         ) : (
-                                          <Button
-                                            size="sm"
-                                            onClick={() => handleConnect(integration.provider)}
-                                            disabled={connecting === integration.provider}
-                                            className="text-xs"
-                                          >
-                                            {connecting === integration.provider ? (
-                                              <>
-                                                <Loader2 className="w-3 h-3 mr-1 animate-spin" />
-                                                Connecting
-                                              </>
-                                            ) : (
-                                              'Connect'
-                                            )}
-                                          </Button>
+                                          <div className="relative group">
+                                            {/* Animated border effect */}
+                                            <div className="absolute -inset-0.5 bg-gradient-to-r from-primary via-primary/50 to-primary rounded-full opacity-0 group-hover:opacity-100 blur-sm transition-opacity duration-300" />
+                                            
+                                            <Button
+                                              size="sm"
+                                              onClick={() => handleConnect(integration.provider)}
+                                              disabled={connecting === integration.provider}
+                                              className="relative h-9 px-4 rounded-full bg-black text-white text-xs font-medium hover:bg-black/90 transition-colors disabled:opacity-50"
+                                            >
+                                              {connecting === integration.provider ? (
+                                                <>
+                                                  <Loader2 className="w-3 h-3 mr-1.5 animate-spin" />
+                                                  Connecting
+                                                </>
+                                              ) : (
+                                                'Connect'
+                                              )}
+                                            </Button>
+                                          </div>
                                         )}
                                       </div>
                                     </div>
