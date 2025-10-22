@@ -247,7 +247,7 @@ async def detect_relationships(ctx, user_id: str, file_id: str = None) -> Dict[s
     """
     try:
         from enhanced_relationship_detector import EnhancedRelationshipDetector
-        from openai import AsyncOpenAI
+        from anthropic import AsyncAnthropic
         
         logger.info(f"🔍 Starting background relationship detection for user_id={user_id}, file_id={file_id}")
         
@@ -259,9 +259,9 @@ async def detect_relationships(ctx, user_id: str, file_id: str = None) -> Dict[s
             cache_client = None
         
         # Initialize relationship detector with cache
-        openai_client = AsyncOpenAI(api_key=os.getenv('OPENAI_API_KEY'))
+        anthropic_client = AsyncAnthropic(api_key=os.getenv('ANTHROPIC_API_KEY'))
         relationship_detector = EnhancedRelationshipDetector(
-            openai_client, 
+            anthropic_client, 
             supabase,
             cache_client=cache_client
         )

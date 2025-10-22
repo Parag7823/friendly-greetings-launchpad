@@ -32,7 +32,7 @@ from typing import Dict, List, Optional, Any, Tuple
 from dataclasses import dataclass, asdict
 from enum import Enum
 
-from openai import AsyncOpenAI
+from anthropic import AsyncAnthropic
 
 logger = logging.getLogger(__name__)
 
@@ -614,14 +614,14 @@ Provide ONLY the JSON response, no additional text."""
 async def test_semantic_extraction():
     """Test semantic relationship extraction"""
     import os
-    from openai import AsyncOpenAI
+    from anthropic import AsyncAnthropic
     
     try:
-        # Initialize OpenAI client
-        openai_client = AsyncOpenAI(api_key=os.getenv('OPENAI_API_KEY'))
+        # Initialize Anthropic client
+        anthropic_client = AsyncAnthropic(api_key=os.getenv('ANTHROPIC_API_KEY'))
         
         # Initialize extractor
-        extractor = SemanticRelationshipExtractor(openai_client)
+        extractor = SemanticRelationshipExtractor(anthropic_client)
         
         # Test events
         source_event = {
