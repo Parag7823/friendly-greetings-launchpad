@@ -43,29 +43,15 @@ export const FinleyLayout = () => {
 
   // Sync view with route path
   useEffect(() => {
-    const path = location.pathname || '/';
-    if (path.startsWith('/connectors')) {
-      setCurrentView('marketplace');
-    } else {
-      setCurrentView('chat');
-    }
+    // All routes now default to chat view
+    setCurrentView('chat');
   }, [location.pathname]);
-
-  const routeForView = (view: string) => {
-    switch (view) {
-      case 'marketplace':
-        return '/connectors';
-      case 'chat':
-      default:
-        return '/chat';
-    }
-  };
 
   const handleNavigate = (view: string) => {
     setCurrentView(view);
-    const target = routeForView(view);
-    if (location.pathname !== target) {
-      navigate(target);
+    // Navigate to chat for all views
+    if (location.pathname !== '/chat' && location.pathname !== '/') {
+      navigate('/chat');
     }
   };
 

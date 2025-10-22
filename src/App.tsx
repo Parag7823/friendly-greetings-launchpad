@@ -8,7 +8,6 @@ import { ErrorBoundary } from "@/components/ErrorBoundary";
 import Index from "./pages/Index";
 import IntegrationTest from "./pages/IntegrationTest";
 import NotFound from "./pages/NotFound";
-import Integrations from "./pages/Integrations";
 import SyncHistory from "./pages/SyncHistory";
 
 const queryClient = new QueryClient();
@@ -24,9 +23,7 @@ const App = () => (
             <Routes>
               <Route path="/" element={<Index />} />
               <Route path="/chat" element={<Index />} />
-              <Route path="/connectors" element={<Integrations />} />
               <Route path="/connectors/:connectionId/history" element={<SyncHistory />} />
-              <Route path="/integrations" element={<Integrations />} />
               <Route path="/test" element={<IntegrationTest />} />
               {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
               <Route path="*" element={<NotFound />} />

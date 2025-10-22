@@ -7,7 +7,6 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/
 import { Button } from './ui/button';
 import { useAuth } from './AuthProvider';
 import { motion, AnimatePresence } from 'framer-motion';
-import IntegrationCard from './IntegrationCard';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/components/ui/use-toast';
 import ConnectorConfigModal from './ConnectorConfigModal';
@@ -349,16 +348,8 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
     // Open Data Sources panel immediately (non-blocking)
     setShowDataSources(true);
     
-    // Add a system message to chat
-    const uploadMessage = {
-      id: `msg-${Date.now()}-upload`,
-      text: `📤 Processing ${files.length} file${files.length > 1 ? 's' : ''}: ${files.map(f => f.name).join(', ')}`,
-      isUser: false,
-      timestamp: new Date()
-    };
-    setMessages(prev => [...prev, uploadMessage]);
-    
     // Trigger file upload event for Data Sources panel to handle
+    // No chat message needed - user can see progress in Data Sources panel
     window.dispatchEvent(new CustomEvent('files-selected-for-upload', {
       detail: { files }
     }));

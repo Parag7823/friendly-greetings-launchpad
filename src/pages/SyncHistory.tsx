@@ -119,7 +119,7 @@ export default function SyncHistory() {
             {brandIcon(titleMeta.slug, titleMeta.color, titleMeta.name)}
             <h1 className="text-xl font-semibold text-foreground">Sync History · {titleMeta.name}</h1>
           </div>
-          <Button variant="secondary" onClick={() => navigate('/connectors')}>Back to Connectors</Button>
+          <Button variant="secondary" onClick={() => navigate('/')}>Back to Home</Button>
         </div>
       </div>
 

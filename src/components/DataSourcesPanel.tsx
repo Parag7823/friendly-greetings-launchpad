@@ -202,10 +202,20 @@ export const DataSourcesPanel = ({ isOpen, onClose }: DataSourcesPanelProps) => 
       }
     };
 
-    if (isOpen) {
-      loadFiles(); // Initial load
-      const interval = setInterval(loadFiles, 3000); // Poll every 3 seconds for real-time updates
-      return () => clearInterval(interval);
+    if (isOpen && user?.id) {
+      loadFiles(); // Initial load immediately
+      const interval = setInterval(loadFiles, 2000); // Poll every 2 seconds for real-time updates
+      
+      // Also listen for file upload events to refresh immediately
+      const handleFileUpload = () => {
+        loadFiles();
+      };
+      window.addEventListener('files-selected-for-upload', handleFileUpload);
+      
+      return () => {
+        clearInterval(interval);
+        window.removeEventListener('files-selected-for-upload', handleFileUpload);
+      };
     }
   }, [user?.id, isOpen]);
 
