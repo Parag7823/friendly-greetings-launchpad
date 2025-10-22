@@ -7,3 +7,6 @@ services:
     dockerContext: .
     healthCheckPath: /
     autoDeploy: true
+    envVars:
+      - key: CORS_ALLOWED_ORIGINS
+        value: https://friendly-greetings-launchpad-1-v831.onrender.com,http://localhost:5173,http://localhost:8080
