@@ -6,7 +6,7 @@ import { DataSourcesPanel } from './DataSourcesPanel';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
 import { useAuth } from './AuthProvider';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import IntegrationCard from './IntegrationCard';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/components/ui/use-toast';
@@ -38,6 +38,16 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
   const [showDataSources, setShowDataSources] = useState(false);
   const [showInlineUpload, setShowInlineUpload] = useState(false);
   const [uploadingFiles, setUploadingFiles] = useState<File[]>([]);
+  const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
+
+  // Sample questions showcasing platform capabilities
+  const sampleQuestions = [
+    "What were my top expenses last quarter?",
+    "Show me revenue trends for the past 6 months",
+    "Which vendors am I spending the most with?",
+    "Analyze my cash flow patterns",
+    "Compare Q1 vs Q2 profitability"
+  ];
 
   // Load connector providers when opening marketplace
   useEffect(() => {
@@ -216,6 +226,15 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
     window.addEventListener('new-chat-requested', handleNewChat);
     return () => window.removeEventListener('new-chat-requested', handleNewChat);
   }, []);
+
+  // Rotate sample questions
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setCurrentQuestionIndex((prev) => (prev + 1) % sampleQuestions.length);
+    }, 3000); // Change every 3 seconds
+
+    return () => clearInterval(interval);
+  }, [sampleQuestions.length]);
 
   const handleSendMessage = async () => {
     if (message.trim()) {
@@ -441,13 +460,13 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
               )}
             </div>
             
-              {/* Chat Input Area - Minimal border animation */}
+              {/* Chat Input Area - Rounded with animated questions */}
               <div className="border-t border-border p-4 bg-background">
                 <div className="max-w-4xl mx-auto">
-                  <div className="relative rounded-lg border border-border bg-background overflow-hidden group">
+                  <div className="relative rounded-3xl border border-border bg-background overflow-hidden group">
                     {/* Minimal animated border effect */}
-                    <div className="absolute inset-0 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-300">
-                      <div className="absolute inset-0 rounded-lg border-2 border-primary/20 animate-pulse" />
+                    <div className="absolute inset-0 rounded-3xl opacity-0 group-hover:opacity-100 transition-opacity duration-300">
+                      <div className="absolute inset-0 rounded-3xl border-2 border-primary/20 animate-pulse" />
                     </div>
                     
                     <div className="relative">
@@ -456,14 +475,15 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
                         value={message}
                         onChange={(e) => setMessage(e.target.value)}
                         onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
-                        placeholder="Ask anything about your financial data..."
-                        className="w-full bg-transparent border-none px-4 py-3 pr-12 text-sm text-foreground placeholder-muted-foreground focus:outline-none"
+                        placeholder={sampleQuestions[currentQuestionIndex]}
+                        className="w-full bg-transparent border-none px-6 py-4 pr-14 text-sm text-foreground placeholder-muted-foreground focus:outline-none transition-all duration-500"
+                        key={currentQuestionIndex}
                       />
                       
                       <button
                         onClick={handleSendMessage}
                         disabled={!message.trim()}
-                        className="absolute right-3 top-1/2 -translate-y-1/2 w-8 h-8 bg-primary text-primary-foreground rounded-md flex items-center justify-center transition-all duration-200 hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed"
+                        className="absolute right-4 top-1/2 -translate-y-1/2 w-9 h-9 bg-primary text-primary-foreground rounded-full flex items-center justify-center transition-all duration-200 hover:bg-primary/90 hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
                       >
                         <Send className="w-4 h-4" />
                       </button>

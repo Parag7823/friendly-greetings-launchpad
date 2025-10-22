@@ -324,21 +324,6 @@ export const FinleySidebar = ({ onClose, onNavigate, currentView = 'chat', isCol
           {isCollapsed && <TooltipContent side="right"><p>New Chat</p></TooltipContent>}
         </Tooltip>
 
-        {/* Integrations */}
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              variant={currentView === 'marketplace' ? 'secondary' : 'ghost'}
-              className={`w-full h-9 rounded-lg ${isCollapsed ? 'justify-center px-0' : 'justify-start px-2'}`}
-              onClick={handleConnectorMarketplace}
-            >
-              <Plug className="w-4 h-4" />
-              {!isCollapsed && <span className="font-medium text-sm ml-2">Integrations</span>}
-            </Button>
-          </TooltipTrigger>
-          {isCollapsed && <TooltipContent side="right"><p>Integrations</p></TooltipContent>}
-        </Tooltip>
-
         {/* Chat History Section */}
         {chatHistory.length > 0 && (
           <div className="mt-4">
