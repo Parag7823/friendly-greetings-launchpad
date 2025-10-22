@@ -368,6 +368,54 @@ export const DataSourcesPanel = ({ isOpen, onClose }: DataSourcesPanelProps) => 
     }
   };
 
+  const handleDisconnect = async (connectionId: string, integrationName: string) => {
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const sessionToken = sessionData?.session?.access_token;
+
+      const response = await fetch(`${config.apiUrl}/api/connectors/disconnect`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          user_id: user?.id,
+          connection_id: connectionId,
+          session_token: sessionToken
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error('Disconnect failed');
+      }
+
+      // Refresh connections immediately
+      const connectionsResponse = await fetch(`${config.apiUrl}/api/connectors/user-connections`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          user_id: user?.id,
+          session_token: sessionToken
+        })
+      });
+
+      if (connectionsResponse.ok) {
+        const data = await connectionsResponse.json();
+        setConnections(data.connections || []);
+      }
+
+      toast({
+        title: 'Disconnected',
+        description: `${integrationName} has been disconnected`
+      });
+    } catch (e) {
+      console.error('Disconnect failed', e);
+      toast({
+        title: 'Disconnect Failed',
+        description: 'Unable to disconnect. Please try again.',
+        variant: 'destructive'
+      });
+    }
+  };
+
   const toggleCategory = (category: string) => {
     setExpandedCategories(prev => {
       const next = new Set(prev);
@@ -644,25 +692,36 @@ export const DataSourcesPanel = ({ isOpen, onClose }: DataSourcesPanelProps) => 
                                       </div>
                                       <div className="flex items-center gap-2">
                                         {connected ? (
-                                          <Button
-                                            size="sm"
-                                            variant="outline"
-                                            onClick={() => handleSync(connection.connection_id, connection.integration_id)}
-                                            disabled={syncing === connection.connection_id}
-                                            className="text-xs"
-                                          >
-                                            {syncing === connection.connection_id ? (
-                                              <>
-                                                <Loader2 className="w-3 h-3 mr-1 animate-spin" />
-                                                Syncing
-                                              </>
-                                            ) : (
-                                              <>
-                                                <RefreshCw className="w-3 h-3 mr-1" />
-                                                Sync
-                                              </>
-                                            )}
-                                          </Button>
+                                          <>
+                                            <Button
+                                              size="sm"
+                                              variant="outline"
+                                              onClick={() => handleSync(connection.connection_id, connection.integration_id)}
+                                              disabled={syncing === connection.connection_id}
+                                              className="text-xs"
+                                            >
+                                              {syncing === connection.connection_id ? (
+                                                <>
+                                                  <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+                                                  Syncing
+                                                </>
+                                              ) : (
+                                                <>
+                                                  <RefreshCw className="w-3 h-3 mr-1" />
+                                                  Sync
+                                                </>
+                                              )}
+                                            </Button>
+                                            <Button
+                                              size="sm"
+                                              variant="ghost"
+                                              onClick={() => handleDisconnect(connection.connection_id, integration.name)}
+                                              className="text-xs h-9 w-9 p-0 hover:bg-destructive/10 hover:text-destructive"
+                                              title="Disconnect"
+                                            >
+                                              <X className="w-4 h-4" />
+                                            </Button>
+                                          </>
                                         ) : (
                                           <div className="relative">
                                             {/* Animated rotating gradient border - always visible */}
