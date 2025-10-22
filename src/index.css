@@ -167,17 +167,21 @@
     }
   }
   
-  @keyframes spin-slow {
-    from {
-      transform: rotate(0deg);
+  @keyframes gradient-shift {
+    0% {
+      background-position: 0% 50%;
     }
-    to {
-      transform: rotate(360deg);
+    50% {
+      background-position: 100% 50%;
+    }
+    100% {
+      background-position: 0% 50%;
     }
   }
   
-  .animate-spin-slow {
-    animation: spin-slow 3s linear infinite;
+  .animate-gradient {
+    background-size: 200% 200%;
+    animation: gradient-shift 3s ease infinite;
   }
   
   /* Hover effects */

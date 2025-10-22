@@ -224,27 +224,34 @@ export const DataSourcesPanel = ({ isOpen, onClose }: DataSourcesPanelProps) => 
           // Process each file
           for (const file of files) {
             try {
-              await processFileWithFastAPI(file, {
-                onProgress: (progress) => {
-                  console.log(`Processing ${file.name}: ${progress}%`);
-                },
-                onComplete: () => {
-                  loadFiles(); // Refresh file list after upload
-                  toast({
-                    title: 'File Uploaded',
-                    description: `${file.name} has been processed successfully`
-                  });
-                },
-                onError: (error) => {
-                  toast({
-                    title: 'Upload Failed',
-                    description: `Failed to process ${file.name}: ${error}`,
-                    variant: 'destructive'
-                  });
+              await processFileWithFastAPI(
+                file,
+                undefined, // No custom prompt
+                (progress) => {
+                  // Progress callback
+                  console.log(`Processing ${file.name}:`, progress);
+                  if (progress.status === 'completed') {
+                    loadFiles(); // Refresh file list
+                    toast({
+                      title: 'File Uploaded',
+                      description: `${file.name} has been processed successfully`
+                    });
+                  } else if (progress.status === 'error') {
+                    toast({
+                      title: 'Upload Failed',
+                      description: `Failed to process ${file.name}`,
+                      variant: 'destructive'
+                    });
+                  }
                 }
-              });
+              );
             } catch (error) {
               console.error('File upload error:', error);
+              toast({
+                title: 'Upload Failed',
+                description: `Failed to process ${file.name}`,
+                variant: 'destructive'
+              });
             }
           }
         }
@@ -724,8 +731,8 @@ export const DataSourcesPanel = ({ isOpen, onClose }: DataSourcesPanelProps) => 
                                           </>
                                         ) : (
                                           <div className="relative">
-                                            {/* Animated rotating gradient border - always visible */}
-                                            <div className="absolute -inset-0.5 bg-gradient-to-r from-primary via-purple-500 to-primary rounded-full opacity-60 blur-[2px] animate-spin-slow" />
+                                            {/* Animated gradient border - colors shift smoothly */}
+                                            <div className="absolute -inset-0.5 bg-gradient-to-r from-primary via-purple-500 to-primary rounded-full opacity-50 blur-[2px] animate-gradient" />
                                             
                                             <Button
                                               size="sm"
