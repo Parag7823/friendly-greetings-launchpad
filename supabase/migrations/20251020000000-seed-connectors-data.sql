@@ -51,6 +51,11 @@ INSERT INTO public.connectors (provider, integration_id, auth_type, scopes, endp
 ('razorpay', 'razorpay', 'OAUTH2',
  '["read_only"]'::jsonb,
  '["/v1/payments", "/v1/orders", "/v1/customers"]'::jsonb,
+ true),
+
+('paypal', 'paypal', 'OAUTH2',
+ '["openid", "profile", "email", "https://uri.paypal.com/services/invoicing", "https://uri.paypal.com/services/payments/payment"]'::jsonb,
+ '["/v1/payments/payment", "/v2/invoicing/invoices", "/v2/payments/captures", "/v1/reporting/transactions"]'::jsonb,
  true)
 
 ON CONFLICT (provider) DO UPDATE SET
@@ -69,9 +74,9 @@ BEGIN
   SELECT COUNT(*) INTO connector_count FROM public.connectors;
   RAISE NOTICE 'Total connectors in table: %', connector_count;
   
-  IF connector_count < 9 THEN
-    RAISE WARNING 'Expected 9 connectors, but found %', connector_count;
+  IF connector_count < 10 THEN
+    RAISE WARNING 'Expected 10 connectors, but found %', connector_count;
   ELSE
-    RAISE NOTICE '✅ All 9 connectors successfully seeded';
+    RAISE NOTICE '✅ All 10 connectors successfully seeded (including PayPal)';
   END IF;
 END $$;

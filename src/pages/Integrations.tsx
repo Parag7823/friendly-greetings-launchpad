@@ -1,6 +1,16 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { FileSpreadsheet, Mail, Database, BookOpen, DollarSign, FileText, HardDrive, Cloud, CreditCard, Wallet, Banknote } from "lucide-react";
+import { FileSpreadsheet, Database } from "lucide-react";
+import gmailLogo from "@/assets/logos/gmail.svg";
+import zohoMailLogo from "@/assets/logos/zoho-mail.svg";
+import zohoLogo from "@/assets/logos/zoho.svg";
+import quickbooksLogo from "@/assets/logos/quickbooks.svg";
+import xeroLogo from "@/assets/logos/xero.svg";
+import stripeLogo from "@/assets/logos/stripe.svg";
+import razorpayLogo from "@/assets/logos/razorpay.svg";
+import paypalLogo from "@/assets/logos/paypal.svg";
+import googleDriveLogo from "@/assets/logos/google-drive.svg";
+import dropboxLogo from "@/assets/logos/dropbox.svg";
 import IntegrationCard from "@/components/IntegrationCard";
 import { useAuth } from "@/components/AuthProvider";
 import { config } from "@/config";
@@ -164,16 +174,16 @@ const Integrations = () => {
 
   const getProviderIcon = (provider: string) => {
     const iconMap: Record<string, JSX.Element> = {
-      'google-mail': <Mail className="w-8 h-8 text-red-600" />,
-      'zoho-mail': <Mail className="w-8 h-8 text-blue-600" />,
-      'dropbox': <Cloud className="w-8 h-8 text-blue-500" />,
-      'google-drive': <HardDrive className="w-8 h-8 text-yellow-600" />,
-      'zoho-books': <BookOpen className="w-8 h-8 text-orange-600" />,
-      'quickbooks-sandbox': <DollarSign className="w-8 h-8 text-green-600" />,
-      'xero': <FileText className="w-8 h-8 text-blue-700" />,
-      'stripe': <CreditCard className="w-8 h-8 text-purple-600" />,
-      'razorpay': <Wallet className="w-8 h-8 text-blue-800" />,
-      'paypal': <Banknote className="w-8 h-8 text-blue-600" />,
+      'google-mail': <img src={gmailLogo} alt="Gmail" className="w-8 h-8 object-contain" />,
+      'zoho-mail': <img src={zohoMailLogo} alt="Zoho Mail" className="w-8 h-8 object-contain" />,
+      'google-drive': <img src={googleDriveLogo} alt="Google Drive" className="w-8 h-8 object-contain" />,
+      'dropbox': <img src={dropboxLogo} alt="Dropbox" className="w-8 h-8 object-contain" />,
+      'zoho-books': <img src={zohoLogo} alt="Zoho Books" className="w-8 h-8 object-contain" />,
+      'quickbooks-sandbox': <img src={quickbooksLogo} alt="QuickBooks" className="w-8 h-8 object-contain" />,
+      'xero': <img src={xeroLogo} alt="Xero" className="w-8 h-8 object-contain" />,
+      'stripe': <img src={stripeLogo} alt="Stripe" className="w-8 h-8 object-contain" />,
+      'razorpay': <img src={razorpayLogo} alt="Razorpay" className="w-8 h-8 object-contain" />,
+      'paypal': <img src={paypalLogo} alt="PayPal" className="w-8 h-8 object-contain" />,
     };
     return iconMap[provider] || <Database className="w-8 h-8 text-gray-600" />;
   };
@@ -206,7 +216,7 @@ const Integrations = () => {
 
       {connections.length > 0 && (
         <section className="p-6">
-          <h2 className="text-lg font-semibold mb-4">Connected Integrations</h2>
+          <h2 className="text-base font-semibold mb-4">Connected Integrations</h2>
           <div className="space-y-3">
             {connections.map((conn) => {
               const provider = providers.find(p => p.integration_id === conn.integration_id);
@@ -231,7 +241,7 @@ const Integrations = () => {
 
       {/* Payment Gateways Section */}
       <section className="p-6">
-        <h2 className="text-lg font-semibold mb-4">Payment Gateways</h2>
+        <h2 className="text-base font-semibold mb-4">Payment Gateways</h2>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {providers.filter(p => p.category === 'payment').map((provider) => {
             const connected = isConnected(provider.integration_id);
@@ -255,7 +265,7 @@ const Integrations = () => {
 
       {/* Accounting Platforms Section */}
       <section className="p-6">
-        <h2 className="text-lg font-semibold mb-4">Accounting Platforms</h2>
+        <h2 className="text-base font-semibold mb-4">Accounting Platforms</h2>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {providers.filter(p => p.category === 'accounting').map((provider) => {
             const connected = isConnected(provider.integration_id);
@@ -279,7 +289,7 @@ const Integrations = () => {
 
       {/* Cloud & Storage Section */}
       <section className="p-6">
-        <h2 className="text-lg font-semibold mb-4">Cloud & Storage</h2>
+        <h2 className="text-base font-semibold mb-4">Cloud & Storage</h2>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           <IntegrationCard
             icon={<FileSpreadsheet className="w-8 h-8 text-green-600" aria-hidden />}

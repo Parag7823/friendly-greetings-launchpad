@@ -1506,15 +1506,21 @@ async def _zohomail_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> D
                             user_id=user_id,
                             operation_type="connector_sync_batch"
                         ) as tx:
-                            for item in batch_items:
-                                try:
-                                    await tx.insert('external_items', item)
-                                    stats['records_fetched'] += 1
-                                except Exception as insert_err:
-                                    if 'duplicate key' in str(insert_err).lower() or 'unique' in str(insert_err).lower():
-                                        pass
-                                    else:
-                                        logger.error(f"Zoho item insert failed: {insert_err}")
+                            try:
+                                # Batch insert for better performance
+                                await tx.insert_batch('external_items', batch_items)
+                                stats['records_fetched'] += len(batch_items)
+                            except Exception as insert_err:
+                                # Fallback to individual inserts if batch fails (e.g., duplicates)
+                                if 'duplicate key' in str(insert_err).lower() or 'unique' in str(insert_err).lower():
+                                    for item in batch_items:
+                                        try:
+                                            await tx.insert('external_items', item)
+                                            stats['records_fetched'] += 1
+                                        except Exception:
+                                            pass
+                                else:
+                                    logger.error(f"Zoho batch insert failed: {insert_err}")
                     except Exception as batch_err:
                         logger.error(f"Zoho batch insert transaction failed: {batch_err}")
                 fetched += 1
@@ -1828,16 +1834,20 @@ async def _quickbooks_sync_run(nango: NangoClient, req: ConnectorSyncRequest) ->
                     user_id=user_id,
                     operation_type="connector_sync_batch"
                 ) as tx:
-                    for item in batch_items:
-                        try:
-                            await tx.insert('external_items', item)
-                            stats['records_fetched'] += 1
-                        except Exception as insert_err:
-                            if 'duplicate key' in str(insert_err).lower() or 'unique' in str(insert_err).lower():
-                                stats['skipped'] += 1
-                            else:
-                                logger.error(f"QuickBooks invoice insert failed: {insert_err}")
-                                stats['skipped'] += 1
+                    try:
+                        await tx.insert_batch('external_items', batch_items)
+                        stats['records_fetched'] += len(batch_items)
+                    except Exception as insert_err:
+                        if 'duplicate key' in str(insert_err).lower() or 'unique' in str(insert_err).lower():
+                            for item in batch_items:
+                                try:
+                                    await tx.insert('external_items', item)
+                                    stats['records_fetched'] += 1
+                                except Exception:
+                                    stats['skipped'] += 1
+                        else:
+                            logger.error(f"QuickBooks invoice batch insert failed: {insert_err}")
+                            stats['skipped'] += len(batch_items)
             except Exception as batch_err:
                 logger.error(f"QuickBooks invoice batch transaction failed: {batch_err}")
 
@@ -1880,16 +1890,20 @@ async def _quickbooks_sync_run(nango: NangoClient, req: ConnectorSyncRequest) ->
                     user_id=user_id,
                     operation_type="connector_sync_batch"
                 ) as tx:
-                    for item in batch_items:
-                        try:
-                            await tx.insert('external_items', item)
-                            stats['records_fetched'] += 1
-                        except Exception as insert_err:
-                            if 'duplicate key' in str(insert_err).lower() or 'unique' in str(insert_err).lower():
-                                stats['skipped'] += 1
-                            else:
-                                logger.error(f"QuickBooks bill insert failed: {insert_err}")
-                                stats['skipped'] += 1
+                    try:
+                        await tx.insert_batch('external_items', batch_items)
+                        stats['records_fetched'] += len(batch_items)
+                    except Exception as insert_err:
+                        if 'duplicate key' in str(insert_err).lower() or 'unique' in str(insert_err).lower():
+                            for item in batch_items:
+                                try:
+                                    await tx.insert('external_items', item)
+                                    stats['records_fetched'] += 1
+                                except Exception:
+                                    stats['skipped'] += 1
+                        else:
+                            logger.error(f"QuickBooks bill batch insert failed: {insert_err}")
+                            stats['skipped'] += len(batch_items)
             except Exception as batch_err:
                 logger.error(f"QuickBooks bill batch transaction failed: {batch_err}")
 
@@ -1931,16 +1945,20 @@ async def _quickbooks_sync_run(nango: NangoClient, req: ConnectorSyncRequest) ->
                     user_id=user_id,
                     operation_type="connector_sync_batch"
                 ) as tx:
-                    for item in batch_items:
-                        try:
-                            await tx.insert('external_items', item)
-                            stats['records_fetched'] += 1
-                        except Exception as insert_err:
-                            if 'duplicate key' in str(insert_err).lower() or 'unique' in str(insert_err).lower():
-                                stats['skipped'] += 1
-                            else:
-                                logger.error(f"QuickBooks payment insert failed: {insert_err}")
-                                stats['skipped'] += 1
+                    try:
+                        await tx.insert_batch('external_items', batch_items)
+                        stats['records_fetched'] += len(batch_items)
+                    except Exception as insert_err:
+                        if 'duplicate key' in str(insert_err).lower() or 'unique' in str(insert_err).lower():
+                            for item in batch_items:
+                                try:
+                                    await tx.insert('external_items', item)
+                                    stats['records_fetched'] += 1
+                                except Exception:
+                                    stats['skipped'] += 1
+                        else:
+                            logger.error(f"QuickBooks payment batch insert failed: {insert_err}")
+                            stats['skipped'] += len(batch_items)
             except Exception as batch_err:
                 logger.error(f"QuickBooks payment batch transaction failed: {batch_err}")
         
@@ -1999,15 +2017,18 @@ async def _quickbooks_sync_run(nango: NangoClient, req: ConnectorSyncRequest) ->
                 stats['normalized_events'] = pipeline_result.get('processed_rows', 0)
                 stats['pipeline_job_id'] = pipeline_result.get('job_id')
                 
-                # Mark external_items as processed
-                for it in items:
+                # Mark external_items as processed (bulk update)
+                if items:
+                    item_ids = [it['id'] for it in items]
                     try:
-                        supabase.table('external_items').update({
-                            'status': 'processed',
-                            'metadata': {**(it.get('metadata') or {}), 'processed_at': datetime.utcnow().isoformat()}
-                        }).eq('id', it['id']).execute()
-                    except Exception:
-                        pass
+                        supabase.table('external_items').update({'status': 'processed'}).in_('id', item_ids).execute()
+                    except Exception as e:
+                        logger.warning(f"QuickBooks bulk status update failed: {e}")
+                        for it in items:
+                            try:
+                                supabase.table('external_items').update({'status': 'processed'}).eq('id', it['id']).execute()
+                            except Exception:
+                                pass
                 
                 NORMALIZATION_EVENTS.labels(provider='quickbooks').inc(stats['normalized_events'])
                 NORMALIZATION_DURATION.labels(provider='quickbooks').observe(max(0.0, time.time() - _t0))
@@ -2361,16 +2382,20 @@ async def _xero_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> Dict[
                         user_id=user_id,
                         operation_type="connector_sync_batch"
                     ) as tx:
-                        for item in batch_items:
-                            try:
-                                await tx.insert('external_items', item)
-                                stats['records_fetched'] += 1
-                            except Exception as insert_err:
-                                if 'duplicate key' in str(insert_err).lower() or 'unique' in str(insert_err).lower():
-                                    stats['skipped'] += 1
-                                else:
-                                    logger.error(f"Xero invoice insert failed: {insert_err}")
-                                    stats['skipped'] += 1
+                        try:
+                            await tx.insert_batch('external_items', batch_items)
+                            stats['records_fetched'] += len(batch_items)
+                        except Exception as insert_err:
+                            if 'duplicate key' in str(insert_err).lower() or 'unique' in str(insert_err).lower():
+                                for item in batch_items:
+                                    try:
+                                        await tx.insert('external_items', item)
+                                        stats['records_fetched'] += 1
+                                    except Exception:
+                                        stats['skipped'] += 1
+                            else:
+                                logger.error(f"Xero invoice batch insert failed: {insert_err}")
+                                stats['skipped'] += len(batch_items)
                 except Exception as batch_err:
                     logger.error(f"Xero invoice batch transaction failed: {batch_err}")
             if fetched >= limit:
@@ -2420,16 +2445,20 @@ async def _xero_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> Dict[
                         user_id=user_id,
                         operation_type="connector_sync_batch"
                     ) as tx:
-                        for item in batch_items:
-                            try:
-                                await tx.insert('external_items', item)
-                                stats['records_fetched'] += 1
-                            except Exception as insert_err:
-                                if 'duplicate key' in str(insert_err).lower() or 'unique' in str(insert_err).lower():
-                                    stats['skipped'] += 1
-                                else:
-                                    logger.error(f"Xero contact insert failed: {insert_err}")
-                                    stats['skipped'] += 1
+                        try:
+                            await tx.insert_batch('external_items', batch_items)
+                            stats['records_fetched'] += len(batch_items)
+                        except Exception as insert_err:
+                            if 'duplicate key' in str(insert_err).lower() or 'unique' in str(insert_err).lower():
+                                for item in batch_items:
+                                    try:
+                                        await tx.insert('external_items', item)
+                                        stats['records_fetched'] += 1
+                                    except Exception:
+                                        stats['skipped'] += 1
+                            else:
+                                logger.error(f"Xero contact batch insert failed: {insert_err}")
+                                stats['skipped'] += len(batch_items)
                 except Exception as batch_err:
                     logger.error(f"Xero contact batch transaction failed: {batch_err}")
             if fetched_c >= limit:
@@ -2479,16 +2508,20 @@ async def _xero_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> Dict[
                         user_id=user_id,
                         operation_type="connector_sync_batch"
                     ) as tx:
-                        for item in batch_items:
-                            try:
-                                await tx.insert('external_items', item)
-                                stats['records_fetched'] += 1
-                            except Exception as insert_err:
-                                if 'duplicate key' in str(insert_err).lower() or 'unique' in str(insert_err).lower():
-                                    stats['skipped'] += 1
-                                else:
-                                    logger.error(f"Xero payment insert failed: {insert_err}")
-                                    stats['skipped'] += 1
+                        try:
+                            await tx.insert_batch('external_items', batch_items)
+                            stats['records_fetched'] += len(batch_items)
+                        except Exception as insert_err:
+                            if 'duplicate key' in str(insert_err).lower() or 'unique' in str(insert_err).lower():
+                                for item in batch_items:
+                                    try:
+                                        await tx.insert('external_items', item)
+                                        stats['records_fetched'] += 1
+                                    except Exception:
+                                        stats['skipped'] += 1
+                            else:
+                                logger.error(f"Xero payment batch insert failed: {insert_err}")
+                                stats['skipped'] += len(batch_items)
                 except Exception as batch_err:
                     logger.error(f"Xero payment batch transaction failed: {batch_err}")
             if fetched_p >= limit:
@@ -2551,15 +2584,18 @@ async def _xero_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> Dict[
                 stats['normalized_events'] = pipeline_result.get('processed_rows', 0)
                 stats['pipeline_job_id'] = pipeline_result.get('job_id')
                 
-                # Mark external_items as processed
-                for it in items:
+                # Mark external_items as processed (bulk update)
+                if items:
+                    item_ids = [it['id'] for it in items]
                     try:
-                        supabase.table('external_items').update({
-                            'status': 'processed',
-                            'metadata': {**(it.get('metadata') or {}), 'processed_at': datetime.utcnow().isoformat()}
-                        }).eq('id', it['id']).execute()
-                    except Exception:
-                        pass
+                        supabase.table('external_items').update({'status': 'processed'}).in_('id', item_ids).execute()
+                    except Exception as e:
+                        logger.warning(f"Xero bulk status update failed: {e}")
+                        for it in items:
+                            try:
+                                supabase.table('external_items').update({'status': 'processed'}).eq('id', it['id']).execute()
+                            except Exception:
+                                pass
                 
                 NORMALIZATION_EVENTS.labels(provider='xero').inc(stats['normalized_events'])
                 NORMALIZATION_DURATION.labels(provider='xero').observe(max(0.0, time.time() - _t0x))
@@ -2915,15 +2951,18 @@ async def _zoho_books_sync_run(nango: NangoClient, req: ConnectorSyncRequest) ->
                 stats['normalized_events'] = pipeline_result.get('processed_rows', 0)
                 stats['pipeline_job_id'] = pipeline_result.get('job_id')
                 
-                # Mark external_items as processed
-                for it in items:
+                # Mark external_items as processed (bulk update)
+                if items:
+                    item_ids = [it['id'] for it in items]
                     try:
-                        supabase.table('external_items').update({
-                            'status': 'processed',
-                            'metadata': {**(it.get('metadata') or {}), 'processed_at': datetime.utcnow().isoformat()}
-                        }).eq('id', it['id']).execute()
-                    except Exception:
-                        pass
+                        supabase.table('external_items').update({'status': 'processed'}).in_('id', item_ids).execute()
+                    except Exception as e:
+                        logger.warning(f"Zoho Books bulk status update failed: {e}")
+                        for it in items:
+                            try:
+                                supabase.table('external_items').update({'status': 'processed'}).eq('id', it['id']).execute()
+                            except Exception:
+                                pass
                 
                 NORMALIZATION_EVENTS.labels(provider='zoho-books').inc(stats['normalized_events'])
                 NORMALIZATION_DURATION.labels(provider='zoho-books').observe(max(0.0, time.time() - _t0z))
@@ -3189,15 +3228,18 @@ async def _stripe_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> Dic
                 stats['normalized_events'] = pipeline_result.get('processed_rows', 0)
                 stats['pipeline_job_id'] = pipeline_result.get('job_id')
                 
-                # Mark external_items as processed
-                for it in items:
+                # Mark external_items as processed (bulk update)
+                if items:
+                    item_ids = [it['id'] for it in items]
                     try:
-                        supabase.table('external_items').update({
-                            'status': 'processed',
-                            'metadata': {**(it.get('metadata') or {}), 'processed_at': datetime.utcnow().isoformat()}
-                        }).eq('id', it['id']).execute()
-                    except Exception:
-                        pass
+                        supabase.table('external_items').update({'status': 'processed'}).in_('id', item_ids).execute()
+                    except Exception as e:
+                        logger.warning(f"Stripe bulk status update failed: {e}")
+                        for it in items:
+                            try:
+                                supabase.table('external_items').update({'status': 'processed'}).eq('id', it['id']).execute()
+                            except Exception:
+                                pass
                 
                 NORMALIZATION_EVENTS.labels(provider='stripe').inc(stats['normalized_events'])
                 NORMALIZATION_DURATION.labels(provider='stripe').observe(max(0.0, time.time() - _t0s))
@@ -3461,15 +3503,18 @@ async def _razorpay_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> D
                 stats['normalized_events'] = pipeline_result.get('processed_rows', 0)
                 stats['pipeline_job_id'] = pipeline_result.get('job_id')
                 
-                # Mark external_items as processed
-                for it in items:
+                # Mark external_items as processed (bulk update)
+                if items:
+                    item_ids = [it['id'] for it in items]
                     try:
-                        supabase.table('external_items').update({
-                            'status': 'processed',
-                            'metadata': {**(it.get('metadata') or {}), 'processed_at': datetime.utcnow().isoformat()}
-                        }).eq('id', it['id']).execute()
-                    except Exception:
-                        pass
+                        supabase.table('external_items').update({'status': 'processed'}).in_('id', item_ids).execute()
+                    except Exception as e:
+                        logger.warning(f"Razorpay bulk status update failed: {e}")
+                        for it in items:
+                            try:
+                                supabase.table('external_items').update({'status': 'processed'}).eq('id', it['id']).execute()
+                            except Exception:
+                                pass
                 
                 NORMALIZATION_EVENTS.labels(provider='razorpay').inc(stats['normalized_events'])
                 NORMALIZATION_DURATION.labels(provider='razorpay').observe(max(0.0, time.time() - _t0r))
@@ -3536,6 +3581,178 @@ async def _razorpay_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> D
         supabase.table('sync_runs').update({'status': 'failed', 'finished_at': datetime.utcnow().isoformat(), 'error': str(e), 'stats': json.dumps(stats)}).eq('id', sync_run_id).execute()
         JOBS_PROCESSED.labels(provider=provider_key, status='failed').inc()
         raise HTTPException(status_code=500, detail='Razorpay sync failed')
+
+async def _paypal_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> Dict[str, Any]:
+    """
+    PayPal ingestion: fetch Payments, Invoices, Transactions via PayPal API.
+    
+    Endpoints:
+    - /v1/payments/payment (Payments)
+    - /v2/invoicing/invoices (Invoices)
+    - /v2/payments/captures (Payment Captures)
+    - /v1/reporting/transactions (Transaction History)
+    
+    Data flow: API → CSV format → ExcelProcessor → raw_events (with full enrichment)
+    """
+    provider_key = NANGO_PAYPAL_INTEGRATION_ID
+    connection_id = req.connection_id
+    user_id = req.user_id
+    stats = {'records_fetched': 0, 'actions_used': 0, 'attachments_saved': 0, 'queued_jobs': 0, 'skipped': 0}
+    
+    sync_run_id = str(uuid.uuid4())
+    try:
+        supabase.table('sync_runs').insert({
+            'id': sync_run_id,
+            'user_id': user_id,
+            'provider': provider_key,
+            'status': 'running',
+            'started_at': datetime.utcnow().isoformat(),
+            'correlation_id': req.correlation_id
+        }).execute()
+    except Exception as e:
+        logger.warning(f"Failed to create sync_run record: {e}")
+    
+    try:
+        logger.info(f"🔵 PayPal sync started: connection_id={connection_id}, user_id={user_id}, mode={req.mode}")
+        
+        # Fetch Payments
+        payments_data = []
+        try:
+            logger.info("Fetching PayPal payments...")
+            payments_resp = await nango.proxy_request(
+                connection_id=connection_id,
+                method='GET',
+                endpoint='/v1/payments/payment',
+                params={'count': req.max_results or 100, 'sort_order': 'desc'}
+            )
+            payments_list = payments_resp.get('payments', [])
+            logger.info(f"✅ Fetched {len(payments_list)} PayPal payments")
+            
+            for payment in payments_list:
+                payments_data.append({
+                    'payment_id': payment.get('id'),
+                    'state': payment.get('state'),
+                    'intent': payment.get('intent'),
+                    'payer_email': (payment.get('payer', {}).get('payer_info', {}).get('email')),
+                    'amount': payment.get('transactions', [{}])[0].get('amount', {}).get('total'),
+                    'currency': payment.get('transactions', [{}])[0].get('amount', {}).get('currency'),
+                    'create_time': payment.get('create_time'),
+                    'update_time': payment.get('update_time'),
+                    'description': payment.get('transactions', [{}])[0].get('description', ''),
+                })
+            stats['records_fetched'] += len(payments_list)
+        except Exception as e:
+            logger.warning(f"Failed to fetch PayPal payments: {e}")
+        
+        # Fetch Invoices
+        invoices_data = []
+        try:
+            logger.info("Fetching PayPal invoices...")
+            invoices_resp = await nango.proxy_request(
+                connection_id=connection_id,
+                method='GET',
+                endpoint='/v2/invoicing/invoices',
+                params={'page_size': req.max_results or 100}
+            )
+            invoices_list = invoices_resp.get('items', [])
+            logger.info(f"✅ Fetched {len(invoices_list)} PayPal invoices")
+            
+            for invoice in invoices_list:
+                detail = invoice.get('detail', {})
+                amount_info = invoice.get('amount', {})
+                invoices_data.append({
+                    'invoice_id': invoice.get('id'),
+                    'invoice_number': detail.get('invoice_number'),
+                    'status': invoice.get('status'),
+                    'invoice_date': detail.get('invoice_date'),
+                    'due_date': detail.get('payment_term', {}).get('due_date'),
+                    'currency_code': amount_info.get('currency_code'),
+                    'total_amount': amount_info.get('value'),
+                    'recipient_email': (invoice.get('primary_recipients', [{}])[0].get('billing_info', {}).get('email_address')),
+                })
+            stats['records_fetched'] += len(invoices_list)
+        except Exception as e:
+            logger.warning(f"Failed to fetch PayPal invoices: {e}")
+        
+        # Convert to CSV and process
+        all_records = []
+        if payments_data:
+            df_payments = pd.DataFrame(payments_data)
+            df_payments['record_type'] = 'payment'
+            all_records.append(df_payments)
+        
+        if invoices_data:
+            df_invoices = pd.DataFrame(invoices_data)
+            df_invoices['record_type'] = 'invoice'
+            all_records.append(df_invoices)
+        
+        if all_records:
+            combined_df = pd.concat(all_records, ignore_index=True, sort=False)
+            csv_buffer = io.StringIO()
+            combined_df.to_csv(csv_buffer, index=False)
+            csv_content = csv_buffer.getvalue().encode('utf-8')
+            
+            # Process via ExcelProcessor
+            processor = ExcelProcessor()
+            job_id = await processor.process_file_async(
+                file_content=csv_content,
+                filename=f'paypal_sync_{datetime.utcnow().strftime("%Y%m%d_%H%M%S")}.csv',
+                user_id=user_id,
+                custom_prompt=None,
+                progress_callback=None
+            )
+            stats['queued_jobs'] += 1
+            logger.info(f"✅ PayPal data queued for processing: job_id={job_id}")
+        
+        # Mark sync as completed
+        try:
+            async with supabase_transaction() as tx:
+                await tx.update('sync_runs', {
+                    'status': 'succeeded',
+                    'finished_at': datetime.utcnow().isoformat(),
+                    'stats': json.dumps(stats)
+                }, {'id': sync_run_id})
+                await tx.update('user_connections', {
+                    'last_synced_at': datetime.utcnow().isoformat()
+                }, {'nango_connection_id': connection_id})
+        except Exception as completion_err:
+            logger.error(f"Failed to update PayPal sync completion status: {completion_err}")
+        
+        try:
+            JOBS_PROCESSED.labels(provider=provider_key, status='succeeded').inc()
+        except Exception:
+            pass
+        
+        return {'status': 'succeeded', 'sync_run_id': sync_run_id, 'stats': stats}
+    
+    except HTTPException:
+        supabase.table('sync_runs').update({'status': 'failed', 'finished_at': datetime.utcnow().isoformat(), 'stats': json.dumps(stats)}).eq('id', sync_run_id).execute()
+        JOBS_PROCESSED.labels(provider=provider_key, status='failed').inc()
+        raise
+    except Exception as e:
+        logger.error(f"PayPal sync failed: {e}")
+        
+        # Error recovery
+        try:
+            recovery_system = get_error_recovery_system()
+            error_context = ErrorContext(
+                error_id=str(uuid.uuid4()),
+                user_id=user_id,
+                job_id=sync_run_id,
+                transaction_id=None,
+                operation_type='paypal_sync',
+                error_message=str(e),
+                error_details={'sync_run_id': sync_run_id, 'connection_id': connection_id, 'provider': provider_key, 'correlation_id': req.correlation_id},
+                severity=ErrorSeverity.HIGH,
+                occurred_at=datetime.utcnow()
+            )
+            await recovery_system.handle_processing_error(error_context)
+        except Exception as recovery_error:
+            logger.error(f"Error recovery failed: {recovery_error}")
+        
+        supabase.table('sync_runs').update({'status': 'failed', 'finished_at': datetime.utcnow().isoformat(), 'error': str(e), 'stats': json.dumps(stats)}).eq('id', sync_run_id).execute()
+        JOBS_PROCESSED.labels(provider=provider_key, status='failed').inc()
+        raise HTTPException(status_code=500, detail='PayPal sync failed')
     
     async def _process_excel_streaming(self, file_content: bytes, filename: str, progress_callback=None) -> Dict[str, pd.DataFrame]:
         """Process Excel files using true streaming approach for large files"""
@@ -10014,18 +10231,23 @@ async def handle_duplicate_decision(request: DuplicateDecisionRequest):
                 progress=(await websocket_manager.get_job_status(request.job_id) or {}).get("progress")
             )
 
-            # Kick off processing job (server-side resume)
-            asyncio.create_task(start_processing_job(
-                user_id=user_id,
-                job_id=request.job_id,
-                storage_path=storage_path,
-                filename=filename,
-                duplicate_decision=decision,
-                existing_file_id=existing_file_id,
-                original_file_hash=request.file_hash
-            ))
-
-            return {"status": "success", "message": "Duplicate decision processed: resuming"}
+            # Dispatch resume via ARQ (queue-only execution)
+            if _queue_backend() == 'arq':
+                try:
+                    pool = await get_arq_pool()
+                    # Note: ARQ worker will need to handle these additional parameters
+                    await pool.enqueue_job('process_spreadsheet',
+                        user_id, filename, storage_path, request.job_id,
+                        duplicate_decision=decision,
+                        existing_file_id=existing_file_id,
+                        original_file_hash=request.file_hash
+                    )
+                    return {"status": "success", "message": "Duplicate decision processed: resuming"}
+                except Exception as e:
+                    logger.error(f"Failed to resume processing via ARQ: {e}")
+                    raise HTTPException(503, "Background worker unavailable")
+            else:
+                raise HTTPException(503, "Background worker not configured")
 
         raise HTTPException(status_code=400, detail="Invalid decision. Use one of: replace, keep_both, skip")
     except HTTPException as he:
@@ -10785,13 +11007,34 @@ async def process_excel_endpoint(request: dict):
                 await websocket_manager.send_error(job_id, str(e))
                 await websocket_manager.merge_job_state(job_id, {**((await websocket_manager.get_job_status(job_id)) or {}), "status": "failed", "error": str(e)})
 
-        # Kick off background processing task
-        asyncio.create_task(_run_processing_job())
-
-        # Increment metrics
-        metrics_collector.increment_counter("file_processing_requests")
-
-        return {"status": "accepted", "job_id": job_id}
+        # Dispatch to ARQ worker (queue-only execution)
+        if _queue_backend() == 'arq':
+            try:
+                pool = await get_arq_pool()
+                await pool.enqueue_job('process_spreadsheet', user_id, filename, storage_path, job_id)
+                # Increment metrics
+                metrics_collector.increment_counter("file_processing_requests")
+                return {"status": "accepted", "job_id": job_id}
+            except Exception as e:
+                logger.error(f"ARQ dispatch failed: {e}")
+                # Update job status to failed
+                try:
+                    supabase.table('ingestion_jobs').update({
+                        'status': 'failed',
+                        'error_message': 'Background worker unavailable',
+                        'updated_at': datetime.utcnow().isoformat()
+                    }).eq('id', job_id).execute()
+                except Exception:
+                    pass
+                raise HTTPException(
+                    status_code=503,
+                    detail="Background worker unavailable. Please try again in a few moments."
+                )
+        else:
+            raise HTTPException(
+                status_code=503,
+                detail="Background worker not configured. Please contact support."
+            )
     except HTTPException as he:
         # Preserve the intended status code (e.g., 401 on auth failures)
         raise he
@@ -10926,6 +11169,7 @@ NANGO_QUICKBOOKS_INTEGRATION_ID = os.environ.get("NANGO_QUICKBOOKS_INTEGRATION_I
 NANGO_XERO_INTEGRATION_ID = os.environ.get("NANGO_XERO_INTEGRATION_ID", "xero")
 NANGO_STRIPE_INTEGRATION_ID = os.environ.get("NANGO_STRIPE_INTEGRATION_ID", "stripe")
 NANGO_RAZORPAY_INTEGRATION_ID = os.environ.get("NANGO_RAZORPAY_INTEGRATION_ID", "razorpay")
+NANGO_PAYPAL_INTEGRATION_ID = os.environ.get("NANGO_PAYPAL_INTEGRATION_ID", "paypal")
 
 class ConnectorInitiateRequest(BaseModel):
     provider: str  # expect 'google-mail' for Gmail
@@ -11104,23 +11348,35 @@ async def _enqueue_file_processing(user_id: str, filename: str, storage_path: st
         except Exception:
             # ignore duplicates
             pass
-        # Dispatch via ARQ when enabled, else Celery, else inline
+        # Dispatch via ARQ (queue-only execution, no inline fallback)
         if _queue_backend() == 'arq':
             try:
                 pool = await get_arq_pool()
                 await pool.enqueue_job('process_spreadsheet', user_id, filename, storage_path, job_id)
+                return job_id
             except Exception as e:
-                logger.warning(f"ARQ dispatch failed, falling back to inline: {e}")
-                asyncio.create_task(start_processing_job(user_id, job_id, storage_path, filename, file_bytes_cached=file_bytes))
-        elif _use_celery() and task_spreadsheet_processing:
-            try:
-                task_spreadsheet_processing.apply_async(args=[user_id, filename, storage_path, job_id])
-            except Exception as e:
-                logger.warning(f"Celery dispatch failed, falling back to inline task: {e}")
-                asyncio.create_task(start_processing_job(user_id, job_id, storage_path, filename, file_bytes_cached=file_bytes))
+                logger.error(f"ARQ dispatch failed: {e}")
+                # Update job status to failed
+                try:
+                    supabase.table('ingestion_jobs').update({
+                        'status': 'failed',
+                        'error_message': 'Worker unavailable',
+                        'updated_at': datetime.utcnow().isoformat()
+                    }).eq('id', job_id).execute()
+                except Exception:
+                    pass
+                raise HTTPException(503, "Background worker unavailable")
         else:
-            asyncio.create_task(start_processing_job(user_id, job_id, storage_path, filename, file_bytes_cached=file_bytes))
-        return job_id
+            logger.error("Background worker not configured")
+            try:
+                supabase.table('ingestion_jobs').update({
+                    'status': 'failed',
+                    'error_message': 'Worker not configured',
+                    'updated_at': datetime.utcnow().isoformat()
+                }).eq('id', job_id).execute()
+            except Exception:
+                pass
+            raise HTTPException(503, "Background worker not configured")
     except Exception as e:
         logger.error(f"Failed to enqueue processing: {e}")
         raise
@@ -11141,22 +11397,35 @@ async def _enqueue_pdf_processing(user_id: str, filename: str, storage_path: str
             supabase.table('ingestion_jobs').insert(job_data).execute()
         except Exception:
             pass
+        # Dispatch via ARQ (queue-only execution, no inline fallback)
         if _queue_backend() == 'arq':
             try:
                 pool = await get_arq_pool()
                 await pool.enqueue_job('process_pdf', user_id, filename, storage_path, job_id)
+                return job_id
             except Exception as e:
-                logger.warning(f"ARQ dispatch failed for PDF, falling back: {e}")
-                asyncio.create_task(start_pdf_processing_job(user_id, job_id, storage_path, filename))
-        elif _use_celery() and task_pdf_processing:
-            try:
-                task_pdf_processing.apply_async(args=[user_id, filename, storage_path, job_id])
-            except Exception as e:
-                logger.warning(f"Celery dispatch failed for PDF, falling back: {e}")
-                asyncio.create_task(start_pdf_processing_job(user_id, job_id, storage_path, filename))
+                logger.error(f"ARQ dispatch failed for PDF: {e}")
+                # Update job status to failed
+                try:
+                    supabase.table('ingestion_jobs').update({
+                        'status': 'failed',
+                        'error_message': 'Worker unavailable',
+                        'updated_at': datetime.utcnow().isoformat()
+                    }).eq('id', job_id).execute()
+                except Exception:
+                    pass
+                raise HTTPException(503, "Background worker unavailable")
         else:
-            asyncio.create_task(start_pdf_processing_job(user_id, job_id, storage_path, filename))
-        return job_id
+            logger.error("Background worker not configured for PDF")
+            try:
+                supabase.table('ingestion_jobs').update({
+                    'status': 'failed',
+                    'error_message': 'Worker not configured',
+                    'updated_at': datetime.utcnow().isoformat()
+                }).eq('id', job_id).execute()
+            except Exception:
+                pass
+            raise HTTPException(503, "Background worker not configured")
     except Exception as e:
         logger.error(f"Failed to enqueue PDF processing: {e}")
         raise
@@ -12379,7 +12648,7 @@ async def list_providers(request: dict):
                 {'provider': 'xero', 'display_name': 'Xero', 'integration_id': NANGO_XERO_INTEGRATION_ID, 'auth_type': 'OAUTH2', 'scopes': [], 'endpoints': [], 'category': 'accounting'},
                 {'provider': 'stripe', 'display_name': 'Stripe', 'integration_id': NANGO_STRIPE_INTEGRATION_ID, 'auth_type': 'OAUTH2', 'scopes': [], 'endpoints': ['v1/charges', 'v1/invoices'], 'category': 'payment'},
                 {'provider': 'razorpay', 'display_name': 'Razorpay', 'integration_id': NANGO_RAZORPAY_INTEGRATION_ID, 'auth_type': 'BASIC', 'scopes': [], 'endpoints': ['v1/payments', 'v1/orders'], 'category': 'payment'},
-                {'provider': 'paypal', 'display_name': 'PayPal', 'integration_id': 'paypal', 'auth_type': 'OAUTH2', 'scopes': [], 'endpoints': [], 'category': 'payment'}
+                {'provider': 'paypal', 'display_name': 'PayPal', 'integration_id': NANGO_PAYPAL_INTEGRATION_ID, 'auth_type': 'OAUTH2', 'scopes': [], 'endpoints': ['v1/payments/payment', 'v2/invoicing/invoices'], 'category': 'payment'}
             ]
         }
     except HTTPException:
@@ -12404,7 +12673,7 @@ async def initiate_connector(req: ConnectorInitiateRequest):
             'xero': NANGO_XERO_INTEGRATION_ID,
             'stripe': NANGO_STRIPE_INTEGRATION_ID,
             'razorpay': NANGO_RAZORPAY_INTEGRATION_ID,
-            'paypal': 'paypal',
+            'paypal': NANGO_PAYPAL_INTEGRATION_ID,
         }
         integ = provider_map.get(req.provider)
         if not integ:
@@ -12481,6 +12750,7 @@ async def _dispatch_connector_sync(
         NANGO_ZOHO_BOOKS_INTEGRATION_ID: ('zoho_books_sync', _zoho_books_sync_run),
         NANGO_STRIPE_INTEGRATION_ID: ('stripe_sync', _stripe_sync_run),
         NANGO_RAZORPAY_INTEGRATION_ID: ('razorpay_sync', _razorpay_sync_run),
+        NANGO_PAYPAL_INTEGRATION_ID: ('paypal_sync', _paypal_sync_run),
     }
     
     if integration_id not in provider_config:
@@ -12756,8 +13026,14 @@ async def nango_webhook(request: Request):
                 logger.warning(f"Webhook signature computation failed: {e}")
                 signature_valid = False
         elif not secret:
-            logger.warning("NANGO_WEBHOOK_SECRET not set; accepting webhook in dev mode")
-            signature_valid = True
+            # Production hardening: Reject webhooks if secret not configured in production
+            environment = os.environ.get('ENVIRONMENT', 'development')
+            if environment == 'production':
+                logger.error("NANGO_WEBHOOK_SECRET not set in production - rejecting webhook")
+                raise HTTPException(status_code=403, detail='Webhook secret not configured')
+            else:
+                logger.warning("NANGO_WEBHOOK_SECRET not set; accepting webhook in dev mode")
+                signature_valid = True
 
         # Extract event and connection details
         event_type = payload.get('type') or payload.get('event_type')
@@ -12771,6 +13047,12 @@ async def nango_webhook(request: Request):
         )
         # Derive correlation id for tracing across queue/DB
         correlation_id = payload.get('correlation_id') or event_id or str(uuid.uuid4())
+        
+        # Production hardening: Reject webhooks with invalid signatures in production
+        environment = os.environ.get('ENVIRONMENT', 'development')
+        if environment == 'production' and not signature_valid:
+            logger.error(f"Webhook signature validation failed in production - rejecting webhook: event_type={event_type}, event_id={event_id}")
+            raise HTTPException(status_code=403, detail='Invalid webhook signature')
 
         # Persist webhook for audit/idempotency
         try:
@@ -12788,6 +13070,45 @@ async def nango_webhook(request: Request):
             # Conflict on unique(event_id) is fine; treat as already processed
             logger.info(f"Webhook insert dedup or failure: {e}")
 
+        # Handle connection.created event - upsert user_connections immediately
+        if event_type == 'connection.created' and signature_valid and connection_id and user_id:
+            try:
+                logger.info(f"🔗 Connection created webhook: connection_id={connection_id}, user_id={user_id}")
+                
+                # Get integration_id from payload
+                connection_data = payload.get('connection', {})
+                integration_id = connection_data.get('integration_id') or connection_data.get('provider_config_key')
+                
+                # Lookup connector_id from connectors table
+                connector_id = None
+                if integration_id:
+                    try:
+                        conn_lookup = supabase.table('connectors').select('id').eq('integration_id', integration_id).limit(1).execute()
+                        if conn_lookup.data:
+                            connector_id = conn_lookup.data[0]['id']
+                    except Exception as e:
+                        logger.warning(f"Failed to lookup connector_id for integration_id={integration_id}: {e}")
+                
+                # Upsert user_connections
+                try:
+                    supabase.table('user_connections').upsert({
+                        'user_id': user_id,
+                        'nango_connection_id': connection_id,
+                        'connector_id': connector_id,
+                        'status': 'active',
+                        'last_synced_at': None,
+                        'sync_frequency_minutes': 60,
+                        'created_at': datetime.utcnow().isoformat(),
+                        'updated_at': datetime.utcnow().isoformat()
+                    }, on_conflict='nango_connection_id').execute()
+                    logger.info(f"✅ User connection upserted: connection_id={connection_id}")
+                except Exception as e:
+                    logger.error(f"Failed to upsert user_connection: {e}")
+                
+                return {'status': 'connection_created', 'signature_valid': True}
+            except Exception as e:
+                logger.error(f"Failed to handle connection.created event: {e}")
+        
         # FIX #4: Process webhook delta changes instead of full sync
         if signature_valid and connection_id and user_id:
             try:
@@ -12795,16 +13116,15 @@ async def nango_webhook(request: Request):
                 webhook_data = payload.get('data', {})
                 changed_items = webhook_data.get('items', []) or webhook_data.get('changes', []) or webhook_data.get('records', [])
                 
-                # Lookup connector integration id first
-                uc = supabase.table('user_connections').select('id, connector_id').eq('nango_connection_id', connection_id).limit(1).execute()
+                # Lookup connector integration id with JOIN to avoid N+1
+                uc = supabase.table('user_connections').select('id, connector_id, connectors(provider, integration_id)').eq('nango_connection_id', connection_id).limit(1).execute()
                 user_connection_id = None
+                provider = NANGO_GMAIL_INTEGRATION_ID
                 if uc.data:
                     user_connection_id = uc.data[0]['id']
-                    connector_id = uc.data[0]['connector_id']
-                    conn = supabase.table('connectors').select('provider, integration_id').eq('id', connector_id).limit(1).execute()
-                    provider = (conn.data[0]['integration_id'] if conn.data else NANGO_GMAIL_INTEGRATION_ID)
-                else:
-                    provider = NANGO_GMAIL_INTEGRATION_ID
+                    connector_data = uc.data[0].get('connectors')
+                    if connector_data:
+                        provider = connector_data.get('integration_id', NANGO_GMAIL_INTEGRATION_ID)
                 
                 # ✅ DELTA PROCESSING: If webhook has specific changed items, process them directly
                 if changed_items and len(changed_items) <= 50 and user_connection_id:  # Only for small deltas
@@ -12849,17 +13169,37 @@ async def nango_webhook(request: Request):
                             await pool.enqueue_job('gmail_sync', req.model_dump())
                             JOBS_ENQUEUED.labels(provider=NANGO_GMAIL_INTEGRATION_ID, mode='incremental').inc()
                         except Exception as e:
-                            logger.warning(f"ARQ dispatch failed in webhook: {e}")
-                            nango = NangoClient(base_url=NANGO_BASE_URL)
-                            asyncio.create_task(_gmail_sync_run(nango, req))
-                            JOBS_ENQUEUED.labels(provider=NANGO_GMAIL_INTEGRATION_ID, mode='incremental').inc()
+                            logger.error(f"ARQ dispatch failed in webhook, persisting for retry: {e}")
+                            # Persist failed webhook for scheduler retry
+                            try:
+                                supabase.table('webhook_events').update({
+                                    'status': 'retry_pending',
+                                    'error': f'Queue dispatch failed: {str(e)}'
+                                }).eq('event_id', event_id).execute()
+                            except Exception:
+                                pass
                     elif _use_celery() and task_gmail_sync:
-                        task_gmail_sync.apply_async(args=[req.model_dump()])
-                        JOBS_ENQUEUED.labels(provider=NANGO_GMAIL_INTEGRATION_ID, mode='incremental').inc()
+                        try:
+                            task_gmail_sync.apply_async(args=[req.model_dump()])
+                            JOBS_ENQUEUED.labels(provider=NANGO_GMAIL_INTEGRATION_ID, mode='incremental').inc()
+                        except Exception as e:
+                            logger.error(f"Celery dispatch failed in webhook, persisting for retry: {e}")
+                            try:
+                                supabase.table('webhook_events').update({
+                                    'status': 'retry_pending',
+                                    'error': f'Queue dispatch failed: {str(e)}'
+                                }).eq('event_id', event_id).execute()
+                            except Exception:
+                                pass
                     else:
-                        nango = NangoClient(base_url=NANGO_BASE_URL)
-                        asyncio.create_task(_gmail_sync_run(nango, req))
-                        JOBS_ENQUEUED.labels(provider=NANGO_GMAIL_INTEGRATION_ID, mode='incremental').inc()
+                        logger.warning("No queue backend configured, persisting webhook for scheduler retry")
+                        try:
+                            supabase.table('webhook_events').update({
+                                'status': 'retry_pending',
+                                'error': 'No queue backend configured'
+                            }).eq('event_id', event_id).execute()
+                        except Exception:
+                            pass
                 elif provider == NANGO_DROPBOX_INTEGRATION_ID:
                     req = ConnectorSyncRequest(
                         user_id=user_id,
@@ -12875,14 +13215,17 @@ async def nango_webhook(request: Request):
                             await pool.enqueue_job('dropbox_sync', req.model_dump())
                             JOBS_ENQUEUED.labels(provider=NANGO_DROPBOX_INTEGRATION_ID, mode='incremental').inc()
                         except Exception as e:
-                            logger.warning(f"ARQ dispatch failed in webhook: {e}")
-                            nango = NangoClient(base_url=NANGO_BASE_URL)
-                            asyncio.create_task(_dropbox_sync_run(nango, req))
-                            JOBS_ENQUEUED.labels(provider=NANGO_DROPBOX_INTEGRATION_ID, mode='incremental').inc()
+                            logger.error(f"ARQ dispatch failed in webhook, persisting for retry: {e}")
+                            try:
+                                supabase.table('webhook_events').update({'status': 'retry_pending', 'error': f'Queue dispatch failed: {str(e)}'}).eq('event_id', event_id).execute()
+                            except Exception:
+                                pass
                     else:
-                        nango = NangoClient(base_url=NANGO_BASE_URL)
-                        asyncio.create_task(_dropbox_sync_run(nango, req))
-                        JOBS_ENQUEUED.labels(provider=NANGO_DROPBOX_INTEGRATION_ID, mode='incremental').inc()
+                        logger.warning("No queue backend configured, persisting webhook for scheduler retry")
+                        try:
+                            supabase.table('webhook_events').update({'status': 'retry_pending', 'error': 'No queue backend configured'}).eq('event_id', event_id).execute()
+                        except Exception:
+                            pass
                 elif provider == NANGO_GOOGLE_DRIVE_INTEGRATION_ID:
                     req = ConnectorSyncRequest(
                         user_id=user_id,
@@ -12898,14 +13241,17 @@ async def nango_webhook(request: Request):
                             await pool.enqueue_job('gdrive_sync', req.model_dump())
                             JOBS_ENQUEUED.labels(provider=NANGO_GOOGLE_DRIVE_INTEGRATION_ID, mode='incremental').inc()
                         except Exception as e:
-                            logger.warning(f"ARQ dispatch failed in webhook: {e}")
-                            nango = NangoClient(base_url=NANGO_BASE_URL)
-                            asyncio.create_task(_gdrive_sync_run(nango, req))
-                            JOBS_ENQUEUED.labels(provider=NANGO_GOOGLE_DRIVE_INTEGRATION_ID, mode='incremental').inc()
+                            logger.error(f"ARQ dispatch failed in webhook, persisting for retry: {e}")
+                            try:
+                                supabase.table('webhook_events').update({'status': 'retry_pending', 'error': f'Queue dispatch failed: {str(e)}'}).eq('event_id', event_id).execute()
+                            except Exception:
+                                pass
                     else:
-                        nango = NangoClient(base_url=NANGO_BASE_URL)
-                        asyncio.create_task(_gdrive_sync_run(nango, req))
-                        JOBS_ENQUEUED.labels(provider=NANGO_GOOGLE_DRIVE_INTEGRATION_ID, mode='incremental').inc()
+                        logger.warning("No queue backend configured, persisting webhook for scheduler retry")
+                        try:
+                            supabase.table('webhook_events').update({'status': 'retry_pending', 'error': 'No queue backend configured'}).eq('event_id', event_id).execute()
+                        except Exception:
+                            pass
                 elif provider == NANGO_ZOHO_MAIL_INTEGRATION_ID:
                     req = ConnectorSyncRequest(
                         user_id=user_id,
@@ -12921,14 +13267,17 @@ async def nango_webhook(request: Request):
                             await pool.enqueue_job('zoho_mail_sync', req.model_dump())
                             JOBS_ENQUEUED.labels(provider=NANGO_ZOHO_MAIL_INTEGRATION_ID, mode='incremental').inc()
                         except Exception as e:
-                            logger.warning(f"ARQ dispatch failed in webhook: {e}")
-                            nango = NangoClient(base_url=NANGO_BASE_URL)
-                            asyncio.create_task(_zohomail_sync_run(nango, req))
-                            JOBS_ENQUEUED.labels(provider=NANGO_ZOHO_MAIL_INTEGRATION_ID, mode='incremental').inc()
+                            logger.error(f"ARQ dispatch failed in webhook, persisting for retry: {e}")
+                            try:
+                                supabase.table('webhook_events').update({'status': 'retry_pending', 'error': f'Queue dispatch failed: {str(e)}'}).eq('event_id', event_id).execute()
+                            except Exception:
+                                pass
                     else:
-                        nango = NangoClient(base_url=NANGO_BASE_URL)
-                        asyncio.create_task(_zohomail_sync_run(nango, req))
-                        JOBS_ENQUEUED.labels(provider=NANGO_ZOHO_MAIL_INTEGRATION_ID, mode='incremental').inc()
+                        logger.warning("No queue backend configured, persisting webhook for scheduler retry")
+                        try:
+                            supabase.table('webhook_events').update({'status': 'retry_pending', 'error': 'No queue backend configured'}).eq('event_id', event_id).execute()
+                        except Exception:
+                            pass
                 elif provider == NANGO_QUICKBOOKS_INTEGRATION_ID:
                     req = ConnectorSyncRequest(
                         user_id=user_id,
@@ -12944,14 +13293,17 @@ async def nango_webhook(request: Request):
                             await pool.enqueue_job('quickbooks_sync', req.model_dump())
                             JOBS_ENQUEUED.labels(provider=NANGO_QUICKBOOKS_INTEGRATION_ID, mode='incremental').inc()
                         except Exception as e:
-                            logger.warning(f"ARQ dispatch failed in webhook: {e}")
-                            nango = NangoClient(base_url=NANGO_BASE_URL)
-                            asyncio.create_task(_quickbooks_sync_run(nango, req))
-                            JOBS_ENQUEUED.labels(provider=NANGO_QUICKBOOKS_INTEGRATION_ID, mode='incremental').inc()
+                            logger.error(f"ARQ dispatch failed in webhook, persisting for retry: {e}")
+                            try:
+                                supabase.table('webhook_events').update({'status': 'retry_pending', 'error': f'Queue dispatch failed: {str(e)}'}).eq('event_id', event_id).execute()
+                            except Exception:
+                                pass
                     else:
-                        nango = NangoClient(base_url=NANGO_BASE_URL)
-                        asyncio.create_task(_quickbooks_sync_run(nango, req))
-                        JOBS_ENQUEUED.labels(provider=NANGO_QUICKBOOKS_INTEGRATION_ID, mode='incremental').inc()
+                        logger.warning("No queue backend configured, persisting webhook for scheduler retry")
+                        try:
+                            supabase.table('webhook_events').update({'status': 'retry_pending', 'error': 'No queue backend configured'}).eq('event_id', event_id).execute()
+                        except Exception:
+                            pass
                 elif provider == NANGO_XERO_INTEGRATION_ID:
                     req = ConnectorSyncRequest(
                         user_id=user_id,
@@ -12967,14 +13319,17 @@ async def nango_webhook(request: Request):
                             await pool.enqueue_job('xero_sync', req.model_dump())
                             JOBS_ENQUEUED.labels(provider=NANGO_XERO_INTEGRATION_ID, mode='incremental').inc()
                         except Exception as e:
-                            logger.warning(f"ARQ dispatch failed in webhook: {e}")
-                            nango = NangoClient(base_url=NANGO_BASE_URL)
-                            asyncio.create_task(_xero_sync_run(nango, req))
-                            JOBS_ENQUEUED.labels(provider=NANGO_XERO_INTEGRATION_ID, mode='incremental').inc()
+                            logger.error(f"ARQ dispatch failed in webhook, persisting for retry: {e}")
+                            try:
+                                supabase.table('webhook_events').update({'status': 'retry_pending', 'error': f'Queue dispatch failed: {str(e)}'}).eq('event_id', event_id).execute()
+                            except Exception:
+                                pass
                     else:
-                        nango = NangoClient(base_url=NANGO_BASE_URL)
-                        asyncio.create_task(_xero_sync_run(nango, req))
-                        JOBS_ENQUEUED.labels(provider=NANGO_XERO_INTEGRATION_ID, mode='incremental').inc()
+                        logger.warning("No queue backend configured, persisting webhook for scheduler retry")
+                        try:
+                            supabase.table('webhook_events').update({'status': 'retry_pending', 'error': 'No queue backend configured'}).eq('event_id', event_id).execute()
+                        except Exception:
+                            pass
                 elif provider == NANGO_ZOHO_BOOKS_INTEGRATION_ID:
                     req = ConnectorSyncRequest(
                         user_id=user_id,
@@ -12990,14 +13345,17 @@ async def nango_webhook(request: Request):
                             await pool.enqueue_job('zoho_books_sync', req.model_dump())
                             JOBS_ENQUEUED.labels(provider=NANGO_ZOHO_BOOKS_INTEGRATION_ID, mode='incremental').inc()
                         except Exception as e:
-                            logger.warning(f"ARQ dispatch failed in webhook: {e}")
-                            nango = NangoClient(base_url=NANGO_BASE_URL)
-                            asyncio.create_task(_zoho_books_sync_run(nango, req))
-                            JOBS_ENQUEUED.labels(provider=NANGO_ZOHO_BOOKS_INTEGRATION_ID, mode='incremental').inc()
+                            logger.error(f"ARQ dispatch failed in webhook, persisting for retry: {e}")
+                            try:
+                                supabase.table('webhook_events').update({'status': 'retry_pending', 'error': f'Queue dispatch failed: {str(e)}'}).eq('event_id', event_id).execute()
+                            except Exception:
+                                pass
                     else:
-                        nango = NangoClient(base_url=NANGO_BASE_URL)
-                        asyncio.create_task(_zoho_books_sync_run(nango, req))
-                        JOBS_ENQUEUED.labels(provider=NANGO_ZOHO_BOOKS_INTEGRATION_ID, mode='incremental').inc()
+                        logger.warning("No queue backend configured, persisting webhook for scheduler retry")
+                        try:
+                            supabase.table('webhook_events').update({'status': 'retry_pending', 'error': 'No queue backend configured'}).eq('event_id', event_id).execute()
+                        except Exception:
+                            pass
                 elif provider == NANGO_STRIPE_INTEGRATION_ID:
                     req = ConnectorSyncRequest(
                         user_id=user_id,
@@ -13013,14 +13371,17 @@ async def nango_webhook(request: Request):
                             await pool.enqueue_job('stripe_sync', req.model_dump())
                             JOBS_ENQUEUED.labels(provider=NANGO_STRIPE_INTEGRATION_ID, mode='incremental').inc()
                         except Exception as e:
-                            logger.warning(f"ARQ dispatch failed in webhook: {e}")
-                            nango = NangoClient(base_url=NANGO_BASE_URL)
-                            asyncio.create_task(_stripe_sync_run(nango, req))
-                            JOBS_ENQUEUED.labels(provider=NANGO_STRIPE_INTEGRATION_ID, mode='incremental').inc()
+                            logger.error(f"ARQ dispatch failed in webhook, persisting for retry: {e}")
+                            try:
+                                supabase.table('webhook_events').update({'status': 'retry_pending', 'error': f'Queue dispatch failed: {str(e)}'}).eq('event_id', event_id).execute()
+                            except Exception:
+                                pass
                     else:
-                        nango = NangoClient(base_url=NANGO_BASE_URL)
-                        asyncio.create_task(_stripe_sync_run(nango, req))
-                        JOBS_ENQUEUED.labels(provider=NANGO_STRIPE_INTEGRATION_ID, mode='incremental').inc()
+                        logger.warning("No queue backend configured, persisting webhook for scheduler retry")
+                        try:
+                            supabase.table('webhook_events').update({'status': 'retry_pending', 'error': 'No queue backend configured'}).eq('event_id', event_id).execute()
+                        except Exception:
+                            pass
                 elif provider == NANGO_RAZORPAY_INTEGRATION_ID:
                     req = ConnectorSyncRequest(
                         user_id=user_id,
@@ -13036,14 +13397,43 @@ async def nango_webhook(request: Request):
                             await pool.enqueue_job('razorpay_sync', req.model_dump())
                             JOBS_ENQUEUED.labels(provider=NANGO_RAZORPAY_INTEGRATION_ID, mode='incremental').inc()
                         except Exception as e:
-                            logger.warning(f"ARQ dispatch failed in webhook: {e}")
-                            nango = NangoClient(base_url=NANGO_BASE_URL)
-                            asyncio.create_task(_razorpay_sync_run(nango, req))
-                            JOBS_ENQUEUED.labels(provider=NANGO_RAZORPAY_INTEGRATION_ID, mode='incremental').inc()
+                            logger.error(f"ARQ dispatch failed in webhook, persisting for retry: {e}")
+                            try:
+                                supabase.table('webhook_events').update({'status': 'retry_pending', 'error': f'Queue dispatch failed: {str(e)}'}).eq('event_id', event_id).execute()
+                            except Exception:
+                                pass
                     else:
-                        nango = NangoClient(base_url=NANGO_BASE_URL)
-                        asyncio.create_task(_razorpay_sync_run(nango, req))
-                        JOBS_ENQUEUED.labels(provider=NANGO_RAZORPAY_INTEGRATION_ID, mode='incremental').inc()
+                        logger.warning("No queue backend configured, persisting webhook for scheduler retry")
+                        try:
+                            supabase.table('webhook_events').update({'status': 'retry_pending', 'error': 'No queue backend configured'}).eq('event_id', event_id).execute()
+                        except Exception:
+                            pass
+                elif provider == NANGO_PAYPAL_INTEGRATION_ID:
+                    req = ConnectorSyncRequest(
+                        user_id=user_id,
+                        connection_id=connection_id,
+                        integration_id=NANGO_PAYPAL_INTEGRATION_ID,
+                        mode='incremental',
+                        max_results=100,
+                        correlation_id=correlation_id
+                    )
+                    if _queue_backend() == 'arq':
+                        try:
+                            pool = await get_arq_pool()
+                            await pool.enqueue_job('paypal_sync', req.model_dump())
+                            JOBS_ENQUEUED.labels(provider=NANGO_PAYPAL_INTEGRATION_ID, mode='incremental').inc()
+                        except Exception as e:
+                            logger.error(f"ARQ dispatch failed in webhook, persisting for retry: {e}")
+                            try:
+                                supabase.table('webhook_events').update({'status': 'retry_pending', 'error': f'Queue dispatch failed: {str(e)}'}).eq('event_id', event_id).execute()
+                            except Exception:
+                                pass
+                    else:
+                        logger.warning("No queue backend configured, persisting webhook for scheduler retry")
+                        try:
+                            supabase.table('webhook_events').update({'status': 'retry_pending', 'error': 'No queue backend configured'}).eq('event_id', event_id).execute()
+                        except Exception:
+                            pass
             except Exception as e:
                 logger.error(f"Failed to trigger incremental sync from webhook: {e}")
 
