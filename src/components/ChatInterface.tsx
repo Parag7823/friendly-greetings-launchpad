@@ -5,8 +5,8 @@ import { InlineUploadZone } from './InlineUploadZone';
 import { DataSourcesPanel } from './DataSourcesPanel';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
-import { StarBorder } from './ui/star-border';
 import { useAuth } from './AuthProvider';
+import { motion } from 'framer-motion';
 import IntegrationCard from './IntegrationCard';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/components/ui/use-toast';
@@ -350,22 +350,30 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
       case 'chat':
       default:
         return (
-          <div className="finley-chat flex flex-col h-full relative">
-            {/* Data Sources Button - Fixed top right */}
-            <div className="absolute top-4 right-4 z-10">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setShowDataSources(true)}
-                className="shadow-lg"
-              >
-                <Layers className="w-4 h-4 mr-2" />
-                Data Sources
-              </Button>
-            </div>
+          <div className="h-full flex bg-background">
+            {/* Main Chat Area - Responsive to Data Sources panel */}
+            <motion.div 
+              className="flex-1 flex flex-col min-w-0"
+              animate={{ 
+                marginRight: showDataSources ? '500px' : '0px' 
+              }}
+              transition={{ type: 'spring', damping: 25, stiffness: 200 }}
+            >
+              {/* Data Sources Button - Fixed top right */}
+              <div className="absolute top-4 right-4 z-10">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setShowDataSources(true)}
+                  className="shadow-lg"
+                >
+                  <Layers className="w-4 h-4 mr-2" />
+                  Data Sources
+                </Button>
+              </div>
 
-            {/* Chat Messages Area */}
-            <div className="flex-1 overflow-y-auto p-4">
+              {/* Chat Messages Area */}
+              <div className="flex-1 overflow-y-auto p-4">
               {messages.length === 0 ? (
                 <div className="h-full flex items-center justify-center">
                   <div className="max-w-2xl w-full space-y-6 px-4">
@@ -433,37 +441,39 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
               )}
             </div>
             
-            {/* Chat Input Area - Fixed at bottom with StarBorder */}
-            <div className="border-t border-border p-4 bg-background">
-              <div className="max-w-4xl mx-auto">
-                <StarBorder 
-                  as="div" 
-                  className="w-full"
-                  speed="8s"
-                >
-                  <div className="relative">
-                    <input
-                      type="text"
-                      value={message}
-                      onChange={(e) => setMessage(e.target.value)}
-                      onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
-                      placeholder="Ask anything about your financial data..."
-                      className="w-full bg-transparent border-none px-4 py-3 pr-12 text-sm text-foreground placeholder-muted-foreground focus:outline-none"
-                    />
+              {/* Chat Input Area - Minimal border animation */}
+              <div className="border-t border-border p-4 bg-background">
+                <div className="max-w-4xl mx-auto">
+                  <div className="relative rounded-lg border border-border bg-background overflow-hidden group">
+                    {/* Minimal animated border effect */}
+                    <div className="absolute inset-0 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-300">
+                      <div className="absolute inset-0 rounded-lg border-2 border-primary/20 animate-pulse" />
+                    </div>
                     
-                    <button
-                      onClick={handleSendMessage}
-                      disabled={!message.trim()}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 w-8 h-8 bg-primary text-primary-foreground rounded-md flex items-center justify-center transition-all duration-200 hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      <Send className="w-4 h-4" />
-                    </button>
+                    <div className="relative">
+                      <input
+                        type="text"
+                        value={message}
+                        onChange={(e) => setMessage(e.target.value)}
+                        onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
+                        placeholder="Ask anything about your financial data..."
+                        className="w-full bg-transparent border-none px-4 py-3 pr-12 text-sm text-foreground placeholder-muted-foreground focus:outline-none"
+                      />
+                      
+                      <button
+                        onClick={handleSendMessage}
+                        disabled={!message.trim()}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 w-8 h-8 bg-primary text-primary-foreground rounded-md flex items-center justify-center transition-all duration-200 hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        <Send className="w-4 h-4" />
+                      </button>
+                    </div>
                   </div>
-                </StarBorder>
+                </div>
               </div>
-            </div>
+            </motion.div>
 
-            {/* Data Sources Panel - Non-blocking */}
+            {/* Data Sources Panel - Positioned absolutely */}
             <DataSourcesPanel 
               isOpen={showDataSources} 
               onClose={() => setShowDataSources(false)} 
