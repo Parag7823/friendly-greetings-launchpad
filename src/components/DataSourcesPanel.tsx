@@ -1,5 +1,14 @@
 import { useState, useEffect } from 'react';
 import { FileSpreadsheet, Plug, RefreshCw, CheckCircle2, AlertCircle, ChevronDown, ChevronRight, X, Loader2, Mail, HardDrive, Calculator, CreditCard, Trash2 } from 'lucide-react';
+import gmailLogo from "@/assets/logos/gmail.svg";
+import zohoMailLogo from "@/assets/logos/zoho-mail.svg";
+import zohoLogo from "@/assets/logos/zoho.svg";
+import quickbooksLogo from "@/assets/logos/quickbooks.svg";
+import xeroLogo from "@/assets/logos/xero.svg";
+import stripeLogo from "@/assets/logos/stripe.svg";
+import razorpayLogo from "@/assets/logos/razorpay.svg";
+import googleDriveLogo from "@/assets/logos/google-drive.svg";
+import dropboxLogo from "@/assets/logos/dropbox.svg";
 import { Card } from './ui/card';
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
@@ -41,7 +50,7 @@ const INTEGRATIONS: Integration[] = [
     name: 'QuickBooks', 
     provider: 'quickbooks-sandbox',
     description: 'Sync invoices, bills, and payments',
-    icon: <Calculator className="w-5 h-5" />,
+    icon: <img src={quickbooksLogo} alt="QuickBooks" className="w-5 h-5 object-contain" />,
     category: 'accounting'
   },
   { 
@@ -49,7 +58,7 @@ const INTEGRATIONS: Integration[] = [
     name: 'Xero', 
     provider: 'xero',
     description: 'Connect your Xero accounting data',
-    icon: <Calculator className="w-5 h-5" />,
+    icon: <img src={xeroLogo} alt="Xero" className="w-5 h-5 object-contain" />,
     category: 'accounting'
   },
   { 
@@ -57,7 +66,7 @@ const INTEGRATIONS: Integration[] = [
     name: 'Zoho Books', 
     provider: 'zoho-books',
     description: 'Import Zoho Books transactions',
-    icon: <Calculator className="w-5 h-5" />,
+    icon: <img src={zohoLogo} alt="Zoho Books" className="w-5 h-5 object-contain" />,
     category: 'accounting'
   },
   
@@ -67,7 +76,7 @@ const INTEGRATIONS: Integration[] = [
     name: 'Google Drive', 
     provider: 'google-drive',
     description: 'Access files from Google Drive',
-    icon: <HardDrive className="w-5 h-5" />,
+    icon: <img src={googleDriveLogo} alt="Google Drive" className="w-5 h-5 object-contain" />,
     category: 'storage'
   },
   { 
@@ -75,7 +84,7 @@ const INTEGRATIONS: Integration[] = [
     name: 'Dropbox', 
     provider: 'dropbox',
     description: 'Sync files from Dropbox',
-    icon: <HardDrive className="w-5 h-5" />,
+    icon: <img src={dropboxLogo} alt="Dropbox" className="w-5 h-5 object-contain" />,
     category: 'storage'
   },
   
@@ -85,7 +94,7 @@ const INTEGRATIONS: Integration[] = [
     name: 'Gmail', 
     provider: 'google-mail',
     description: 'Extract attachments from Gmail',
-    icon: <Mail className="w-5 h-5" />,
+    icon: <img src={gmailLogo} alt="Gmail" className="w-5 h-5 object-contain" />,
     category: 'email'
   },
   { 
@@ -93,7 +102,7 @@ const INTEGRATIONS: Integration[] = [
     name: 'Zoho Mail', 
     provider: 'zoho-mail',
     description: 'Get attachments from Zoho Mail',
-    icon: <Mail className="w-5 h-5" />,
+    icon: <img src={zohoMailLogo} alt="Zoho Mail" className="w-5 h-5 object-contain" />,
     category: 'email'
   },
   
@@ -103,7 +112,7 @@ const INTEGRATIONS: Integration[] = [
     name: 'Stripe', 
     provider: 'stripe',
     description: 'Import Stripe transactions',
-    icon: <CreditCard className="w-5 h-5" />,
+    icon: <img src={stripeLogo} alt="Stripe" className="w-5 h-5 object-contain" />,
     category: 'payment'
   },
   { 
@@ -111,7 +120,7 @@ const INTEGRATIONS: Integration[] = [
     name: 'Razorpay', 
     provider: 'razorpay',
     description: 'Sync Razorpay payments',
-    icon: <CreditCard className="w-5 h-5" />,
+    icon: <img src={razorpayLogo} alt="Razorpay" className="w-5 h-5 object-contain" />,
     category: 'payment'
   },
 ];
@@ -357,7 +366,7 @@ export const DataSourcesPanel = ({ isOpen, onClose }: DataSourcesPanelProps) => 
         <div className="flex items-center justify-between p-4 border-b border-border">
           <div className="flex items-center gap-2">
             <Plug className="w-5 h-5 text-primary" />
-            <h2 className="text-lg font-semibold">Data Sources</h2>
+            <h2 className="text-base font-semibold">Data Sources</h2>
           </div>
           <Button variant="ghost" size="sm" onClick={onClose}>
             <X className="w-4 h-4" />
