@@ -5,6 +5,7 @@ import { InlineUploadZone } from './InlineUploadZone';
 import { DataSourcesPanel } from './DataSourcesPanel';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
+import { StarBorder } from './ui/star-border';
 import { useAuth } from './AuthProvider';
 import IntegrationCard from './IntegrationCard';
 import { supabase } from '@/integrations/supabase/client';
@@ -584,27 +585,33 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
               )}
             </div>
             
-            {/* Chat Input Area - Fixed at bottom */}
-            <div className="border-t border-border p-3 bg-background">
-              <div className="w-full">
-                <div className="relative">
-                  <input
-                    type="text"
-                    value={message}
-                    onChange={(e) => setMessage(e.target.value)}
-                    onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
-                    placeholder="Ask anything about your financial data..."
-                    className="w-full bg-card border border-border rounded-lg px-3 py-2 pr-10 text-sm text-foreground placeholder-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring transition-all duration-200"
-                  />
-                  
-                  <button
-                    onClick={handleSendMessage}
-                    disabled={!message.trim()}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 w-7 h-7 bg-primary text-primary-foreground rounded-md flex items-center justify-center transition-all duration-200 hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    <Send className="w-3.5 h-3.5" />
-                  </button>
-                </div>
+            {/* Chat Input Area - Fixed at bottom with StarBorder */}
+            <div className="border-t border-border p-4 bg-background">
+              <div className="max-w-4xl mx-auto">
+                <StarBorder 
+                  as="div" 
+                  className="w-full"
+                  speed="8s"
+                >
+                  <div className="relative">
+                    <input
+                      type="text"
+                      value={message}
+                      onChange={(e) => setMessage(e.target.value)}
+                      onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
+                      placeholder="Ask anything about your financial data..."
+                      className="w-full bg-transparent border-none px-4 py-3 pr-12 text-sm text-foreground placeholder-muted-foreground focus:outline-none"
+                    />
+                    
+                    <button
+                      onClick={handleSendMessage}
+                      disabled={!message.trim()}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 w-8 h-8 bg-primary text-primary-foreground rounded-md flex items-center justify-center transition-all duration-200 hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      <Send className="w-4 h-4" />
+                    </button>
+                  </div>
+                </StarBorder>
               </div>
             </div>
 
