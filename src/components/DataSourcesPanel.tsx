@@ -217,11 +217,39 @@ export const DataSourcesPanel = ({ isOpen, onClose }: DataSourcesPanelProps) => 
       loadFiles(); // Initial load immediately
       const interval = setInterval(loadFiles, 2000); // Poll every 2 seconds for real-time updates
       
-      // Also listen for file upload events to refresh immediately
-      const handleFileUpload = () => {
-        loadFiles();
+      // Listen for file upload events and actually process the files
+      const handleFileUpload = async (event: any) => {
+        const files = event.detail?.files;
+        if (files && files.length > 0) {
+          // Process each file
+          for (const file of files) {
+            try {
+              await processFileWithFastAPI(file, {
+                onProgress: (progress) => {
+                  console.log(`Processing ${file.name}: ${progress}%`);
+                },
+                onComplete: () => {
+                  loadFiles(); // Refresh file list after upload
+                  toast({
+                    title: 'File Uploaded',
+                    description: `${file.name} has been processed successfully`
+                  });
+                },
+                onError: (error) => {
+                  toast({
+                    title: 'Upload Failed',
+                    description: `Failed to process ${file.name}: ${error}`,
+                    variant: 'destructive'
+                  });
+                }
+              });
+            } catch (error) {
+              console.error('File upload error:', error);
+            }
+          }
+        }
       };
-      window.addEventListener('files-selected-for-upload', handleFileUpload);
+      window.addEventListener('files-selected-for-upload', handleFileUpload as EventListener);
       
       return () => {
         clearInterval(interval);
@@ -636,9 +664,9 @@ export const DataSourcesPanel = ({ isOpen, onClose }: DataSourcesPanelProps) => 
                                             )}
                                           </Button>
                                         ) : (
-                                          <div className="relative group">
-                                            {/* Animated border effect */}
-                                            <div className="absolute -inset-0.5 bg-gradient-to-r from-primary via-primary/50 to-primary rounded-full opacity-0 group-hover:opacity-100 blur-sm transition-opacity duration-300" />
+                                          <div className="relative">
+                                            {/* Animated rotating gradient border - always visible */}
+                                            <div className="absolute -inset-0.5 bg-gradient-to-r from-primary via-purple-500 to-primary rounded-full opacity-60 blur-[2px] animate-spin-slow" />
                                             
                                             <Button
                                               size="sm"
