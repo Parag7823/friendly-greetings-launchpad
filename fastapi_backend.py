@@ -12907,9 +12907,52 @@ async def connectors_status(connection_id: str, user_id: str, session_token: Opt
 
 @app.post("/api/connectors/user-connections")
 async def list_user_connections(req: UserConnectionsRequest):
-    """List the current user's Nango connections with integration IDs for UI rendering."""
+    """List the current user's Nango connections with integration IDs for UI rendering.
+    
+    Also syncs connections from Nango API to ensure database is up-to-date,
+    handling cases where webhooks may have failed or not been delivered.
+    """
     await _require_security('connectors-user-connections', req.user_id, req.session_token)
     try:
+        # Fetch connections from Nango API to ensure we have the latest state
+        nango = NangoClient(base_url=NANGO_BASE_URL)
+        try:
+            nango_connections = await nango.list_connections(end_user_id=req.user_id)
+            logger.info(f"Fetched {len(nango_connections)} connections from Nango for user {req.user_id}")
+            
+            # Sync each Nango connection to database
+            for nango_conn in nango_connections:
+                connection_id = nango_conn.get('connection_id')
+                integration_id = nango_conn.get('integration_id') or nango_conn.get('provider_config_key')
+                
+                if not connection_id or not integration_id:
+                    continue
+                
+                # Lookup connector_id
+                connector_id = None
+                try:
+                    conn_lookup = supabase.table('connectors').select('id').eq('integration_id', integration_id).limit(1).execute()
+                    if conn_lookup.data:
+                        connector_id = conn_lookup.data[0]['id']
+                except Exception as e:
+                    logger.warning(f"Failed to lookup connector_id for {integration_id}: {e}")
+                
+                # Upsert to user_connections
+                try:
+                    supabase.table('user_connections').upsert({
+                        'user_id': req.user_id,
+                        'nango_connection_id': connection_id,
+                        'connector_id': connector_id,
+                        'status': 'active',
+                        'sync_frequency_minutes': 60,
+                        'updated_at': datetime.utcnow().isoformat()
+                    }, on_conflict='nango_connection_id').execute()
+                except Exception as e:
+                    logger.error(f"Failed to upsert connection {connection_id}: {e}")
+        except Exception as e:
+            logger.warning(f"Failed to fetch/sync Nango connections: {e}")
+        
+        # Now fetch from database (which should include synced connections)
         res = supabase.table('user_connections').select('id, user_id, nango_connection_id, connector_id, status, last_synced_at, created_at').eq('user_id', req.user_id).limit(1000).execute()
         items = []
         for row in (res.data or []):
