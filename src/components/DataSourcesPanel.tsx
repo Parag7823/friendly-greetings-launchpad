@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { FileSpreadsheet, Plug, RefreshCw, CheckCircle2, AlertCircle, ChevronRight, X } from 'lucide-react';
+import { FileSpreadsheet, Plug, RefreshCw, CheckCircle2, AlertCircle, ChevronRight, X, Loader2 } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
@@ -8,16 +8,28 @@ import { supabase } from '@/integrations/supabase/client';
 import { config } from '@/config';
 import { useToast } from './ui/use-toast';
 import { motion, AnimatePresence } from 'framer-motion';
+import { useFastAPIProcessor } from './FastAPIProcessor';
 
 interface DataSourcesPanelProps {
   isOpen: boolean;
   onClose: () => void;
 }
 
+interface UploadingFile {
+  id: string;
+  name: string;
+  status: 'uploading' | 'processing' | 'completed' | 'error';
+  progress: number;
+  timestamp: Date;
+  error?: string;
+}
+
 export const DataSourcesPanel = ({ isOpen, onClose }: DataSourcesPanelProps) => {
   const { user } = useAuth();
   const { toast } = useToast();
+  const { processFileWithFastAPI } = useFastAPIProcessor();
   const [uploadedFiles, setUploadedFiles] = useState<any[]>([]);
+  const [uploadingFiles, setUploadingFiles] = useState<UploadingFile[]>([]);
   const [connections, setConnections] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [syncing, setSyncing] = useState<string | null>(null);
@@ -80,6 +92,70 @@ export const DataSourcesPanel = ({ isOpen, onClose }: DataSourcesPanelProps) => 
       loadConnections();
     }
   }, [user?.id, isOpen]);
+
+  // Listen for file upload events from ChatInterface
+  useEffect(() => {
+    const handleFilesSelected = async (event: CustomEvent) => {
+      const files: File[] = event.detail.files;
+      
+      // Add files to uploading state immediately
+      const newUploadingFiles: UploadingFile[] = files.map((file, idx) => ({
+        id: `${Date.now()}-${idx}`,
+        name: file.name,
+        status: 'uploading',
+        progress: 0,
+        timestamp: new Date()
+      }));
+      
+      setUploadingFiles(prev => [...prev, ...newUploadingFiles]);
+      
+      // Process each file with FastAPI WebSocket integration
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        const fileId = newUploadingFiles[i].id;
+        
+        try {
+          await processFileWithFastAPI(file, undefined, (progress) => {
+            // Real-time WebSocket progress updates
+            setUploadingFiles(prev => prev.map(f => 
+              f.id === fileId 
+                ? { 
+                    ...f, 
+                    status: progress.step === 'completed' ? 'completed' : 'processing',
+                    progress: progress.progress || 0
+                  }
+                : f
+            ));
+          });
+          
+          // Mark as completed
+          setUploadingFiles(prev => prev.map(f => 
+            f.id === fileId ? { ...f, status: 'completed', progress: 100 } : f
+          ));
+          
+          // Reload uploaded files list
+          const { data } = await supabase
+            .from('ingestion_jobs')
+            .select('id, filename, status, created_at, progress')
+            .eq('user_id', user?.id)
+            .order('created_at', { ascending: false })
+            .limit(10);
+          
+          if (data) setUploadedFiles(data);
+          
+        } catch (error) {
+          setUploadingFiles(prev => prev.map(f => 
+            f.id === fileId 
+              ? { ...f, status: 'error', error: 'Processing failed' }
+              : f
+          ));
+        }
+      }
+    };
+    
+    window.addEventListener('files-selected-for-upload', handleFilesSelected as EventListener);
+    return () => window.removeEventListener('files-selected-for-upload', handleFilesSelected as EventListener);
+  }, [user?.id, processFileWithFastAPI]);
 
   const handleSync = async (provider: string, connectionId: string) => {
     try {
@@ -173,6 +249,66 @@ export const DataSourcesPanel = ({ isOpen, onClose }: DataSourcesPanelProps) => 
                   <X className="w-4 h-4" />
                 </Button>
               </div>
+
+              {/* Currently Uploading Files - Real-time WebSocket Progress */}
+              {uploadingFiles.length > 0 && (
+                <Card className="border-primary/50">
+                  <CardHeader className="pb-3">
+                    <div className="flex items-center gap-2">
+                      <Loader2 className="w-4 h-4 text-primary animate-spin" />
+                      <CardTitle className="text-sm">Processing Files</CardTitle>
+                    </div>
+                    <CardDescription className="text-xs">
+                      Real-time WebSocket updates
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-2">
+                    {uploadingFiles.map((file) => (
+                      <div
+                        key={file.id}
+                        className="p-3 rounded-md bg-primary/5 border border-primary/20"
+                      >
+                        <div className="flex items-center justify-between mb-2">
+                          <div className="flex items-center gap-2 flex-1 min-w-0">
+                            {file.status === 'completed' ? (
+                              <CheckCircle2 className="w-4 h-4 text-green-500" />
+                            ) : file.status === 'error' ? (
+                              <AlertCircle className="w-4 h-4 text-red-500" />
+                            ) : (
+                              <Loader2 className="w-4 h-4 text-primary animate-spin" />
+                            )}
+                            <div className="flex-1 min-w-0">
+                              <p className="text-xs font-medium truncate">{file.name}</p>
+                              <p className="text-[10px] text-muted-foreground">
+                                {formatDate(file.timestamp.toISOString())}
+                              </p>
+                            </div>
+                          </div>
+                          <Badge 
+                            variant={file.status === 'completed' ? 'default' : 'secondary'} 
+                            className="text-[10px]"
+                          >
+                            {file.progress}%
+                          </Badge>
+                        </div>
+                        {/* Progress Bar */}
+                        <div className="w-full bg-muted rounded-full h-1.5">
+                          <div 
+                            className={`h-1.5 rounded-full transition-all duration-300 ${
+                              file.status === 'completed' ? 'bg-green-500' : 
+                              file.status === 'error' ? 'bg-red-500' : 'bg-primary'
+                            }`}
+                            style={{ width: `${file.progress}%` }}
+                          />
+                        </div>
+                        {file.error && (
+                          <p className="text-[10px] text-red-500 mt-1">{file.error}</p>
+                        )}
+                      </div>
+                    ))}
+                  </CardContent>
+                </Card>
+              )}
 
               {/* Uploaded Files */}
               <Card>

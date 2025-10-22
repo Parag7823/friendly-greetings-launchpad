@@ -17,7 +17,7 @@ import logging
 import re
 from datetime import datetime
 from typing import Dict, List, Optional, Any, Tuple
-from openai import AsyncOpenAI
+from anthropic import AsyncAnthropic
 from supabase import create_client, Client
 
 logger = logging.getLogger(__name__)
@@ -49,8 +49,8 @@ except ImportError:
 class EnhancedRelationshipDetector:
     """Enhanced relationship detector that actually finds relationships between events"""
     
-    def __init__(self, openai_client: AsyncOpenAI, supabase_client: Client, cache_client=None):
-        self.openai = openai_client
+    def __init__(self, openai_client: AsyncAnthropic, supabase_client: Client, cache_client=None):
+        self.anthropic = openai_client
         self.supabase = supabase_client
         self.cache = cache_client  # Use centralized cache, no local cache
         

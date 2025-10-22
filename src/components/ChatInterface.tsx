@@ -326,17 +326,22 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
   };
 
   const handleInlineFilesSelected = (files: File[]) => {
-    setUploadingFiles(files);
-    setShowInlineUpload(true);
+    // Open Data Sources panel immediately (non-blocking)
+    setShowDataSources(true);
     
     // Add a system message to chat
     const uploadMessage = {
       id: `msg-${Date.now()}-upload`,
-      text: `📤 Uploading ${files.length} file${files.length > 1 ? 's' : ''}: ${files.map(f => f.name).join(', ')}`,
+      text: `📤 Processing ${files.length} file${files.length > 1 ? 's' : ''}: ${files.map(f => f.name).join(', ')}`,
       isUser: false,
       timestamp: new Date()
     };
     setMessages(prev => [...prev, uploadMessage]);
+    
+    // Trigger file upload event for Data Sources panel to handle
+    window.dispatchEvent(new CustomEvent('files-selected-for-upload', {
+      detail: { files }
+    }));
   };
 
   const renderCurrentView = () => {
@@ -603,53 +608,11 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
               </div>
             </div>
 
-            {/* Data Sources Panel */}
+            {/* Data Sources Panel - Non-blocking */}
             <DataSourcesPanel 
               isOpen={showDataSources} 
               onClose={() => setShowDataSources(false)} 
             />
-
-            {/* Upload Modal (when files selected) */}
-            {showInlineUpload && uploadingFiles.length > 0 && (
-              <div className="fixed inset-0 bg-[#1a1a1a]/50 z-50 flex items-center justify-center p-4">
-                <div className="bg-background rounded-lg max-w-4xl w-full max-h-[80vh] overflow-hidden">
-                  <div className="p-4 border-b border-border flex items-center justify-between">
-                    <h2 className="text-lg font-semibold">Processing {uploadingFiles.length} File{uploadingFiles.length > 1 ? 's' : ''}</h2>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => {
-                        setShowInlineUpload(false);
-                        setUploadingFiles([]);
-                      }}
-                    >
-                      <span className="text-xl">×</span>
-                    </Button>
-                  </div>
-                  <div className="p-4 overflow-y-auto">
-                    <EnhancedFileUpload 
-                      initialFiles={uploadingFiles}
-                      onUploadComplete={() => {
-                        // Add success message to chat
-                        const successMessage = {
-                          id: `msg-${Date.now()}-success`,
-                          text: `✅ Successfully processed ${uploadingFiles.length} file${uploadingFiles.length > 1 ? 's' : ''}! You can now ask questions about your data.`,
-                          isUser: false,
-                          timestamp: new Date()
-                        };
-                        setMessages(prev => [...prev, successMessage]);
-                        
-                        // Close modal after a brief delay
-                        setTimeout(() => {
-                          setShowInlineUpload(false);
-                          setUploadingFiles([]);
-                        }, 1500);
-                      }}
-                    />
-                  </div>
-                </div>
-              </div>
-            )}
           </div>
         );
     }
