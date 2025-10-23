@@ -76,10 +76,14 @@ COPY security_system.py .
 COPY nango_client.py .
 COPY arq_worker.py .
 COPY provenance_tracker.py .
+COPY start.sh .
  
 # Copy built frontend from frontend stage
 COPY --from=frontend-builder /app/frontend/dist ./dist
 
+# Make start.sh executable
+RUN chmod +x start.sh
+
 EXPOSE 8000
 
-CMD ["python", "fastapi_backend.py"]
+CMD ["bash", "start.sh"]
