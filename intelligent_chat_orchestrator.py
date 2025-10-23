@@ -106,7 +106,6 @@ class IntelligentChatOrchestrator:
         )
         
         self.entity_resolver = EntityResolver(
-            openai_client=openai_client,
             supabase_client=supabase_client,
             cache_client=cache_client
         )
