@@ -169,10 +169,13 @@ export const DataSourcesPanel = ({ isOpen, onClose }: DataSourcesPanelProps) => 
         if (response.ok) {
           const data = await response.json();
           setConnections(data.connections || []);
+        } else {
+          console.error('Failed to load connections: HTTP', response.status);
         }
       } catch (e) {
         console.error('Failed to load connections', e);
       } finally {
+        // ALWAYS set loading to false, even on error
         if (showLoading) {
           setLoading(false);
         }
