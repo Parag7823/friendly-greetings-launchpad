@@ -321,7 +321,8 @@ export const DataSourcesPanel = ({ isOpen, onClose }: DataSourcesPanelProps) => 
                 
                 // Call verify endpoint to ensure connection is saved
                 try {
-                  await fetch(`${config.apiUrl}/api/connectors/verify-connection`, {
+                  console.log('Verifying connection for provider:', provider);
+                  const verifyResponse = await fetch(`${config.apiUrl}/api/connectors/verify-connection`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
@@ -330,6 +331,17 @@ export const DataSourcesPanel = ({ isOpen, onClose }: DataSourcesPanelProps) => 
                       session_token: sessionToken
                     })
                   });
+                  
+                  if (verifyResponse.ok) {
+                    console.log('Connection verified successfully');
+                    toast({
+                      title: 'Connected!',
+                      description: `${integration.name} connected successfully`
+                    });
+                  } else {
+                    const error = await verifyResponse.text();
+                    console.error('Verify failed:', error);
+                  }
                 } catch (e) {
                   console.error('Failed to verify connection:', e);
                 }
@@ -346,8 +358,9 @@ export const DataSourcesPanel = ({ isOpen, onClose }: DataSourcesPanelProps) => 
                 if (response.ok) {
                   const data = await response.json();
                   setConnections(data.connections || []);
+                  console.log('Connections refreshed:', data.connections);
                 }
-              }, 2000); // Wait 2 seconds for Nango to process
+              }, 3000); // Wait 3 seconds for Nango to process
             }
           }, 500);
         }
