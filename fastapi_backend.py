@@ -12713,6 +12713,74 @@ async def initiate_connector(req: ConnectorInitiateRequest):
         logger.error(f"Initiate connector failed for provider={req.provider}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.post("/api/connectors/verify-connection")
+async def verify_connection(req: dict):
+    """Verify and create connection record after Nango popup closes.
+    
+    Workaround for when webhooks fail or are delayed.
+    Frontend calls this after popup closes to ensure connection is saved.
+    """
+    user_id = req.get('user_id')
+    provider = req.get('provider')
+    session_token = req.get('session_token')
+    
+    await _require_security('connectors-verify', user_id, session_token)
+    
+    try:
+        # Map provider to integration_id
+        provider_map = {
+            'google-mail': NANGO_GMAIL_INTEGRATION_ID,
+            'zoho-mail': NANGO_ZOHO_MAIL_INTEGRATION_ID,
+            'dropbox': NANGO_DROPBOX_INTEGRATION_ID,
+            'google-drive': NANGO_GOOGLE_DRIVE_INTEGRATION_ID,
+            'zoho-books': NANGO_ZOHO_BOOKS_INTEGRATION_ID,
+            'quickbooks': NANGO_QUICKBOOKS_INTEGRATION_ID,
+            'quickbooks-sandbox': NANGO_QUICKBOOKS_INTEGRATION_ID,
+            'xero': NANGO_XERO_INTEGRATION_ID,
+            'stripe': NANGO_STRIPE_INTEGRATION_ID,
+            'razorpay': NANGO_RAZORPAY_INTEGRATION_ID,
+        }
+        integration_id = provider_map.get(provider)
+        
+        if not integration_id:
+            raise HTTPException(status_code=400, detail="Unknown provider")
+        
+        # Generate connection_id (Nango uses format: {user_id}_{integration_id})
+        connection_id = f"{user_id}_{integration_id}"
+        
+        # Lookup connector_id
+        connector_id = None
+        try:
+            conn_lookup = supabase.table('connectors').select('id').eq('integration_id', integration_id).limit(1).execute()
+            if conn_lookup.data:
+                connector_id = conn_lookup.data[0]['id']
+        except Exception as e:
+            logger.warning(f"Failed to lookup connector_id for {integration_id}: {e}")
+        
+        # Upsert user_connection
+        try:
+            supabase.table('user_connections').upsert({
+                'user_id': user_id,
+                'nango_connection_id': connection_id,
+                'connector_id': connector_id,
+                'status': 'active',
+                'sync_frequency_minutes': 60,
+                'created_at': datetime.utcnow().isoformat(),
+                'updated_at': datetime.utcnow().isoformat()
+            }, on_conflict='nango_connection_id').execute()
+            
+            logger.info(f"✅ Manually verified connection: {connection_id} for user {user_id}")
+            return {'status': 'ok', 'connection_id': connection_id}
+        except Exception as e:
+            logger.error(f"Failed to create connection: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Verify connection failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 async def _dispatch_connector_sync(
     integration_id: str,
     req: ConnectorSyncRequest,
@@ -12909,50 +12977,11 @@ async def connectors_status(connection_id: str, user_id: str, session_token: Opt
 async def list_user_connections(req: UserConnectionsRequest):
     """List the current user's Nango connections with integration IDs for UI rendering.
     
-    Also syncs connections from Nango API to ensure database is up-to-date,
-    handling cases where webhooks may have failed or not been delivered.
+    Connections are created via webhook when user authorizes in Nango popup.
     """
     await _require_security('connectors-user-connections', req.user_id, req.session_token)
     try:
-        # Fetch connections from Nango API to ensure we have the latest state
-        nango = NangoClient(base_url=NANGO_BASE_URL)
-        try:
-            nango_connections = await nango.list_connections(end_user_id=req.user_id)
-            logger.info(f"Fetched {len(nango_connections)} connections from Nango for user {req.user_id}")
-            
-            # Sync each Nango connection to database
-            for nango_conn in nango_connections:
-                connection_id = nango_conn.get('connection_id')
-                integration_id = nango_conn.get('integration_id') or nango_conn.get('provider_config_key')
-                
-                if not connection_id or not integration_id:
-                    continue
-                
-                # Lookup connector_id
-                connector_id = None
-                try:
-                    conn_lookup = supabase.table('connectors').select('id').eq('integration_id', integration_id).limit(1).execute()
-                    if conn_lookup.data:
-                        connector_id = conn_lookup.data[0]['id']
-                except Exception as e:
-                    logger.warning(f"Failed to lookup connector_id for {integration_id}: {e}")
-                
-                # Upsert to user_connections
-                try:
-                    supabase.table('user_connections').upsert({
-                        'user_id': req.user_id,
-                        'nango_connection_id': connection_id,
-                        'connector_id': connector_id,
-                        'status': 'active',
-                        'sync_frequency_minutes': 60,
-                        'updated_at': datetime.utcnow().isoformat()
-                    }, on_conflict='nango_connection_id').execute()
-                except Exception as e:
-                    logger.error(f"Failed to upsert connection {connection_id}: {e}")
-        except Exception as e:
-            logger.warning(f"Failed to fetch/sync Nango connections: {e}")
-        
-        # Now fetch from database (which should include synced connections)
+        # Fetch from database (connections created by webhook handler)
         res = supabase.table('user_connections').select('id, user_id, nango_connection_id, connector_id, status, last_synced_at, created_at').eq('user_id', req.user_id).limit(1000).execute()
         items = []
         for row in (res.data or []):

@@ -309,15 +309,32 @@ export const DataSourcesPanel = ({ isOpen, onClose }: DataSourcesPanelProps) => 
           description: 'Complete the authorization in the popup window'
         });
         
-        // Poll to detect when popup closes, then refresh connections
+        // Poll to detect when popup closes, then verify connection
         if (popup) {
           const pollTimer = setInterval(() => {
             if (popup.closed) {
               clearInterval(pollTimer);
-              // Refresh connections after popup closes
+              // Verify connection after popup closes (creates record if webhook failed)
               setTimeout(async () => {
                 const { data: sessionData } = await supabase.auth.getSession();
                 const sessionToken = sessionData?.session?.access_token;
+                
+                // Call verify endpoint to ensure connection is saved
+                try {
+                  await fetch(`${config.apiUrl}/api/connectors/verify-connection`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                      user_id: user?.id,
+                      provider: provider,
+                      session_token: sessionToken
+                    })
+                  });
+                } catch (e) {
+                  console.error('Failed to verify connection:', e);
+                }
+                
+                // Refresh connections list
                 const response = await fetch(`${config.apiUrl}/api/connectors/user-connections`, {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
@@ -330,7 +347,7 @@ export const DataSourcesPanel = ({ isOpen, onClose }: DataSourcesPanelProps) => 
                   const data = await response.json();
                   setConnections(data.connections || []);
                 }
-              }, 1000);
+              }, 2000); // Wait 2 seconds for Nango to process
             }
           }, 500);
         }
