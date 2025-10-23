@@ -10997,7 +10997,7 @@ async def process_excel_endpoint(request: dict):
 
         # Process file inline (direct processing, no ARQ)
         logger.info(f"🔄 Processing file inline: {job_id}")
-        asyncio.create_task(inline_process())
+        asyncio.create_task(_run_processing_job())
         metrics_collector.increment_counter("file_processing_requests")
         return {"status": "accepted", "job_id": job_id}
     except HTTPException as he:
