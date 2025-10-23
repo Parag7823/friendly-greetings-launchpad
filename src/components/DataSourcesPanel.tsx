@@ -145,10 +145,15 @@ export const DataSourcesPanel = ({ isOpen, onClose }: DataSourcesPanelProps) => 
 
   // Load connections
   useEffect(() => {
-    const loadConnections = async () => {
+    let isInitialLoad = true;
+    
+    const loadConnections = async (showLoading = false) => {
       if (!user?.id) return;
       try {
-        setLoading(true);
+        // Only show loading spinner on initial load
+        if (showLoading) {
+          setLoading(true);
+        }
         const { data: sessionData } = await supabase.auth.getSession();
         const sessionToken = sessionData?.session?.access_token;
 
@@ -168,18 +173,22 @@ export const DataSourcesPanel = ({ isOpen, onClose }: DataSourcesPanelProps) => 
       } catch (e) {
         console.error('Failed to load connections', e);
       } finally {
-        setLoading(false);
+        if (showLoading) {
+          setLoading(false);
+        }
       }
     };
 
     if (isOpen && user?.id) {
-      loadConnections();
-      // Faster polling when connecting to catch new connections quickly
-      const interval = setInterval(loadConnections, connecting ? 3000 : 15000);
+      // Initial load with loading spinner
+      loadConnections(true);
+      
+      // Poll every 30 seconds for updates (no loading spinner)
+      const interval = setInterval(() => loadConnections(false), 30000);
       
       // Refresh when window regains focus (user returns from Nango popup)
       const handleFocus = () => {
-        loadConnections();
+        loadConnections(false);
       };
       window.addEventListener('focus', handleFocus);
       
@@ -188,7 +197,7 @@ export const DataSourcesPanel = ({ isOpen, onClose }: DataSourcesPanelProps) => 
         window.removeEventListener('focus', handleFocus);
       };
     }
-  }, [user?.id, isOpen, connecting]);
+  }, [user?.id, isOpen]);
 
   // Load uploaded files with real-time polling
   useEffect(() => {
