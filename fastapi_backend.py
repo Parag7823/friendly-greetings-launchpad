@@ -85,6 +85,21 @@ except Exception:
     field_validator = None  # fallback if not available
 
 # ------------------------- Request Models (Pydantic) -------------------------
+# MEDIUM FIX #2: Standardized Error Response Format
+class StandardErrorResponse(BaseModel):
+    """Standardized error response format for consistent error handling"""
+    error: str
+    error_code: str
+    error_details: Optional[Dict[str, Any]] = None
+    retryable: bool = False
+    user_action: Optional[str] = None
+    timestamp: str = None
+    
+    def __init__(self, **data):
+        if 'timestamp' not in data:
+            data['timestamp'] = datetime.utcnow().isoformat()
+        super().__init__(**data)
+
 class FieldDetectionRequest(BaseModel):
     data: Dict[str, Any]
     filename: Optional[str] = None
@@ -10189,13 +10204,15 @@ async def handle_duplicate_decision(request: DuplicateDecisionRequest):
                 progress=100
             )
 
-            # FIX #9: Persist job status AND duplicate decision in DB (transactional)
+            # CRITICAL FIX #4: Persist duplicate decision to BOTH tables transactionally
+            # This ensures future duplicate checks can see the decision
             try:
                 transaction_manager = get_transaction_manager()
                 async with transaction_manager.transaction(
                     user_id=request.user_id,
                     operation_type="ingestion_job_skip"
                 ) as tx:
+                    # Update ingestion_jobs
                     await tx.update('ingestion_jobs', {
                         'status': 'cancelled',
                         'updated_at': datetime.utcnow().isoformat(),
@@ -10207,20 +10224,28 @@ async def handle_duplicate_decision(request: DuplicateDecisionRequest):
                         }
                     }, {'id': request.job_id})
                     
-                    # FIX #9: CRITICAL - Store decision in raw_records for future duplicate checks
+                    # CRITICAL FIX #4: Update raw_records with duplicate decision
+                    # This is where duplicate checks query, so decision MUST be stored here
                     if request.file_hash:
                         try:
                             await tx.update('raw_records', {
-                                'metadata': {
-                                    'duplicate_decision': 'skip',
+                                'duplicate_decision': 'skip',
+                                'duplicate_of': request.existing_file_id,
+                                'decision_timestamp': datetime.utcnow().isoformat(),
+                                'decision_metadata': {
                                     'decided_at': datetime.utcnow().isoformat(),
-                                    'duplicate_of': request.existing_file_id
+                                    'job_id': request.job_id,
+                                    'user_action': 'skip'
                                 }
                             }, {'file_hash': request.file_hash, 'user_id': request.user_id})
+                            logger.info(f"Persisted 'skip' decision to raw_records for hash {request.file_hash}")
                         except Exception as rr_err:
-                            logger.warning(f"Failed to update raw_records with duplicate decision: {rr_err}")
+                            logger.error(f"CRITICAL: Failed to update raw_records with duplicate decision: {rr_err}")
+                            # Re-raise to rollback transaction
+                            raise
             except Exception as e:
-                logger.warning(f"Failed to transactionally update ingestion_jobs on skip for job {request.job_id}: {e}")
+                logger.error(f"Failed to transactionally update duplicate decision for job {request.job_id}: {e}")
+                raise HTTPException(status_code=500, detail=f"Failed to persist duplicate decision: {str(e)}")
 
             return {"status": "success", "message": "Duplicate decision processed: skipped"}
 
@@ -10256,20 +10281,48 @@ async def handle_duplicate_decision(request: DuplicateDecisionRequest):
             # FIX ISSUE #11, #13, #14: Actually resume processing
             logger.info(f"🔄 Processing resume inline: {request.job_id}, decision: {decision}")
             
-            # FIX ISSUE #14: Handle delta_merge specially
+            # CRITICAL FIX #5: Complete rewrite of delta_merge with proper transaction handling
             if decision == 'delta_merge':
                 try:
-                    # Download file for delta merge
+                    # Step 1: Validate existing file exists and belongs to user
+                    await websocket_manager.send_overall_update(
+                        job_id=request.job_id,
+                        status="processing",
+                        message="Validating files for delta merge...",
+                        progress=10
+                    )
+                    
+                    existing_file = supabase.table('raw_records').select('*').eq(
+                        'id', existing_file_id
+                    ).eq('user_id', user_id).single().execute()
+                    
+                    if not existing_file.data:
+                        raise ValueError(f"Existing file not found or access denied: {existing_file_id}")
+                    
+                    logger.info(f"Delta merge: validated existing file {existing_file_id}")
+                    
+                    # Step 2: Download new file
+                    await websocket_manager.send_overall_update(
+                        job_id=request.job_id,
+                        status="processing",
+                        message="Downloading new file for delta merge...",
+                        progress=20
+                    )
+                    
                     storage = supabase.storage.from_("finely-upload")
                     file_resp = storage.download(storage_path)
                     file_bytes = file_resp if isinstance(file_resp, (bytes, bytearray)) else getattr(file_resp, 'data', None)
                     if file_bytes is None:
                         file_bytes = file_resp
                     
-                    # Perform delta merge
-                    duplicate_service = ProductionDuplicateDetectionService(supabase)
+                    # Step 3: Parse file to get sheets data
+                    await websocket_manager.send_overall_update(
+                        job_id=request.job_id,
+                        status="processing",
+                        message="Parsing file data...",
+                        progress=30
+                    )
                     
-                    # Parse file to get sheets data
                     import pandas as pd
                     import io
                     if filename.endswith('.csv'):
@@ -10278,16 +10331,30 @@ async def handle_duplicate_decision(request: DuplicateDecisionRequest):
                     else:
                         sheets_data = pd.read_excel(io.BytesIO(file_bytes), sheet_name=None)
                     
-                    # Perform delta merge
-                    merge_result = await duplicate_service._perform_delta_merge(
-                        user_id=user_id,
-                        new_record_id=request.job_id,  # Use job_id as placeholder
-                        existing_file_id=existing_file_id,
-                        sheets_data=sheets_data,
-                        filename=filename
+                    logger.info(f"Delta merge: parsed {len(sheets_data)} sheets")
+                    
+                    # Step 4: Calculate file hash for new file
+                    import hashlib
+                    new_file_hash = hashlib.sha256(file_bytes).hexdigest()
+                    
+                    # Step 5: Perform delta merge with transaction
+                    await websocket_manager.send_overall_update(
+                        job_id=request.job_id,
+                        status="processing",
+                        message="Analyzing differences...",
+                        progress=40
                     )
                     
-                    # Update job status
+                    duplicate_service = ProductionDuplicateDetectionService(supabase)
+                    
+                    # CRITICAL: Use proper parameters (new_file_hash instead of job_id)
+                    merge_result = await duplicate_service._perform_delta_merge(
+                        user_id=user_id,
+                        new_file_hash=new_file_hash,
+                        existing_file_id=existing_file_id
+                    )
+                    
+                    # Step 6: Update job status
                     await websocket_manager.send_overall_update(
                         job_id=request.job_id,
                         status="completed",
@@ -10295,12 +10362,56 @@ async def handle_duplicate_decision(request: DuplicateDecisionRequest):
                         progress=100
                     )
                     
+                    # Step 7: Update ingestion_jobs with success
+                    try:
+                        supabase.table('ingestion_jobs').update({
+                            'status': 'completed',
+                            'progress': 100,
+                            'updated_at': datetime.utcnow().isoformat(),
+                            'metadata': {
+                                'duplicate_decision': 'delta_merge',
+                                'merge_result': merge_result,
+                                'existing_file_id': existing_file_id
+                            }
+                        }).eq('id', request.job_id).execute()
+                    except Exception as db_err:
+                        logger.warning(f"Failed to update ingestion_jobs after delta merge: {db_err}")
+                    
+                    logger.info(f"Delta merge completed successfully for job {request.job_id}")
                     return {"status": "success", "message": "Delta merge completed", "result": merge_result}
                     
+                except ValueError as ve:
+                    # Validation errors (user-friendly)
+                    error_msg = str(ve)
+                    logger.error(f"Delta merge validation failed for job {request.job_id}: {error_msg}")
+                    await websocket_manager.send_error(request.job_id, error_msg)
+                    
+                    # Update job status
+                    supabase.table('ingestion_jobs').update({
+                        'status': 'failed',
+                        'error_message': error_msg,
+                        'updated_at': datetime.utcnow().isoformat()
+                    }).eq('id', request.job_id).execute()
+                    
+                    raise HTTPException(status_code=400, detail=error_msg)
+                    
                 except Exception as e:
-                    logger.error(f"Delta merge failed for job {request.job_id}: {e}")
-                    await websocket_manager.send_error(request.job_id, f"Delta merge failed: {str(e)}")
-                    raise HTTPException(status_code=500, detail=f"Delta merge failed: {str(e)}")
+                    # Unexpected errors
+                    error_msg = f"Delta merge failed: {str(e)}"
+                    logger.error(f"Delta merge failed for job {request.job_id}: {e}", exc_info=True)
+                    await websocket_manager.send_error(request.job_id, error_msg)
+                    
+                    # Update job status
+                    try:
+                        supabase.table('ingestion_jobs').update({
+                            'status': 'failed',
+                            'error_message': error_msg,
+                            'updated_at': datetime.utcnow().isoformat()
+                        }).eq('id', request.job_id).execute()
+                    except Exception as db_err:
+                        logger.error(f"Failed to update job status after delta merge error: {db_err}")
+                    
+                    raise HTTPException(status_code=500, detail=error_msg)
             
             # FIX ISSUE #11: For replace/keep_both, trigger actual processing
             # Create background task to process the file
@@ -10785,6 +10896,36 @@ async def check_rate_limit(user_id: str, max_requests: int = 100, window_seconds
         rate_limit_store[user_id].append(current_time)
         return True, "OK"
 
+# FIX ISSUE #13: Concurrent upload limit per user to prevent abuse
+concurrent_uploads = defaultdict(int)  # user_id -> count of active uploads
+concurrent_uploads_lock = asyncio.Lock()
+MAX_CONCURRENT_UPLOADS_PER_USER = 5  # Allow max 5 concurrent uploads per user
+
+async def acquire_upload_slot(user_id: str) -> Tuple[bool, str]:
+    """
+    Check if user can start a new upload (within concurrent limit).
+    Returns (is_allowed, message)
+    """
+    async with concurrent_uploads_lock:
+        current_count = concurrent_uploads[user_id]
+        if current_count >= MAX_CONCURRENT_UPLOADS_PER_USER:
+            return False, f"Too many concurrent uploads. Please wait for some uploads to complete. ({current_count}/{MAX_CONCURRENT_UPLOADS_PER_USER} active)"
+        
+        concurrent_uploads[user_id] += 1
+        logger.info(f"User {user_id} started upload. Active uploads: {concurrent_uploads[user_id]}/{MAX_CONCURRENT_UPLOADS_PER_USER}")
+        return True, "OK"
+
+async def release_upload_slot(user_id: str):
+    """Release upload slot when processing completes or fails"""
+    async with concurrent_uploads_lock:
+        if concurrent_uploads[user_id] > 0:
+            concurrent_uploads[user_id] -= 1
+            logger.info(f"User {user_id} completed upload. Active uploads: {concurrent_uploads[user_id]}/{MAX_CONCURRENT_UPLOADS_PER_USER}")
+            
+            # Clean up if no active uploads
+            if concurrent_uploads[user_id] == 0:
+                del concurrent_uploads[user_id]
+
 @app.post("/check-duplicate")
 async def check_duplicate_endpoint(request: dict):
     """
@@ -10887,6 +11028,7 @@ async def check_duplicate_endpoint(request: dict):
 @app.post("/process-excel")
 async def process_excel_endpoint(request: dict):
     """Start processing job from Supabase Storage and stream progress via WebSocket."""
+    user_id = None  # Initialize for finally block
     try:
         # Critical: Check database health before processing
         check_database_health()
@@ -10897,6 +11039,12 @@ async def process_excel_endpoint(request: dict):
         filename = request.get('file_name') or 'uploaded_file'
         if not user_id or not job_id or not storage_path:
             raise HTTPException(status_code=400, detail="user_id, job_id, and storage_path are required")
+        
+        # FIX ISSUE #13: Check concurrent upload limit per user
+        can_upload, limit_message = await acquire_upload_slot(user_id)
+        if not can_upload:
+            logger.warning(f"Concurrent upload limit exceeded for user {user_id}")
+            raise HTTPException(status_code=429, detail=limit_message)
 
         # Security validation: sanitize and require valid session token
         try:
@@ -10933,12 +11081,19 @@ async def process_excel_endpoint(request: dict):
         client_provided_hash = request.get('file_hash')  # Client hint, will be verified
         resume_after_duplicate = request.get('resume_after_duplicate')
         
-        # FIX ISSUE #9: Validate file size BEFORE download to prevent DoS
-        # Note: Supabase storage doesn't expose file info API, so we rely on client-provided size
-        # which was validated at upload time. Add secondary validation after download.
+        # MEDIUM FIX #1: Validate file size BEFORE download to prevent DoS
+        # Client provides file_size hint which we validate first (defense in depth)
+        # Then we validate again after download as secondary check
         MAX_FILE_SIZE = 500 * 1024 * 1024  # 500MB
         
-        # BROKEN LOGIC FIX #2: Always download file once (don't rely on conditional download)
+        # Pre-download size check using client-provided hint
+        if file_size_hint and file_size_hint > MAX_FILE_SIZE:
+            error_msg = f"File too large: {file_size_hint / 1024 / 1024:.2f}MB (max: 500MB)"
+            logger.error(f"SECURITY: File size exceeded before download for job {job_id}")
+            raise HTTPException(status_code=400, detail=error_msg)
+        
+        # CRITICAL FIX #2: Download file ONCE and reuse for both hash check and processing
+        # This prevents 2x bandwidth usage and 2x memory consumption
         file_bytes = None
         file_downloaded_successfully = False
         
@@ -10981,6 +11136,15 @@ async def process_excel_endpoint(request: dict):
             if client_provided_hash and client_provided_hash != file_hash:
                 error_msg = f"File hash mismatch detected. Expected: {client_provided_hash}, Got: {file_hash}. File may be corrupted or tampered."
                 logger.error(f"SECURITY: Hash mismatch for job {job_id}: client={client_provided_hash}, server={file_hash}")
+                
+                # CRITICAL FIX #3: Cleanup orphaned file from storage to prevent storage leak
+                try:
+                    storage = supabase.storage.from_("finely-upload")
+                    storage.remove([storage_path])
+                    logger.info(f"Cleaned up orphaned file after hash mismatch: {storage_path}")
+                except Exception as cleanup_err:
+                    logger.error(f"Failed to cleanup orphaned file {storage_path}: {cleanup_err}")
+                
                 await websocket_manager.send_error(job_id, error_msg)
                 await websocket_manager.merge_job_state(job_id, {
                     **((await websocket_manager.get_job_status(job_id)) or {}),
@@ -10992,10 +11156,14 @@ async def process_excel_endpoint(request: dict):
                     supabase.table('ingestion_jobs').update({
                         'status': 'failed',
                         'error_message': error_msg,
-                        'updated_at': datetime.utcnow().isoformat()
+                        'updated_at': datetime.utcnow().isoformat(),
+                        'metadata': {'cleanup_performed': True, 'reason': 'hash_mismatch'}
                     }).eq('id', job_id).execute()
                 except Exception as db_err:
                     logger.warning(f"Failed to update ingestion_jobs on hash mismatch: {db_err}")
+                
+                # Clear file_bytes to free memory immediately
+                file_bytes = None
                 return
             
             try:
@@ -11076,7 +11244,8 @@ async def process_excel_endpoint(request: dict):
                     status = await websocket_manager.get_job_status(job_id)
                     return (status or {}).get("status") == "cancelled"
                 
-                # BROKEN LOGIC FIX #2: Reuse file_bytes if already downloaded, otherwise download
+                # CRITICAL FIX #2: Reuse file_bytes from hash check (prevents duplicate download)
+                # Only download if hash check was skipped or failed
                 if file_bytes is None or not file_downloaded_successfully:
                     await websocket_manager.send_overall_update(
                         job_id=job_id,
@@ -11171,13 +11340,29 @@ async def process_excel_endpoint(request: dict):
 
         # Process file inline (direct processing, no ARQ)
         logger.info(f"🔄 Processing file inline: {job_id}")
-        asyncio.create_task(_run_processing_job())
+        
+        # FIX ISSUE #13: Wrap async task to ensure upload slot is released
+        async def _run_with_cleanup():
+            try:
+                await _run_processing_job()
+            finally:
+                # Always release upload slot when done
+                if user_id:
+                    await release_upload_slot(user_id)
+        
+        asyncio.create_task(_run_with_cleanup())
         metrics_collector.increment_counter("file_processing_requests")
         return {"status": "accepted", "job_id": job_id}
     except HTTPException as he:
+        # Release upload slot on HTTP exceptions (e.g., 429, 401)
+        if user_id:
+            await release_upload_slot(user_id)
         # Preserve the intended status code (e.g., 401 on auth failures)
         raise he
     except Exception as e:
+        # Release upload slot on any error
+        if user_id:
+            await release_upload_slot(user_id)
         structured_logger.error("Process excel endpoint error", error=str(e))
         metrics_collector.increment_counter("file_processing_errors")
         raise HTTPException(status_code=500, detail=str(e))

@@ -68,7 +68,9 @@ export const EnhancedFileUpload: React.FC<EnhancedFileUploadProps> = ({ initialF
     return [null, null];
   };
   
-  const [activeModalFileId, activeModal] = getActiveModal();
+  // FIX ISSUE #6: Use useMemo to ensure activeModal updates when duplicateModals changes
+  // This prevents stale closure and ensures modal shows correct file information
+  const [activeModalFileId, activeModal] = React.useMemo(() => getActiveModal(), [duplicateModals]);
 
   const { toast } = useToast();
   const { processFileWithFastAPI } = useFastAPIProcessor();

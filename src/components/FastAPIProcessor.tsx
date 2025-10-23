@@ -281,7 +281,8 @@ export class FastAPIProcessor {
   }
 
   private async pollForResults(jobId: string, initialResponse: any): Promise<any> {
-    const maxAttempts = 60; // 5 minutes max (5 seconds * 60)
+    // FIX ISSUE #15: Reduce timeout from 5 minutes to 2 minutes for better UX
+    const maxAttempts = 80; // 2 minutes max (1.5 seconds * 80 = 120 seconds)
     let attempts = 0;
     
     while (attempts < maxAttempts) {
@@ -300,9 +301,11 @@ export class FastAPIProcessor {
             throw new Error('Processing was cancelled');
           }
           
-          // Update progress if available
+          // FIX ISSUE #15: Show progress indication during polling
           if (statusData.progress !== undefined) {
-            this.updateProgress('processing', statusData.message || 'Processing...', statusData.progress);
+            const timeElapsed = Math.floor((attempts * config.websocket.pollingInterval) / 1000);
+            const progressMessage = statusData.message || `Processing... (${timeElapsed}s elapsed)`;
+            this.updateProgress('processing', progressMessage, statusData.progress);
           }
         }
         
@@ -317,8 +320,8 @@ export class FastAPIProcessor {
       }
     }
     
-    // If we get here, polling timed out
-    throw new Error('Processing timeout - please try again');
+    // FIX ISSUE #15: Better timeout message with suggestion
+    throw new Error('Processing is taking longer than expected. The job may still be running in the background. Please refresh the page or try again later.');
   }
 
   async processFile(
@@ -409,13 +412,13 @@ export class FastAPIProcessor {
         file_name: file.name,
         user_id: user.id,
         file_hash: fileHash,
-        session_token: session.access_token,  // Add missing session token
+        session_token: session.access_token,  // Backend reads from body for validation
         endpoint: 'process-excel'  // Add endpoint for security validation
       };
 
       // Start FastAPI backend processing and connect to WebSocket for real-time updates
       try {
-        // FIX #1: Add JWT token to API request headers
+        // Add JWT token to API request headers for Supabase operations
         const headers: Record<string, string> = {
           'Content-Type': 'application/json',
         };
