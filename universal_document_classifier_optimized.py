@@ -48,8 +48,8 @@ class UniversalDocumentClassifierOptimized:
     - Real-time classification updates
     """
     
-    def __init__(self, openai_client=None, cache_client=None, supabase_client=None, config=None):
-        self.openai = openai_client
+    def __init__(self, anthropic_client=None, cache_client=None, supabase_client=None, config=None):
+        self.anthropic = anthropic_client
         self.cache = cache_client
         self.supabase = supabase_client
         self.config = config or self._get_default_config()
@@ -82,7 +82,7 @@ class UniversalDocumentClassifierOptimized:
     
     def _get_default_config(self) -> Dict[str, Any]:
         """Get default configuration"""
-        default_model = os.getenv('DOC_CLASSIFIER_MODEL') or os.getenv('OPENAI_MODEL') or 'gpt-4o-mini'
+        default_model = os.getenv('DOC_CLASSIFIER_MODEL') or os.getenv('ANTHROPIC_MODEL') or 'claude-haiku-4-20250514'
         return {
             'enable_caching': True,
             'cache_ttl': 7200,  # 2 hours
@@ -381,7 +381,7 @@ class UniversalDocumentClassifierOptimized:
             
             # 2. AI-powered classification (primary method)
             ai_result = None
-            if self.config['enable_ai_classification'] and self.openai:
+            if self.config['enable_ai_classification'] and self.anthropic:
                 ai_result = await self._classify_document_with_ai(payload, filename)
                 if ai_result and ai_result['confidence'] >= 0.8:
                     self.metrics['ai_classifications'] += 1
@@ -435,7 +435,7 @@ class UniversalDocumentClassifierOptimized:
                     'payload_keys': list(payload.keys()) if isinstance(payload, dict) else [],
                     'classification_methods_used': [final_result['method']],
                     'ocr_available': self.ocr_available,
-                    'ai_available': self.openai is not None
+                    'ai_available': self.anthropic is not None
                 }
             })
             
@@ -525,9 +525,9 @@ class UniversalDocumentClassifierOptimized:
             }}
             """
             
-            result_text = await self._safe_openai_call(
-                self.openai,
-                self.config['ai_model'],
+            result_text = await self._safe_anthropic_call(
+                self.anthropic,
+                'claude-haiku-4-20250514',
                 [{"role": "user", "content": prompt}],
                 self.config['ai_temperature'],
                 self.config['ai_max_tokens']
@@ -734,17 +734,17 @@ class UniversalDocumentClassifierOptimized:
         user_part = (user_id or "anon")[:12]
         return f"classify_{user_part}_{filename_part}_{content_hash}"
     
-    async def _safe_openai_call(self, client, model: str, messages: List[Dict], 
+    async def _safe_anthropic_call(self, client, model: str, messages: List[Dict], 
                                temperature: float, max_tokens: int) -> str:
-        """Safe OpenAI API call with error handling"""
+        """Safe Anthropic API call with error handling"""
         try:
-            response = await client.chat.completions.create(
+            response = await client.messages.create(
                 model=model,
-                messages=messages,
+                max_tokens=max_tokens,
                 temperature=temperature,
-                max_tokens=max_tokens
+                messages=messages
             )
-            return response.choices[0].message.content
+            return response.content[0].text
         except Exception as e:
             if "429" in str(e) or "quota" in str(e).lower():
                 logger.warning(f"OpenAI quota exceeded: {e}")
@@ -941,21 +941,21 @@ class UniversalDocumentClassifierOptimized:
             """
             
             # Make AI call
-            if not self.openai:
+            if not self.anthropic:
                 # Fallback to pattern-based classification
                 return [self._pattern_classify_row(row, platform_info, column_names) for row in rows]
             
-            response = await self.openai.chat.completions.create(
-                model=self.config.get('ai_model', 'gpt-4o-mini'),
-                messages=[
-                    {"role": "system", "content": "You are a financial data classification expert. Classify transaction rows accurately and return valid JSON."},
-                    {"role": "user", "content": prompt}
-                ],
+            response = await self.anthropic.messages.create(
+                model='claude-haiku-4-20250514',
+                max_tokens=2000,
                 temperature=0.1,
-                max_tokens=2000  # Enough for batch response
+                system="You are a financial data classification expert. Classify transaction rows accurately and return valid JSON.",
+                messages=[
+                    {"role": "user", "content": prompt}
+                ]
             )
             
-            result_text = response.choices[0].message.content.strip()
+            result_text = response.content[0].text.strip()
             
             # Parse JSON response
             if result_text.startswith('```json'):

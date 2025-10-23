@@ -48,8 +48,8 @@ class UniversalPlatformDetectorOptimized:
     - Real-time platform updates
     """
     
-    def __init__(self, openai_client=None, cache_client=None, supabase_client=None, config=None):
-        self.openai = openai_client
+    def __init__(self, anthropic_client=None, cache_client=None, supabase_client=None, config=None):
+        self.anthropic = anthropic_client
         self.cache = cache_client
         self.supabase = supabase_client
         self.config = config or self._get_default_config()
@@ -78,7 +78,7 @@ class UniversalPlatformDetectorOptimized:
     
     def _get_default_config(self) -> Dict[str, Any]:
         """Get default configuration"""
-        default_model = os.getenv('PLATFORM_DETECTOR_MODEL') or os.getenv('OPENAI_MODEL') or 'gpt-4o-mini'
+        default_model = os.getenv('PLATFORM_DETECTOR_MODEL') or 'claude-haiku-4-20250514'
         return {
             'enable_caching': True,
             'cache_ttl': 7200,  # 2 hours
@@ -395,7 +395,7 @@ class UniversalPlatformDetectorOptimized:
             
             # 2. AI-powered detection (primary method)
             ai_result = None
-            if self.config['enable_ai_detection'] and self.openai:
+            if self.config['enable_ai_detection'] and self.anthropic:
                 ai_result = await self._detect_platform_with_ai(payload, filename)
                 if ai_result and ai_result['confidence'] >= 0.8:
                     self.metrics['ai_detections'] += 1
@@ -518,9 +518,9 @@ class UniversalPlatformDetectorOptimized:
             }}
             """
             
-            result_text = await self._safe_openai_call(
-                self.openai,
-                self.config['ai_model'],
+            result_text = await self._safe_anthropic_call(
+                self.anthropic,
+                'claude-haiku-4-20250514',
                 [{"role": "user", "content": prompt}],
                 self.config['ai_temperature'],
                 self.config['ai_max_tokens']
@@ -658,23 +658,23 @@ class UniversalPlatformDetectorOptimized:
         user_part = (user_id or "anon")[:12]
         return f"detect_{user_part}_{filename_part}_{content_hash}"
     
-    async def _safe_openai_call(self, client, model: str, messages: List[Dict], 
+    async def _safe_anthropic_call(self, client, model: str, messages: List[Dict], 
                                temperature: float, max_tokens: int) -> str:
-        """Safe OpenAI API call with error handling"""
+        """Safe Anthropic API call with error handling"""
         try:
-            response = await client.chat.completions.create(
+            response = await client.messages.create(
                 model=model,
-                messages=messages,
+                max_tokens=max_tokens,
                 temperature=temperature,
-                max_tokens=max_tokens
+                messages=messages
             )
-            return response.choices[0].message.content
+            return response.content[0].text
         except Exception as e:
             if "429" in str(e) or "quota" in str(e).lower():
-                logger.warning(f"OpenAI quota exceeded: {e}")
+                logger.warning(f"Anthropic quota exceeded: {e}")
                 return '{"platform": "unknown", "confidence": 0.0, "indicators": [], "reasoning": "AI processing unavailable due to quota limits"}'
             else:
-                logger.error(f"OpenAI API call failed: {e}")
+                logger.error(f"Anthropic API call failed: {e}")
                 raise
     
     def _parse_ai_response(self, response_text: str) -> Optional[Dict[str, Any]]:

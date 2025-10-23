@@ -8033,6 +8033,12 @@ class ExcelProcessor:
         # Use first sheet for detection
         first_sheet = list(sheets.values())[0]
         
+        # Convert DataFrame to payload dict for platform detection
+        payload_for_detection = {
+            'columns': list(first_sheet.columns),
+            'sample_data': first_sheet.head(10).to_dict('records') if not first_sheet.empty else []
+        }
+        
         # Fast pattern-based platform detection first (with AI cache)
         ai_cache = safe_get_ai_cache()
         platform_cache_key = {
@@ -8043,7 +8049,12 @@ class ExcelProcessor:
         if cached_platform:
             platform_info = cached_platform
         else:
-            platform_info = self.universal_platform_detector.detect_platform(first_sheet, filename)
+            # Call the correct async method with Dict payload
+            platform_info = await self.universal_platform_detector.detect_platform_universal(
+                payload_for_detection, 
+                filename=filename,
+                user_id=user_id
+            )
             try:
                 await ai_cache.store_classification(platform_cache_key, platform_info, "platform_detection", ttl_hours=48)
             except Exception as cache_err:
