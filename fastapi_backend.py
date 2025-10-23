@@ -10231,28 +10231,11 @@ async def handle_duplicate_decision(request: DuplicateDecisionRequest):
                 progress=(await websocket_manager.get_job_status(request.job_id) or {}).get("progress")
             )
 
-            # Try ARQ worker first, fall back to inline processing if unavailable
-            if _queue_backend() == 'arq':
-                try:
-                    pool = await get_arq_pool()
-                    # Note: ARQ worker will need to handle these additional parameters
-                    await pool.enqueue_job('process_spreadsheet',
-                        user_id, filename, storage_path, request.job_id,
-                        duplicate_decision=decision,
-                        existing_file_id=existing_file_id,
-                        original_file_hash=request.file_hash
-                    )
-                    logger.info(f"✅ Resume queued to ARQ worker: {request.job_id}")
-                    return {"status": "success", "message": "Duplicate decision processed: resuming"}
-                except Exception as e:
-                    logger.warning(f"ARQ dispatch failed for resume, using inline processing: {e}")
-                    # Fall through to inline processing
-            
-            # Inline processing fallback
-            logger.info(f"🔄 Processing resume inline (ARQ unavailable): {request.job_id}")
+            # Process resume inline (direct processing, no ARQ)
+            logger.info(f"🔄 Processing resume inline: {request.job_id}")
             # Process inline - the file is already in storage, just need to process it
             # This will be handled by the existing inline_process logic
-            return {"status": "success", "message": "Duplicate decision processed: resuming inline"}
+            return {"status": "success", "message": "Duplicate decision processed: resuming"}
 
         raise HTTPException(status_code=400, detail="Invalid decision. Use one of: replace, keep_both, skip")
     except HTTPException as he:
@@ -11012,21 +10995,8 @@ async def process_excel_endpoint(request: dict):
                 await websocket_manager.send_error(job_id, str(e))
                 await websocket_manager.merge_job_state(job_id, {**((await websocket_manager.get_job_status(job_id)) or {}), "status": "failed", "error": str(e)})
 
-        # Try ARQ worker first, fall back to inline processing if unavailable
-        if _queue_backend() == 'arq':
-            try:
-                pool = await get_arq_pool()
-                await pool.enqueue_job('process_spreadsheet', user_id, filename, storage_path, job_id)
-                # Increment metrics
-                metrics_collector.increment_counter("file_processing_requests")
-                logger.info(f"✅ File queued to ARQ worker: {job_id}")
-                return {"status": "accepted", "job_id": job_id}
-            except Exception as e:
-                logger.warning(f"ARQ dispatch failed, falling back to inline processing: {e}")
-                # Fall through to inline processing below
-        
-        # Inline processing (fallback when ARQ unavailable or not configured)
-        logger.info(f"🔄 Processing file inline (ARQ unavailable): {job_id}")
+        # Process file inline (direct processing, no ARQ)
+        logger.info(f"🔄 Processing file inline: {job_id}")
         asyncio.create_task(inline_process())
         metrics_collector.increment_counter("file_processing_requests")
         return {"status": "accepted", "job_id": job_id}
@@ -11343,19 +11313,8 @@ async def _enqueue_file_processing(user_id: str, filename: str, storage_path: st
         except Exception:
             # ignore duplicates
             pass
-        # Try ARQ worker first, fall back to inline processing if unavailable
-        if _queue_backend() == 'arq':
-            try:
-                pool = await get_arq_pool()
-                await pool.enqueue_job('process_spreadsheet', user_id, filename, storage_path, job_id)
-                logger.info(f"✅ File queued to ARQ worker: {job_id}")
-                return job_id
-            except Exception as e:
-                logger.warning(f"ARQ dispatch failed, falling back to inline processing: {e}")
-                # Fall through to inline processing below
-        
-        # Inline processing (fallback when ARQ unavailable or not configured)
-        logger.info(f"🔄 Processing file inline (ARQ unavailable): {job_id}")
+        # Process file inline (direct processing, no ARQ)
+        logger.info(f"🔄 Processing file inline: {job_id}")
         # Download file from storage and process inline
         file_bytes = supabase.storage.from_('financial-documents').download(storage_path)
         
@@ -11395,19 +11354,8 @@ async def _enqueue_pdf_processing(user_id: str, filename: str, storage_path: str
             supabase.table('ingestion_jobs').insert(job_data).execute()
         except Exception:
             pass
-        # Try ARQ worker first, fall back to inline processing if unavailable
-        if _queue_backend() == 'arq':
-            try:
-                pool = await get_arq_pool()
-                await pool.enqueue_job('process_pdf', user_id, filename, storage_path, job_id)
-                logger.info(f"✅ PDF queued to ARQ worker: {job_id}")
-                return job_id
-            except Exception as e:
-                logger.warning(f"ARQ dispatch failed for PDF, falling back to inline processing: {e}")
-                # Fall through to inline processing below
-        
-        # Inline processing (fallback when ARQ unavailable or not configured)
-        logger.info(f"🔄 Processing PDF inline (ARQ unavailable): {job_id}")
+        # Process PDF inline (direct processing, no ARQ)
+        logger.info(f"🔄 Processing PDF inline: {job_id}")
         asyncio.create_task(start_pdf_processing_job(user_id, job_id, storage_path, filename))
         return job_id
     except Exception as e:
