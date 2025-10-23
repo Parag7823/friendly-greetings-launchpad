@@ -327,14 +327,26 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
           
           setMessages(prev => [...prev, aiMessage]);
         } else {
-          throw new Error('Failed to get response from AI');
+          // Get error details from backend
+          let errorDetail = 'Failed to get response from AI';
+          try {
+            const errorData = await response.json();
+            errorDetail = errorData.detail || errorDetail;
+          } catch {
+            // If can't parse JSON, use status text
+            errorDetail = `Server error (${response.status}): ${response.statusText}`;
+          }
+          throw new Error(errorDetail);
         }
       } catch (error) {
         console.error('Chat error:', error);
         
+        // Show actual error message from backend
+        const errorText = error instanceof Error ? error.message : 'Sorry, I encountered an error. Please try again.';
+        
         const errorMessage = {
           id: `msg-${Date.now()}-error`,
-          text: 'Sorry, I encountered an error. Please try again.',
+          text: errorText,
           isUser: false,
           timestamp: new Date()
         };

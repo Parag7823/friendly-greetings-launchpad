@@ -10723,7 +10723,22 @@ async def chat_endpoint(request: dict):
         from intelligent_chat_orchestrator import IntelligentChatOrchestrator
         from anthropic import AsyncAnthropic
         
-        anthropic_client = AsyncAnthropic(api_key=os.getenv('ANTHROPIC_API_KEY'))
+        # Check for API key before initializing
+        anthropic_api_key = os.getenv('ANTHROPIC_API_KEY')
+        if not anthropic_api_key:
+            raise HTTPException(
+                status_code=503, 
+                detail="Chat service is temporarily unavailable. Please contact support. (Missing ANTHROPIC_API_KEY)"
+            )
+        
+        try:
+            anthropic_client = AsyncAnthropic(api_key=anthropic_api_key)
+        except Exception as api_error:
+            structured_logger.error("Failed to initialize Anthropic client", error=api_error)
+            raise HTTPException(
+                status_code=503,
+                detail=f"Chat service initialization failed: {str(api_error)}"
+            )
         
         orchestrator = IntelligentChatOrchestrator(
             openai_client=anthropic_client,
@@ -10757,9 +10772,19 @@ async def chat_endpoint(request: dict):
             "status": "success"
         }
         
+    except HTTPException:
+        # Re-raise HTTP exceptions (like 503 from missing API key)
+        raise
     except Exception as e:
         structured_logger.error("Chat endpoint error", error=e)
-        raise HTTPException(status_code=500, detail=str(e))
+        # Return more helpful error message
+        error_message = str(e)
+        if "ANTHROPIC_API_KEY" in error_message or "api_key" in error_message.lower():
+            raise HTTPException(
+                status_code=503, 
+                detail="Chat service is temporarily unavailable. Please contact support."
+            )
+        raise HTTPException(status_code=500, detail=f"Sorry, I encountered an error: {error_message}")
 
 
 @app.post("/api/detect-fields")
