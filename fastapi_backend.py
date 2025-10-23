@@ -10397,8 +10397,10 @@ async def handle_duplicate_decision(request: DuplicateDecisionRequest):
                     
                 except Exception as e:
                     # Unexpected errors
+                    import traceback
                     error_msg = f"Delta merge failed: {str(e)}"
-                    logger.error(f"Delta merge failed for job {request.job_id}: {e}", exc_info=True)
+                    error_details = f"Delta merge failed for job {request.job_id}: {e}\n{traceback.format_exc()}"
+                    structured_logger.error("Delta merge failed", error=error_details)
                     await websocket_manager.send_error(request.job_id, error_msg)
                     
                     # Update job status
@@ -13026,7 +13028,9 @@ async def initiate_connector(req: ConnectorInitiateRequest):
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Initiate connector failed for provider={req.provider}: {e}", exc_info=True)
+        import traceback
+        error_details = f"Initiate connector failed for provider={req.provider}: {e}\n{traceback.format_exc()}"
+        structured_logger.error("Connector initiation failed", error=error_details)
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/connectors/verify-connection")
