@@ -4355,7 +4355,7 @@ class VendorStandardizer:
                 
                 # Make the AI call using Anthropic
                 response = self.anthropic.messages.create(
-                    model="claude-3-5-haiku-20241022",
+                    model="claude-haiku-4-20250514",
                     max_tokens=200,
                     temperature=0.1,
                     messages=[{"role": "user", "content": prompt}]
@@ -6516,7 +6516,7 @@ class AIRowClassifier:
             
             # Get AI response using Anthropic
             response = self.anthropic.messages.create(
-                model="claude-3-5-haiku-20241022",
+                model="claude-haiku-4-20250514",
                 max_tokens=1000,
                 temperature=0.1,
                 messages=[{"role": "user", "content": prompt}]
@@ -6860,7 +6860,7 @@ class BatchAIRowClassifier:
             # Get AI response using Anthropic
             try:
                 response = self.anthropic.messages.create(
-                    model="claude-3-5-haiku-20241022",
+                    model="claude-haiku-4-20250514",
                     max_tokens=2000,
                     temperature=0.1,
                     messages=[{"role": "user", "content": prompt}]
