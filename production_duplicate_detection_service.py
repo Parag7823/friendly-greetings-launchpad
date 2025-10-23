@@ -116,15 +116,10 @@ class ProductionDuplicateDetectionService:
         self.cache_timestamps = {}
         self.max_cache_size = int(os.environ.get('MAX_CACHE_SIZE', 10000))  # Max 10k entries
         
-        # FIX #12: Start background cleanup task
+        # FIX ISSUE #19: Start background cleanup task lazily
         import asyncio
         self._cleanup_task = None
-        try:
-            loop = asyncio.get_event_loop()
-            self._cleanup_task = loop.create_task(self._cache_cleanup_loop())
-        except RuntimeError:
-            # No event loop running yet, will start on first use
-            logger.warning("Event loop not running, cache cleanup will start on first cache operation")
+        self._cleanup_started = False
         
         # Thread pool for CPU-intensive operations
         self.executor = ThreadPoolExecutor(max_workers=self.max_workers)
@@ -941,6 +936,16 @@ class ProductionDuplicateDetectionService:
             self.memory_cache[cache_key] = result
             self.cache_timestamps[cache_key] = time.time()
             
+            # FIX ISSUE #19: Start cleanup task lazily on first cache operation
+            if not self._cleanup_started:
+                try:
+                    import asyncio
+                    self._cleanup_task = asyncio.create_task(self._cache_cleanup_loop())
+                    self._cleanup_started = True
+                    logger.info("Cache cleanup loop started successfully")
+                except Exception as e:
+                    logger.warning(f"Failed to start cache cleanup loop: {e}")
+            
             # Clean expired entries periodically
             if len(self.memory_cache) > 1000:
                 self._clean_memory_cache()
@@ -982,7 +987,7 @@ class ProductionDuplicateDetectionService:
             cache_hit=False
         )
     
-    async def analyze_delta_ingestion(self, user_id: str, new_sheets: Dict[str, pd.DataFrame], 
+    async def analyze_delta_ingestion(self, user_id: str, new_sheets: Optional[Dict[str, Any]], 
                                     existing_file_id: str) -> Dict[str, Any]:
         """
         Analyze what rows are new vs existing for delta ingestion.
@@ -990,15 +995,42 @@ class ProductionDuplicateDetectionService:
         This feature enables intelligent merging of overlapping data by analyzing
         the differences between new and existing files at the row level.
         
+        FIX ISSUE #20: Accepts Optional[Dict[str, Any]] and converts to pandas DataFrames internally.
+        
         Args:
             user_id: User identifier
-            new_sheets: New file sheets data
+            new_sheets: New file sheets data (can be Dict[str, pd.DataFrame] or Dict[str, Any])
             existing_file_id: ID of existing file to compare against
             
         Returns:
             Dictionary with delta analysis results
         """
         try:
+            # FIX ISSUE #20: Convert new_sheets to pandas DataFrames if needed
+            if new_sheets is None:
+                return {'delta_analysis': None, 'error': 'No sheets data provided'}
+            
+            # Convert to pandas DataFrames if not already
+            import pandas as pd
+            converted_sheets: Dict[str, pd.DataFrame] = {}
+            for sheet_name, sheet_data in new_sheets.items():
+                if isinstance(sheet_data, pd.DataFrame):
+                    converted_sheets[sheet_name] = sheet_data
+                elif isinstance(sheet_data, (list, dict)):
+                    try:
+                        converted_sheets[sheet_name] = pd.DataFrame(sheet_data)
+                    except Exception as e:
+                        logger.warning(f"Failed to convert sheet {sheet_name} to DataFrame: {e}")
+                        continue
+                else:
+                    logger.warning(f"Unsupported sheet data type for {sheet_name}: {type(sheet_data)}")
+                    continue
+            
+            if not converted_sheets:
+                return {'delta_analysis': None, 'error': 'No valid sheets data to analyze'}
+            
+            # Use converted sheets for analysis
+            new_sheets = converted_sheets
             # Get existing file data (prefer lightweight "sheets_row_hashes")
             existing_result = self.supabase.table('raw_records').select(
                 'id, content, file_name'
@@ -1249,8 +1281,18 @@ class ProductionDuplicateDetectionService:
         """
         Apply delta ingestion by merging new rows into existing records.
         BUG #17 FIX: Wrapped in transaction to prevent data corruption.
+        FIX ISSUE #25: Validates existing_file_id belongs to user_id to prevent cross-user data contamination.
         """
         try:
+            # FIX ISSUE #25: CRITICAL SECURITY - Verify existing_file_id belongs to user_id
+            existing_check = self.supabase.table('raw_records').select('id').eq(
+                'id', existing_file_id
+            ).eq('user_id', user_id).execute()
+            
+            if not existing_check.data:
+                logger.error(f"SECURITY: User {user_id} attempted to merge into unauthorized file {existing_file_id}")
+                raise ValueError("Existing file not found or unauthorized access")
+            
             # BUG #17 FIX: Start transaction for atomic operation
             # Note: Supabase doesn't support transactions directly, so we'll use error handling
             # and cleanup to maintain consistency

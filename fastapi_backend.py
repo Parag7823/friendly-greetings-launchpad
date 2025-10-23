@@ -11101,29 +11101,12 @@ async def process_excel_endpoint(request: dict):
                         await websocket_manager.merge_job_state(job_id, {**((await websocket_manager.get_job_status(job_id)) or {}), "status": "failed", "error": str(e)})
                         return
                 else:
-                    # File already downloaded for hash verification
-                    logger.info(f"Reusing downloaded file for job {job_id} (already verified hash)")
+                    # File already downloaded for hash verification and size validated
+                    logger.info(f"Reusing downloaded file for job {job_id} (already verified hash and size)")
                 
-                # Secondary file size validation (defense in depth - primary validation at endpoint entry)
-                MAX_FILE_SIZE = 500 * 1024 * 1024  # 500MB
-                if len(file_bytes) > MAX_FILE_SIZE:
-                    error_msg = f"File too large: {len(file_bytes) / 1024 / 1024:.2f}MB (max: 500MB)"
-                    logger.error(f"File size validation failed for job {job_id}: {error_msg}")
-                    await websocket_manager.send_error(job_id, error_msg)
-                    await websocket_manager.merge_job_state(job_id, {
-                        **((await websocket_manager.get_job_status(job_id)) or {}),
-                        "status": "failed",
-                        "error": error_msg
-                    })
-                    try:
-                        supabase.table('ingestion_jobs').update({
-                            'status': 'failed',
-                            'error_message': error_msg,
-                            'updated_at': datetime.utcnow().isoformat()
-                        }).eq('id', job_id).execute()
-                    except Exception as db_err:
-                        logger.warning(f"Failed to update ingestion_jobs on size validation: {db_err}")
-                    return
+                # FIX ISSUE #17: Removed duplicate file size check
+                # Size is already validated at line 10867 when file is first downloaded
+                # No need to check again when reusing file_bytes
                 
                 # Validate file type using magic numbers (security check)
                 try:
