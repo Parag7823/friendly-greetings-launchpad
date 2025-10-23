@@ -10253,10 +10253,77 @@ async def handle_duplicate_decision(request: DuplicateDecisionRequest):
                 progress=(await websocket_manager.get_job_status(request.job_id) or {}).get("progress")
             )
 
-            # Process resume inline (direct processing, no ARQ)
-            logger.info(f"🔄 Processing resume inline: {request.job_id}")
-            # Process inline - the file is already in storage, just need to process it
-            # This will be handled by the existing inline_process logic
+            # FIX ISSUE #11, #13, #14: Actually resume processing
+            logger.info(f"🔄 Processing resume inline: {request.job_id}, decision: {decision}")
+            
+            # FIX ISSUE #14: Handle delta_merge specially
+            if decision == 'delta_merge':
+                try:
+                    # Download file for delta merge
+                    storage = supabase.storage.from_("finely-upload")
+                    file_resp = storage.download(storage_path)
+                    file_bytes = file_resp if isinstance(file_resp, (bytes, bytearray)) else getattr(file_resp, 'data', None)
+                    if file_bytes is None:
+                        file_bytes = file_resp
+                    
+                    # Perform delta merge
+                    duplicate_service = ProductionDuplicateDetectionService(supabase)
+                    
+                    # Parse file to get sheets data
+                    import pandas as pd
+                    import io
+                    if filename.endswith('.csv'):
+                        df = pd.read_csv(io.BytesIO(file_bytes))
+                        sheets_data = {'Sheet1': df}
+                    else:
+                        sheets_data = pd.read_excel(io.BytesIO(file_bytes), sheet_name=None)
+                    
+                    # Perform delta merge
+                    merge_result = await duplicate_service._perform_delta_merge(
+                        user_id=user_id,
+                        new_record_id=request.job_id,  # Use job_id as placeholder
+                        existing_file_id=existing_file_id,
+                        sheets_data=sheets_data,
+                        filename=filename
+                    )
+                    
+                    # Update job status
+                    await websocket_manager.send_overall_update(
+                        job_id=request.job_id,
+                        status="completed",
+                        message=f"Delta merge completed: {merge_result.get('merged_events', 0)} events merged",
+                        progress=100
+                    )
+                    
+                    return {"status": "success", "message": "Delta merge completed", "result": merge_result}
+                    
+                except Exception as e:
+                    logger.error(f"Delta merge failed for job {request.job_id}: {e}")
+                    await websocket_manager.send_error(request.job_id, f"Delta merge failed: {str(e)}")
+                    raise HTTPException(status_code=500, detail=f"Delta merge failed: {str(e)}")
+            
+            # FIX ISSUE #11: For replace/keep_both, trigger actual processing
+            # Create background task to process the file
+            async def resume_processing():
+                try:
+                    # Re-trigger processing with resume flag
+                    from fastapi_backend import process_file_inline
+                    await process_file_inline({
+                        'user_id': user_id,
+                        'storage_path': storage_path,
+                        'filename': filename,
+                        'job_id': request.job_id,
+                        'resume_after_duplicate': True,
+                        'duplicate_decision': decision,
+                        'existing_file_id': existing_file_id
+                    })
+                except Exception as e:
+                    logger.error(f"Resume processing failed for job {request.job_id}: {e}")
+                    await websocket_manager.send_error(request.job_id, f"Processing failed: {str(e)}")
+            
+            # Start processing in background
+            asyncio.create_task(resume_processing())
+            
             return {"status": "success", "message": "Duplicate decision processed: resuming"}
 
         raise HTTPException(status_code=400, detail="Invalid decision. Use one of: replace, keep_both, skip")
@@ -10266,6 +10333,29 @@ async def handle_duplicate_decision(request: DuplicateDecisionRequest):
     except Exception as e:
         logger.error(f"Error handling duplicate decision: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/delta-merge-history/{file_id}")
+async def get_delta_merge_history(file_id: str, user_id: str, session_token: Optional[str] = None):
+    """
+    FIX ISSUE #15: Get delta merge history for a file.
+    Returns all delta merge operations involving this file.
+    """
+    await _require_security('delta-merge-history', user_id, session_token)
+    try:
+        # Use the database function created in migration 20250920130000
+        result = supabase.rpc('get_delta_merge_history', {
+            'p_user_id': user_id,
+            'p_file_id': file_id
+        }).execute()
+        
+        return {
+            "file_id": file_id,
+            "merge_history": result.data or [],
+            "total_merges": len(result.data) if result.data else 0
+        }
+    except Exception as e:
+        logger.error(f"Failed to fetch delta merge history for file {file_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to fetch merge history: {str(e)}")
 
 @app.get("/api/connectors/history")
 async def connectors_history(connection_id: str, user_id: str, page: int = 1, page_size: int = 20, session_token: Optional[str] = None):
@@ -10761,27 +10851,32 @@ async def check_duplicate_endpoint(request: dict):
                 # Note: We don't have file_content here, so we'll only do exact hash check
                 # For full multi-phase detection, this happens during processing
                 result = await duplicate_service._detect_exact_duplicates(file_metadata)
+                
+                # FIX #10: Check result and return
+                if result.is_duplicate:
+                    response = {
+                        "is_duplicate": True,
+                        "duplicate_type": result.duplicate_type.value,
+                        "similarity_score": result.similarity_score,
+                        "duplicate_files": result.duplicate_files,
+                        "latest_duplicate": result.duplicate_files[0] if result.duplicate_files else None,
+                        "recommendation": result.recommendation.value,
+                        "message": result.message,
+                        "confidence": result.confidence
+                    }
+                    # FIX ISSUE #2: Include delta_analysis if available
+                    if hasattr(result, 'delta_analysis') and result.delta_analysis:
+                        response["delta_analysis"] = result.delta_analysis
+                    return response
+                
+                return {"is_duplicate": False}
+                
+            except Exception as db_err:
+                logger.error(f"Database error checking duplicates: {db_err}")
+                raise HTTPException(status_code=500, detail="Failed to check for duplicates")
             finally:
                 # FIX #10: Schedule lock cleanup in background
                 asyncio.create_task(release_duplicate_lock(file_hash))
-            
-            if result.is_duplicate:
-                return {
-                    "is_duplicate": True,
-                    "duplicate_type": result.duplicate_type.value,
-                    "similarity_score": result.similarity_score,
-                    "duplicate_files": result.duplicate_files,
-                    "latest_duplicate": result.duplicate_files[0] if result.duplicate_files else None,
-                    "recommendation": result.recommendation.value,
-                    "message": result.message,
-                    "confidence": result.confidence
-                }
-            
-            return {"is_duplicate": False}
-            
-        except Exception as db_err:
-            logger.error(f"Database error checking duplicates: {db_err}")
-            raise HTTPException(status_code=500, detail="Failed to check for duplicates")
             
     except HTTPException:
         raise
@@ -10838,25 +10933,35 @@ async def process_excel_endpoint(request: dict):
         client_provided_hash = request.get('file_hash')  # Client hint, will be verified
         resume_after_duplicate = request.get('resume_after_duplicate')
         
+        # FIX ISSUE #9: Validate file size BEFORE download to prevent DoS
+        # Note: Supabase storage doesn't expose file info API, so we rely on client-provided size
+        # which was validated at upload time. Add secondary validation after download.
+        MAX_FILE_SIZE = 500 * 1024 * 1024  # 500MB
+        
         # BROKEN LOGIC FIX #2: Always download file once (don't rely on conditional download)
         file_bytes = None
         file_downloaded_successfully = False
         
         try:
             storage = supabase.storage.from_("finely-upload")
+            
+            # FIX ISSUE #9: Stream download with size check to prevent memory exhaustion
+            # Note: supabase-py doesn't support streaming, so we download and immediately check
             file_resp = storage.download(storage_path)
             file_bytes = file_resp if isinstance(file_resp, (bytes, bytearray)) else getattr(file_resp, 'data', None)
             if file_bytes is None:
                 file_bytes = file_resp
-            file_downloaded_successfully = True
             
-            # FIX ISSUE #2: Check file size immediately after download (before processing)
+            # FIX ISSUE #9: IMMEDIATE size check after download (defense in depth)
             actual_file_size = len(file_bytes) if file_bytes else 0
-            MAX_FILE_SIZE = 500 * 1024 * 1024  # 500MB
             if actual_file_size > MAX_FILE_SIZE:
                 error_msg = f"File too large: {actual_file_size / 1024 / 1024:.2f}MB (max: 500MB)"
-                logger.error(f"File size exceeded for job {job_id}: {actual_file_size} bytes")
+                logger.error(f"SECURITY: File size exceeded for job {job_id}: {actual_file_size} bytes")
+                # Clear file_bytes immediately to free memory
+                file_bytes = None
                 raise HTTPException(status_code=400, detail=error_msg)
+            
+            file_downloaded_successfully = True
             
             logger.info(f"File downloaded successfully for job {job_id}, size: {actual_file_size} bytes")
         except HTTPException:

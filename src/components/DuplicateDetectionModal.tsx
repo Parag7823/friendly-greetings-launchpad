@@ -16,37 +16,18 @@ interface DuplicateInfo {
   message: string;
 }
 
-interface VersionCandidate {
-  id: string;
-  filename: string;
-  file_hash: string;
-  created_at: string;
-  total_rows: number;
-  total_columns: number;
-}
-
-interface VersionRecommendation {
-  recommended_file_id: string;
-  recommended_version: {
-    filename: string;
-    row_count: number;
-    column_count: number;
-    overall_score: number;
-    is_most_recent: boolean;
-  };
-  reasoning: string;
-  confidence: number;
-}
+// REMOVED: VersionCandidate and VersionRecommendation interfaces
+// These were part of the deprecated version_recommendations system
+// that was removed in migration 20251013000000-remove-unused-version-tables.sql
+// The backend never populates these fields, making this dead code.
 
 interface DuplicateDetectionModalProps {
   isOpen: boolean;
   onClose: () => void;
   duplicateInfo?: DuplicateInfo;
-  versionCandidates?: VersionCandidate[];
-  recommendation?: VersionRecommendation;
   onDecision: (decision: 'replace' | 'keep_both' | 'skip' | 'delta_merge') => void;
-  onVersionAccept: (accepted: boolean, feedback?: string) => void;
-  phase: 'basic_duplicate' | 'versions_detected' | 'similar_files';
+  // phase is always 'basic_duplicate' - other phases were never implemented
+  phase: 'basic_duplicate';
   deltaAnalysis?: any;
   error?: string | null;
 }
@@ -55,16 +36,11 @@ export const DuplicateDetectionModal: React.FC<DuplicateDetectionModalProps> = (
   isOpen,
   onClose,
   duplicateInfo,
-  versionCandidates,
-  recommendation,
   onDecision,
-  onVersionAccept,
   phase,
   deltaAnalysis,
   error
 }) => {
-  const [feedback, setFeedback] = useState('');
-  const [showFeedback, setShowFeedback] = useState(false);
 
   if (!isOpen) return null;
 
@@ -108,7 +84,7 @@ export const DuplicateDetectionModal: React.FC<DuplicateDetectionModalProps> = (
             ))}
           </div>
 
-          {/* Delta Analysis Display - Backend sends unwrapped delta_analysis object */}
+          {/* FIX ISSUE #8: Delta Analysis Display - Backend wraps in { delta_analysis: {...} } */}
           {deltaAnalysis?.delta_analysis?.new_rows !== undefined && (
             <div className="mt-4 bg-background/50 rounded-lg p-4 border border-border">
               <p className="font-semibold text-white mb-2">Delta Analysis</p>
@@ -214,119 +190,15 @@ export const DuplicateDetectionModal: React.FC<DuplicateDetectionModalProps> = (
     </div>
   );
 
-  const renderVersionDetection = () => (
-    <div className="space-y-6">
-      <div className="flex items-center space-x-3">
-        <BarChart3 className="h-8 w-8 text-blue-500" />
-        <div>
-          <h3 className="text-lg font-semibold text-gray-900">Multiple Versions Detected</h3>
-          <p className="text-sm text-gray-600">We found similar files that appear to be different versions</p>
-        </div>
-      </div>
-
-      {versionCandidates && (
-        <div className="space-y-3">
-          <h4 className="font-medium text-gray-900">Version Candidates:</h4>
-          {versionCandidates.map((candidate) => (
-            <div key={candidate.id} className="flex items-center justify-between bg-gray-50 rounded p-3 border">
-              <div className="flex items-center space-x-3">
-                <FileText className="h-5 w-5 text-gray-400" />
-                <div>
-                  <p className="font-medium text-gray-900">{candidate.filename}</p>
-                  <p className="text-sm text-gray-500">
-                    {candidate.total_rows} rows • {candidate.total_columns} columns • 
-                    {new Date(candidate.created_at).toLocaleDateString()}
-                  </p>
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {recommendation && (
-        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-          <div className="flex items-start space-x-3">
-            <CheckCircle className="h-6 w-6 text-blue-500 mt-0.5" />
-            <div className="flex-1">
-              <h4 className="font-medium text-blue-900 mb-2">AI Recommendation</h4>
-              <p className="text-blue-800 mb-3">{recommendation.reasoning}</p>
-              
-              <div className="bg-white rounded p-3 border border-blue-200">
-                <p className="font-medium text-gray-900">{recommendation.recommended_version.filename}</p>
-                <div className="flex items-center space-x-4 mt-1 text-sm text-gray-600">
-                  <span>{recommendation.recommended_version.row_count} rows</span>
-                  <span>{recommendation.recommended_version.column_count} columns</span>
-                  <span className="flex items-center space-x-1">
-                    <BarChart3 className="h-4 w-4" />
-                    <span>{Math.round(recommendation.confidence * 100)}% confidence</span>
-                  </span>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      <div className="space-y-3">
-        <h4 className="font-medium text-gray-900">Do you accept this recommendation?</h4>
-        
-        <div className="flex space-x-3">
-          <button
-            onClick={() => onVersionAccept(true)}
-            className="flex-1 flex items-center justify-center space-x-2 px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-          >
-            <CheckCircle className="h-5 w-5" />
-            <span>Accept Recommendation</span>
-          </button>
-          
-          <button
-            onClick={() => setShowFeedback(true)}
-            className="flex-1 flex items-center justify-center space-x-2 px-4 py-3 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
-          >
-            <XCircle className="h-5 w-5" />
-            <span>Provide Feedback</span>
-          </button>
-        </div>
-
-        {showFeedback && (
-          <div className="space-y-3 p-4 bg-gray-50 rounded-lg">
-            <label className="block text-sm font-medium text-gray-700">
-              Why don't you agree with this recommendation?
-            </label>
-            <textarea
-              value={feedback}
-              onChange={(e) => setFeedback(e.target.value)}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-              rows={3}
-              placeholder="Your feedback helps us improve our recommendations..."
-            />
-            <div className="flex space-x-2">
-              <button
-                onClick={() => onVersionAccept(false, feedback)}
-                className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700 transition-colors"
-              >
-                Submit Feedback
-              </button>
-              <button
-                onClick={() => setShowFeedback(false)}
-                className="px-4 py-2 border border-gray-300 text-gray-700 rounded hover:bg-gray-50 transition-colors"
-              >
-                Cancel
-              </button>
-            </div>
-          </div>
-        )}
-      </div>
-    </div>
-  );
+  // REMOVED: renderVersionDetection() function (105 lines)
+  // This was dead code for the deprecated version_recommendations system
+  // The phase was always 'basic_duplicate' and never 'versions_detected'
 
   return (
     <div className="fixed inset-0 bg-[#1a1a1a]/80 backdrop-blur-sm flex items-center justify-center z-50 animate-fade-in">
       <div className="bg-card border border-border rounded-2xl shadow-2xl max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto animate-scale-in">
         <div className="p-8">
-          {phase === 'basic_duplicate' && renderBasicDuplicate()}
-          {phase === 'versions_detected' && renderVersionDetection()}
+          {renderBasicDuplicate()}
           
           <div className="mt-8 pt-6 border-t border-border">
             <button

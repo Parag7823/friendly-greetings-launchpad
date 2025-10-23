@@ -41,7 +41,7 @@ export const EnhancedFileUpload: React.FC<EnhancedFileUploadProps> = ({ initialF
   // FIX #5: Consolidated duplicate modal state for better maintainability
   interface DuplicateModalState {
     isOpen: boolean;
-    phase: 'basic_duplicate' | 'versions_detected' | 'similar_files';
+    phase: 'basic_duplicate'; // Only phase used - versions_detected was never implemented
     context: {
       jobId: string | null;
       fileHash: string | null;
@@ -50,8 +50,6 @@ export const EnhancedFileUpload: React.FC<EnhancedFileUploadProps> = ({ initialF
     };
     data: {
       duplicateInfo?: any;
-      versionCandidates?: any;
-      recommendation?: any;
       deltaAnalysis?: any;
     };
     error: string | null;
@@ -220,40 +218,55 @@ export const EnhancedFileUpload: React.FC<EnhancedFileUploadProps> = ({ initialF
             : f
         ));
 
-        // Pre-fill duplicate modal context
-        setDuplicateModal(prev => ({
-          ...prev,
-          context: {
-            ...prev.context,
-            jobId,
-            fileHash: fileHash || prev.context.fileHash
-          }
-        }));
+        // FIX #5: Pre-fill duplicate modal context in Map
+        setDuplicateModals(prev => {
+          const newMap = new Map(prev);
+          const existing = newMap.get(fileId) || {
+            isOpen: false,
+            phase: 'basic_duplicate',
+            context: { jobId: null, fileHash: null, fileId: null, existingFileId: null },
+            data: {},
+            error: null
+          };
+          newMap.set(fileId, {
+            ...existing,
+            context: {
+              ...existing.context,
+              jobId,
+              fileHash: fileHash || existing.context.fileHash
+            }
+          });
+          return newMap;
+        });
       });
 
       // Check if result indicates any duplicate flow requiring user decision
       if (result.requires_user_decision) {
-        // FIX #4: Show consolidated duplicate modal
-        setDuplicateModal(prev => ({
-          ...prev,
-          isOpen: true,
-          phase: 'basic_duplicate',
-          context: {
-            jobId: result.job_id || null,
-            fileHash: result.file_hash || null,
-            fileId: fileId,
-            existingFileId: (result as any).existing_file_id || null,
-          },
-          data: {
-            duplicateInfo: {
-              message: result.message || 'Duplicate or similar file detected!',
-              filename: file.name,
-              recommendation: result.duplicate_analysis?.recommendation || 'replace_or_skip',
-              duplicate_files: result.duplicate_analysis?.duplicate_files || []
+        // FIX #5: Show consolidated duplicate modal in Map
+        setDuplicateModals(prev => {
+          const newMap = new Map(prev);
+          newMap.set(fileId, {
+            isOpen: true,
+            phase: 'basic_duplicate',
+            context: {
+              jobId: result.job_id || null,
+              fileHash: result.file_hash || null,
+              fileId: fileId,
+              existingFileId: (result as any).existing_file_id || null,
             },
-            deltaAnalysis: (result as any).delta_analysis ? { delta_analysis: (result as any).delta_analysis } : null
-          }
-        }));
+            data: {
+              duplicateInfo: {
+                message: result.message || 'Duplicate or similar file detected!',
+                filename: file.name,
+                recommendation: result.duplicate_analysis?.recommendation || 'replace_or_skip',
+                duplicate_files: result.duplicate_analysis?.duplicate_files || []
+              },
+              deltaAnalysis: (result as any).delta_analysis ? { delta_analysis: (result as any).delta_analysis } : null
+            },
+            error: null
+          });
+          return newMap;
+        });
         
         // Don't proceed with normal completion
         return result;
@@ -450,9 +463,18 @@ export const EnhancedFileUpload: React.FC<EnhancedFileUploadProps> = ({ initialF
     setUploadedFiles(prev => prev.filter(f => f.id !== fileId));
   }, []);
 
-  // Duplicate detection handlers
+  // FIX #5: Duplicate detection handlers using Map-based state
   const handleDuplicateDecision = async (decision: 'replace' | 'keep_both' | 'skip' | 'delta_merge') => {
-    if (!duplicateModal.context.jobId || !duplicateModal.context.fileHash) {
+    if (!activeModal || !activeModalFileId) {
+      toast({
+        title: "Error",
+        description: "No active duplicate modal",
+        variant: "destructive"
+      });
+      return;
+    }
+    
+    if (!activeModal.context.jobId || !activeModal.context.fileHash) {
       toast({
         title: "Error",
         description: "Missing job information for duplicate decision",
@@ -473,24 +495,28 @@ export const EnhancedFileUpload: React.FC<EnhancedFileUploadProps> = ({ initialF
           ...(session?.access_token && { 'Authorization': `Bearer ${session.access_token}` })
         },
         body: JSON.stringify({
-          job_id: duplicateModal.context.jobId,
+          job_id: activeModal.context.jobId,
           user_id: user?.id || 'anonymous',
           decision: decision,
-          file_hash: duplicateModal.context.fileHash,
+          file_hash: activeModal.context.fileHash,
           session_token: session?.access_token,
-          ...(decision === 'delta_merge' && duplicateModal.context.existingFileId
-            ? { existing_file_id: duplicateModal.context.existingFileId }
+          ...(decision === 'delta_merge' && activeModal.context.existingFileId
+            ? { existing_file_id: activeModal.context.existingFileId }
             : {})
         })
       });
       if (!response.ok) throw new Error('Failed to process duplicate decision');
 
-      // Close modal
-      setDuplicateModal(prev => ({ ...prev, isOpen: false }));
+      // FIX #5: Close modal in Map
+      setDuplicateModals(prev => {
+        const newMap = new Map(prev);
+        newMap.delete(activeModalFileId);
+        return newMap;
+      });
 
       // If skip, mark UI as cancelled and remove from list
       if (decision === 'skip') {
-        const fileRowId = duplicateModal.context.fileId as string | null;
+        const fileRowId = activeModal.context.fileId as string | null;
         if (fileRowId) {
           setFiles(prev => prev.map(f => 
             f.id === fileRowId 
@@ -507,8 +533,8 @@ export const EnhancedFileUpload: React.FC<EnhancedFileUploadProps> = ({ initialF
       }
 
       // For replace/keep_both, poll job status as backend resumes processing
-      const jobId = duplicateModal.context.jobId as string;
-      const fileRowId = duplicateModal.context.fileId as string | null;
+      const jobId = activeModal.context.jobId as string;
+      const fileRowId = activeModal.context.fileId as string | null;
 
       if (fileRowId) {
         // Optimistic UI update
@@ -557,11 +583,15 @@ export const EnhancedFileUpload: React.FC<EnhancedFileUploadProps> = ({ initialF
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : "Failed to process duplicate decision";
       
-      // Show error in modal
-      setDuplicateModal(prev => ({ 
-        ...prev, 
-        error: errorMessage 
-      }));
+      // FIX #5: Show error in modal Map
+      setDuplicateModals(prev => {
+        const newMap = new Map(prev);
+        const existing = newMap.get(activeModalFileId);
+        if (existing) {
+          newMap.set(activeModalFileId, { ...existing, error: errorMessage });
+        }
+        return newMap;
+      });
       
       toast({
         title: "Error",
@@ -571,13 +601,19 @@ export const EnhancedFileUpload: React.FC<EnhancedFileUploadProps> = ({ initialF
     }
   };
 
-  // Expose a helper to cancel from modal's footer button
+  // FIX #5: Expose a helper to cancel from modal's footer button
   const handleModalCancel = useCallback(async () => {
+    if (!activeModal || !activeModalFileId) return;
+    
     try {
-      const jobId = duplicateModal.context.jobId;
-      const fileRowId = duplicateModal.context.fileId as string | null;
+      const jobId = activeModal.context.jobId;
+      const fileRowId = activeModal.context.fileId as string | null;
       if (!jobId) {
-        setDuplicateModal(prev => ({ ...prev, isOpen: false }));
+        setDuplicateModals(prev => {
+          const newMap = new Map(prev);
+          newMap.delete(activeModalFileId);
+          return newMap;
+        });
         return;
       }
       const res = await fetch(`${config.apiUrl}/cancel-upload/${jobId}`, { method: 'POST', headers: { 'Content-Type': 'application/json' } });
@@ -590,27 +626,21 @@ export const EnhancedFileUpload: React.FC<EnhancedFileUploadProps> = ({ initialF
         ));
         setTimeout(() => setFiles(prev => prev.filter(f => f.id !== fileRowId)), 1200);
       }
-      setDuplicateModal(prev => ({ ...prev, isOpen: false }));
+      setDuplicateModals(prev => {
+        const newMap = new Map(prev);
+        newMap.delete(activeModalFileId);
+        return newMap;
+      });
       if (!res.ok) throw new Error('Failed to cancel upload');
       toast({ title: 'Upload Cancelled', description: 'File upload has been cancelled' });
     } catch (e) {
       toast({ variant: 'destructive', title: 'Cancel Failed', description: 'Could not cancel upload. Please try again.' });
     }
-  }, [duplicateModal, toast]);
+  }, [activeModal, activeModalFileId, duplicateModals, toast]);
 
-  const handleVersionRecommendationFeedback = async (accepted: boolean, feedback?: string) => {
-    if (!duplicateModal.data.recommendation) return;
-
-    // Note: Backend endpoint /version-recommendation-feedback was removed
-    // as version_recommendations table is deprecated. Simplified to just close modal.
-    setDuplicateModal(prev => ({ ...prev, isOpen: false }));
-    toast({
-      title: accepted ? "Recommendation Noted" : "Feedback Noted",
-      description: accepted
-        ? "Processing will continue with the recommended version"
-        : "Thank you for your feedback.",
-    });
-  };
+  // REMOVED: handleVersionRecommendationFeedback() function
+  // This was dead code for the deprecated version_recommendations system
+  // Backend endpoint /version-recommendation-feedback was removed in migration 20251013000000
 
   return (
     <div className="space-y-6">
@@ -724,10 +754,7 @@ export const EnhancedFileUpload: React.FC<EnhancedFileUploadProps> = ({ initialF
           isOpen={activeModal.isOpen}
           onClose={handleModalCancel}
           duplicateInfo={activeModal.data.duplicateInfo}
-          versionCandidates={activeModal.data.versionCandidates}
-          recommendation={activeModal.data.recommendation}
           onDecision={handleDuplicateDecision}
-          onVersionAccept={handleVersionRecommendationFeedback}
           phase={activeModal.phase}
           deltaAnalysis={activeModal.data.deltaAnalysis}
           error={activeModal.error}

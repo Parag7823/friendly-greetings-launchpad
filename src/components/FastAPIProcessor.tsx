@@ -232,7 +232,8 @@ export class FastAPIProcessor {
       ws.onclose = (event) => {
         // CRITICAL FIX: Implement reconnection logic before falling back to polling
         cleanup();
-        if (event.code !== 1000 && event.reason !== 'Processing completed' && !isCleanedUp) {
+        // FIX #8: Check cleanup flag from Map instead of local variable
+        if (event.code !== 1000 && event.reason !== 'Processing completed' && !this.wsCleanupFlags.get(jobId)) {
           // Try to reconnect before giving up
           this.attemptWebSocketReconnection(jobId, resolve, reject, 0);
         }
