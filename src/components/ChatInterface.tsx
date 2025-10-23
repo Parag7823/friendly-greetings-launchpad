@@ -438,7 +438,7 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
             </div>
             
               {/* Chat Input Area - Rounded with animated questions */}
-              <div className={`border-t border-border p-4 bg-background transition-all duration-300 ${showDataSources ? 'mr-[500px]' : ''}`}>
+              <div className="border-t border-border p-4 bg-background">
                 <div className="max-w-4xl mx-auto">
                   <div className="relative rounded-3xl border border-border bg-background overflow-hidden group">
                     {/* Minimal animated border effect */}
