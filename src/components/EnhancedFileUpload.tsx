@@ -57,18 +57,20 @@ export const EnhancedFileUpload: React.FC<EnhancedFileUploadProps> = ({ initialF
     error: string | null;
   }
 
-  const [duplicateModal, setDuplicateModal] = useState<DuplicateModalState>({
-    isOpen: false,
-    phase: 'basic_duplicate',
-    context: {
-      jobId: null,
-      fileHash: null,
-      fileId: null,
-      existingFileId: null,
-    },
-    data: {},
-    error: null,
-  });
+  // FIX #5: Use Map to track duplicate modals per file to prevent state corruption
+  const [duplicateModals, setDuplicateModals] = useState<Map<string, DuplicateModalState>>(new Map());
+  
+  // Helper to get current active modal (first open one)
+  const getActiveModal = (): [string | null, DuplicateModalState | null] => {
+    for (const [fileId, modal] of duplicateModals.entries()) {
+      if (modal.isOpen) {
+        return [fileId, modal];
+      }
+    }
+    return [null, null];
+  };
+  
+  const [activeModalFileId, activeModal] = getActiveModal();
 
   const { toast } = useToast();
   const { processFileWithFastAPI } = useFastAPIProcessor();
@@ -154,26 +156,40 @@ export const EnhancedFileUpload: React.FC<EnhancedFileUploadProps> = ({ initialF
             total_rows: f.total_rows || 0
           }));
 
-          // FIX #4: Show consolidated duplicate modal
-          setDuplicateModal(prev => ({
-            ...prev,
-            isOpen: true,
-            phase: 'basic_duplicate',
-            context: {
-              ...prev.context,
-              existingFileId: existingId,
-            },
-            data: {
-              ...prev.data,
-              duplicateInfo: {
-                message: progress.message || 'Potential duplicate detected!',
-                filename: file.name,
-                recommendation: 'replace_or_skip',
-                duplicate_files: normalizedFiles
+          // FIX #5: Store duplicate modal per file to prevent corruption
+          setDuplicateModals(prev => {
+            const newMap = new Map(prev);
+            const existingModal = newMap.get(fileId) || {
+              isOpen: false,
+              phase: 'basic_duplicate',
+              context: { jobId: null, fileHash: null, fileId: null, existingFileId: null },
+              data: {},
+              error: null
+            };
+            
+            newMap.set(fileId, {
+              ...existingModal,
+              isOpen: true,
+              phase: 'basic_duplicate',
+              context: {
+                ...existingModal.context,
+                fileId: fileId,
+                existingFileId: existingId,
               },
-              deltaAnalysis: extra.delta_analysis ? { delta_analysis: extra.delta_analysis } : prev.data.deltaAnalysis
-            }
-          }));
+              data: {
+                ...existingModal.data,
+                duplicateInfo: {
+                  message: progress.message || 'Potential duplicate detected!',
+                  filename: file.name,
+                  recommendation: 'replace_or_skip',
+                  duplicate_files: normalizedFiles
+                },
+                deltaAnalysis: extra.delta_analysis ? { delta_analysis: extra.delta_analysis } : existingModal.data.deltaAnalysis
+              }
+            });
+            
+            return newMap;
+          });
         }
         
         // Update file state with progress and enrichment details
@@ -278,6 +294,9 @@ export const EnhancedFileUpload: React.FC<EnhancedFileUploadProps> = ({ initialF
     }
   };
 
+  // FIX #1: In-memory lock for duplicate checking to prevent race conditions
+  const duplicateCheckLock = React.useRef<Set<string>>(new Set());
+
   const handleFilesSelected = useCallback(async (fileList: FileList | File[]) => {
     const fileArray = Array.from(fileList).slice(0, 15); // Limit to 15 files
 
@@ -316,7 +335,8 @@ export const EnhancedFileUpload: React.FC<EnhancedFileUploadProps> = ({ initialF
     setFiles(prev => [...prev, ...initialFileStates]);
     setIsProcessing(true);
 
-    // CONSUMER EXPERIENCE: Process up to 3 files concurrently for faster bulk uploads
+    // FIX #1: CRITICAL - Sequential duplicate checking with in-memory lock
+    // Process files concurrently BUT with sequential duplicate checking
     const MAX_CONCURRENT = 3;
     const processQueue = async () => {
       const queue = [...fileEntries];
@@ -335,8 +355,33 @@ export const EnhancedFileUpload: React.FC<EnhancedFileUploadProps> = ({ initialF
               : f
           ));
           
-          // Start processing with proper cleanup
-          const processPromise = processFile(file, id)
+          // FIX #1: Wrap processing with duplicate check lock
+          const processPromise = (async () => {
+            // Calculate file hash BEFORE acquiring lock
+            const fileBuffer = await file.arrayBuffer();
+            const hashBuffer = await crypto.subtle.digest('SHA-256', fileBuffer);
+            const hashArray = Array.from(new Uint8Array(hashBuffer));
+            const fileHash = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+            
+            // FIX #1: CRITICAL - Acquire lock for this file hash
+            // Wait if another file with same hash is being checked
+            while (duplicateCheckLock.current.has(fileHash)) {
+              await new Promise(resolve => setTimeout(resolve, 100));
+            }
+            
+            // Acquire lock
+            duplicateCheckLock.current.add(fileHash);
+            
+            try {
+              // Now process file with lock held
+              await processFile(file, id);
+            } finally {
+              // Always release lock
+              duplicateCheckLock.current.delete(fileHash);
+            }
+          })();
+          
+          const wrappedPromise = processPromise
             .then(() => {}) // Convert to Promise<void> for Map type consistency
             .catch(error => {
               console.error(`Error processing file ${file.name}:`, error);
@@ -346,7 +391,7 @@ export const EnhancedFileUpload: React.FC<EnhancedFileUploadProps> = ({ initialF
               processing.delete(id);
             });
           
-          processing.set(id, processPromise);
+          processing.set(id, wrappedPromise);
         }
         
         // Wait for at least one to complete
@@ -673,19 +718,21 @@ export const EnhancedFileUpload: React.FC<EnhancedFileUploadProps> = ({ initialF
         </Card>
       )}
 
-      {/* FIX #4: Duplicate Detection Modal with consolidated state */}
-      <DuplicateDetectionModal
-        isOpen={duplicateModal.isOpen}
-        onClose={handleModalCancel}
-        duplicateInfo={duplicateModal.data.duplicateInfo}
-        versionCandidates={duplicateModal.data.versionCandidates}
-        recommendation={duplicateModal.data.recommendation}
-        onDecision={handleDuplicateDecision}
-        onVersionAccept={handleVersionRecommendationFeedback}
-        phase={duplicateModal.phase}
-        deltaAnalysis={duplicateModal.data.deltaAnalysis}
-        error={duplicateModal.error}
-      />
+      {/* FIX #5: Duplicate Detection Modal using Map-based state */}
+      {activeModal && (
+        <DuplicateDetectionModal
+          isOpen={activeModal.isOpen}
+          onClose={handleModalCancel}
+          duplicateInfo={activeModal.data.duplicateInfo}
+          versionCandidates={activeModal.data.versionCandidates}
+          recommendation={activeModal.data.recommendation}
+          onDecision={handleDuplicateDecision}
+          onVersionAccept={handleVersionRecommendationFeedback}
+          phase={activeModal.phase}
+          deltaAnalysis={activeModal.data.deltaAnalysis}
+          error={activeModal.error}
+        />
+      )}
     </div>
   );
 };

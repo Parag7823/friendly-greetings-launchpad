@@ -110,9 +110,21 @@ class ProductionDuplicateDetectionService:
         self.batch_size = int(os.environ.get('BATCH_SIZE', 100))
         self.max_workers = int(os.environ.get('MAX_WORKERS', 4))
         
-        # In-memory cache as fallback when Redis is not available
+        # FIX #12: In-memory cache as fallback when Redis is not available
+        # Now with automatic TTL cleanup to prevent memory leaks
         self.memory_cache = {}
         self.cache_timestamps = {}
+        self.max_cache_size = int(os.environ.get('MAX_CACHE_SIZE', 10000))  # Max 10k entries
+        
+        # FIX #12: Start background cleanup task
+        import asyncio
+        self._cleanup_task = None
+        try:
+            loop = asyncio.get_event_loop()
+            self._cleanup_task = loop.create_task(self._cache_cleanup_loop())
+        except RuntimeError:
+            # No event loop running yet, will start on first use
+            logger.warning("Event loop not running, cache cleanup will start on first cache operation")
         
         # Thread pool for CPU-intensive operations
         self.executor = ThreadPoolExecutor(max_workers=self.max_workers)
@@ -127,10 +139,11 @@ class ProductionDuplicateDetectionService:
             'exact_duplicates_found': 0,
             'near_duplicates_found': 0,
             'processing_errors': 0,
-            'total_processing_time': 0
+            'total_processing_time': 0,
+            'cache_evictions': 0  # FIX #12: Track evictions
         }
         
-        logger.info("Production Duplicate Detection Service initialized")
+        logger.info("Production Duplicate Detection Service initialized with cache cleanup")
     
     def _validate_security(self, user_id: str, file_hash: str, filename: str) -> None:
         """
@@ -1398,6 +1411,66 @@ class ProductionDuplicateDetectionService:
             'avg_processing_time_ms': average_time,
             'redis_enabled': bool(self.redis_client)
         }
+    
+    async def _cache_cleanup_loop(self):
+        """
+        FIX #12: Background task to clean up expired cache entries.
+        Runs every 5 minutes to prevent memory leaks.
+        """
+        import asyncio
+        while True:
+            try:
+                await asyncio.sleep(300)  # Run every 5 minutes
+                await self._cleanup_expired_cache()
+            except asyncio.CancelledError:
+                logger.info("Cache cleanup task cancelled")
+                break
+            except Exception as e:
+                logger.error(f"Error in cache cleanup loop: {e}")
+                await asyncio.sleep(60)  # Wait 1 minute before retry
+    
+    async def _cleanup_expired_cache(self):
+        """
+        FIX #12: Remove expired entries from memory cache.
+        Also enforces max cache size using LRU eviction.
+        """
+        try:
+            current_time = time.time()
+            expired_keys = []
+            
+            # Find expired entries
+            for key, timestamp in list(self.cache_timestamps.items()):
+                if current_time - timestamp > self.cache_ttl:
+                    expired_keys.append(key)
+            
+            # Remove expired entries
+            for key in expired_keys:
+                self.memory_cache.pop(key, None)
+                self.cache_timestamps.pop(key, None)
+                self.metrics['cache_evictions'] += 1
+            
+            if expired_keys:
+                logger.info(f"Cleaned up {len(expired_keys)} expired cache entries")
+            
+            # FIX #12: Enforce max cache size using LRU eviction
+            if len(self.memory_cache) > self.max_cache_size:
+                # Sort by timestamp (oldest first)
+                sorted_keys = sorted(
+                    self.cache_timestamps.items(),
+                    key=lambda x: x[1]
+                )
+                
+                # Remove oldest entries until under limit
+                entries_to_remove = len(self.memory_cache) - self.max_cache_size
+                for key, _ in sorted_keys[:entries_to_remove]:
+                    self.memory_cache.pop(key, None)
+                    self.cache_timestamps.pop(key, None)
+                    self.metrics['cache_evictions'] += 1
+                
+                logger.info(f"Evicted {entries_to_remove} entries to enforce cache size limit")
+                
+        except Exception as e:
+            logger.error(f"Error cleaning up cache: {e}")
     
     async def clear_cache(self, user_id: Optional[str] = None) -> None:
         """Clear cache for user or all users"""

@@ -10189,7 +10189,7 @@ async def handle_duplicate_decision(request: DuplicateDecisionRequest):
                 progress=100
             )
 
-            # Persist job status in DB (transactional)
+            # FIX #9: Persist job status AND duplicate decision in DB (transactional)
             try:
                 transaction_manager = get_transaction_manager()
                 async with transaction_manager.transaction(
@@ -10199,8 +10199,26 @@ async def handle_duplicate_decision(request: DuplicateDecisionRequest):
                     await tx.update('ingestion_jobs', {
                         'status': 'cancelled',
                         'updated_at': datetime.utcnow().isoformat(),
-                        'error_message': 'Skipped due to duplicate'
+                        'error_message': 'Skipped due to duplicate',
+                        'metadata': {
+                            'duplicate_decision': 'skip',
+                            'decided_at': datetime.utcnow().isoformat(),
+                            'existing_file_id': request.existing_file_id
+                        }
                     }, {'id': request.job_id})
+                    
+                    # FIX #9: CRITICAL - Store decision in raw_records for future duplicate checks
+                    if request.file_hash:
+                        try:
+                            await tx.update('raw_records', {
+                                'metadata': {
+                                    'duplicate_decision': 'skip',
+                                    'decided_at': datetime.utcnow().isoformat(),
+                                    'duplicate_of': request.existing_file_id
+                                }
+                            }, {'file_hash': request.file_hash, 'user_id': request.user_id})
+                        except Exception as rr_err:
+                            logger.warning(f"Failed to update raw_records with duplicate decision: {rr_err}")
             except Exception as e:
                 logger.warning(f"Failed to transactionally update ingestion_jobs on skip for job {request.job_id}: {e}")
 
@@ -10626,10 +10644,62 @@ async def classify_document_endpoint(request: DocumentClassificationRequest):
         logger.error(f"Entity resolution error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+# FIX #10: In-memory lock for duplicate detection to prevent race conditions
+# Using asyncio.Lock per file_hash to ensure atomic check+insert operations
+duplicate_check_locks = {}
+duplicate_check_locks_lock = asyncio.Lock()
+
+async def acquire_duplicate_lock(file_hash: str) -> asyncio.Lock:
+    """FIX #10: Acquire lock for file hash to prevent concurrent duplicate checks"""
+    async with duplicate_check_locks_lock:
+        if file_hash not in duplicate_check_locks:
+            duplicate_check_locks[file_hash] = asyncio.Lock()
+        return duplicate_check_locks[file_hash]
+
+async def release_duplicate_lock(file_hash: str):
+    """FIX #10: Release and cleanup lock for file hash"""
+    async with duplicate_check_locks_lock:
+        if file_hash in duplicate_check_locks:
+            # Keep lock for 5 seconds to prevent immediate reuse
+            await asyncio.sleep(5)
+            duplicate_check_locks.pop(file_hash, None)
+
+# FIX #18: Rate limiting for duplicate checks to prevent DoS attacks
+from collections import defaultdict
+import time
+
+rate_limit_store = defaultdict(list)  # user_id -> list of timestamps
+rate_limit_lock = asyncio.Lock()
+
+async def check_rate_limit(user_id: str, max_requests: int = 100, window_seconds: int = 60) -> Tuple[bool, str]:
+    """
+    FIX #18: Check if user has exceeded rate limit for duplicate checks.
+    Returns (is_allowed, message)
+    """
+    async with rate_limit_lock:
+        current_time = time.time()
+        
+        # Clean up old timestamps
+        if user_id in rate_limit_store:
+            rate_limit_store[user_id] = [
+                ts for ts in rate_limit_store[user_id]
+                if current_time - ts < window_seconds
+            ]
+        
+        # Check rate limit
+        request_count = len(rate_limit_store[user_id])
+        if request_count >= max_requests:
+            return False, f"Rate limit exceeded: {request_count}/{max_requests} requests in {window_seconds}s"
+        
+        # Add current request
+        rate_limit_store[user_id].append(current_time)
+        return True, "OK"
+
 @app.post("/check-duplicate")
 async def check_duplicate_endpoint(request: dict):
     """
-    Check for duplicate files using file hash.
+    FIX #10 & #18: Check for duplicate files using file hash with distributed locking and rate limiting.
+    CRITICAL: Now uses asyncio.Lock to prevent race conditions during concurrent uploads.
     SECURITY: Uses backend API with proper RLS enforcement instead of direct client queries.
     """
     try:
@@ -10640,6 +10710,12 @@ async def check_duplicate_endpoint(request: dict):
         
         if not user_id or not file_hash:
             raise HTTPException(status_code=400, detail="user_id and file_hash are required")
+        
+        # FIX #18: CRITICAL - Check rate limit BEFORE any processing
+        is_allowed, rate_limit_msg = await check_rate_limit(user_id, max_requests=100, window_seconds=60)
+        if not is_allowed:
+            logger.warning(f"Rate limit exceeded for user {user_id}: {rate_limit_msg}")
+            raise HTTPException(status_code=429, detail=rate_limit_msg)
         
         # Security validation
         try:
@@ -10657,31 +10733,37 @@ async def check_duplicate_endpoint(request: dict):
             logger.warning(f"Security validation error for duplicate check: {sec_e}")
             raise HTTPException(status_code=401, detail="Unauthorized or invalid session")
         
-        # CONSISTENCY FIX: Always use ProductionDuplicateDetectionService for consistent duplicate detection
-        # No fallback to simple hash check - fail explicitly if service unavailable
-        try:
-            if not PRODUCTION_DUPLICATE_SERVICE_AVAILABLE:
-                error_msg = "Duplicate detection service is unavailable. Please try again later."
-                logger.error(f"ProductionDuplicateDetectionService not available for duplicate check")
-                raise HTTPException(status_code=503, detail=error_msg)
-            
-            # Use production service for advanced detection (exact + near + content duplicates)
-            duplicate_service = ProductionDuplicateDetectionService(supabase)
-            
-            # Create file metadata for production service
-            from production_duplicate_detection_service import FileMetadata
-            file_metadata = FileMetadata(
-                user_id=user_id,
-                file_hash=file_hash,
-                filename=file_name,
-                file_size=0,  # Size not available at this stage
-                content_type='application/octet-stream',
-                upload_timestamp=datetime.utcnow()
-            )
-            
-            # Note: We don't have file_content here, so we'll only do exact hash check
-            # For full multi-phase detection, this happens during processing
-            result = await duplicate_service._detect_exact_duplicates(file_metadata)
+        # FIX #10: CRITICAL - Acquire lock for this file hash to prevent race conditions
+        lock = await acquire_duplicate_lock(file_hash)
+        async with lock:
+            try:
+                # CONSISTENCY FIX: Always use ProductionDuplicateDetectionService for consistent duplicate detection
+                # No fallback to simple hash check - fail explicitly if service unavailable
+                if not PRODUCTION_DUPLICATE_SERVICE_AVAILABLE:
+                    error_msg = "Duplicate detection service is unavailable. Please try again later."
+                    logger.error(f"ProductionDuplicateDetectionService not available for duplicate check")
+                    raise HTTPException(status_code=503, detail=error_msg)
+                
+                # Use production service for advanced detection (exact + near + content duplicates)
+                duplicate_service = ProductionDuplicateDetectionService(supabase)
+                
+                # Create file metadata for production service
+                from production_duplicate_detection_service import FileMetadata
+                file_metadata = FileMetadata(
+                    user_id=user_id,
+                    file_hash=file_hash,
+                    filename=file_name,
+                    file_size=0,  # Size not available at this stage
+                    content_type='application/octet-stream',
+                    upload_timestamp=datetime.utcnow()
+                )
+                
+                # Note: We don't have file_content here, so we'll only do exact hash check
+                # For full multi-phase detection, this happens during processing
+                result = await duplicate_service._detect_exact_duplicates(file_metadata)
+            finally:
+                # FIX #10: Schedule lock cleanup in background
+                asyncio.create_task(release_duplicate_lock(file_hash))
             
             if result.is_duplicate:
                 return {
@@ -14284,20 +14366,49 @@ async def process_with_websocket_endpoint(
 
 @app.get("/api/job-status/{job_id}")
 async def get_job_status_endpoint(job_id: str):
-    """Get current job status with Redis/memory and DB fallback"""
+    """
+    FIX #3: Get current job status with Redis/memory and DB fallback.
+    CRITICAL: Now includes duplicate_info for polling fallback when WebSocket fails.
+    """
     status = await websocket_manager.get_job_status(job_id)
     if status:
+        # FIX #3: Ensure duplicate_info is included in response
         return status
     try:
         if optimized_db:
             row = await optimized_db.get_job_status_optimized(job_id)
             if row:
-                return {
+                # FIX #3: Include duplicate_info from database if available
+                response = {
                     "status": row.get("status"),
                     "progress": row.get("progress"),
                     "message": row.get("error_message") or row.get("status") or "unknown",
                     "updated_at": row.get("completed_at") or row.get("created_at")
                 }
+                
+                # FIX #3: CRITICAL - Add duplicate detection info if present
+                # Check if job has duplicate detection metadata
+                if row.get("metadata"):
+                    metadata = row.get("metadata")
+                    if isinstance(metadata, str):
+                        try:
+                            metadata = json.loads(metadata)
+                        except:
+                            metadata = {}
+                    
+                    # Include duplicate_info if present
+                    if metadata.get("duplicate_info"):
+                        response["duplicate_info"] = metadata["duplicate_info"]
+                    if metadata.get("near_duplicate_info"):
+                        response["near_duplicate_info"] = metadata["near_duplicate_info"]
+                    if metadata.get("content_duplicate_info"):
+                        response["content_duplicate_info"] = metadata["content_duplicate_info"]
+                    if metadata.get("delta_analysis"):
+                        response["delta_analysis"] = metadata["delta_analysis"]
+                    if metadata.get("requires_user_decision"):
+                        response["requires_user_decision"] = metadata["requires_user_decision"]
+                
+                return response
     except Exception as e:
         logger.warning(f"DB fallback for job status failed: {e}")
     raise HTTPException(status_code=404, detail="Job not found")

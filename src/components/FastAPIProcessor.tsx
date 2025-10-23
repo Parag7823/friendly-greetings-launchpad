@@ -141,6 +141,9 @@ export class FastAPIProcessor {
     }
   }
 
+  // FIX #8: Move isCleanedUp outside to prevent multiple cleanup calls
+  private wsCleanupFlags = new Map<string, boolean>();
+
   private async connectWebSocket(jobId: string): Promise<any> {
     return new Promise((resolve, reject) => {
       // Build WS URL from centralized config
@@ -149,16 +152,25 @@ export class FastAPIProcessor {
       
       const ws = new WebSocket(wsUrl);
       let timeoutId: NodeJS.Timeout;
-      let isCleanedUp = false;
+      
+      // FIX #8: Use Map-based flag to prevent multiple cleanup calls
+      this.wsCleanupFlags.set(jobId, false);
 
       // Cleanup function to prevent memory leaks
       const cleanup = () => {
-        if (isCleanedUp) return;
-        isCleanedUp = true;
+        // FIX #8: Check flag from Map instead of local variable
+        if (this.wsCleanupFlags.get(jobId)) return;
+        this.wsCleanupFlags.set(jobId, true);
+        
         clearTimeout(timeoutId);
         if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
           ws.close();
         }
+        
+        // FIX #8: Clean up flag after a delay to prevent immediate reuse
+        setTimeout(() => {
+          this.wsCleanupFlags.delete(jobId);
+        }, 1000);
       };
 
       // Set a timeout for the connection (60 seconds for better large file handling)

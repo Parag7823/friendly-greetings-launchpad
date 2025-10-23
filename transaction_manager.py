@@ -192,11 +192,38 @@ class DatabaseTransactionManager:
                 pass  # Best effort
     
     async def _rollback_operation(self, operation: TransactionOperation):
-        """Rollback a single operation"""
+        """
+        FIX #4: Rollback a single operation with comprehensive cleanup.
+        CRITICAL: Now includes cleanup for relationship tables.
+        """
         if operation.operation == 'insert':
             # Delete the inserted record
             if 'id' in operation.rollback_data:
-                self.supabase.table(operation.table).delete().eq('id', operation.rollback_data['id']).execute()
+                record_id = operation.rollback_data['id']
+                self.supabase.table(operation.table).delete().eq('id', record_id).execute()
+                
+                # FIX #4: CRITICAL - Clean up related records in relationship tables
+                if operation.table == 'raw_events':
+                    # Clean up cross_platform_relationships
+                    try:
+                        self.supabase.table('cross_platform_relationships').delete().eq('event_id_1', record_id).execute()
+                        self.supabase.table('cross_platform_relationships').delete().eq('event_id_2', record_id).execute()
+                    except Exception as e:
+                        logger.warning(f"Failed to clean up cross_platform_relationships for event {record_id}: {e}")
+                    
+                    # Clean up relationship_instances
+                    try:
+                        self.supabase.table('relationship_instances').delete().eq('event_id_1', record_id).execute()
+                        self.supabase.table('relationship_instances').delete().eq('event_id_2', record_id).execute()
+                    except Exception as e:
+                        logger.warning(f"Failed to clean up relationship_instances for event {record_id}: {e}")
+                
+                elif operation.table == 'normalized_entities':
+                    # Clean up entity_matches
+                    try:
+                        self.supabase.table('entity_matches').delete().eq('entity_id', record_id).execute()
+                    except Exception as e:
+                        logger.warning(f"Failed to clean up entity_matches for entity {record_id}: {e}")
         
         elif operation.operation == 'update':
             # Restore original data

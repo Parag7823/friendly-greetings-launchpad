@@ -276,7 +276,11 @@ class AuthenticationValidator:
         if not user_id or not session_token:
             return False, "Missing user ID or session token"
 
-        # 1) Try Supabase JWT validation (preferred in production)
+        # FIX #14: Try Supabase JWT validation (preferred in production)
+        # CRITICAL: Only fall back to in-memory for specific errors, not all exceptions
+        supabase_validation_failed = False
+        supabase_error_reason = None
+        
         try:
             supabase_url = os.environ.get("SUPABASE_URL")
             # apikey header required by Supabase Auth endpoints
@@ -301,10 +305,27 @@ class AuthenticationValidator:
                             return True, "Session valid"
                         else:
                             return False, "Token user mismatch"
-                    # For 401/403 keep falling back to in-memory session check
-        except Exception:
-            # Network or parse error; fall back to in-memory session logic
-            pass
+                    elif resp.status_code in (401, 403):
+                        # FIX #14: CRITICAL - Explicit auth failure, don't fall back
+                        return False, f"Supabase auth failed: {resp.status_code}"
+                    else:
+                        # FIX #14: Other errors (5xx, timeouts) can fall back
+                        supabase_validation_failed = True
+                        supabase_error_reason = f"HTTP {resp.status_code}"
+        except httpx.TimeoutException as e:
+            # FIX #14: Timeout is acceptable for fallback
+            supabase_validation_failed = True
+            supabase_error_reason = "timeout"
+            logger.warning(f"Supabase validation timeout for user {user_id}: {e}")
+        except httpx.NetworkError as e:
+            # FIX #14: Network error is acceptable for fallback
+            supabase_validation_failed = True
+            supabase_error_reason = "network_error"
+            logger.warning(f"Supabase validation network error for user {user_id}: {e}")
+        except Exception as e:
+            # FIX #14: CRITICAL - Log unexpected errors but DON'T fall back silently
+            logger.error(f"Unexpected error in Supabase validation for user {user_id}: {e}")
+            return False, f"Session validation error: {type(e).__name__}"
 
         # 2) Fallback to in-memory sessions (dev/testing compatibility)
         if user_id not in self.active_sessions:
