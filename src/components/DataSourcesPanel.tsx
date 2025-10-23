@@ -221,8 +221,14 @@ export const DataSourcesPanel = ({ isOpen, onClose }: DataSourcesPanelProps) => 
       const handleFileUpload = async (event: any) => {
         const files = event.detail?.files;
         if (files && files.length > 0) {
-          // Process each file
-          for (const file of files) {
+          // Show toast for batch upload
+          toast({
+            title: 'Uploading Files',
+            description: `Processing ${files.length} file${files.length > 1 ? 's' : ''}...`
+          });
+          
+          // Process all files in parallel (not sequentially)
+          const uploadPromises = Array.from(files).map(async (file: File) => {
             try {
               await processFileWithFastAPI(
                 file,
@@ -230,30 +236,39 @@ export const DataSourcesPanel = ({ isOpen, onClose }: DataSourcesPanelProps) => 
                 (progress) => {
                   // Progress callback
                   console.log(`Processing ${file.name}:`, progress);
+                  
+                  // Refresh file list on any progress update to show all files
+                  loadFiles();
+                  
                   if (progress.status === 'completed') {
-                    loadFiles(); // Refresh file list
                     toast({
-                      title: 'File Uploaded',
-                      description: `${file.name} has been processed successfully`
+                      title: 'File Completed',
+                      description: `${file.name} processed successfully`
                     });
                   } else if (progress.status === 'error') {
                     toast({
                       title: 'Upload Failed',
-                      description: `Failed to process ${file.name}`,
+                      description: `${file.name} failed to process`,
                       variant: 'destructive'
                     });
                   }
                 }
               );
             } catch (error) {
-              console.error('File upload error:', error);
+              console.error(`File upload error for ${file.name}:`, error);
               toast({
                 title: 'Upload Failed',
-                description: `Failed to process ${file.name}`,
+                description: `${file.name} failed to process`,
                 variant: 'destructive'
               });
             }
-          }
+          });
+          
+          // Wait for all uploads to complete
+          await Promise.allSettled(uploadPromises);
+          
+          // Final refresh
+          loadFiles();
         }
       };
       window.addEventListener('files-selected-for-upload', handleFileUpload as EventListener);
