@@ -70,14 +70,14 @@ const INTEGRATIONS: Integration[] = [
     category: 'accounting'
   },
   
-  // Cloud Storage
+  // Data Sources (Cloud Storage + Email)
   { 
     id: 'google-drive', 
     name: 'Google Drive', 
     provider: 'google-drive',
     description: 'Access files from Google Drive',
     icon: <img src={googleDriveLogo} alt="Google Drive" className="w-5 h-5 object-contain" />,
-    category: 'storage'
+    category: 'data-sources'
   },
   { 
     id: 'dropbox', 
@@ -85,17 +85,15 @@ const INTEGRATIONS: Integration[] = [
     provider: 'dropbox',
     description: 'Sync files from Dropbox',
     icon: <img src={dropboxLogo} alt="Dropbox" className="w-5 h-5 object-contain" />,
-    category: 'storage'
+    category: 'data-sources'
   },
-  
-  // Email
   { 
     id: 'google-mail', 
     name: 'Gmail', 
     provider: 'google-mail',
     description: 'Extract attachments from Gmail',
     icon: <img src={gmailLogo} alt="Gmail" className="w-5 h-5 object-contain" />,
-    category: 'email'
+    category: 'data-sources'
   },
   { 
     id: 'zoho-mail', 
@@ -103,7 +101,7 @@ const INTEGRATIONS: Integration[] = [
     provider: 'zoho-mail',
     description: 'Get attachments from Zoho Mail',
     icon: <img src={zohoMailLogo} alt="Zoho Mail" className="w-5 h-5 object-contain" />,
-    category: 'email'
+    category: 'data-sources'
   },
   
   // Payment
@@ -127,8 +125,7 @@ const INTEGRATIONS: Integration[] = [
 
 const CATEGORY_INFO = {
   accounting: { name: 'Accounting Platforms', icon: <Calculator className="w-4 h-4" /> },
-  storage: { name: 'Cloud Storage', icon: <HardDrive className="w-4 h-4" /> },
-  email: { name: 'Email Platforms', icon: <Mail className="w-4 h-4" /> },
+  'data-sources': { name: 'Cloud & Email', icon: <HardDrive className="w-4 h-4" /> },
   payment: { name: 'Payment Processors', icon: <CreditCard className="w-4 h-4" /> },
 };
 
@@ -143,7 +140,7 @@ export const DataSourcesPanel = ({ isOpen, onClose }: DataSourcesPanelProps) => 
   const [syncing, setSyncing] = useState<string | null>(null);
   const [connecting, setConnecting] = useState<string | null>(null);
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(
-    new Set(['accounting', 'storage', 'email', 'payment'])
+    new Set(['accounting', 'data-sources', 'payment'])
   );
 
   // Load connections
