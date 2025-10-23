@@ -395,7 +395,7 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
               </div>
 
               {/* Chat Messages Area */}
-              <div className="flex-1 overflow-y-auto p-4">
+              <div className={`flex-1 overflow-y-auto p-4 transition-all duration-300 ${showDataSources ? 'pr-8' : ''}`}>
               {messages.length === 0 ? (
                 <div className="h-full flex items-center justify-center">
                   <div className="max-w-2xl w-full space-y-6 px-4">
