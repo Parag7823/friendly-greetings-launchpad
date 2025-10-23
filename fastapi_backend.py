@@ -4214,8 +4214,8 @@ async def _paypal_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> Dic
 class VendorStandardizer:
     """Handles vendor name standardization and cleaning"""
     
-    def __init__(self, openai_client, cache_client=None):
-        self.openai = openai_client
+    def __init__(self, anthropic_client, cache_client=None):
+        self.anthropic = anthropic_client
         # Use centralized AIClassificationCache for persistent, shared caching
         self.cache = cache_client or safe_get_ai_cache()
         self.common_suffixes = [
@@ -4353,12 +4353,12 @@ class VendorStandardizer:
                     if time_since_last < min_interval:
                         await asyncio.sleep(min_interval - time_since_last)
                 
-                # Make the AI call
-                response = self.openai.chat.completions.create(
-                    model="gpt-4o-mini",
-                    messages=[{"role": "user", "content": prompt}],
+                # Make the AI call using Anthropic
+                response = self.anthropic.messages.create(
+                    model="claude-3-5-haiku-20241022",
+                    max_tokens=200,
                     temperature=0.1,
-                    max_tokens=200
+                    messages=[{"role": "user", "content": prompt}]
                 )
                 
                 # Update last call time
@@ -4725,8 +4725,8 @@ class DataEnrichmentProcessor:
     - Security validations and audit logging
     """
     
-    def __init__(self, openai_client, cache_client=None, config=None):
-        self.openai = openai_client
+    def __init__(self, anthropic_client, cache_client=None, config=None):
+        self.anthropic = anthropic_client
         self.cache = cache_client  # Will be initialized with ProductionCache
         self.config = config or self._get_default_config()
         
@@ -4747,7 +4747,7 @@ class DataEnrichmentProcessor:
         
         # Initialize components with error handling
         try:
-            self.vendor_standardizer = VendorStandardizer(openai_client, cache_client=safe_get_ai_cache())
+            self.vendor_standardizer = VendorStandardizer(anthropic_client, cache_client=safe_get_ai_cache())
             self.platform_id_extractor = PlatformIDExtractor()
             self.universal_extractors = UniversalExtractors(cache_client=safe_get_ai_cache())
             # FIX #1: Don't initialize platform detector here - will be passed from Phase 3
@@ -6446,11 +6446,11 @@ class AIRowClassifier:
     """
     AI-powered row classification for financial data processing.
     
-    Uses OpenAI's language models to intelligently classify and categorize
+    Uses Anthropic's Claude models to intelligently classify and categorize
     financial data rows, providing enhanced data understanding and processing.
     """
-    def __init__(self, openai_client, entity_resolver = None):
-        self.openai = openai_client
+    def __init__(self, anthropic_client, entity_resolver = None):
+        self.anthropic = anthropic_client
         self.entity_resolver = entity_resolver
     
     async def classify_row_with_ai(self, row: pd.Series, platform_info: Dict, column_names: List[str], file_context: Dict = None) -> Dict[str, Any]:
@@ -6514,15 +6514,15 @@ class AIRowClassifier:
             7. Return ONLY valid JSON, no extra text
             """
             
-            # Get AI response
-            response = self.openai.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[{"role": "user", "content": prompt}],
+            # Get AI response using Anthropic
+            response = self.anthropic.messages.create(
+                model="claude-3-5-haiku-20241022",
+                max_tokens=1000,
                 temperature=0.1,
-                max_tokens=1000
+                messages=[{"role": "user", "content": prompt}]
             )
             
-            result = response.choices[0].message.content.strip()
+            result = response.content[0].text.strip()
             
             # Clean and parse JSON response
             cleaned_result = result.strip()
@@ -6747,8 +6747,8 @@ class BatchAIRowClassifier:
     - Complex rows (many fields): 10 rows/batch
     """
     
-    def __init__(self, openai_client):
-        self.openai = openai_client
+    def __init__(self, anthropic_client):
+        self.anthropic = anthropic_client
         self.cache = {}  # Simple cache for similar rows
         
         # OPTIMIZATION 2: Dynamic batch sizing parameters
@@ -6854,26 +6854,19 @@ class BatchAIRowClassifier:
             
             prompt += """
             
-            Return ONLY a valid JSON array with one classification object per row, like:
-            [
-                {"row_type": "payroll_expense", "category": "payroll", ...},
-                {"row_type": "revenue_income", "category": "revenue", ...},
-                ...
-            ]
-            
-            IMPORTANT: Return exactly one classification object per row, in the same order.
+            Return ONLY a valid JSON array with one classification object per row, in the same order.
             """
             
-            # Get AI response
+            # Get AI response using Anthropic
             try:
-                response = self.openai.chat.completions.create(
-                    model="gpt-4o-mini",
-                    messages=[{"role": "user", "content": prompt}],
+                response = self.anthropic.messages.create(
+                    model="claude-3-5-haiku-20241022",
+                    max_tokens=2000,
                     temperature=0.1,
-                    max_tokens=2000
+                    messages=[{"role": "user", "content": prompt}]
                 )
                 
-                result = response.choices[0].message.content.strip()
+                result = response.content[0].text.strip()
                 
                 if not result:
                     logger.warning("AI returned empty response, using fallback")
@@ -8050,7 +8043,7 @@ class ExcelProcessor:
         if cached_platform:
             platform_info = cached_platform
         else:
-            platform_info = self.platform_detector.detect_platform(first_sheet, filename)
+            platform_info = self.universal_platform_detector.detect_platform(first_sheet, filename)
             try:
                 await ai_cache.store_classification(platform_cache_key, platform_info, "platform_detection", ttl_hours=48)
             except Exception as cache_err:
@@ -8082,8 +8075,8 @@ class ExcelProcessor:
         
         # Initialize EntityResolver and AI classifier with Supabase client
         self.entity_resolver = EntityResolver(supabase_client=supabase, cache_client=safe_get_ai_cache())
-        self.ai_classifier = AIRowClassifier(self.openai, self.entity_resolver)
-        self.row_processor = RowProcessor(self.platform_detector, self.ai_classifier, self.enrichment_processor)
+        self.ai_classifier = AIRowClassifier(self.anthropic, self.entity_resolver)
+        self.row_processor = RowProcessor(self.universal_platform_detector, self.ai_classifier, self.enrichment_processor)
         
         # Step 3: Start atomic transaction for all database operations
         await manager.send_update(job_id, {
@@ -8297,7 +8290,7 @@ class ExcelProcessor:
                         row_platform_series = None
                         try:
                             pattern_dict = {}
-                            detector_patterns = getattr(self.platform_detector, 'platform_patterns', {}) or {}
+                            detector_patterns = getattr(self.universal_platform_detector, 'platform_patterns', {}) or {}
                             for plat, meta in detector_patterns.items():
                                 try:
                                     keywords = []
@@ -8578,7 +8571,7 @@ class ExcelProcessor:
         
         # Add enhanced platform information if detected
         if platform_info.get('platform') != 'unknown':
-            platform_details = self.platform_detector.get_platform_info(platform_info['platform'])
+            platform_details = self.universal_platform_detector.get_platform_info(platform_info['platform'])
             insights['platform_details'] = {
                 'name': platform_details['name'],
                 'description': platform_details['description'],
