@@ -182,7 +182,10 @@ export const EnhancedFileUpload: React.FC<EnhancedFileUploadProps> = ({ initialF
                   message: progress.message || 'Potential duplicate detected!',
                   filename: file.name,
                   recommendation: 'replace_or_skip',
-                  duplicate_files: normalizedFiles
+                  duplicate_files: normalizedFiles,
+                  // CRITICAL FIX: Pass duplicate_type and similarity_score from backend
+                  duplicate_type: extra.duplicate_info?.duplicate_type || extra.near_duplicate_info?.duplicate_type || 'exact',
+                  similarity_score: extra.duplicate_info?.similarity_score || extra.near_duplicate_info?.similarity_score || 1.0
                 },
                 deltaAnalysis: extra.delta_analysis ? { delta_analysis: extra.delta_analysis } : existingModal.data.deltaAnalysis
               }
@@ -261,7 +264,10 @@ export const EnhancedFileUpload: React.FC<EnhancedFileUploadProps> = ({ initialF
                 message: result.message || 'Duplicate or similar file detected!',
                 filename: file.name,
                 recommendation: result.duplicate_analysis?.recommendation || 'replace_or_skip',
-                duplicate_files: result.duplicate_analysis?.duplicate_files || []
+                duplicate_files: result.duplicate_analysis?.duplicate_files || [],
+                // CRITICAL FIX: Pass duplicate_type and similarity_score from backend response
+                duplicate_type: result.duplicate_analysis?.duplicate_type || (result as any).duplicate_type || 'exact',
+                similarity_score: result.duplicate_analysis?.similarity_score || (result as any).similarity_score || 1.0
               },
               deltaAnalysis: (result as any).delta_analysis ? { delta_analysis: (result as any).delta_analysis } : null
             },
