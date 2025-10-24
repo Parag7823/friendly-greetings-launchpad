@@ -48,6 +48,21 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
     "Compare Q1 vs Q2 profitability"
   ];
 
+  // Initialize chat ID from URL or create new one
+  useEffect(() => {
+    if (!user?.id) return;
+    
+    const chatIdFromUrl = searchParams.get('chat_id');
+    if (chatIdFromUrl) {
+      setCurrentChatId(chatIdFromUrl);
+    } else if (!currentChatId) {
+      // Generate new chat ID
+      const newChatId = `chat_${Date.now()}`;
+      setCurrentChatId(newChatId);
+      setSearchParams({ chat_id: newChatId });
+    }
+  }, [user?.id]);
+
   // Load chat history on mount
   useEffect(() => {
     const loadChatHistory = async () => {
@@ -245,7 +260,9 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
   // Function to reset chat for new conversation
   const resetChat = () => {
     setMessages([]);
-    setCurrentChatId(null);
+    const newChatId = `chat_${Date.now()}`;
+    setCurrentChatId(newChatId);
+    setSearchParams({ chat_id: newChatId });
     setIsNewChat(true);
   };
 
