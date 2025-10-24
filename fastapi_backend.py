@@ -4370,9 +4370,9 @@ class VendorStandardizer:
                     if time_since_last < min_interval:
                         await asyncio.sleep(min_interval - time_since_last)
                 
-                # Make the AI call using Anthropic
+                # Make the AI call using Anthropic (Haiku for fast vendor standardization)
                 response = self.anthropic.messages.create(
-                    model="claude-3-5-sonnet-20241022",
+                    model="claude-3-5-haiku-20241022",
                     max_tokens=200,
                     temperature=0.1,
                     messages=[{"role": "user", "content": prompt}]
@@ -6160,9 +6160,9 @@ class DataEnrichmentProcessor:
             # Prepare AI prompt
             prompt = self._build_ai_classification_prompt(document_features, pattern_classification)
             
-            # Call AI service (using Claude 3.5 Sonnet for superior accuracy)
+            # Call AI service (using Haiku for fast document classification)
             response = self.anthropic.messages.create(
-                model="claude-3-5-sonnet-20241022",
+                model="claude-3-5-haiku-20241022",
                 max_tokens=2000,
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.1
@@ -6534,8 +6534,8 @@ class AIRowClassifier:
             
             # Get AI response using Anthropic
             response = self.anthropic.messages.create(
-                model="claude-3-5-sonnet-20241022",
-                max_tokens=1000,
+                model="claude-3-5-haiku-20241022",  # Using Haiku for fast, cheap batch classification
+                max_tokens=2000,
                 temperature=0.1,
                 messages=[{"role": "user", "content": prompt}]
             )
@@ -6770,10 +6770,10 @@ class BatchAIRowClassifier:
         self.cache = {}  # Simple cache for similar rows
         
         # OPTIMIZATION 2: Dynamic batch sizing parameters
-        self.min_batch_size = 10  # Complex rows
-        self.default_batch_size = 20  # Normal rows
-        self.max_batch_size = 50  # Simple rows
-        self.max_concurrent_batches = 3  # Process 3 batches simultaneously
+        self.min_batch_size = 30  # Complex rows (for files with 15+ columns)
+        self.default_batch_size = 75  # Normal rows (for files with 6-14 columns)
+        self.max_batch_size = 150  # Simple rows (for files with ≤5 columns)
+        self.max_concurrent_batches = 5  # Process 5 batches simultaneously
         
         # Complexity thresholds
         self.simple_row_field_threshold = 5  # <= 5 fields = simple
@@ -6878,7 +6878,7 @@ class BatchAIRowClassifier:
             # Get AI response using Anthropic
             try:
                 response = self.anthropic.messages.create(
-                    model="claude-3-5-sonnet-20241022",
+                    model="claude-3-5-haiku-20241022",  # Using Haiku for fast, cheap batch classification
                     max_tokens=2000,
                     temperature=0.1,
                     messages=[{"role": "user", "content": prompt}]
@@ -10664,7 +10664,7 @@ async def generate_chat_title(request: dict):
         anthropic_client = AsyncAnthropic(api_key=os.getenv('ANTHROPIC_API_KEY'))
         
         response = await anthropic_client.messages.create(
-            model="claude-3-5-sonnet-20241022",
+            model="claude-3-5-haiku-20241022",  # Using Haiku for simple title generation
             max_tokens=50,
             system="Generate a concise, descriptive title (max 6 words) for this financial question. Return ONLY the title, no quotes or extra text.",
             messages=[

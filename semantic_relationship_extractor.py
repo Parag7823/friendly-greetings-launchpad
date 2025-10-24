@@ -396,7 +396,7 @@ Provide ONLY the JSON response, no additional text."""
             self.metrics['ai_calls'] += 1
             
             response = await self.anthropic.messages.create(
-                model="claude-3-5-sonnet-20241022",
+                model="claude-3-5-haiku-20241022",  # Using Haiku for fast relationship extraction
                 system="You are a financial relationship analyst. Provide accurate, well-reasoned analysis in JSON format.",
                 messages=[
                     {

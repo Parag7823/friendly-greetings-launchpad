@@ -946,7 +946,7 @@ class UniversalDocumentClassifierOptimized:
                 return [self._pattern_classify_row(row, platform_info, column_names) for row in rows]
             
             response = await self.anthropic.messages.create(
-                model='claude-3-5-sonnet-20241022',
+                model='claude-3-5-haiku-20241022',  # Using Haiku for fast, cheap row classification
                 max_tokens=2000,
                 temperature=0.1,
                 system="You are a financial data classification expert. Classify transaction rows accurately and return valid JSON.",

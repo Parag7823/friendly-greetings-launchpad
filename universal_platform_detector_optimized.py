@@ -520,7 +520,7 @@ class UniversalPlatformDetectorOptimized:
             
             result_text = await self._safe_anthropic_call(
                 self.anthropic,
-                'claude-3-5-sonnet-20241022',
+                'claude-3-5-haiku-20241022',  # Using Haiku for fast platform detection
                 [{"role": "user", "content": prompt}],
                 self.config['ai_temperature'],
                 self.config['ai_max_tokens']
