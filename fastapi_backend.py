@@ -8307,7 +8307,7 @@ class ExcelProcessor:
                         
                         # Batch classify rows (single AI call for entire batch)
                         batch_classifications = await self.batch_classifier.classify_rows_batch(
-                            batch_rows_data, platform_info, column_names, user_id
+                            batch_rows_data, platform_info, column_names
                         )
                         
                         # Batch enrich rows (concurrent processing with semaphore)
