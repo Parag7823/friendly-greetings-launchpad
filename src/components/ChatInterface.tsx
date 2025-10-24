@@ -55,13 +55,15 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
     const chatIdFromUrl = searchParams.get('chat_id');
     if (chatIdFromUrl) {
       setCurrentChatId(chatIdFromUrl);
-    } else if (!currentChatId) {
-      // Generate new chat ID
+      setIsNewChat(false); // Existing chat
+    } else {
+      // Generate new chat ID and persist in URL
       const newChatId = `chat_${Date.now()}`;
       setCurrentChatId(newChatId);
-      setSearchParams({ chat_id: newChatId });
+      setIsNewChat(true); // New chat
+      setSearchParams({ chat_id: newChatId }, { replace: true }); // Replace to avoid history pollution
     }
-  }, [user?.id]);
+  }, [user?.id, searchParams]);
 
   // Load chat history on mount
   useEffect(() => {
@@ -325,6 +327,9 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
               chatId = titleData.chat_id;
               setCurrentChatId(chatId);
               setIsNewChat(false);
+              
+              // Update URL with the chat ID from backend
+              setSearchParams({ chat_id: chatId }, { replace: true });
               
               // Notify parent component about new chat
               if (onNavigate) {
