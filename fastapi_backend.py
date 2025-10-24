@@ -11056,17 +11056,24 @@ async def check_duplicate_endpoint(request: dict):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/process-excel")
-async def process_excel_endpoint(request: dict):
+async def process_excel_endpoint(request: Request):
     """Start processing job from Supabase Storage and stream progress via WebSocket."""
     user_id = None  # Initialize for finally block
     try:
         # Critical: Check database health before processing
         check_database_health()
 
-        user_id = request.get('user_id')
-        job_id = request.get('job_id')
-        storage_path = request.get('storage_path')
-        filename = request.get('file_name') or 'uploaded_file'
+        # CRITICAL FIX: Parse JSON body from Request object
+        try:
+            body = await request.json()
+        except Exception as e:
+            logger.error(f"Failed to parse request body: {e}")
+            raise HTTPException(status_code=400, detail="Invalid JSON body")
+
+        user_id = body.get('user_id')
+        job_id = body.get('job_id')
+        storage_path = body.get('storage_path')
+        filename = body.get('file_name') or 'uploaded_file'
         if not user_id or not job_id or not storage_path:
             raise HTTPException(status_code=400, detail="user_id, job_id, and storage_path are required")
         
@@ -11082,7 +11089,7 @@ async def process_excel_endpoint(request: dict):
             valid, violations = await security_validator.validate_request({
                 'endpoint': 'process-excel',
                 'user_id': user_id,
-                'session_token': request.get('session_token')
+                'session_token': body.get('session_token')
             }, SecurityContext(user_id=user_id))
             if not valid:
                 logger.warning(f"Security validation failed for job {job_id}: {violations}")
@@ -11095,11 +11102,11 @@ async def process_excel_endpoint(request: dict):
         
         # File metadata validation at entry point (before downloading)
         # Get file size from request if provided, otherwise will validate after download
-        file_size_hint = request.get('file_size', 0)
+        file_size_hint = body.get('file_size', 0)
         file_valid, file_violations = security_validator.validate_file_metadata(
             filename=filename,
             file_size=file_size_hint if file_size_hint > 0 else 0,
-            content_type=request.get('content_type')
+            content_type=body.get('content_type')
         )
         if not file_valid:
             error_msg = f"Invalid file: {'; '.join(file_violations)}"
@@ -11108,8 +11115,8 @@ async def process_excel_endpoint(request: dict):
 
         # Early duplicate check based on file hash
         # NOTE: We verify the hash server-side after download for security
-        client_provided_hash = request.get('file_hash')  # Client hint, will be verified
-        resume_after_duplicate = request.get('resume_after_duplicate')
+        client_provided_hash = body.get('file_hash')  # Client hint, will be verified
+        resume_after_duplicate = body.get('resume_after_duplicate')
         
         # MEDIUM FIX #1: Validate file size BEFORE download to prevent DoS
         # Client provides file_size hint which we validate first (defense in depth)
