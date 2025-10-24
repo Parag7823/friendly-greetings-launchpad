@@ -730,10 +730,12 @@ else:
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=ALLOWED_ORIGINS,  # Configured via CORS_ALLOWED_ORIGINS env var
+    allow_origins=ALLOWED_ORIGINS if ALLOWED_ORIGINS != ["*"] else ["*"],  # Configured via CORS_ALLOWED_ORIGINS env var
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["*"],  # Allow all response headers to be exposed
+    max_age=3600,  # Cache preflight requests for 1 hour
 )
 
 # Startup environment validation
@@ -4313,7 +4315,7 @@ class VendorStandardizer:
                         classification_type='vendor_standardization',
                         ttl_hours=48,
                         confidence_score=ai_result.get('confidence', 0.7),
-                        model_version='gpt-4o-mini'
+                        model_version='claude-haiku-4-20250514'
                     )
                 except Exception as e:
                     logger.warning(f"Cache storage failed: {e}")
@@ -6158,14 +6160,15 @@ class DataEnrichmentProcessor:
             # Prepare AI prompt
             prompt = self._build_ai_classification_prompt(document_features, pattern_classification)
             
-            # Call AI service (using GPT-4o for better accuracy)
-            response = self.openai.chat.completions.create(
-                model="gpt-4o",
+            # Call AI service (using Claude Haiku 4.x for speed and accuracy)
+            response = self.anthropic.messages.create(
+                model="claude-haiku-4-20250514",
+                max_tokens=2000,
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.1
             )
             
-            result = response.choices[0].message.content
+            result = response.content[0].text
             
             # Parse AI response
             ai_result = self._parse_ai_classification_response(result)

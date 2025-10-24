@@ -115,7 +115,7 @@ class SemanticRelationshipExtractor:
             'cache_ttl_hours': 48,  # Semantic relationships are stable
             'enable_embeddings': True,
             'embedding_model': 'text-embedding-3-small',
-            'semantic_model': 'gpt-4o',  # Best for semantic understanding
+            'semantic_model': 'claude-haiku-4-20250514',  # Fast and accurate for semantic understanding
             'temperature': 0.1,  # Low temperature for consistency
             'max_tokens': 500,
             'confidence_threshold': 0.7,

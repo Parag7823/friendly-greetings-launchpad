@@ -22,13 +22,25 @@ class NangoClient:
             raise ValueError("NANGO_SECRET_KEY env var not set")
 
     def _headers(self, provider_config_key: Optional[str] = None, connection_id: Optional[str] = None) -> Dict[str, str]:
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        if not self.secret_key:
+            logger.error("❌ NANGO_SECRET_KEY is not set!")
+        else:
+            logger.info(f"✅ Nango API Key present (length: {len(self.secret_key)})")
+        
         headers = {
-            "Authorization": f"Bearer {self.secret_key}",
+            'Authorization': f'Bearer {self.secret_key}',
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
         }
+        
         if provider_config_key:
             headers["Provider-Config-Key"] = provider_config_key
         if connection_id:
             headers["Connection-Id"] = connection_id
+            
         return headers
 
     async def create_connect_session(self, end_user: Dict[str, Any], allowed_integrations: list[str]) -> Dict[str, Any]:
@@ -50,8 +62,20 @@ class NangoClient:
             "end_user": end_user,
             "allowed_integrations": allowed_integrations,
         }
+        
+        # Debug logging
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(f"Nango API Request - URL: {url}")
+        logger.info(f"Nango API Request - Payload: {payload}")
+        
         async with httpx.AsyncClient(timeout=30.0) as client:
             resp = await client.post(url, json=payload, headers=self._headers())
+            
+            # Log response for debugging
+            logger.info(f"Nango API Response - Status: {resp.status_code}")
+            logger.info(f"Nango API Response - Body: {resp.text}")
+            
             resp.raise_for_status()
             return resp.json()
 
