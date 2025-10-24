@@ -48,6 +48,39 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
     "Compare Q1 vs Q2 profitability"
   ];
 
+  // Load chat history on mount
+  useEffect(() => {
+    const loadChatHistory = async () => {
+      if (!user?.id || !currentChatId) return;
+      
+      try {
+        const { data, error } = await supabase
+          .from('chat_messages')
+          .select('*')
+          .eq('user_id', user.id)
+          .eq('chat_id', currentChatId)
+          .order('created_at', { ascending: true });
+
+        if (error) throw error;
+
+        if (data && data.length > 0) {
+          const loadedMessages = data.map((msg: any) => ({
+            id: msg.id,
+            text: msg.message,
+            isUser: msg.role === 'user',
+            timestamp: new Date(msg.created_at)
+          }));
+          setMessages(loadedMessages);
+          setIsNewChat(false);
+        }
+      } catch (error) {
+        console.error('Failed to load chat history:', error);
+      }
+    };
+
+    loadChatHistory();
+  }, [user?.id, currentChatId]);
+
   // Load connector providers when opening marketplace
   useEffect(() => {
     const loadProviders = async () => {
