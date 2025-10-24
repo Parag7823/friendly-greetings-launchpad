@@ -785,8 +785,8 @@ export const DataSourcesPanel = ({ isOpen, onClose }: DataSourcesPanelProps) => 
                                           </>
                                         ) : (
                                           <div className="relative">
-                                            {/* Animated gradient border - colors shift smoothly */}
-                                            <div className="absolute -inset-0.5 bg-gradient-to-r from-primary via-purple-500 to-primary rounded-full opacity-50 blur-[2px] animate-gradient" />
+                                            {/* Animated gradient border - white transparent glow */}
+                                            <div className="absolute -inset-0.5 bg-gradient-to-r from-white/40 via-white/60 to-white/40 rounded-full opacity-45 blur-[2px] animate-gradient" />
                                             
                                             <Button
                                               size="sm"
