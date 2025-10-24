@@ -200,13 +200,12 @@ class IntelligentChatOrchestrator:
             Tuple of (QuestionType, confidence_score)
         """
         try:
-            # Use GPT-4 to classify the question
-            response = await self.openai.chat.completions.create(
-                model="gpt-4",
-                messages=[
-                    {
-                        "role": "system",
-                        "content": """You are a financial AI assistant that classifies user questions.
+            # Use Claude Haiku to classify the question
+            response = await self.openai.messages.create(
+                model="claude-haiku-4-20250514",
+                max_tokens=150,
+                temperature=0.1,
+                system="""You are a financial AI assistant that classifies user questions.
 
 Classify the question into ONE of these types:
 - causal: Questions about WHY something happened (e.g., "Why did revenue drop?", "What caused the expense spike?")
@@ -218,18 +217,16 @@ Classify the question into ONE of these types:
 - general: General financial questions or advice
 - unknown: Cannot classify
 
-Respond with ONLY a JSON object: {"type": "question_type", "confidence": 0.0-1.0, "reasoning": "brief explanation"}"""
-                    },
+Respond with ONLY a JSON object: {"type": "question_type", "confidence": 0.0-1.0, "reasoning": "brief explanation"}""",
+                messages=[
                     {
                         "role": "user",
                         "content": question
                     }
-                ],
-                temperature=0.1,
-                max_tokens=150
+                ]
             )
             
-            result = json.loads(response.choices[0].message.content)
+            result = json.loads(response.content[0].text)
             question_type_str = result.get('type', 'unknown')
             confidence = result.get('confidence', 0.5)
             
@@ -576,29 +573,46 @@ Respond with ONLY a JSON object: {"type": "question_type", "confidence": 0.0-1.0
         context: Optional[Dict[str, Any]]
     ) -> ChatResponse:
         """
-        Handle general financial questions using GPT-4.
+        Handle general financial questions using Claude Haiku.
         
         Examples: "How do I improve cash flow?", "What is EBITDA?"
         """
         try:
-            # Use GPT-4 for general financial advice
-            response = await self.openai.chat.completions.create(
-                model="gpt-4",
-                messages=[
-                    {
-                        "role": "system",
-                        "content": "You are Finley, an expert financial AI assistant. Provide helpful, accurate financial advice and explanations."
-                    },
-                    {
-                        "role": "user",
-                        "content": question
-                    }
-                ],
+            # Get conversation history for context
+            conversation_history = self.conversation_context.get(user_id, [])
+            
+            # Build messages with conversation history
+            messages = []
+            
+            # Add last 5 messages for context (if available)
+            for msg in conversation_history[-5:]:
+                messages.append({
+                    "role": "user" if msg.get("is_user") else "assistant",
+                    "content": msg.get("content", "")
+                })
+            
+            # Add current question
+            messages.append({
+                "role": "user",
+                "content": question
+            })
+            
+            # Use Claude Haiku for general financial advice
+            response = await self.openai.messages.create(
+                model="claude-haiku-4-20250514",
+                max_tokens=500,
                 temperature=0.7,
-                max_tokens=500
+                system="You are Finley, an expert financial AI assistant. Provide helpful, accurate financial advice and explanations. Be concise but thorough.",
+                messages=messages
             )
             
-            answer = response.choices[0].message.content
+            answer = response.content[0].text
+            
+            # Store in conversation history
+            self.conversation_context.setdefault(user_id, []).extend([
+                {"is_user": True, "content": question},
+                {"is_user": False, "content": answer}
+            ])
             
             return ChatResponse(
                 answer=answer,

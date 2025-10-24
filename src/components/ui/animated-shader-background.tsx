@@ -29,23 +29,33 @@ export const AnimatedShaderBackground = () => {
       opacity: number;
     }> = [];
 
-    // Create initial lines
-    for (let i = 0; i < 50; i++) {
+    // Create initial lines - more lines with brighter colors
+    for (let i = 0; i < 80; i++) {
+      const colorChoice = Math.random();
+      let color;
+      if (colorChoice < 0.33) {
+        color = '#3b82f6'; // Bright Blue
+      } else if (colorChoice < 0.66) {
+        color = '#8b5cf6'; // Bright Purple
+      } else {
+        color = '#06b6d4'; // Cyan
+      }
+      
       lines.push({
         x: Math.random() * canvas.width,
         y: Math.random() * canvas.height,
-        length: Math.random() * 200 + 100,
+        length: Math.random() * 250 + 150,
         angle: Math.random() * Math.PI * 2,
-        speed: Math.random() * 0.5 + 0.2,
-        color: Math.random() > 0.5 ? '#3b82f6' : '#8b5cf6', // Blue or Purple
-        opacity: Math.random() * 0.5 + 0.3
+        speed: Math.random() * 0.8 + 0.3,
+        color: color,
+        opacity: Math.random() * 0.6 + 0.4
       });
     }
 
     // Animation loop
     let animationId: number;
     const animate = () => {
-      ctx.fillStyle = 'rgba(0, 0, 0, 0.05)'; // Fade effect
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.03)'; // Lighter fade for more visible trails
       ctx.fillRect(0, 0, canvas.width, canvas.height);
 
       lines.forEach((line) => {
@@ -59,17 +69,24 @@ export const AnimatedShaderBackground = () => {
         if (line.y < 0) line.y = canvas.height;
         if (line.y > canvas.height) line.y = 0;
 
-        // Draw line
+        // Draw line with glow effect
         ctx.beginPath();
         ctx.moveTo(line.x, line.y);
         ctx.lineTo(
           line.x + Math.cos(line.angle) * line.length,
           line.y + Math.sin(line.angle) * line.length
         );
+        
+        // Add glow
+        ctx.shadowBlur = 10;
+        ctx.shadowColor = line.color;
         ctx.strokeStyle = line.color;
         ctx.globalAlpha = line.opacity;
-        ctx.lineWidth = 2;
+        ctx.lineWidth = 3;
         ctx.stroke();
+        
+        // Reset shadow
+        ctx.shadowBlur = 0;
         ctx.globalAlpha = 1;
       });
 

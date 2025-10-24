@@ -10743,7 +10743,7 @@ async def chat_endpoint(request: dict):
             )
         
         orchestrator = IntelligentChatOrchestrator(
-            openai_client=anthropic_client,
+            openai_client=anthropic_client,  # Named openai_client for compatibility
             supabase_client=supabase,
             cache_client=safe_get_ai_cache()
         )
@@ -12999,7 +12999,11 @@ async def initiate_connector(req: ConnectorInitiateRequest):
         
         logger.info(f"Creating Nango Connect session for provider={req.provider}, integration_id={integ}, user_id={req.user_id}")
         nango = NangoClient(base_url=NANGO_BASE_URL)
-        session = await nango.create_connect_session(end_user={'id': req.user_id}, allowed_integrations=[integ])
+        # Nango expects integration objects with provider_config_key
+        session = await nango.create_connect_session(
+            end_user={'id': req.user_id}, 
+            allowed_integrations=[{'provider_config_key': integ}]
+        )
         
         logger.info(f"Nango Connect session created: {json.dumps(session)}")
         
