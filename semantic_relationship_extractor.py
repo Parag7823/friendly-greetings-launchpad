@@ -115,7 +115,7 @@ class SemanticRelationshipExtractor:
             'cache_ttl_hours': 48,  # Semantic relationships are stable
             'enable_embeddings': True,
             'embedding_model': 'text-embedding-3-small',
-            'semantic_model': 'claude-haiku-4-20250514',  # Fast and accurate for semantic understanding
+            'semantic_model': 'claude-3-5-sonnet-20241022',  # Latest and most capable for semantic understanding
             'temperature': 0.1,  # Low temperature for consistency
             'max_tokens': 500,
             'confidence_threshold': 0.7,
@@ -396,7 +396,7 @@ Provide ONLY the JSON response, no additional text."""
             self.metrics['ai_calls'] += 1
             
             response = await self.anthropic.messages.create(
-                model="claude-haiku-4-20250514",
+                model="claude-3-5-sonnet-20241022",
                 system="You are a financial relationship analyst. Provide accurate, well-reasoned analysis in JSON format.",
                 messages=[
                     {

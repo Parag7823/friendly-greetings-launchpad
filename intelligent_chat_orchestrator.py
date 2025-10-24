@@ -200,9 +200,9 @@ class IntelligentChatOrchestrator:
             Tuple of (QuestionType, confidence_score)
         """
         try:
-            # Use Claude Haiku 4.x (latest, fastest) to classify the question
+            # Use Claude 3.5 Sonnet (latest, most capable) to classify the question
             response = await self.openai.messages.create(
-                model="claude-haiku-4-20250514",
+                model="claude-3-5-sonnet-20241022",
                 max_tokens=150,
                 temperature=0.1,
                 system="""You are Finley's question classifier. Classify user questions to route them to the right analysis engine.
@@ -607,9 +607,9 @@ CRITICAL: Reference their ACTUAL data in your response. Be specific with numbers
                 "content": enriched_question
             })
             
-            # Use Claude Haiku 4.x (latest, fastest) for general financial advice
+            # Use Claude 3.5 Sonnet (latest, most capable) for general financial advice
             response = await self.openai.messages.create(
-                model="claude-haiku-4-20250514",
+                model="claude-3-5-sonnet-20241022",
                 max_tokens=600,
                 temperature=0.7,
                 system="""You are Finley - the user's energetic, smart, proactive AI finance team member (their first employee!). You're not a tool or chatbot - you're part of their team.

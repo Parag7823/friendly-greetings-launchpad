@@ -78,7 +78,7 @@ class UniversalPlatformDetectorOptimized:
     
     def _get_default_config(self) -> Dict[str, Any]:
         """Get default configuration"""
-        default_model = os.getenv('PLATFORM_DETECTOR_MODEL') or 'claude-haiku-4-20250514'
+        default_model = os.getenv('PLATFORM_DETECTOR_MODEL') or 'claude-3-5-sonnet-20241022'
         return {
             'enable_caching': True,
             'cache_ttl': 7200,  # 2 hours
@@ -520,7 +520,7 @@ class UniversalPlatformDetectorOptimized:
             
             result_text = await self._safe_anthropic_call(
                 self.anthropic,
-                'claude-haiku-4-20250514',
+                'claude-3-5-sonnet-20241022',
                 [{"role": "user", "content": prompt}],
                 self.config['ai_temperature'],
                 self.config['ai_max_tokens']

@@ -82,7 +82,7 @@ class UniversalDocumentClassifierOptimized:
     
     def _get_default_config(self) -> Dict[str, Any]:
         """Get default configuration"""
-        default_model = os.getenv('DOC_CLASSIFIER_MODEL') or os.getenv('ANTHROPIC_MODEL') or 'claude-haiku-4-20250514'
+        default_model = os.getenv('DOC_CLASSIFIER_MODEL') or os.getenv('ANTHROPIC_MODEL') or 'claude-3-5-sonnet-20241022'
         return {
             'enable_caching': True,
             'cache_ttl': 7200,  # 2 hours
@@ -527,7 +527,7 @@ class UniversalDocumentClassifierOptimized:
             
             result_text = await self._safe_anthropic_call(
                 self.anthropic,
-                'claude-haiku-4-20250514',
+                'claude-3-5-sonnet-20241022',
                 [{"role": "user", "content": prompt}],
                 self.config['ai_temperature'],
                 self.config['ai_max_tokens']
@@ -946,7 +946,7 @@ class UniversalDocumentClassifierOptimized:
                 return [self._pattern_classify_row(row, platform_info, column_names) for row in rows]
             
             response = await self.anthropic.messages.create(
-                model='claude-haiku-4-20250514',
+                model='claude-3-5-sonnet-20241022',
                 max_tokens=2000,
                 temperature=0.1,
                 system="You are a financial data classification expert. Classify transaction rows accurately and return valid JSON.",

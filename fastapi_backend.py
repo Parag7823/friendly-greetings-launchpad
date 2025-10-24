@@ -4315,7 +4315,7 @@ class VendorStandardizer:
                         classification_type='vendor_standardization',
                         ttl_hours=48,
                         confidence_score=ai_result.get('confidence', 0.7),
-                        model_version='claude-haiku-4-20250514'
+                        model_version='claude-3-5-sonnet-20241022'
                     )
                 except Exception as e:
                     logger.warning(f"Cache storage failed: {e}")
@@ -4372,7 +4372,7 @@ class VendorStandardizer:
                 
                 # Make the AI call using Anthropic
                 response = self.anthropic.messages.create(
-                    model="claude-haiku-4-20250514",
+                    model="claude-3-5-sonnet-20241022",
                     max_tokens=200,
                     temperature=0.1,
                     messages=[{"role": "user", "content": prompt}]
@@ -6160,9 +6160,9 @@ class DataEnrichmentProcessor:
             # Prepare AI prompt
             prompt = self._build_ai_classification_prompt(document_features, pattern_classification)
             
-            # Call AI service (using Claude Haiku 4.x for speed and accuracy)
+            # Call AI service (using Claude 3.5 Sonnet for superior accuracy)
             response = self.anthropic.messages.create(
-                model="claude-haiku-4-20250514",
+                model="claude-3-5-sonnet-20241022",
                 max_tokens=2000,
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.1
@@ -6534,7 +6534,7 @@ class AIRowClassifier:
             
             # Get AI response using Anthropic
             response = self.anthropic.messages.create(
-                model="claude-haiku-4-20250514",
+                model="claude-3-5-sonnet-20241022",
                 max_tokens=1000,
                 temperature=0.1,
                 messages=[{"role": "user", "content": prompt}]
@@ -6878,7 +6878,7 @@ class BatchAIRowClassifier:
             # Get AI response using Anthropic
             try:
                 response = self.anthropic.messages.create(
-                    model="claude-haiku-4-20250514",
+                    model="claude-3-5-sonnet-20241022",
                     max_tokens=2000,
                     temperature=0.1,
                     messages=[{"role": "user", "content": prompt}]
@@ -10664,7 +10664,7 @@ async def generate_chat_title(request: dict):
         anthropic_client = AsyncAnthropic(api_key=os.getenv('ANTHROPIC_API_KEY'))
         
         response = await anthropic_client.messages.create(
-            model="claude-haiku-4-20250514",
+            model="claude-3-5-sonnet-20241022",
             max_tokens=50,
             system="Generate a concise, descriptive title (max 6 words) for this financial question. Return ONLY the title, no quotes or extra text.",
             messages=[
@@ -13004,12 +13004,28 @@ async def initiate_connector(req: ConnectorInitiateRequest):
         nango = NangoClient(base_url=NANGO_BASE_URL)
         # FIX: Nango expects array of integration IDs (strings), not objects
         # Correct format: ["google-drive"] not [{"provider_config_key": "google-drive"}]
-        session = await nango.create_connect_session(
-            end_user={'id': req.user_id}, 
-            allowed_integrations=[integ]  # Pass integration ID directly as string
-        )
-        
-        logger.info(f"Nango Connect session created: {json.dumps(session)}")
+        try:
+            session = await nango.create_connect_session(
+                end_user={'id': req.user_id}, 
+                allowed_integrations=[integ]  # Pass integration ID directly as string
+            )
+            
+            logger.info(f"Nango Connect session created: {json.dumps(session)}")
+        except Exception as nango_error:
+            # Check if it's a connection limit error
+            error_str = str(nango_error).lower()
+            if 'resource_capped' in error_str or 'connection limit' in error_str or 'maximum number' in error_str:
+                raise HTTPException(
+                    status_code=402,  # Payment Required
+                    detail={
+                        'error': 'connection_limit_reached',
+                        'message': 'You have reached the maximum number of connections allowed on your Nango plan. Please upgrade your plan or delete unused connections.',
+                        'action_required': 'upgrade_plan',
+                        'upgrade_url': 'https://app.nango.dev/settings/billing'
+                    }
+                )
+            # Re-raise other errors
+            raise
         
         # Extract token from Nango response and construct Connect URL
         session_data = session.get('data', {})

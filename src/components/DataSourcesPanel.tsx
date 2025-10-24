@@ -306,6 +306,21 @@ export const DataSourcesPanel = ({ isOpen, onClose }: DataSourcesPanelProps) => 
       });
 
       if (!response.ok) {
+        // Check if it's a connection limit error (HTTP 402)
+        if (response.status === 402) {
+          const errorData = await response.json();
+          toast({
+            title: '⚠️ Connection Limit Reached',
+            description: errorData.detail?.message || 'You have reached the maximum number of connections. Please upgrade your Nango plan or delete unused connections.',
+            variant: 'destructive',
+            duration: 10000,
+            action: errorData.detail?.upgrade_url ? {
+              label: 'Upgrade Plan',
+              onClick: () => window.open(errorData.detail.upgrade_url, '_blank')
+            } : undefined
+          });
+          return;
+        }
         throw new Error('Failed to initiate connection');
       }
 
