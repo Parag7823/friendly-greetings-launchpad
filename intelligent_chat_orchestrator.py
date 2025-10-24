@@ -200,24 +200,24 @@ class IntelligentChatOrchestrator:
             Tuple of (QuestionType, confidence_score)
         """
         try:
-            # Use Claude 3.5 Haiku (latest) to classify the question
+            # Use Claude Haiku 4.x (latest, fastest) to classify the question
             response = await self.openai.messages.create(
-                model="claude-3-5-haiku-20241022",
+                model="claude-haiku-4-20250514",
                 max_tokens=150,
                 temperature=0.1,
-                system="""You are a financial AI assistant that classifies user questions.
+                system="""You are Finley's question classifier. Classify user questions to route them to the right analysis engine.
 
-Classify the question into ONE of these types:
-- causal: Questions about WHY something happened (e.g., "Why did revenue drop?", "What caused the expense spike?")
-- temporal: Questions about WHEN something will happen or patterns over time (e.g., "When will customer pay?", "Is this normal?")
-- relationship: Questions about connections between entities (e.g., "Show vendor relationships", "Who are my top customers?")
-- what_if: Counterfactual questions (e.g., "What if I delay payment?", "Impact of hiring 2 people?")
-- explain: Questions asking for explanation of specific data (e.g., "Explain this invoice", "Where did this number come from?")
-- data_query: Questions asking for specific data retrieval (e.g., "Show me all invoices", "List my expenses")
-- general: General financial questions or advice
-- unknown: Cannot classify
+QUESTION TYPES:
+- **causal**: WHY questions (e.g., "Why did revenue drop?", "What caused the spike?")
+- **temporal**: WHEN questions, patterns over time (e.g., "When will they pay?", "Is this seasonal?")
+- **relationship**: WHO/connections (e.g., "Show vendor relationships", "Top customers?")
+- **what_if**: Scenarios, predictions (e.g., "What if I delay payment?", "Impact of hiring?")
+- **explain**: Data provenance (e.g., "Explain this invoice", "Where's this from?")
+- **data_query**: Specific data requests (e.g., "Show invoices", "List expenses")
+- **general**: Platform questions, general advice, how-to
+- **unknown**: Cannot classify
 
-Respond with ONLY a JSON object: {"type": "question_type", "confidence": 0.0-1.0, "reasoning": "brief explanation"}""",
+Respond with ONLY JSON: {"type": "question_type", "confidence": 0.0-1.0, "reasoning": "brief explanation"}""",
                 messages=[
                     {
                         "role": "user",
@@ -578,6 +578,9 @@ Respond with ONLY a JSON object: {"type": "question_type", "confidence": 0.0-1.0
         Examples: "How do I improve cash flow?", "What is EBITDA?"
         """
         try:
+            # INTELLIGENCE LAYER: Fetch user's actual data context
+            user_context = await self._fetch_user_data_context(user_id)
+            
             # Get conversation history for context
             conversation_history = self.conversation_context.get(user_id, [])
             
@@ -591,18 +594,86 @@ Respond with ONLY a JSON object: {"type": "question_type", "confidence": 0.0-1.0
                     "content": msg.get("content", "")
                 })
             
-            # Add current question
+            # Add current question WITH data context enrichment
+            enriched_question = f"""USER QUESTION: {question}
+
+USER'S ACTUAL DATA CONTEXT:
+{user_context}
+
+CRITICAL: Reference their ACTUAL data in your response. Be specific with numbers, dates, entities, and platforms from THEIR system. If they have no data yet, guide them to connect sources or upload files."""
+            
             messages.append({
                 "role": "user",
-                "content": question
+                "content": enriched_question
             })
             
-            # Use Claude 3.5 Haiku (latest) for general financial advice
+            # Use Claude Haiku 4.x (latest, fastest) for general financial advice
             response = await self.openai.messages.create(
-                model="claude-3-5-haiku-20241022",
-                max_tokens=500,
+                model="claude-haiku-4-20250514",
+                max_tokens=600,
                 temperature=0.7,
-                system="You are Finley, an expert financial AI assistant. Provide helpful, accurate financial advice and explanations. Be concise but thorough.",
+                system="""You are Finley - the user's energetic, smart, proactive AI finance team member (their first employee!). You're not a tool or chatbot - you're part of their team.
+
+🎯 YOUR PERSONALITY:
+- **Energetic & Enthusiastic**: Use exclamation marks, show excitement about insights
+- **Proactive**: Suggest next steps, anticipate needs, spot opportunities
+- **Team-Oriented**: Use "we/us/let's" language, collaborative tone
+- **Confident but Humble**: State confidence levels, admit when you need more data
+- **Results-Focused**: Always end with action items, quantify impact
+
+💪 YOUR CAPABILITIES:
+1. **Auto-Hunt Financial Data** 📥
+   - Connect: QuickBooks, Xero, Zoho Books, Stripe, Razorpay, PayPal, Gusto
+   - Scan: Gmail/Zoho Mail for invoices, receipts, statements
+   - Access: Google Drive, Dropbox for financial files
+
+2. **Universal Financial Understanding** 🧠
+   - Read ANY financial document from ANY platform globally
+   - Like a "Financial Rosetta Stone" - understand all formats
+
+3. **Intelligent Analysis** 💡
+   - WHY analysis: Causal relationships, root causes
+   - WHEN patterns: Temporal trends, predictions
+   - WHO insights: Entity relationships, vendor analysis
+   - WHAT-IF scenarios: Impact modeling
+   - Real-time: Duplicate detection, vendor standardization, currency normalization
+
+📊 RESPONSE STRUCTURE (Always follow):
+1. **Instant Value** (1 sentence with emoji)
+   → Answer immediately, show enthusiasm
+
+2. **Key Insights** (2-3 bullets)
+   → Most important findings from THEIR data
+
+3. **Action Items** (Numbered list with 🎯)
+   → Specific next steps they can take
+
+4. **Proactive Suggestion** (End with question)
+   → What else you can do for them
+
+✅ ALWAYS DO:
+- Check if user has connected data sources (reference their actual data if available)
+- Use emojis strategically (💰📊💡🎯⚠️✅🚀)
+- Use **bold** for emphasis, bullets for lists
+- Quantify impact ("Save 5 hours/week", "15% cost reduction")
+- Celebrate wins ("Great news!", "Awesome progress!")
+- End with actionable next steps
+- Use "we/us" team language
+
+❌ NEVER DO:
+- Give generic advice any chatbot could give
+- Recommend external tools (YOU are the tool)
+- Use formal, robotic language
+- Give long paragraphs without structure
+- Forget to suggest specific platform actions
+- Miss opportunities to showcase YOUR capabilities
+
+🎯 TARGET USERS:
+- Small business owners (overwhelmed, time-poor, need automation)
+- Startup founders (fast-growing, need real-time insights)
+- Freelancers (scattered data, need simplicity)
+
+Remember: You're their motivated, high-energy finance team member who's excited to help them succeed! 🚀""",
                 messages=messages
             )
             
@@ -619,9 +690,9 @@ Respond with ONLY a JSON object: {"type": "question_type", "confidence": 0.0-1.0
                 question_type=QuestionType.GENERAL,
                 confidence=0.8,
                 follow_up_questions=[
-                    "Can you explain that in simpler terms?",
-                    "How does this apply to my business?",
-                    "What are the next steps?"
+                    "What data sources should I connect?",
+                    "Can you analyze my uploaded financial data?",
+                    "Show me insights from my transactions"
                 ]
             )
             
@@ -805,6 +876,42 @@ Respond with ONLY a JSON object: {"type": "question_type", "confidence": 0.0-1.0
                 "data": relationships_result.get('relationships', [])
             }
         ]
+    
+    async def _fetch_user_data_context(self, user_id: str) -> str:
+        """Fetch user's actual data to provide intelligent, personalized responses"""
+        try:
+            # Query user's data sources
+            connections_result = self.supabase.table('user_connections').select('*').eq('user_id', user_id).eq('status', 'active').execute()
+            connected_sources = [conn['connector_id'] for conn in connections_result.data] if connections_result.data else []
+            
+            # Query uploaded files
+            files_result = self.supabase.table('raw_records').select('file_name, created_at').eq('user_id', user_id).order('created_at', desc=True).limit(5).execute()
+            recent_files = [f['file_name'] for f in files_result.data] if files_result.data else []
+            
+            # Query transaction summary
+            events_result = self.supabase.table('raw_events').select('id, source_platform, ingest_ts, payload').eq('user_id', user_id).order('ingest_ts', desc=True).limit(100).execute()
+            
+            total_transactions = len(events_result.data) if events_result.data else 0
+            platforms = list(set([e.get('source_platform', 'unknown') for e in events_result.data])) if events_result.data else []
+            
+            # Query entities (vendors/customers)
+            entities_result = self.supabase.table('normalized_entities').select('canonical_name, entity_type').eq('user_id', user_id).limit(20).execute()
+            top_entities = [e['canonical_name'] for e in entities_result.data[:5]] if entities_result.data else []
+            
+            # Build context string
+            context = f"""CONNECTED DATA SOURCES: {', '.join(connected_sources) if connected_sources else 'None yet'}
+RECENT FILES UPLOADED: {', '.join(recent_files) if recent_files else 'None yet'}
+TOTAL TRANSACTIONS: {total_transactions}
+PLATFORMS DETECTED: {', '.join(platforms) if platforms else 'None'}
+TOP ENTITIES: {', '.join(top_entities) if top_entities else 'None yet'}
+
+DATA STATUS: {'Rich data available - provide specific insights!' if total_transactions > 50 else 'Limited data - encourage user to connect sources or upload files'}"""
+            
+            return context
+            
+        except Exception as e:
+            logger.error(f"Failed to fetch user data context: {e}")
+            return "DATA STATUS: Unable to fetch user data context"
     
     def _update_conversation_context(
         self,

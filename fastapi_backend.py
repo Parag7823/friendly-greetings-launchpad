@@ -6158,9 +6158,9 @@ class DataEnrichmentProcessor:
             # Prepare AI prompt
             prompt = self._build_ai_classification_prompt(document_features, pattern_classification)
             
-            # Call AI service
+            # Call AI service (using GPT-4o for better accuracy)
             response = self.openai.chat.completions.create(
-                model="gpt-4o-mini",
+                model="gpt-4o",
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.1
             )
