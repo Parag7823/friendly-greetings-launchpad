@@ -518,10 +518,20 @@ class UniversalPlatformDetectorOptimized:
             }}
             """
             
-            result_text = await self._safe_anthropic_call(
-                self.anthropic,
-                'claude-3-5-haiku-20241022',  # Using Haiku for fast platform detection
-                [{"role": "user", "content": prompt}],
+            # Use Groq (free, fast) if available
+            if hasattr(self, 'groq') and self.groq:
+                response = self.groq.chat.completions.create(
+                    model="llama-3.3-70b-versatile",
+                    messages=[{"role": "user", "content": prompt}],
+                    max_tokens=self.config['ai_max_tokens'],
+                    temperature=self.config['ai_temperature']
+                )
+                result_text = response.choices[0].message.content
+            else:
+                result_text = await self._safe_anthropic_call(
+                    self.anthropic,
+                    'claude-3-5-haiku-20241022',
+                    [{"role": "user", "content": prompt}],
                 self.config['ai_temperature'],
                 self.config['ai_max_tokens']
             )

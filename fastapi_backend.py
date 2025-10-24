@@ -173,6 +173,16 @@ async def get_arq_pool():
         return _arq_pool
 
 from anthropic import Anthropic
+
+# Groq client for fast, free LLM processing
+try:
+    from groq import Groq
+    GROQ_AVAILABLE = True
+    logger.info("✅ Groq client available")
+except ImportError:
+    GROQ_AVAILABLE = False
+    logger.warning("⚠️ Groq not installed. Install with: pip install groq")
+
 try:
     # Prefer external module if available
     from nango_client import NangoClient
@@ -871,6 +881,20 @@ try:
 except Exception as e:
     logger.error(f"❌ Failed to initialize Anthropic client: {e}")
     anthropic_client = None
+
+# Initialize Groq client for fast, free LLM processing
+groq_client = None
+if GROQ_AVAILABLE:
+    try:
+        groq_api_key = os.getenv('GROQ_API_KEY')
+        if groq_api_key:
+            groq_client = Groq(api_key=groq_api_key)
+            logger.info("✅ Groq client initialized successfully (FREE Llama 3.3 70B)")
+        else:
+            logger.warning("⚠️ GROQ_API_KEY not set. Add to .env for free, fast LLM processing!")
+    except Exception as e:
+        logger.error(f"❌ Failed to initialize Groq client: {e}")
+        groq_client = None
 
 # Initialize Supabase client and critical systems
 try:
@@ -4370,13 +4394,26 @@ class VendorStandardizer:
                     if time_since_last < min_interval:
                         await asyncio.sleep(min_interval - time_since_last)
                 
-                # Make the AI call using Anthropic (Haiku for fast vendor standardization)
-                response = self.anthropic.messages.create(
-                    model="claude-3-5-haiku-20241022",
-                    max_tokens=200,
-                    temperature=0.1,
-                    messages=[{"role": "user", "content": prompt}]
-                )
+                # Make the AI call using Groq (free, fast) or Anthropic as fallback
+                if groq_client:
+                    response = groq_client.chat.completions.create(
+                        model="llama-3.3-70b-versatile",
+                        messages=[{"role": "user", "content": prompt}],
+                        max_tokens=200,
+                        temperature=0.1
+                    )
+                    # Convert Groq response to Anthropic-like format for compatibility
+                    class GroqResponse:
+                        def __init__(self, content_text):
+                            self.content = [type('obj', (object,), {'text': content_text})]
+                    response = GroqResponse(response.choices[0].message.content)
+                else:
+                    response = self.anthropic.messages.create(
+                        model="claude-3-5-haiku-20241022",
+                        max_tokens=200,
+                        temperature=0.1,
+                        messages=[{"role": "user", "content": prompt}]
+                    )
                 
                 # Update last call time
                 self._last_ai_call_time = time.time()
@@ -6765,8 +6802,9 @@ class BatchAIRowClassifier:
     - Complex rows (many fields): 10 rows/batch
     """
     
-    def __init__(self, anthropic_client):
+    def __init__(self, anthropic_client, groq_client=None):
         self.anthropic = anthropic_client
+        self.groq = groq_client  # Groq client for fast, free processing
         self.cache = {}  # Simple cache for similar rows
         
         # OPTIMIZATION 2: Dynamic batch sizing parameters
@@ -6875,16 +6913,26 @@ class BatchAIRowClassifier:
             Return ONLY a valid JSON array with one classification object per row, in the same order.
             """
             
-            # Get AI response using Anthropic
+            # Get AI response using Groq (free, fast) or Anthropic as fallback
             try:
-                response = self.anthropic.messages.create(
-                    model="claude-3-5-haiku-20241022",  # Using Haiku for fast, cheap batch classification
-                    max_tokens=2000,
-                    temperature=0.1,
-                    messages=[{"role": "user", "content": prompt}]
-                )
-                
-                result = response.content[0].text.strip()
+                if self.groq:
+                    # Use Groq Llama 3.3 70B (FREE and FAST!)
+                    response = self.groq.chat.completions.create(
+                        model="llama-3.3-70b-versatile",
+                        messages=[{"role": "user", "content": prompt}],
+                        max_tokens=2000,
+                        temperature=0.1
+                    )
+                    result = response.choices[0].message.content.strip()
+                else:
+                    # Fallback to Anthropic if Groq not available
+                    response = self.anthropic.messages.create(
+                        model="claude-3-5-haiku-20241022",
+                        max_tokens=2000,
+                        temperature=0.1,
+                        messages=[{"role": "user", "content": prompt}]
+                    )
+                    result = response.content[0].text.strip()
                 
                 if not result:
                     logger.warning("AI returned empty response, using fallback")
@@ -7260,14 +7308,15 @@ class ExcelProcessor:
         # Initialize universal components with supabase_client for persistent learning
         self.universal_field_detector = UniversalFieldDetector()
         self.universal_platform_detector = UniversalPlatformDetector(self.anthropic, cache_client=safe_get_ai_cache(), supabase_client=supabase)
-        self.universal_document_classifier = UniversalDocumentClassifier(self.anthropic, cache_client=safe_get_ai_cache(), supabase_client=supabase)
+        self.universal_platform_detector.groq = groq_client  # Add Groq support
+        self.universal_document_classifier = UniversalDocumentClassifier(self.anthropic, cache_client=safe_get_ai_cache(), supabase_client=supabase, groq_client=groq_client)
         self.universal_extractors = UniversalExtractors(cache_client=safe_get_ai_cache())
         
         # Entity resolver and AI classifier will be initialized per request with Supabase client
         self.entity_resolver = None
         self.ai_classifier = None
         self.row_processor = None
-        self.batch_classifier = BatchAIRowClassifier(self.anthropic)
+        self.batch_classifier = BatchAIRowClassifier(self.anthropic, groq_client)
         # Initialize data enrichment processor
         self.enrichment_processor = DataEnrichmentProcessor(self.anthropic)
         
