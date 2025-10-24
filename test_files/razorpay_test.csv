@@ -1,4 +1,0 @@
-payment_id,order_id,amount,currency,status,created_at
-pay_ABC123XYZ456,order_DEF789GHI012,5000,INR,captured,2024-01-15 10:30:00
-pay_DEF456ABC789,order_GHI012JKL345,7500,INR,captured,2024-01-15 11:45:00
-pay_GHI789DEF012,order_JKL345MNO678,3000,INR,captured,2024-01-15 14:20:00

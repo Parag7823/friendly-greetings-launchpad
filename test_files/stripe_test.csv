@@ -1,4 +1,0 @@
-id,amount,currency,description,customer,created
-ch_1ABC123XYZ,1000,usd,Payment for services,cus_XYZ789,2024-01-15
-ch_2DEF456ABC,2000,usd,Subscription payment,cus_ABC123,2024-01-16
-ch_3GHI789DEF,1500,usd,One-time purchase,cus_DEF456,2024-01-17

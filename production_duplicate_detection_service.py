@@ -1078,11 +1078,14 @@ class ProductionDuplicateDetectionService:
                 'modified_rows': 0,
                 'sheet_analysis': {},
                 'recommendation': 'merge_intelligent',
-                'confidence': 0.0
+                'confidence': 0.0,
+                'sample_new_rows': []  # ENHANCEMENT: Add sample rows for preview
             }
             
             total_similarity = 0
             sheet_count = 0
+            sample_rows_collected = 0
+            MAX_SAMPLE_ROWS = 5
             
             for sheet_name, new_df in new_sheets.items():
                 existing_hash_list = existing_sheets.get(sheet_name, [])
@@ -1111,6 +1114,21 @@ class ProductionDuplicateDetectionService:
                 new_only = new_row_hashes - existing_row_hashes
                 existing_only = existing_row_hashes - new_row_hashes
                 common = new_row_hashes & existing_row_hashes
+                
+                # ENHANCEMENT: Collect sample new rows for preview
+                if sample_rows_collected < MAX_SAMPLE_ROWS:
+                    for idx, row in new_df.iterrows():
+                        row_str = "|".join([str(val) for val in row.values if pd.notna(val)])
+                        row_hash = hashlib.md5(row_str.encode('utf-8')).hexdigest()
+                        if row_hash in new_only and sample_rows_collected < MAX_SAMPLE_ROWS:
+                            # Convert row to dict for JSON serialization
+                            sample_row = row.to_dict()
+                            # Clean NaN values
+                            sample_row = {k: (v if pd.notna(v) else None) for k, v in sample_row.items()}
+                            delta_analysis['sample_new_rows'].append(sample_row)
+                            sample_rows_collected += 1
+                            if sample_rows_collected >= MAX_SAMPLE_ROWS:
+                                break
                 
                 # Calculate similarity for this sheet
                 total_rows = len(new_row_hashes) + len(existing_row_hashes) - len(common)
