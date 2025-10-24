@@ -178,10 +178,10 @@ from anthropic import Anthropic
 try:
     from groq import Groq
     GROQ_AVAILABLE = True
-    logger.info("✅ Groq client available")
+    print("✅ Groq client available")
 except ImportError:
     GROQ_AVAILABLE = False
-    logger.warning("⚠️ Groq not installed. Install with: pip install groq")
+    print("⚠️ Groq not installed. Install with: pip install groq")
 
 try:
     # Prefer external module if available
