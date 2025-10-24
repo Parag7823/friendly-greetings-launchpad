@@ -277,20 +277,30 @@ export const EnhancedFileUpload: React.FC<EnhancedFileUploadProps> = ({ initialF
       // Move to completed state only if not a duplicate
       setFiles(prev => prev.map(f => 
         f.id === fileId 
-          ? { ...f, status: 'completed' as const, progress: 100 }
+          ? { ...f, status: 'completed' as const, progress: 100, currentStep: '✅ Processing complete!' }
           : f
       ));
 
-      // Move to uploaded files after a delay
+      // CRITICAL FIX: Add to uploaded files immediately (not after delay)
+      // This ensures files show up in "Uploaded Files" section right away
+      const uploadedFile = {
+        id: result.file_id || `${file.name}-${Date.now()}`,
+        name: file.name,
+        uploadedAt: new Date(),
+        analysisResults: result,
+        sheets: result.sheets || []
+      };
+      
+      setUploadedFiles(prev => {
+        // Prevent duplicates
+        const exists = prev.some(f => f.id === uploadedFile.id);
+        if (exists) return prev;
+        return [...prev, uploadedFile];
+      });
+
+      // Remove from processing list after a short delay (for visual feedback)
       setTimeout(() => {
         setFiles(prev => prev.filter(f => f.id !== fileId));
-        setUploadedFiles(prev => [...prev, {
-          id: `${file.name}-${Date.now()}`,
-          name: file.name,
-          uploadedAt: new Date(),
-          analysisResults: result,
-          sheets: result.sheets || []
-        }]);
       }, 2000);
 
       return result;

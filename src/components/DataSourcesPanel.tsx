@@ -207,6 +207,7 @@ export const DataSourcesPanel = ({ isOpen, onClose }: DataSourcesPanelProps) => 
     const loadFiles = async () => {
       if (!user?.id) return;
       try {
+        console.log('🔄 Loading uploaded files for user:', user.id);
         const { data, error } = await supabase
           .from('ingestion_jobs')
           .select('id, filename, status, created_at, progress, error_message')
@@ -214,11 +215,15 @@ export const DataSourcesPanel = ({ isOpen, onClose }: DataSourcesPanelProps) => 
           .order('created_at', { ascending: false })
           .limit(20);
 
-        if (!error && data) {
-          setUploadedFiles(data);
+        if (error) {
+          console.error('❌ Error loading files:', error);
+        } else {
+          console.log('✅ Loaded files:', data?.length || 0, 'files');
+          console.log('Files data:', data);
+          setUploadedFiles(data || []);
         }
       } catch (e) {
-        console.error('Failed to load files', e);
+        console.error('❌ Failed to load files:', e);
       }
     };
 
@@ -578,17 +583,54 @@ export const DataSourcesPanel = ({ isOpen, onClose }: DataSourcesPanelProps) => 
           <div className="p-4 space-y-6">
             {/* Unified Uploaded Files Section - Shows all files with their current state */}
             <div>
-              <div className="flex items-center gap-2 mb-3">
-                <FileSpreadsheet className="w-4 h-4 text-muted-foreground" />
-                <h3 className="text-sm font-medium">Uploaded Files</h3>
-                {uploadedFiles.length > 0 && (
-                  <Badge variant="outline" className="text-[10px]">
-                    {uploadedFiles.length}
-                  </Badge>
-                )}
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-2">
+                  <FileSpreadsheet className="w-4 h-4 text-muted-foreground" />
+                  <h3 className="text-sm font-medium">Uploaded Files</h3>
+                  {uploadedFiles.length > 0 && (
+                    <Badge variant="outline" className="text-[10px]">
+                      {uploadedFiles.length}
+                    </Badge>
+                  )}
+                </div>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={async () => {
+                    if (!user?.id) return;
+                    try {
+                      const { data, error } = await supabase
+                        .from('ingestion_jobs')
+                        .select('id, filename, status, created_at, progress, error_message')
+                        .eq('user_id', user.id)
+                        .order('created_at', { ascending: false })
+                        .limit(20);
+                      if (!error && data) {
+                        setUploadedFiles(data || []);
+                        toast({
+                          title: 'Refreshed',
+                          description: `Found ${data.length} files`
+                        });
+                      }
+                    } catch (e) {
+                      console.error('Refresh failed:', e);
+                    }
+                  }}
+                  className="h-7 px-2"
+                >
+                  <RefreshCw className="w-3 h-3" />
+                </Button>
               </div>
-              {uploadedFiles.length === 0 ? (
-                <p className="text-xs text-muted-foreground">No files uploaded yet</p>
+              {loading ? (
+                <div className="flex items-center justify-center py-8">
+                  <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
+                </div>
+              ) : uploadedFiles.length === 0 ? (
+                <div className="text-center py-8 space-y-2">
+                  <FileSpreadsheet className="w-8 h-8 mx-auto text-muted-foreground/50" />
+                  <p className="text-xs text-muted-foreground">No files uploaded yet</p>
+                  <p className="text-[10px] text-muted-foreground/70">Upload files to see them here</p>
+                </div>
               ) : (
                 <div className="space-y-2">
                   {uploadedFiles.map((file) => {
