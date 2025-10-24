@@ -19,12 +19,13 @@ Date: 2025-01-22
 
 import logging
 import json
-from datetime import datetime
-from typing import Dict, List, Optional, Any, Tuple
-from dataclasses import dataclass, asdict
+from datetime import datetime, timedelta
+from typing import Dict, Any, List, Optional, Tuple
 from enum import Enum
-
-# Import intelligence engines
+import json
+import logging
+import asyncio
+from anthropic import AsyncAnthropic
 from causal_inference_engine import CausalInferenceEngine
 from temporal_pattern_learner import TemporalPatternLearner
 from enhanced_relationship_detector import EnhancedRelationshipDetector
@@ -115,6 +116,39 @@ class IntelligentChatOrchestrator:
         
         logger.info("✅ IntelligentChatOrchestrator initialized with all engines")
     
+    async def _parallel_query(self, queries: List[Tuple[str, callable]]) -> Dict[str, Any]:
+        """
+        PARALLEL PROCESSING: Execute multiple queries simultaneously using asyncio.
+        
+        Example: "Compare Q1 vs Q2" → Query Q1 and Q2 data in parallel
+        
+        Args:
+            queries: List of (query_name, async_function) tuples
+        
+        Returns:
+            Dict mapping query_name to result
+        """
+        try:
+            # Execute all queries in parallel
+            tasks = [func() for name, func in queries]
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            
+            # Map results back to query names
+            result_dict = {}
+            for (name, _), result in zip(queries, results):
+                if isinstance(result, Exception):
+                    logger.error(f"Parallel query '{name}' failed: {result}")
+                    result_dict[name] = None
+                else:
+                    result_dict[name] = result
+            
+            logger.info(f"✅ Parallel processing: {len(queries)} queries completed")
+            return result_dict
+            
+        except Exception as e:
+            logger.error(f"Parallel processing failed: {e}")
+            return {}
+    
     async def process_question(
         self,
         question: str,
@@ -135,34 +169,37 @@ class IntelligentChatOrchestrator:
             ChatResponse with answer and structured data
         """
         try:
-            logger.info(f"Processing question: '{question}' for user_id={user_id}")
+            logger.info(f"Processing question: '{question}' for user_id={user_id}, chat_id={chat_id}")
             
-            # Step 1: Classify the question type
-            question_type, confidence = await self._classify_question(question, user_id)
+            # Step 0: Load conversation history for context
+            conversation_history = await self._load_conversation_history(user_id, chat_id) if chat_id else []
+            
+            # Step 1: Classify the question type (with conversation context)
+            question_type, confidence = await self._classify_question(question, user_id, conversation_history)
             
             logger.info(f"Question classified as: {question_type.value} (confidence: {confidence:.2f})")
             
-            # Step 2: Route to appropriate handler
+            # Step 2: Route to appropriate handler (pass conversation history)
             if question_type == QuestionType.CAUSAL:
-                response = await self._handle_causal_question(question, user_id, context)
+                response = await self._handle_causal_question(question, user_id, context, conversation_history)
             
             elif question_type == QuestionType.TEMPORAL:
-                response = await self._handle_temporal_question(question, user_id, context)
+                response = await self._handle_temporal_question(question, user_id, context, conversation_history)
             
             elif question_type == QuestionType.RELATIONSHIP:
-                response = await self._handle_relationship_question(question, user_id, context)
+                response = await self._handle_relationship_question(question, user_id, context, conversation_history)
             
             elif question_type == QuestionType.WHAT_IF:
-                response = await self._handle_whatif_question(question, user_id, context)
+                response = await self._handle_whatif_question(question, user_id, context, conversation_history)
             
             elif question_type == QuestionType.EXPLAIN:
-                response = await self._handle_explain_question(question, user_id, context)
+                response = await self._handle_explain_question(question, user_id, context, conversation_history)
             
             elif question_type == QuestionType.DATA_QUERY:
-                response = await self._handle_data_query(question, user_id, context)
+                response = await self._handle_data_query(question, user_id, context, conversation_history)
             
             else:
-                response = await self._handle_general_question(question, user_id, context)
+                response = await self._handle_general_question(question, user_id, context, conversation_history)
             
             # Step 3: Store in conversation context
             if chat_id:
@@ -187,25 +224,47 @@ class IntelligentChatOrchestrator:
     async def _classify_question(
         self,
         question: str,
-        user_id: str
+        user_id: str,
+        conversation_history: list[Dict[str, str]] = None
     ) -> Tuple[QuestionType, float]:
         """
-        Classify the question type using GPT-4.
+        Classify the question type using Claude with conversation context.
         
         Args:
             question: User's question
             user_id: User ID for context
+            conversation_history: Previous messages for context
         
         Returns:
             Tuple of (QuestionType, confidence_score)
         """
         try:
+            # Build messages with conversation history
+            messages = []
+            
+            # Add recent conversation history (last 3 exchanges for context)
+            if conversation_history:
+                recent_history = conversation_history[-6:]  # Last 3 Q&A pairs
+                for msg in recent_history:
+                    messages.append({
+                        "role": msg['role'],
+                        "content": msg['content']
+                    })
+            
+            # Add current question
+            messages.append({
+                "role": "user",
+                "content": question
+            })
+            
             # Use Claude 3.5 Sonnet (latest, most capable) to classify the question
             response = await self.openai.messages.create(
                 model="claude-3-5-sonnet-20241022",
                 max_tokens=150,
                 temperature=0.1,
                 system="""You are Finley's question classifier. Classify user questions to route them to the right analysis engine.
+
+CRITICAL: Consider conversation history to understand context. Follow-up questions like "How?" or "Why?" refer to previous context.
 
 QUESTION TYPES:
 - **causal**: WHY questions (e.g., "Why did revenue drop?", "What caused the spike?")
@@ -218,12 +277,7 @@ QUESTION TYPES:
 - **unknown**: Cannot classify
 
 Respond with ONLY JSON: {"type": "question_type", "confidence": 0.0-1.0, "reasoning": "brief explanation"}""",
-                messages=[
-                    {
-                        "role": "user",
-                        "content": question
-                    }
-                ]
+                messages=messages
             )
             
             result = json.loads(response.content[0].text)
@@ -570,10 +624,11 @@ Respond with ONLY JSON: {"type": "question_type", "confidence": 0.0-1.0, "reason
         self,
         question: str,
         user_id: str,
-        context: Optional[Dict[str, Any]]
+        context: Optional[Dict[str, Any]],
+        conversation_history: list[Dict[str, str]] = None
     ) -> ChatResponse:
         """
-        Handle general financial questions using Claude Haiku.
+        Handle general financial questions using Claude with full conversation context.
         
         Examples: "How do I improve cash flow?", "What is EBITDA?"
         """
@@ -581,18 +636,16 @@ Respond with ONLY JSON: {"type": "question_type", "confidence": 0.0-1.0, "reason
             # INTELLIGENCE LAYER: Fetch user's actual data context
             user_context = await self._fetch_user_data_context(user_id)
             
-            # Get conversation history for context
-            conversation_history = self.conversation_context.get(user_id, [])
-            
             # Build messages with conversation history
             messages = []
             
-            # Add last 5 messages for context (if available)
-            for msg in conversation_history[-5:]:
-                messages.append({
-                    "role": "user" if msg.get("is_user") else "assistant",
-                    "content": msg.get("content", "")
-                })
+            # Add conversation history (last 10 messages for context)
+            if conversation_history:
+                for msg in conversation_history[-10:]:
+                    messages.append({
+                        "role": msg['role'],
+                        "content": msg['content']
+                    })
             
             # Add current question WITH data context enrichment
             enriched_question = f"""USER QUESTION: {question}
@@ -610,9 +663,78 @@ CRITICAL: Reference their ACTUAL data in your response. Be specific with numbers
             # Use Claude 3.5 Sonnet (latest, most capable) for general financial advice
             response = await self.openai.messages.create(
                 model="claude-3-5-sonnet-20241022",
-                max_tokens=800,  # Increased for richer responses
+                max_tokens=1000,  # Increased for richer responses (but controlled by length rules)
                 temperature=0.7,
                 system="""You are Finley - the world's most intelligent AI finance teammate. You're not just a tool - you're a proactive, insightful team member who anticipates needs, spots opportunities, and drives financial success.
+
+🔒 CRITICAL SAFETY GUARDRAILS (ZERO TOLERANCE):
+1. **NO Tax Advice**: Never give specific tax advice. Say "Consult a tax professional for [specific situation]"
+2. **NO Legal Advice**: Never give legal advice. Say "Consult a lawyer for legal matters"
+3. **NO Investment Advice**: Never recommend specific investments. Say "Consult a financial advisor"
+4. **VERIFY Data**: Only reference data from USER'S ACTUAL DATA CONTEXT. If not in context, say "I don't have that data yet"
+5. **NO Hallucination**: If you don't know, say "I don't have enough data to answer that accurately"
+6. **NO Harmful Actions**: Never suggest illegal, unethical, or harmful financial practices
+7. **UNCERTAINTY HANDLING**: When uncertain or lacking data:
+   - Say "I don't have enough data to answer that accurately"
+   - Say "I need more information about [specific data needed]"
+   - Provide confidence level: "I'm 60% confident based on limited data"
+   - NEVER guess or make up numbers
+   - Better to admit uncertainty than give wrong answer
+
+🌍 MULTI-LANGUAGE SUPPORT:
+- **Auto-detect user's language** from their question
+- **Respond in the SAME language** they used
+- Supported: English, Spanish, French, German, Italian, Portuguese, Hindi, Chinese, Japanese, Korean, Arabic, and 85+ more
+- If user asks in Spanish, respond in Spanish
+- If user asks in Hindi, respond in Hindi
+- Keep financial terms in English if no direct translation (e.g., "EBITDA", "ROI")
+
+Example:
+- User: "¿Cuál es mi ingreso?" → Response: "Tu ingreso total es $125,432 en los últimos 90 días."
+- User: "मेरा राजस्व क्या है?" → Response: "आपका कुल राजस्व पिछले 90 दिनों में $125,432 है।"
+
+📏 DYNAMIC RESPONSE LENGTH RULES (MATCH QUESTION COMPLEXITY):
+- **Simple questions** (1 sentence, factual): 30-80 words max
+  Example Q: "What's my revenue?" → A: "Your total revenue is $125,432 in the last 90 days."
+  
+- **Medium questions** (how-to, explanations): 100-200 words
+  Example Q: "How are you going to analyze my data?" → A: [2-3 paragraphs with bullet points]
+  
+- **Complex questions** (full analysis, strategy): 250-400 words max
+  Example Q: "Give me a complete financial analysis" → A: [Full analysis with sections]
+  
+- **Follow-up questions**: 50-150 words (assume context from previous)
+  Example Q: "How?" (after previous answer) → A: [Brief explanation referencing previous context]
+
+CRITICAL: Match response length to question complexity. NEVER write 500-word essays for simple questions!
+
+🧠 MULTI-TURN REASONING (For Complex Questions):
+When faced with complex questions, break them down into steps:
+
+**Example: "Compare Q1 vs Q2 profitability"**
+Step 1: Identify what data is needed (Q1 revenue/expenses, Q2 revenue/expenses)
+Step 2: Calculate Q1 profit margin
+Step 3: Calculate Q2 profit margin  
+Step 4: Compare and explain the difference
+Step 5: Identify root causes of change
+Step 6: Provide actionable recommendations
+
+Show your thinking: "Let me break this down: First, I'll look at Q1... Then Q2... Now comparing..."
+
+🎭 ADAPTIVE RESPONSE STYLE (Match User's Expertise):
+- **Beginner** (first-time user, simple questions): Use simple language, explain jargon, be encouraging
+  Example: "Revenue is the money coming IN to your business. Think of it like your paycheck!"
+  
+- **Intermediate** (regular user, some finance knowledge): Use standard business terms, provide context
+  Example: "Your revenue grew 23% QoQ, which is strong for your industry."
+  
+- **Advanced** (asks technical questions, uses jargon): Use technical terms, deep analysis, benchmarks
+  Example: "Your EBITDA margin improved 340bps YoY, outperforming the SaaS median of 18%."
+
+**Auto-detect expertise level from:**
+- Question complexity
+- Use of financial jargon
+- Recurring question patterns (from long-term memory)
 
 🎯 YOUR PERSONALITY - WORLD-CLASS STANDARDS:
 - **Hyper-Intelligent**: Think 10 steps ahead, connect dots others miss
@@ -996,9 +1118,87 @@ Remember: You're not just answering questions - you're running their finance dep
             }
         ]
     
+    async def _load_user_long_term_memory(self, user_id: str) -> Dict[str, Any]:
+        """
+        Load user's long-term memory: preferences, past insights, recurring patterns.
+        This creates continuity across sessions - like a real team member who remembers!
+        """
+        try:
+            # Check if user_preferences table exists, if not return empty
+            memory = {
+                'preferences': {},
+                'past_insights': [],
+                'recurring_questions': [],
+                'business_context': {}
+            }
+            
+            # Try to load from user_preferences table (create if doesn't exist)
+            try:
+                prefs_result = self.supabase.table('user_preferences')\
+                    .select('*')\
+                    .eq('user_id', user_id)\
+                    .limit(1)\
+                    .execute()
+                
+                if prefs_result.data and len(prefs_result.data) > 0:
+                    prefs = prefs_result.data[0]
+                    memory['preferences'] = prefs.get('preferences', {})
+                    memory['business_context'] = prefs.get('business_context', {})
+            except Exception:
+                # Table might not exist yet - that's okay
+                pass
+            
+            # Load recurring question patterns from chat history
+            try:
+                # Find most common question topics
+                chat_result = self.supabase.table('chat_messages')\
+                    .select('message')\
+                    .eq('user_id', user_id)\
+                    .eq('role', 'user')\
+                    .order('created_at', desc=True)\
+                    .limit(50)\
+                    .execute()
+                
+                if chat_result.data:
+                    # Simple pattern detection: common keywords
+                    keywords = {}
+                    for msg in chat_result.data:
+                        text = msg['message'].lower()
+                        for keyword in ['revenue', 'expense', 'cash flow', 'profit', 'vendor', 'invoice']:
+                            if keyword in text:
+                                keywords[keyword] = keywords.get(keyword, 0) + 1
+                    
+                    # Top 3 recurring topics
+                    memory['recurring_questions'] = sorted(keywords.items(), key=lambda x: x[1], reverse=True)[:3]
+            except Exception:
+                pass
+            
+            return memory
+            
+        except Exception as e:
+            logger.error(f"Failed to load long-term memory: {e}")
+            return {'preferences': {}, 'past_insights': [], 'recurring_questions': [], 'business_context': {}}
+    
+    async def _save_user_insight(self, user_id: str, insight: str, category: str):
+        """Save important insights to long-term memory for future reference"""
+        try:
+            # Store in user_preferences table (upsert)
+            self.supabase.table('user_preferences').upsert({
+                'user_id': user_id,
+                'last_insight': insight,
+                'last_insight_category': category,
+                'last_insight_at': datetime.utcnow().isoformat(),
+                'updated_at': datetime.utcnow().isoformat()
+            }, on_conflict='user_id').execute()
+        except Exception as e:
+            logger.error(f"Failed to save insight: {e}")
+    
     async def _fetch_user_data_context(self, user_id: str) -> str:
         """Fetch user's actual data to provide intelligent, personalized responses"""
         try:
+            # Load long-term memory first
+            long_term_memory = await self._load_user_long_term_memory(user_id)
+            
             # Query user's data sources
             connections_result = self.supabase.table('user_connections').select('*').eq('user_id', user_id).eq('status', 'active').execute()
             connected_sources = [conn['connector_id'] for conn in connections_result.data] if connections_result.data else []
@@ -1039,8 +1239,22 @@ Remember: You're not just answering questions - you're running their finance dep
             entities_result = self.supabase.table('normalized_entities').select('canonical_name, entity_type').eq('user_id', user_id).limit(20).execute()
             top_entities = [e['canonical_name'] for e in entities_result.data[:5]] if entities_result.data else []
             
-            # Build context string with financial summary
+            # Build context string with financial summary AND long-term memory
             net_income = total_revenue - total_expenses
+            
+            # Add long-term memory context
+            memory_context = ""
+            if long_term_memory['recurring_questions']:
+                topics = [f"{topic} ({count}x)" for topic, count in long_term_memory['recurring_questions']]
+                memory_context = f"\n\nUSER'S RECURRING INTERESTS: {', '.join(topics)}"
+            
+            if long_term_memory['business_context']:
+                biz = long_term_memory['business_context']
+                if biz.get('industry'):
+                    memory_context += f"\nBUSINESS TYPE: {biz.get('industry')}"
+                if biz.get('size'):
+                    memory_context += f" | SIZE: {biz.get('size')}"
+            
             context = f"""CONNECTED DATA SOURCES: {', '.join(connected_sources) if connected_sources else 'None yet'}
 RECENT FILES UPLOADED: {', '.join(recent_files) if recent_files else 'None yet'}
 TOTAL TRANSACTIONS (Last 90 days): {total_transactions}
@@ -1051,7 +1265,7 @@ FINANCIAL SUMMARY (Last 90 days):
 - Total Revenue: ${total_revenue:,.2f}
 - Total Expenses: ${total_expenses:,.2f}
 - Net Income: ${net_income:,.2f}
-- Profit Margin: {(net_income / total_revenue * 100) if total_revenue > 0 else 0:.1f}%
+- Profit Margin: {(net_income / total_revenue * 100) if total_revenue > 0 else 0:.1f}%{memory_context}
 
 DATA STATUS: {'Rich data available - provide specific, quantified insights!' if total_transactions > 50 else 'Limited data - encourage user to connect sources or upload files'}"""
             
@@ -1060,6 +1274,101 @@ DATA STATUS: {'Rich data available - provide specific, quantified insights!' if 
         except Exception as e:
             logger.error(f"Failed to fetch user data context: {e}")
             return "DATA STATUS: Unable to fetch user data context"
+    
+    async def _load_conversation_history(
+        self,
+        user_id: str,
+        chat_id: str,
+        limit: int = 20
+    ) -> list[Dict[str, str]]:
+        """
+        Load conversation history from database with SMART CONTEXT WINDOW MANAGEMENT.
+        
+        If conversation is too long (>100K tokens), intelligently summarize old messages
+        while keeping recent ones intact. This prevents hitting Claude's 200K token limit.
+        """
+        try:
+            # Query last N messages from this chat
+            result = self.supabase.table('chat_messages')\
+                .select('role, message, created_at')\
+                .eq('user_id', user_id)\
+                .eq('chat_id', chat_id)\
+                .order('created_at', desc=False)\
+                .limit(limit)\
+                .execute()
+            
+            if not result.data:
+                return []
+            
+            # Convert to Claude message format
+            history = []
+            for msg in result.data:
+                history.append({
+                    'role': msg['role'],  # 'user' or 'assistant'
+                    'content': msg['message']
+                })
+            
+            # CONTEXT WINDOW MANAGEMENT: Estimate token count
+            # Rough estimate: 1 token ≈ 4 characters
+            total_chars = sum(len(msg['content']) for msg in history)
+            estimated_tokens = total_chars // 4
+            
+            # If conversation is getting long (>50K tokens), summarize old messages
+            if estimated_tokens > 50000 and len(history) > 10:
+                logger.info(f"Context window management: {estimated_tokens} tokens, summarizing old messages")
+                
+                # Keep last 6 messages (3 Q&A pairs) intact
+                recent_messages = history[-6:]
+                old_messages = history[:-6]
+                
+                # Create summary of old conversation
+                old_summary = self._summarize_conversation(old_messages)
+                
+                # Return: [summary] + recent messages
+                return [
+                    {
+                        'role': 'assistant',
+                        'content': f"[Previous conversation summary: {old_summary}]"
+                    }
+                ] + recent_messages
+            
+            logger.info(f"Loaded {len(history)} messages from conversation history ({estimated_tokens} tokens)")
+            return history
+            
+        except Exception as e:
+            logger.error(f"Failed to load conversation history: {e}")
+            return []
+    
+    def _summarize_conversation(self, messages: list[Dict[str, str]]) -> str:
+        """
+        Summarize old conversation messages to save context window space.
+        Extracts key topics, decisions, and insights.
+        """
+        if not messages:
+            return "No previous context"
+        
+        # Extract key topics from user questions
+        user_questions = [msg['content'] for msg in messages if msg['role'] == 'user']
+        
+        # Simple keyword extraction
+        topics = set()
+        for q in user_questions:
+            q_lower = q.lower()
+            if 'revenue' in q_lower:
+                topics.add('revenue analysis')
+            if 'expense' in q_lower or 'cost' in q_lower:
+                topics.add('expense tracking')
+            if 'cash flow' in q_lower:
+                topics.add('cash flow')
+            if 'vendor' in q_lower or 'supplier' in q_lower:
+                topics.add('vendor relationships')
+            if 'profit' in q_lower:
+                topics.add('profitability')
+        
+        if topics:
+            return f"User discussed: {', '.join(topics)}"
+        else:
+            return f"User asked {len(user_questions)} questions about their finances"
     
     def _update_conversation_context(
         self,
