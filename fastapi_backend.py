@@ -12999,10 +12999,11 @@ async def initiate_connector(req: ConnectorInitiateRequest):
         
         logger.info(f"Creating Nango Connect session for provider={req.provider}, integration_id={integ}, user_id={req.user_id}")
         nango = NangoClient(base_url=NANGO_BASE_URL)
-        # Nango expects integration objects with provider_config_key
+        # FIX: Nango expects array of integration IDs (strings), not objects
+        # Correct format: ["google-drive"] not [{"provider_config_key": "google-drive"}]
         session = await nango.create_connect_session(
             end_user={'id': req.user_id}, 
-            allowed_integrations=[{'provider_config_key': integ}]
+            allowed_integrations=[integ]  # Pass integration ID directly as string
         )
         
         logger.info(f"Nango Connect session created: {json.dumps(session)}")

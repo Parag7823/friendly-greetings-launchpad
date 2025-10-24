@@ -36,6 +36,14 @@ class NangoClient:
 
         API: POST /connect/sessions
         Docs: https://docs.nango.dev/reference/api/connect/sessions/create
+        
+        Args:
+            end_user: Dict with 'id' key containing user identifier
+            allowed_integrations: List of integration IDs (strings) e.g. ["google-drive", "gmail"]
+                                 NOT objects like [{"provider_config_key": "google-drive"}]
+        
+        Returns:
+            Dict containing session token and metadata
         """
         url = f"{self.base_url}/connect/sessions"
         payload = {

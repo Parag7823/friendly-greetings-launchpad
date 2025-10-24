@@ -200,9 +200,9 @@ class IntelligentChatOrchestrator:
             Tuple of (QuestionType, confidence_score)
         """
         try:
-            # Use Claude Haiku to classify the question
+            # Use Claude 3.5 Haiku (latest) to classify the question
             response = await self.openai.messages.create(
-                model="claude-haiku-4-20250514",
+                model="claude-3-5-haiku-20241022",
                 max_tokens=150,
                 temperature=0.1,
                 system="""You are a financial AI assistant that classifies user questions.
@@ -597,9 +597,9 @@ Respond with ONLY a JSON object: {"type": "question_type", "confidence": 0.0-1.0
                 "content": question
             })
             
-            # Use Claude Haiku for general financial advice
+            # Use Claude 3.5 Haiku (latest) for general financial advice
             response = await self.openai.messages.create(
-                model="claude-haiku-4-20250514",
+                model="claude-3-5-haiku-20241022",
                 max_tokens=500,
                 temperature=0.7,
                 system="You are Finley, an expert financial AI assistant. Provide helpful, accurate financial advice and explanations. Be concise but thorough.",
@@ -834,14 +834,23 @@ Respond with ONLY a JSON object: {"type": "question_type", "confidence": 0.0-1.0
     ):
         """Store chat message in database"""
         try:
+            # Store user message
             self.supabase.table('chat_messages').insert({
                 'user_id': user_id,
-                'chat_id': chat_id or f"chat_{datetime.utcnow().strftime('%Y%m%d')}",
+                'chat_id': chat_id or f"chat_{datetime.utcnow().strftime('%Y%m%d%H%M%S')}",
+                'chat_title': 'New Chat',
                 'message': question,
-                'response': response.answer,
-                'question_type': response.question_type.value,
-                'confidence': response.confidence,
-                'metadata': response.to_dict(),
+                'role': 'user',  # FIX: Add required 'role' field
+                'created_at': datetime.utcnow().isoformat()
+            }).execute()
+            
+            # Store assistant response
+            self.supabase.table('chat_messages').insert({
+                'user_id': user_id,
+                'chat_id': chat_id or f"chat_{datetime.utcnow().strftime('%Y%m%d%H%M%S')}",
+                'chat_title': 'New Chat',
+                'message': response.answer,
+                'role': 'assistant',  # FIX: Add required 'role' field
                 'created_at': datetime.utcnow().isoformat()
             }).execute()
         except Exception as e:
