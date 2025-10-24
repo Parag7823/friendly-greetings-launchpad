@@ -12,7 +12,6 @@ import { useToast } from '@/components/ui/use-toast';
 import ConnectorConfigModal from './ConnectorConfigModal';
 import { useSearchParams } from 'react-router-dom';
 import { config } from '@/config';
-import { AnimatedShaderBackground } from './ui/animated-shader-background';
 
 interface ChatInterfaceProps {
   currentView?: string;
@@ -374,9 +373,6 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
       default:
         return (
           <div className="h-full flex bg-background relative">
-            {/* Animated Shader Background */}
-            <AnimatedShaderBackground />
-            
             {/* Main Chat Area - Responsive to Data Sources panel */}
             <motion.div 
               className="flex-1 flex flex-col min-w-0"
