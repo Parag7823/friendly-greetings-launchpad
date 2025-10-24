@@ -14,7 +14,7 @@ export const config = {
     reconnectBaseDelay: parseInt(import.meta.env.VITE_WS_RECONNECT_BASE_DELAY || '1000', 10), // milliseconds
   },
   // API base URL - defaults to production, can be overridden with VITE_API_URL
-  apiUrl: import.meta.env.VITE_API_URL || 'https://friendly-greetings-launchpad-iz34.onrender.com',
+  apiUrl: import.meta.env.VITE_API_URL || 'https://friendly-greetings-launchpad-ay56.onrender.com',
   
   // WebSocket URL derived from API URL
   get wsUrl() {

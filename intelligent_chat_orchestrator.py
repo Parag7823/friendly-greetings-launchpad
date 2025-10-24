@@ -1007,24 +1007,53 @@ Remember: You're not just answering questions - you're running their finance dep
             files_result = self.supabase.table('raw_records').select('file_name, created_at').eq('user_id', user_id).order('created_at', desc=True).limit(5).execute()
             recent_files = [f['file_name'] for f in files_result.data] if files_result.data else []
             
-            # Query transaction summary
-            events_result = self.supabase.table('raw_events').select('id, source_platform, ingest_ts, payload').eq('user_id', user_id).order('ingest_ts', desc=True).limit(100).execute()
+            # Query transaction summary (last 90 days or 1000 transactions, whichever is less)
+            ninety_days_ago = (datetime.utcnow() - timedelta(days=90)).isoformat()
+            events_result = self.supabase.table('raw_events')\
+                .select('id, source_platform, ingest_ts, payload, classification_metadata')\
+                .eq('user_id', user_id)\
+                .gte('ingest_ts', ninety_days_ago)\
+                .order('ingest_ts', desc=True)\
+                .limit(1000)\
+                .execute()
             
             total_transactions = len(events_result.data) if events_result.data else 0
             platforms = list(set([e.get('source_platform', 'unknown') for e in events_result.data])) if events_result.data else []
+            
+            # Calculate financial summary
+            total_revenue = 0
+            total_expenses = 0
+            for event in (events_result.data or []):
+                payload = event.get('payload', {})
+                classification = event.get('classification_metadata', {})
+                amount = float(payload.get('amount', 0) or payload.get('total_amount', 0) or 0)
+                
+                # Determine if revenue or expense based on classification
+                kind = classification.get('kind', '').lower() if classification else ''
+                if 'revenue' in kind or 'income' in kind or 'invoice' in kind:
+                    total_revenue += abs(amount)
+                elif 'expense' in kind or 'bill' in kind or 'payment' in kind:
+                    total_expenses += abs(amount)
             
             # Query entities (vendors/customers)
             entities_result = self.supabase.table('normalized_entities').select('canonical_name, entity_type').eq('user_id', user_id).limit(20).execute()
             top_entities = [e['canonical_name'] for e in entities_result.data[:5]] if entities_result.data else []
             
-            # Build context string
+            # Build context string with financial summary
+            net_income = total_revenue - total_expenses
             context = f"""CONNECTED DATA SOURCES: {', '.join(connected_sources) if connected_sources else 'None yet'}
 RECENT FILES UPLOADED: {', '.join(recent_files) if recent_files else 'None yet'}
-TOTAL TRANSACTIONS: {total_transactions}
+TOTAL TRANSACTIONS (Last 90 days): {total_transactions}
 PLATFORMS DETECTED: {', '.join(platforms) if platforms else 'None'}
 TOP ENTITIES: {', '.join(top_entities) if top_entities else 'None yet'}
 
-DATA STATUS: {'Rich data available - provide specific insights!' if total_transactions > 50 else 'Limited data - encourage user to connect sources or upload files'}"""
+FINANCIAL SUMMARY (Last 90 days):
+- Total Revenue: ${total_revenue:,.2f}
+- Total Expenses: ${total_expenses:,.2f}
+- Net Income: ${net_income:,.2f}
+- Profit Margin: {(net_income / total_revenue * 100) if total_revenue > 0 else 0:.1f}%
+
+DATA STATUS: {'Rich data available - provide specific, quantified insights!' if total_transactions > 50 else 'Limited data - encourage user to connect sources or upload files'}"""
             
             return context
             

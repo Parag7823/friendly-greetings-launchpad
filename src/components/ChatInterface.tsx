@@ -3,6 +3,7 @@ import { useState, useEffect, useRef } from 'react';
 import { EnhancedFileUpload } from './EnhancedFileUpload';
 import { InlineUploadZone } from './InlineUploadZone';
 import { DataSourcesPanel } from './DataSourcesPanel';
+import { MarkdownMessage } from './MarkdownMessage';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
 import { useAuth } from './AuthProvider';
@@ -481,7 +482,11 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
                             : 'bg-[#1a1a1a]/90 backdrop-blur-sm text-white border-white/10'
                         }`}
                       >
-                        <p className="text-xs">{msg.text}</p>
+                        {msg.isUser ? (
+                          <p className="text-xs">{msg.text}</p>
+                        ) : (
+                          <MarkdownMessage content={msg.text} />
+                        )}
                         <p className="text-[10px] opacity-70 mt-1">
                           {msg.timestamp.toLocaleTimeString()}
                         </p>
