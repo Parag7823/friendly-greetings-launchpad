@@ -4393,6 +4393,65 @@ class VendorStandardizer:
                 "cleaning_method": "fallback"
             }
     
+    async def _ai_standardization(self, vendor_name: str, platform: str = None) -> Dict[str, Any]:
+        """
+        CRITICAL FIX: Missing method that was being called but never defined.
+        Use AI to standardize vendor name for complex cases.
+        """
+        try:
+            # Prepare prompt for AI
+            prompt = f"""Standardize this vendor name to a clean, consistent format:
+
+Vendor: {vendor_name}
+Platform: {platform or 'unknown'}
+
+Return JSON with:
+- vendor_raw: original name
+- vendor_standard: cleaned name (remove suffixes like Inc, LLC, Ltd, Corp, etc.)
+- confidence: 0.0-1.0
+- cleaning_method: "ai"
+
+Example:
+{{"vendor_raw": "Acme Corp.", "vendor_standard": "Acme", "confidence": 0.9, "cleaning_method": "ai"}}"""
+
+            # Use Anthropic for vendor standardization
+            response = await self.anthropic.messages.create(
+                model="claude-3-5-sonnet-20241022",
+                max_tokens=200,
+                temperature=0.1,
+                messages=[{"role": "user", "content": prompt}]
+            )
+            
+            result_text = response.content[0].text.strip()
+            
+            # Parse JSON response
+            import json
+            import re
+            
+            # Extract JSON from markdown if present
+            json_match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', result_text, re.DOTALL)
+            if json_match:
+                result_text = json_match.group(1)
+            
+            result = json.loads(result_text)
+            
+            # Ensure all required fields are present
+            if not all(k in result for k in ['vendor_raw', 'vendor_standard', 'confidence', 'cleaning_method']):
+                raise ValueError("AI response missing required fields")
+            
+            return result
+            
+        except Exception as e:
+            logger.warning(f"AI standardization failed for '{vendor_name}': {e}")
+            # Fallback to rule-based cleaning
+            cleaned = self._rule_based_cleaning(vendor_name)
+            return {
+                "vendor_raw": vendor_name,
+                "vendor_standard": cleaned,
+                "confidence": 0.6,
+                "cleaning_method": "fallback"
+            }
+    
     async def get_cache_stats(self) -> Dict[str, Any]:
         """Get cache statistics from centralized cache"""
         if self.cache and hasattr(self.cache, 'get_cache_stats'):
@@ -5083,14 +5142,21 @@ class DataEnrichmentProcessor:
         """
         Get field mappings from database for smart field extraction.
         Returns dict mapping target_field -> source_column
+        
+        CRITICAL FIX: Disabled until field_mappings feature is fully implemented.
+        This feature requires supabase client to be passed as parameter.
         """
         if not user_id:
             return {}
         
-        try:
-            # Query field_mappings table for this user
-            from supabase_client import get_supabase_client
-            supabase = get_supabase_client()
+        # CRITICAL FIX: Return empty dict for now - field_mappings feature not yet implemented
+        logger.debug("Field mappings feature disabled - returning empty mappings")
+        return {}
+        
+        # TODO: Re-enable when field_mappings table and RPC function are implemented
+        # try:
+        #     # Query field_mappings table for this user
+        #     supabase = get_supabase_client()  # Need to pass this as parameter
             
             mappings = {}
             for column in column_names:
@@ -6841,10 +6907,11 @@ class BatchAIRowClassifier:
         self.cache = {}  # Simple cache for similar rows
         
         # OPTIMIZATION 2: Dynamic batch sizing parameters
-        # REDUCED to prevent AI response truncation (max_tokens=8000 limit)
-        self.min_batch_size = 20  # Complex rows (for files with 15+ columns)
-        self.default_batch_size = 40  # Normal rows (for files with 6-14 columns)
-        self.max_batch_size = 60  # Simple rows (for files with ≤5 columns)
+        # CRITICAL FIX: Further reduced to prevent AI response truncation (max_tokens=8000 limit)
+        # Based on real-world testing with 150-200 row files
+        self.min_batch_size = 10  # Complex rows (for files with 15+ columns)
+        self.default_batch_size = 20  # Normal rows (for files with 6-14 columns)
+        self.max_batch_size = 30  # Simple rows (for files with ≤5 columns)
         self.max_concurrent_batches = 5  # Process 5 batches simultaneously
         
         # Complexity thresholds
@@ -6966,7 +7033,7 @@ class BatchAIRowClassifier:
                 response = groq_client.chat.completions.create(
                     model="llama-3.3-70b-versatile",
                     messages=[{"role": "user", "content": prompt}],
-                    max_tokens=8000,
+                    max_tokens=16000,  # CRITICAL FIX: Increased from 8000 to handle larger batches
                     temperature=0.1
                 )
                 
@@ -6974,9 +7041,9 @@ class BatchAIRowClassifier:
                 
                 # Check if response was truncated (ends mid-JSON)
                 if result and not result.rstrip().endswith((']', '}')):
-                    logger.warning(f"AI response appears truncated (length: {len(result)}). Batch too large for max_tokens=8000")
+                    logger.warning(f"AI response appears truncated (length: {len(result)}). Batch too large for max_tokens=16000")
                     # If batch is large, split it and retry
-                    if len(rows) > 30:
+                    if len(rows) > 15:  # CRITICAL FIX: Reduced threshold from 30 to 15
                         logger.info(f"Splitting batch of {len(rows)} rows into smaller chunks")
                         mid = len(rows) // 2
                         first_half = await self.classify_rows_batch(rows[:mid], platform_info, column_names)

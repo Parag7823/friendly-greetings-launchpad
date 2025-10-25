@@ -303,7 +303,12 @@ class TransactionContext:
             return result.data[0]
             
         except Exception as e:
-            logger.error(f"Transaction insert failed for {table}: {e}")
+            # CRITICAL FIX: Don't log duplicate key errors as ERROR - they're expected and handled
+            error_str = str(e)
+            if '23505' in error_str or 'duplicate key' in error_str.lower():
+                logger.info(f"Transaction insert skipped for {table} (duplicate key): {e}")
+            else:
+                logger.error(f"Transaction insert failed for {table}: {e}")
             raise
     
     async def update(self, table: str, data: Dict[str, Any], filters: Dict[str, Any]) -> Dict[str, Any]:

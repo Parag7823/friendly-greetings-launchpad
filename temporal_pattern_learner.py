@@ -624,6 +624,25 @@ class TemporalPatternLearner:
     ):
         """Store temporal pattern in database"""
         try:
+            # Generate semantic description
+            semantic_desc = f"{pattern.relationship_type} occurs every {pattern.avg_days_between:.1f} days on average"
+            if pattern.has_seasonal_pattern:
+                semantic_desc += f" with seasonal pattern (period: {pattern.seasonal_period_days} days)"
+            
+            # Generate temporal causality explanation
+            temporal_causality = f"Time-based pattern with {pattern.confidence_score:.0%} confidence"
+            if pattern.std_dev_days > 0:
+                temporal_causality += f", variability: ±{pattern.std_dev_days:.1f} days"
+            
+            # Generate business logic
+            business_logic = f"Predictable pattern based on {pattern.sample_count} historical occurrences"
+            if pattern.confidence_score >= 0.8:
+                business_logic += " (high confidence - reliable for forecasting)"
+            elif pattern.confidence_score >= 0.6:
+                business_logic += " (moderate confidence - use with caution)"
+            else:
+                business_logic += " (low confidence - insufficient data)"
+            
             data = {
                 'user_id': user_id,
                 'relationship_type': pattern.relationship_type,
@@ -637,7 +656,11 @@ class TemporalPatternLearner:
                 'pattern_description': pattern.pattern_description,
                 'has_seasonal_pattern': pattern.has_seasonal_pattern,
                 'seasonal_period_days': pattern.seasonal_period_days,
-                'seasonal_amplitude': pattern.seasonal_amplitude
+                'seasonal_amplitude': pattern.seasonal_amplitude,
+                # CRITICAL FIX: Add missing fields
+                'semantic_description': semantic_desc,
+                'temporal_causality': temporal_causality,
+                'business_logic': business_logic
             }
             
             self.supabase.table('temporal_patterns').upsert(data).execute()

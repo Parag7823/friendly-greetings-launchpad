@@ -8,14 +8,19 @@
 -- FIX 1: Update entity_type CHECK constraint to include 'projects'
 -- ============================================================================
 
--- Drop the existing CHECK constraint
+-- Drop the existing-- Add CHECK constraint for entity_type with both singular and plural forms
+-- CRITICAL FIX: Support both singular AND plural for ALL entity types
 ALTER TABLE public.normalized_entities 
 DROP CONSTRAINT IF EXISTS normalized_entities_entity_type_check;
 
--- Add new CHECK constraint with 'projects' included
 ALTER TABLE public.normalized_entities 
 ADD CONSTRAINT normalized_entities_entity_type_check 
-CHECK (entity_type IN ('employee', 'vendor', 'customer', 'project', 'projects'));
+CHECK (entity_type IN (
+    'employee', 'employees',
+    'vendor', 'vendors', 
+    'customer', 'customers',
+    'project', 'projects'
+));
 
 -- Note: We allow both 'project' and 'projects' for backward compatibility
 -- The code may use either variant, so we support both
@@ -44,4 +49,4 @@ CHECK (entity_type IN ('employee', 'vendor', 'customer', 'project', 'projects'))
 -- ============================================================================
 
 COMMENT ON CONSTRAINT normalized_entities_entity_type_check ON public.normalized_entities 
-IS 'Allows entity types: employee, vendor, customer, project, projects. Both project/projects supported for compatibility.';
+IS 'Allows entity types (both singular and plural): employee/employees, vendor/vendors, customer/customers, project/projects. Both forms supported for compatibility.';
