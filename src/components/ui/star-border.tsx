@@ -30,29 +30,30 @@ export function StarBorder<T extends ElementType = "button">({
     >
       <div
         className={cn(
-          "absolute w-[300%] h-[50%] bottom-[-11px] right-[-250%] rounded-full animate-star-movement-bottom z-0",
-          "opacity-40 dark:opacity-80 blur-sm" 
+          "absolute w-[200%] h-[40%] bottom-[-8px] right-[-150%] rounded-full animate-star-movement-bottom z-0",
+          "opacity-50 dark:opacity-90 blur-[3px]" 
         )}
         style={{
-          background: `radial-gradient(circle, ${defaultColor}, transparent 15%)`,
+          background: `radial-gradient(circle, ${defaultColor}, transparent 20%)`,
           animationDuration: speed,
         }}
       />
       <div
         className={cn(
-          "absolute w-[300%] h-[50%] top-[-10px] left-[-250%] rounded-full animate-star-movement-top z-0",
-          "opacity-40 dark:opacity-80 blur-sm"
+          "absolute w-[200%] h-[40%] top-[-8px] left-[-150%] rounded-full animate-star-movement-top z-0",
+          "opacity-50 dark:opacity-90 blur-[3px]"
         )}
         style={{
-          background: `radial-gradient(circle, ${defaultColor}, transparent 15%)`,
+          background: `radial-gradient(circle, ${defaultColor}, transparent 20%)`,
           animationDuration: speed,
         }}
       />
       <div className={cn(
         "relative z-10 border text-foreground text-center py-2 px-4 rounded-[20px]",
-        "bg-gradient-to-b from-background/90 to-muted/90 border-border/40",
-        "dark:from-background dark:to-muted dark:border-border",
-        "transition-all duration-200 hover:from-background hover:to-muted/80"
+        "bg-gradient-to-b from-background via-background to-muted/50 border-border/60",
+        "dark:from-zinc-900 dark:via-zinc-900 dark:to-zinc-800 dark:border-zinc-700",
+        "transition-all duration-200 hover:from-muted/20 hover:to-muted/40",
+        "shadow-sm hover:shadow-md"
       )}>
         {children}
       </div>

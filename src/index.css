@@ -196,4 +196,21 @@
   .hover-glow:hover {
     box-shadow: 0 0 20px rgba(160, 160, 160, 0.3);
   }
+  
+  /* Dynamic Black - The beautiful gradient black from StarBorder */
+  .dynamic-black {
+    @apply bg-gradient-to-b from-background via-background to-muted/50;
+    @apply border-border/60;
+  }
+  
+  .dynamic-black-dark {
+    @apply dark:from-zinc-900 dark:via-zinc-900 dark:to-zinc-800 dark:border-zinc-700;
+  }
+  
+  /* Combined dynamic black for easy use */
+  .finley-dynamic-bg {
+    @apply bg-gradient-to-b from-background via-background to-muted/50 border-border/60;
+    @apply dark:from-zinc-900 dark:via-zinc-900 dark:to-zinc-800 dark:border-zinc-700;
+    @apply transition-all duration-200;
+  }
 }
