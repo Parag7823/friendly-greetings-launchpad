@@ -13,6 +13,7 @@ import { Card } from './ui/card';
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
 import { StarBorder } from './ui/star-border';
+import { ToastAction } from './ui/toast';
 import { useAuth } from './AuthProvider';
 import { supabase } from '@/integrations/supabase/client';
 import { config } from '@/config';
@@ -320,10 +321,14 @@ export const DataSourcesPanel = ({ isOpen, onClose }: DataSourcesPanelProps) => 
             description: errorData.detail?.message || 'You have reached the maximum number of connections. Please upgrade your Nango plan or delete unused connections.',
             variant: 'destructive',
             duration: 10000,
-            action: errorData.detail?.upgrade_url ? {
-              label: 'Upgrade Plan',
-              onClick: () => window.open(errorData.detail.upgrade_url, '_blank')
-            } : undefined
+            action: errorData.detail?.upgrade_url ? (
+              <ToastAction 
+                altText="Upgrade Plan" 
+                onClick={() => window.open(errorData.detail.upgrade_url, '_blank')}
+              >
+                Upgrade Plan
+              </ToastAction>
+            ) : undefined
           });
           return;
         }
@@ -847,7 +852,7 @@ export const DataSourcesPanel = ({ isOpen, onClose }: DataSourcesPanelProps) => 
                                             as="button"
                                             onClick={() => handleConnect(integration.provider)}
                                             disabled={connecting === integration.provider}
-                                            speed="6s"
+                                            speed="4s"
                                             className="h-9 px-4 text-xs font-medium disabled:opacity-50 disabled:cursor-not-allowed"
                                           >
                                             {connecting === integration.provider ? (
