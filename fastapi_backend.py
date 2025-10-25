@@ -6841,16 +6841,27 @@ class BatchAIRowClassifier:
         # This maintains compatibility with the existing RowProcessor
         return self._fallback_classification(row, platform_info, column_names)
     
-    async def classify_rows_batch(self, rows: List[pd.Series], platform_info: Dict, column_names: List[str]) -> List[Dict[str, Any]]:
-        """Classify multiple rows in a single AI call for efficiency"""
+    async def classify_rows_batch(self, rows, platform_info: Dict, column_names: List[str]) -> List[Dict[str, Any]]:
+        """Classify multiple rows in a single AI call for efficiency
+        
+        Args:
+            rows: List of pd.Series or List of dicts
+            platform_info: Platform information
+            column_names: List of column names
+        """
         try:
             # Prepare batch data
             batch_data = []
             for i, row in enumerate(rows):
                 row_data = {}
-                for col, val in row.items():
-                    if pd.notna(val):
-                        row_data[str(col)] = str(val)
+                # Handle both pd.Series and dict inputs
+                if isinstance(row, dict):
+                    row_data = {str(k): str(v) for k, v in row.items() if v is not None and str(v) != 'nan'}
+                else:
+                    # pd.Series
+                    for col, val in row.items():
+                        if pd.notna(val):
+                            row_data[str(col)] = str(val)
                 
                 batch_data.append({
                     'index': i,
@@ -6905,7 +6916,7 @@ class BatchAIRowClassifier:
                 response = groq_client.chat.completions.create(
                     model="llama-3.3-70b-versatile",
                     messages=[{"role": "user", "content": prompt}],
-                    max_tokens=2000,
+                    max_tokens=8000,
                     temperature=0.1
                 )
                 
@@ -11991,6 +12002,7 @@ async def _process_api_data_through_pipeline(
                 'file_size': len(csv_bytes),
                 'file_hash': file_hash,
                 'source': f'connector_{source_platform.lower()}',
+                'job_type': 'api_sync',
                 'status': 'processing',
                 'created_at': datetime.utcnow().isoformat()
             }).execute()
