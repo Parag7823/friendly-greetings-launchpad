@@ -5157,33 +5157,34 @@ class DataEnrichmentProcessor:
         # try:
         #     # Query field_mappings table for this user
         #     supabase = get_supabase_client()  # Need to pass this as parameter
-            
-            mappings = {}
-            for column in column_names:
-                try:
-                    # Call the get_field_mapping function
-                    result = supabase.rpc('get_field_mapping', {
-                        'p_user_id': user_id,
-                        'p_source_column': column,
-                        'p_platform': platform,
-                        'p_document_type': document_type
-                    }).execute()
-                    
-                    if result.data and len(result.data) > 0:
-                        mapping = result.data[0]
-                        target_field = mapping.get('target_field')
-                        if target_field:
-                            mappings[target_field] = column
-                            logger.debug(f"✅ Field mapping found: {column} -> {target_field}")
-                except Exception as e:
-                    logger.debug(f"No mapping found for column {column}: {e}")
-                    continue
-            
-            return mappings
-            
-        except Exception as e:
-            logger.warning(f"Failed to get field mappings: {e}")
-            return {}
+        #     
+        #     mappings = {}
+        #     for column in column_names:
+        #         try:
+        #             # Call the get_field_mapping function
+        #             result = supabase.rpc('get_field_mapping', {
+        #                 'p_user_id': user_id,
+        #                 'p_source_column': column,
+        #                 'p_platform': platform,
+        #                 'p_document_type': document_type
+        #             }).execute()
+        #             
+        #             if result.data and len(result.data) > 0:
+        #                 mapping = result.data[0]
+        #                 target_field = mapping.get('target_field')
+        #                 if target_field:
+        #                     mappings[target_field] = column
+        #                     logger.debug(f"✅ Field mapping found: {column} -> {target_field}")
+        #         except Exception as e:
+        #             logger.debug(f"No mapping found for column {column}: {e}")
+        #             continue
+        #     
+        #     return mappings
+        #     
+        # except Exception as e:
+        #     logger.warning(f"Failed to get field mappings: {e}")
+        #     return {}
+        return {}
     
     async def _extract_amount_smart(self, row_data: Dict, field_mappings: Dict[str, str]) -> float:
         """Extract amount using smart field mapping"""

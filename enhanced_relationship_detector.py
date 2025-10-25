@@ -46,6 +46,14 @@ except ImportError:
     TEMPORAL_PATTERN_LEARNER_AVAILABLE = False
     logger.warning("TemporalPatternLearner not available. Temporal pattern learning will be disabled.")
 
+# Import Neo4j relationship detector for graph database integration
+try:
+    from neo4j_relationship_detector import Neo4jRelationshipDetector
+    NEO4J_AVAILABLE = True
+except ImportError:
+    NEO4J_AVAILABLE = False
+    logger.warning("Neo4jRelationshipDetector not available. Graph database features will be disabled.")
+
 class EnhancedRelationshipDetector:
     """Enhanced relationship detector that actually finds relationships between events"""
     
@@ -86,6 +94,18 @@ class EnhancedRelationshipDetector:
             self.temporal_learner = None
             logger.warning("⚠️ Temporal pattern learner not available")
         
+        # Initialize Neo4j graph database for visual relationship exploration
+        if NEO4J_AVAILABLE:
+            try:
+                self.neo4j = Neo4jRelationshipDetector()
+                logger.info("✅ Neo4j graph database initialized")
+            except Exception as e:
+                self.neo4j = None
+                logger.error(f"❌ Neo4j initialization failed: {e}")
+        else:
+            self.neo4j = None
+            logger.warning("⚠️ Neo4j not available - graph features disabled")
+        
     async def detect_all_relationships(self, user_id: str, file_id: Optional[str] = None) -> Dict[str, Any]:
         """
         CRITICAL FIX: Detect relationships using document_type classification and database-level JOINs.
@@ -109,9 +129,13 @@ class EnhancedRelationshipDetector:
             # Combine and store relationships
             all_relationships = cross_file_relationships + within_file_relationships
             
-            # Store relationships in database
+            # Store relationships in Supabase database
             if all_relationships:
                 await self._store_relationships(all_relationships, user_id)
+            
+            # NEW: Sync relationships to Neo4j graph database
+            if all_relationships and self.neo4j:
+                await self._sync_to_neo4j(all_relationships, user_id)
             
             # PHASE 2B: Enrich relationships with semantic analysis
             semantic_enrichment_stats = await self._enrich_relationships_with_semantics(
@@ -1213,6 +1237,81 @@ class EnhancedRelationshipDetector:
                 'anomalies_detected': 0,
                 'error': str(e),
                 'message': 'Temporal pattern learning failed'
+            }
+    
+    async def _sync_to_neo4j(self, relationships: List[Dict], user_id: str) -> Dict[str, Any]:
+        """
+        Sync relationships to Neo4j graph database for visual exploration.
+        
+        Args:
+            relationships: List of detected relationships
+            user_id: User ID for context
+        
+        Returns:
+            Statistics about Neo4j sync
+        """
+        if not self.neo4j:
+            return {
+                'enabled': False,
+                'synced_nodes': 0,
+                'synced_relationships': 0,
+                'message': 'Neo4j not available'
+            }
+        
+        try:
+            synced_nodes = 0
+            synced_relationships = 0
+            failed_count = 0
+            
+            # Get unique event IDs
+            event_ids = set()
+            for rel in relationships:
+                event_ids.add(rel['source_event_id'])
+                event_ids.add(rel['target_event_id'])
+            
+            # Fetch event details from Supabase
+            events_dict = await self._fetch_events_by_ids(list(event_ids), user_id)
+            
+            # Create event nodes in Neo4j
+            for event_id, event_data in events_dict.items():
+                try:
+                    if self.neo4j.create_event_node(event_data):
+                        synced_nodes += 1
+                except Exception as e:
+                    logger.error(f"Failed to create Neo4j node for {event_id}: {e}")
+                    failed_count += 1
+            
+            # Create relationship edges in Neo4j
+            for rel in relationships:
+                try:
+                    if self.neo4j.create_relationship(
+                        rel['source_event_id'],
+                        rel['target_event_id'],
+                        rel
+                    ):
+                        synced_relationships += 1
+                except Exception as e:
+                    logger.error(f"Failed to create Neo4j relationship: {e}")
+                    failed_count += 1
+            
+            logger.info(f"✅ Neo4j sync: {synced_nodes} nodes, {synced_relationships} relationships")
+            
+            return {
+                'enabled': True,
+                'synced_nodes': synced_nodes,
+                'synced_relationships': synced_relationships,
+                'failed_count': failed_count,
+                'message': f'Neo4j sync completed: {synced_nodes} nodes, {synced_relationships} relationships'
+            }
+            
+        except Exception as e:
+            logger.error(f"Neo4j sync failed: {e}")
+            return {
+                'enabled': True,
+                'synced_nodes': 0,
+                'synced_relationships': 0,
+                'error': str(e),
+                'message': 'Neo4j sync failed'
             }
 
 # Test function
