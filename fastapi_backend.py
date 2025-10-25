@@ -4260,6 +4260,13 @@ class VendorStandardizer:
             ' services.', ' systems.', ' technologies.', ' tech.', ' group.', ' holdings.'
         ]
     
+    def _is_effectively_empty(self, text: str) -> bool:
+        """Check if text is effectively empty (None, empty, or only whitespace including Unicode)"""
+        if not text:
+            return True
+        # Strip all whitespace including Unicode whitespace
+        return len(text.strip()) == 0
+    
     async def standardize_vendor(self, vendor_name: str, platform: str = None) -> Dict[str, Any]:
         """Standardize vendor name using AI and rule-based cleaning"""
         try:
@@ -8760,9 +8767,9 @@ class ExcelProcessor:
                 
                 # Queue background job for relationship detection
                 try:
-                    arq_redis = get_arq_redis()
-                    if arq_redis:
-                        await arq_redis.enqueue_job('detect_relationships', user_id=user_id)
+                    arq_pool = await get_arq_pool()
+                    if arq_pool:
+                        await arq_pool.enqueue_job('detect_relationships', user_id=user_id)
                         logger.info(f"Queued background relationship detection for user {user_id}")
                 except Exception as queue_error:
                     logger.error(f"Failed to queue background relationship detection: {queue_error}")

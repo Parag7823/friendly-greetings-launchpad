@@ -89,6 +89,29 @@ class EntityResolverOptimized:
             'timeout_seconds': 30
         }
     
+    async def _validate_resolution_input(self, entity_name: str, entity_type: str, 
+                                        platform: str, user_id: str) -> Dict[str, Any]:
+        """Validate input parameters for entity resolution"""
+        errors = []
+        
+        if not entity_name or not isinstance(entity_name, str):
+            errors.append("entity_name must be a non-empty string")
+        
+        if not entity_type or not isinstance(entity_type, str):
+            errors.append("entity_type must be a non-empty string")
+        
+        if not user_id or not isinstance(user_id, str):
+            errors.append("user_id must be a non-empty string")
+        
+        # Platform is optional but should be string if provided
+        if platform and not isinstance(platform, str):
+            errors.append("platform must be a string if provided")
+        
+        return {
+            'valid': len(errors) == 0,
+            'errors': errors
+        }
+    
     async def resolve_entity(self, entity_name: str, entity_type: str, platform: str, 
                            user_id: str, row_data: Dict, column_names: List[str], 
                            source_file: str, row_id: str) -> Dict[str, Any]:
