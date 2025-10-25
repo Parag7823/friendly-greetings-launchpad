@@ -48,9 +48,8 @@ class UniversalDocumentClassifierOptimized:
     - Real-time classification updates
     """
     
-    def __init__(self, anthropic_client=None, cache_client=None, supabase_client=None, config=None, groq_client=None):
+    def __init__(self, anthropic_client=None, cache_client=None, supabase_client=None, config=None):
         self.anthropic = anthropic_client
-        self.groq = groq_client  # Groq client for fast, free processing
         self.cache = cache_client
         self.supabase = supabase_client
         self.config = config or self._get_default_config()
@@ -946,31 +945,17 @@ class UniversalDocumentClassifierOptimized:
                 # Fallback to pattern-based classification
                 return [self._pattern_classify_row(row, platform_info, column_names) for row in rows]
             
-            # Use Groq (free, fast) or Anthropic as fallback
-            if self.groq:
-                # Calculate required tokens: ~150 tokens per row classification
-                required_tokens = min(len(rows) * 150, 8000)  # Cap at 8000 tokens
-                response = self.groq.chat.completions.create(
-                    model="llama-3.3-70b-versatile",
-                    messages=[
-                        {"role": "system", "content": "You are a financial data classification expert. Classify transaction rows accurately and return valid JSON."},
-                        {"role": "user", "content": prompt}
-                    ],
-                    max_tokens=required_tokens,
-                    temperature=0.1
-                )
-                result_text = response.choices[0].message.content.strip()
-            else:
-                response = await self.anthropic.messages.create(
-                    model='claude-3-5-haiku-20241022',
-                    max_tokens=2000,
-                    temperature=0.1,
-                    system="You are a financial data classification expert. Classify transaction rows accurately and return valid JSON.",
-                    messages=[
-                        {"role": "user", "content": prompt}
-                    ]
-                )
-                result_text = response.content[0].text.strip()
+            response = await self.anthropic.messages.create(
+                model='claude-3-5-haiku-20241022',  # Using Haiku for fast, cheap row classification
+                max_tokens=2000,
+                temperature=0.1,
+                system="You are a financial data classification expert. Classify transaction rows accurately and return valid JSON.",
+                messages=[
+                    {"role": "user", "content": prompt}
+                ]
+            )
+            
+            result_text = response.content[0].text.strip()
             
             # Parse JSON response
             if result_text.startswith('```json'):
