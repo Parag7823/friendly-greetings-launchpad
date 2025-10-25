@@ -785,10 +785,10 @@ export const DataSourcesPanel = ({ isOpen, onClose }: DataSourcesPanelProps) => 
                                   return (
                                     <div
                                       key={integration.id}
-                                      className={`flex items-center justify-between p-3 border rounded-md hover:bg-muted/30 transition-all ${
+                                      className={`flex items-center justify-between p-3 border rounded-md transition-all ${
                                         connected 
                                           ? 'border-2 border-emerald-500/50 bg-emerald-500/5 shadow-sm shadow-emerald-500/20' 
-                                          : 'border-border'
+                                          : 'finley-dynamic-bg hover:bg-muted/20'
                                       }`}
                                     >
                                       <div className="flex items-center gap-3 flex-1 min-w-0">
