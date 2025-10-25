@@ -78,7 +78,7 @@ class UniversalPlatformDetectorOptimized:
     
     def _get_default_config(self) -> Dict[str, Any]:
         """Get default configuration"""
-        default_model = os.getenv('PLATFORM_DETECTOR_MODEL') or 'claude-3-5-sonnet-20241022'
+        default_model = os.getenv('PLATFORM_DETECTOR_MODEL') or 'llama-3.3-70b-versatile'
         return {
             'enable_caching': True,
             'cache_ttl': 7200,  # 2 hours
@@ -518,10 +518,9 @@ class UniversalPlatformDetectorOptimized:
             }}
             """
             
-            result_text = await self._safe_anthropic_call(
-                self.anthropic,
-                'claude-3-5-haiku-20241022',  # Using Haiku for fast platform detection
-                [{"role": "user", "content": prompt}],
+            # Use Groq Llama-3.3-70B for cost-effective platform detection
+            result_text = await self._safe_groq_call(
+                prompt,
                 self.config['ai_temperature'],
                 self.config['ai_max_tokens']
             )
@@ -658,23 +657,25 @@ class UniversalPlatformDetectorOptimized:
         user_part = (user_id or "anon")[:12]
         return f"detect_{user_part}_{filename_part}_{content_hash}"
     
-    async def _safe_anthropic_call(self, client, model: str, messages: List[Dict], 
-                               temperature: float, max_tokens: int) -> str:
-        """Safe Anthropic API call with error handling"""
+    async def _safe_groq_call(self, prompt: str, temperature: float, max_tokens: int) -> str:
+        """Safe Groq API call with error handling for cost-effective platform detection"""
         try:
-            response = await client.messages.create(
-                model=model,
+            from groq import Groq
+            groq_client = Groq(api_key=os.getenv('GROQ_API_KEY'))
+            
+            response = groq_client.chat.completions.create(
+                model="llama-3.3-70b-versatile",
+                messages=[{"role": "user", "content": prompt}],
                 max_tokens=max_tokens,
-                temperature=temperature,
-                messages=messages
+                temperature=temperature
             )
-            return response.content[0].text
+            return response.choices[0].message.content
         except Exception as e:
             if "429" in str(e) or "quota" in str(e).lower():
-                logger.warning(f"Anthropic quota exceeded: {e}")
+                logger.warning(f"Groq quota exceeded: {e}")
                 return '{"platform": "unknown", "confidence": 0.0, "indicators": [], "reasoning": "AI processing unavailable due to quota limits"}'
             else:
-                logger.error(f"Anthropic API call failed: {e}")
+                logger.error(f"Groq API call failed: {e}")
                 raise
     
     def _parse_ai_response(self, response_text: str) -> Optional[Dict[str, Any]]:

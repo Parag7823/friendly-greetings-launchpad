@@ -395,8 +395,9 @@ Provide ONLY the JSON response, no additional text."""
         try:
             self.metrics['ai_calls'] += 1
             
+            # Use Claude 3.5 Sonnet for complex relationship extraction (requires multi-step reasoning)
             response = await self.anthropic.messages.create(
-                model="claude-3-5-haiku-20241022",  # Using Haiku for fast relationship extraction
+                model="claude-3-5-sonnet-20241022",
                 system="You are a financial relationship analyst. Provide accurate, well-reasoned analysis in JSON format.",
                 messages=[
                     {
@@ -404,7 +405,8 @@ Provide ONLY the JSON response, no additional text."""
                         "content": prompt
                     }
                 ],
-                max_tokens=self.config['max_tokens']
+                max_tokens=1000,
+                temperature=0.1
             )
             
             # Parse JSON response

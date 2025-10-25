@@ -82,7 +82,7 @@ class UniversalDocumentClassifierOptimized:
     
     def _get_default_config(self) -> Dict[str, Any]:
         """Get default configuration"""
-        default_model = os.getenv('DOC_CLASSIFIER_MODEL') or os.getenv('ANTHROPIC_MODEL') or 'claude-3-5-sonnet-20241022'
+        default_model = os.getenv('DOC_CLASSIFIER_MODEL') or os.getenv('ANTHROPIC_MODEL') or 'llama-3.3-70b-versatile'
         return {
             'enable_caching': True,
             'cache_ttl': 7200,  # 2 hours
@@ -525,10 +525,9 @@ class UniversalDocumentClassifierOptimized:
             }}
             """
             
-            result_text = await self._safe_anthropic_call(
-                self.anthropic,
-                'claude-3-5-sonnet-20241022',
-                [{"role": "user", "content": prompt}],
+            # Use Groq Llama-3.3-70B for cost-effective document classification
+            result_text = await self._safe_groq_call(
+                prompt,
                 self.config['ai_temperature'],
                 self.config['ai_max_tokens']
             )
@@ -734,23 +733,25 @@ class UniversalDocumentClassifierOptimized:
         user_part = (user_id or "anon")[:12]
         return f"classify_{user_part}_{filename_part}_{content_hash}"
     
-    async def _safe_anthropic_call(self, client, model: str, messages: List[Dict], 
-                               temperature: float, max_tokens: int) -> str:
-        """Safe Anthropic API call with error handling"""
+    async def _safe_groq_call(self, prompt: str, temperature: float, max_tokens: int) -> str:
+        """Safe Groq API call with error handling for cost-effective document classification"""
         try:
-            response = await client.messages.create(
-                model=model,
+            from groq import Groq
+            groq_client = Groq(api_key=os.getenv('GROQ_API_KEY'))
+            
+            response = groq_client.chat.completions.create(
+                model="llama-3.3-70b-versatile",
+                messages=[{"role": "user", "content": prompt}],
                 max_tokens=max_tokens,
-                temperature=temperature,
-                messages=messages
+                temperature=temperature
             )
-            return response.content[0].text
+            return response.choices[0].message.content
         except Exception as e:
             if "429" in str(e) or "quota" in str(e).lower():
-                logger.warning(f"OpenAI quota exceeded: {e}")
+                logger.warning(f"Groq quota exceeded: {e}")
                 return '{"document_type": "unknown", "confidence": 0.0, "indicators": [], "reasoning": "AI processing unavailable due to quota limits"}'
             else:
-                logger.error(f"OpenAI API call failed: {e}")
+                logger.error(f"Groq API call failed: {e}")
                 raise
     
     def _parse_ai_response(self, response_text: str) -> Optional[Dict[str, Any]]:
@@ -945,17 +946,21 @@ class UniversalDocumentClassifierOptimized:
                 # Fallback to pattern-based classification
                 return [self._pattern_classify_row(row, platform_info, column_names) for row in rows]
             
-            response = await self.anthropic.messages.create(
-                model='claude-3-5-haiku-20241022',  # Using Haiku for fast, cheap row classification
-                max_tokens=2000,
-                temperature=0.1,
-                system="You are a financial data classification expert. Classify transaction rows accurately and return valid JSON.",
+            # Use Groq Llama-3.3-70B for cost-effective batch row classification
+            from groq import Groq
+            groq_client = Groq(api_key=os.getenv('GROQ_API_KEY'))
+            
+            response = groq_client.chat.completions.create(
+                model="llama-3.3-70b-versatile",
                 messages=[
+                    {"role": "system", "content": "You are a financial data classification expert. Classify transaction rows accurately and return valid JSON."},
                     {"role": "user", "content": prompt}
-                ]
+                ],
+                max_tokens=2000,
+                temperature=0.1
             )
             
-            result_text = response.content[0].text.strip()
+            result_text = response.choices[0].message.content.strip()
             
             # Parse JSON response
             if result_text.startswith('```json'):

@@ -872,6 +872,19 @@ except Exception as e:
     logger.error(f"❌ Failed to initialize Anthropic client: {e}")
     anthropic_client = None
 
+# Initialize Groq client for cost-effective high-volume operations
+try:
+    from groq import Groq
+    groq_api_key = os.getenv('GROQ_API_KEY')
+    if not groq_api_key:
+        raise ValueError("GROQ_API_KEY environment variable is required")
+    
+    groq_client = Groq(api_key=groq_api_key)
+    logger.info("✅ Groq client initialized successfully (Llama-3.3-70B for high-volume operations)")
+except Exception as e:
+    logger.error(f"❌ Failed to initialize Anthropic client: {e}")
+    anthropic_client = None
+
 # Initialize Supabase client and critical systems
 try:
     # Try multiple possible environment variable names for Render compatibility
@@ -4370,12 +4383,12 @@ class VendorStandardizer:
                     if time_since_last < min_interval:
                         await asyncio.sleep(min_interval - time_since_last)
                 
-                # Make the AI call using Anthropic (Haiku for fast vendor standardization)
-                response = self.anthropic.messages.create(
-                    model="claude-3-5-haiku-20241022",
+                # Make the AI call using Groq (Llama-3.3-70B for cost-effective vendor standardization)
+                response = groq_client.chat.completions.create(
+                    model="llama-3.3-70b-versatile",
+                    messages=[{"role": "user", "content": prompt}],
                     max_tokens=200,
-                    temperature=0.1,
-                    messages=[{"role": "user", "content": prompt}]
+                    temperature=0.1
                 )
                 
                 # Update last call time
@@ -6160,15 +6173,15 @@ class DataEnrichmentProcessor:
             # Prepare AI prompt
             prompt = self._build_ai_classification_prompt(document_features, pattern_classification)
             
-            # Call AI service (using Haiku for fast document classification)
-            response = self.anthropic.messages.create(
-                model="claude-3-5-haiku-20241022",
-                max_tokens=2000,
+            # Call AI service (using Groq Llama-3.3-70B for cost-effective document classification)
+            response = groq_client.chat.completions.create(
+                model="llama-3.3-70b-versatile",
                 messages=[{"role": "user", "content": prompt}],
+                max_tokens=2000,
                 temperature=0.1
             )
             
-            result = response.content[0].text
+            result = response.choices[0].message.content
             
             # Parse AI response
             ai_result = self._parse_ai_classification_response(result)
@@ -6532,15 +6545,15 @@ class AIRowClassifier:
             7. Return ONLY valid JSON, no extra text
             """
             
-            # Get AI response using Anthropic
-            response = self.anthropic.messages.create(
-                model="claude-3-5-haiku-20241022",  # Using Haiku for fast, cheap batch classification
+            # Get AI response using Groq (Llama-3.3-70B for cost-effective batch classification)
+            response = groq_client.chat.completions.create(
+                model="llama-3.3-70b-versatile",
+                messages=[{"role": "user", "content": prompt}],
                 max_tokens=2000,
-                temperature=0.1,
-                messages=[{"role": "user", "content": prompt}]
+                temperature=0.1
             )
             
-            result = response.content[0].text.strip()
+            result = response.choices[0].message.content.strip()
             
             # Clean and parse JSON response
             cleaned_result = result.strip()
@@ -6875,16 +6888,16 @@ class BatchAIRowClassifier:
             Return ONLY a valid JSON array with one classification object per row, in the same order.
             """
             
-            # Get AI response using Anthropic
+            # Get AI response using Groq (Llama-3.3-70B for cost-effective batch classification)
             try:
-                response = self.anthropic.messages.create(
-                    model="claude-3-5-haiku-20241022",  # Using Haiku for fast, cheap batch classification
+                response = groq_client.chat.completions.create(
+                    model="llama-3.3-70b-versatile",
+                    messages=[{"role": "user", "content": prompt}],
                     max_tokens=2000,
-                    temperature=0.1,
-                    messages=[{"role": "user", "content": prompt}]
+                    temperature=0.1
                 )
                 
-                result = response.content[0].text.strip()
+                result = response.choices[0].message.content.strip()
                 
                 if not result:
                     logger.warning("AI returned empty response, using fallback")
@@ -10659,23 +10672,21 @@ async def generate_chat_title(request: dict):
             "message_length": len(message)
         })
         
-        # Use GPT-4 to generate a concise title
-        from anthropic import AsyncAnthropic
-        anthropic_client = AsyncAnthropic(api_key=os.getenv('ANTHROPIC_API_KEY'))
+        # Use Groq for simple title generation (cost-effective)
+        from groq import Groq
+        groq_client = Groq(api_key=os.getenv('GROQ_API_KEY'))
         
-        response = await anthropic_client.messages.create(
-            model="claude-3-5-haiku-20241022",  # Using Haiku for simple title generation
-            max_tokens=50,
-            system="Generate a concise, descriptive title (max 6 words) for this financial question. Return ONLY the title, no quotes or extra text.",
+        response = groq_client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
             messages=[
-                {
-                    "role": "user",
-                    "content": message
-                }
-            ]
+                {"role": "system", "content": "Generate a concise, descriptive title (max 6 words) for this financial question. Return ONLY the title, no quotes or extra text."},
+                {"role": "user", "content": f"Question: {message}"}
+            ],
+            max_tokens=50,
+            temperature=0.3
         )
         
-        title = response.content[0].text.strip()
+        title = response.choices[0].message.content.strip()
         
         # Generate chat_id
         chat_id = f"chat_{datetime.utcnow().strftime('%Y%m%d%H%M%S')}_{user_id[:8]}"
