@@ -42,6 +42,7 @@ interface FastAPIProcessingProgress {
   step: string;
   message: string;
   progress: number;
+  status?: 'processing' | 'completed' | 'error' | 'failed';
   sheetProgress?: {
     currentSheet: string;
     sheetsCompleted: number;

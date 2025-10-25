@@ -12,6 +12,7 @@ import dropboxLogo from "@/assets/logos/dropbox.svg";
 import { Card } from './ui/card';
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
+import { StarBorder } from './ui/star-border';
 import { useAuth } from './AuthProvider';
 import { supabase } from '@/integrations/supabase/client';
 import { config } from '@/config';
@@ -366,9 +367,10 @@ export const DataSourcesPanel = ({ isOpen, onClose }: DataSourcesPanelProps) => 
                   
                   if (verifyResponse.ok) {
                     console.log('Connection verified successfully');
+                    const integrationName = INTEGRATIONS.find(i => i.provider === provider)?.name || provider;
                     toast({
                       title: 'Connected!',
-                      description: `${integration.name} connected successfully`
+                      description: `${integrationName} connected successfully`
                     });
                   } else {
                     const error = await verifyResponse.text();
@@ -841,26 +843,22 @@ export const DataSourcesPanel = ({ isOpen, onClose }: DataSourcesPanelProps) => 
                                             </Button>
                                           </>
                                         ) : (
-                                          <div className="relative">
-                                            {/* Animated gradient border - white transparent glow */}
-                                            <div className="absolute -inset-0.5 bg-gradient-to-r from-white/40 via-white/60 to-white/40 rounded-full opacity-45 blur-[2px] animate-gradient" />
-                                            
-                                            <Button
-                                              size="sm"
-                                              onClick={() => handleConnect(integration.provider)}
-                                              disabled={connecting === integration.provider}
-                                              className="relative h-9 px-4 rounded-full bg-black text-white text-xs font-medium hover:bg-black/90 transition-colors disabled:opacity-50"
-                                            >
-                                              {connecting === integration.provider ? (
-                                                <>
-                                                  <Loader2 className="w-3 h-3 mr-1.5 animate-spin" />
-                                                  Connecting
-                                                </>
-                                              ) : (
-                                                'Connect'
-                                              )}
-                                            </Button>
-                                          </div>
+                                          <StarBorder
+                                            as="button"
+                                            onClick={() => handleConnect(integration.provider)}
+                                            disabled={connecting === integration.provider}
+                                            speed="6s"
+                                            className="h-9 px-4 text-xs font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                                          >
+                                            {connecting === integration.provider ? (
+                                              <div className="flex items-center gap-1.5">
+                                                <Loader2 className="w-3 h-3 animate-spin" />
+                                                Connecting
+                                              </div>
+                                            ) : (
+                                              'Connect'
+                                            )}
+                                          </StarBorder>
                                         )}
                                       </div>
                                     </div>
