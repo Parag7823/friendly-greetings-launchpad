@@ -882,8 +882,8 @@ try:
     groq_client = Groq(api_key=groq_api_key)
     logger.info("✅ Groq client initialized successfully (Llama-3.3-70B for high-volume operations)")
 except Exception as e:
-    logger.error(f"❌ Failed to initialize Anthropic client: {e}")
-    anthropic_client = None
+    logger.error(f"❌ Failed to initialize Groq client: {e}")
+    groq_client = None
 
 # Initialize Supabase client and critical systems
 try:
@@ -4384,6 +4384,9 @@ class VendorStandardizer:
                         await asyncio.sleep(min_interval - time_since_last)
                 
                 # Make the AI call using Groq (Llama-3.3-70B for cost-effective vendor standardization)
+                if not groq_client:
+                    raise ValueError("Groq client not initialized. Please check GROQ_API_KEY.")
+                
                 response = groq_client.chat.completions.create(
                     model="llama-3.3-70b-versatile",
                     messages=[{"role": "user", "content": prompt}],
@@ -6174,6 +6177,9 @@ class DataEnrichmentProcessor:
             prompt = self._build_ai_classification_prompt(document_features, pattern_classification)
             
             # Call AI service (using Groq Llama-3.3-70B for cost-effective document classification)
+            if not groq_client:
+                raise ValueError("Groq client not initialized. Please check GROQ_API_KEY.")
+            
             response = groq_client.chat.completions.create(
                 model="llama-3.3-70b-versatile",
                 messages=[{"role": "user", "content": prompt}],
@@ -6546,6 +6552,9 @@ class AIRowClassifier:
             """
             
             # Get AI response using Groq (Llama-3.3-70B for cost-effective batch classification)
+            if not groq_client:
+                raise ValueError("Groq client not initialized. Please check GROQ_API_KEY.")
+            
             response = groq_client.chat.completions.create(
                 model="llama-3.3-70b-versatile",
                 messages=[{"role": "user", "content": prompt}],
@@ -6890,6 +6899,9 @@ class BatchAIRowClassifier:
             
             # Get AI response using Groq (Llama-3.3-70B for cost-effective batch classification)
             try:
+                if not groq_client:
+                    raise ValueError("Groq client not initialized. Please check GROQ_API_KEY.")
+                
                 response = groq_client.chat.completions.create(
                     model="llama-3.3-70b-versatile",
                     messages=[{"role": "user", "content": prompt}],
@@ -10673,8 +10685,8 @@ async def generate_chat_title(request: dict):
         })
         
         # Use Groq for simple title generation (cost-effective)
-        from groq import Groq
-        groq_client = Groq(api_key=os.getenv('GROQ_API_KEY'))
+        if not groq_client:
+            raise ValueError("Groq client not initialized. Please check GROQ_API_KEY.")
         
         response = groq_client.chat.completions.create(
             model="llama-3.3-70b-versatile",
