@@ -6917,10 +6917,12 @@ class BatchAIRowClassifier:
             try:
                 if self.groq:
                     # Use Groq Llama 3.3 70B (FREE and FAST!)
+                    # Calculate required tokens: ~150 tokens per row classification
+                    required_tokens = min(len(rows) * 150, 8000)  # Cap at 8000 tokens
                     response = self.groq.chat.completions.create(
                         model="llama-3.3-70b-versatile",
                         messages=[{"role": "user", "content": prompt}],
-                        max_tokens=2000,
+                        max_tokens=required_tokens,
                         temperature=0.1
                     )
                     result = response.choices[0].message.content.strip()
@@ -8255,6 +8257,7 @@ class ExcelProcessor:
                 'id': job_id,
                 'user_id': user_id,
                 'file_id': file_id,
+                'job_type': 'file_upload',  # Required field
                 'status': 'processing',
                 'created_at': datetime.utcnow().isoformat(),
                 'updated_at': datetime.utcnow().isoformat()

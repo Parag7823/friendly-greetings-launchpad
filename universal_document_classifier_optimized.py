@@ -948,13 +948,15 @@ class UniversalDocumentClassifierOptimized:
             
             # Use Groq (free, fast) or Anthropic as fallback
             if self.groq:
+                # Calculate required tokens: ~150 tokens per row classification
+                required_tokens = min(len(rows) * 150, 8000)  # Cap at 8000 tokens
                 response = self.groq.chat.completions.create(
                     model="llama-3.3-70b-versatile",
                     messages=[
                         {"role": "system", "content": "You are a financial data classification expert. Classify transaction rows accurately and return valid JSON."},
                         {"role": "user", "content": prompt}
                     ],
-                    max_tokens=2000,
+                    max_tokens=required_tokens,
                     temperature=0.1
                 )
                 result_text = response.choices[0].message.content.strip()
