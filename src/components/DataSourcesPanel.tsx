@@ -852,7 +852,7 @@ export const DataSourcesPanel = ({ isOpen, onClose }: DataSourcesPanelProps) => 
                                             as="button"
                                             onClick={() => handleConnect(integration.provider)}
                                             disabled={connecting === integration.provider}
-                                            speed="4s"
+                                            speed="1.5s"
                                             className="h-9 px-4 text-xs font-medium disabled:opacity-50 disabled:cursor-not-allowed"
                                           >
                                             {connecting === integration.provider ? (
