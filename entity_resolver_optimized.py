@@ -650,7 +650,7 @@ class EntityResolverOptimized:
             'entity_type': entity_type,
             'platform': platform,
             'confidence': 0.0,
-            'method': 'unresolved',
+            'method': 'new_entity',  # Changed from 'unresolved' to match DB constraint
             'resolution_success': False,
             'reason': 'No matching entity found and creation failed'
         }

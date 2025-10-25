@@ -411,10 +411,28 @@ RETRIES_TOTAL = Counter('retries_total', 'Total retries by operation', ['operati
 # ----------------------------------------------------------------------------
 # DB helper wrappers with metrics
 # ----------------------------------------------------------------------------
+def _sanitize_for_json(obj):
+    """Recursively sanitize NaN/Inf values for JSON serialization"""
+    import math
+    if isinstance(obj, dict):
+        return {k: _sanitize_for_json(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [_sanitize_for_json(item) for item in obj]
+    elif isinstance(obj, float):
+        if math.isnan(obj) or math.isinf(obj):
+            return None
+        return obj
+    elif pd.isna(obj):
+        return None
+    else:
+        return obj
+
 def _db_insert(table: str, payload):
     t0 = time.time()
     try:
-        res = supabase.table(table).insert(payload).execute()
+        # Sanitize payload to remove NaN/Inf values
+        sanitized_payload = _sanitize_for_json(payload)
+        res = supabase.table(table).insert(sanitized_payload).execute()
         DB_WRITES.labels(table=table, op='insert', status='ok').inc()
         DB_WRITE_LATENCY.labels(table=table, op='insert').observe(max(0.0, time.time() - t0))
         return res
@@ -6799,9 +6817,10 @@ class BatchAIRowClassifier:
         self.cache = {}  # Simple cache for similar rows
         
         # OPTIMIZATION 2: Dynamic batch sizing parameters
-        self.min_batch_size = 30  # Complex rows (for files with 15+ columns)
-        self.default_batch_size = 75  # Normal rows (for files with 6-14 columns)
-        self.max_batch_size = 150  # Simple rows (for files with ≤5 columns)
+        # REDUCED to prevent AI response truncation (max_tokens=8000 limit)
+        self.min_batch_size = 20  # Complex rows (for files with 15+ columns)
+        self.default_batch_size = 40  # Normal rows (for files with 6-14 columns)
+        self.max_batch_size = 60  # Simple rows (for files with ≤5 columns)
         self.max_concurrent_batches = 5  # Process 5 batches simultaneously
         
         # Complexity thresholds
@@ -6928,6 +6947,17 @@ class BatchAIRowClassifier:
                 )
                 
                 result = response.choices[0].message.content.strip()
+                
+                # Check if response was truncated (ends mid-JSON)
+                if result and not result.rstrip().endswith((']', '}')):
+                    logger.warning(f"AI response appears truncated (length: {len(result)}). Batch too large for max_tokens=8000")
+                    # If batch is large, split it and retry
+                    if len(rows) > 30:
+                        logger.info(f"Splitting batch of {len(rows)} rows into smaller chunks")
+                        mid = len(rows) // 2
+                        first_half = await self.classify_rows_batch(rows[:mid], platform_info, column_names)
+                        second_half = await self.classify_rows_batch(rows[mid:], platform_info, column_names)
+                        return first_half + second_half
                 
                 if not result:
                     logger.warning("AI returned empty response, using fallback")
@@ -7551,12 +7581,29 @@ class ExcelProcessor:
                 }
             }
 
+    def _sanitize_nan_for_json(self, obj):
+        """Recursively replace NaN values with None for JSON serialization"""
+        import math
+        if isinstance(obj, dict):
+            return {k: self._sanitize_nan_for_json(v) for k, v in obj.items()}
+        elif isinstance(obj, list):
+            return [self._sanitize_nan_for_json(item) for item in obj]
+        elif isinstance(obj, float) and (math.isnan(obj) or math.isinf(obj)):
+            return None
+        elif pd.isna(obj):
+            return None
+        else:
+            return obj
+    
     async def _fast_classify_row_cached(self, row: pd.Series, platform_info: dict, column_names: list) -> dict:
         """Fast cached classification with AI fallback - 90% cost reduction"""
         try:
-            # Create cache key from row content
+            # Create cache key from row content (sanitize NaN values)
+            row_dict = row.to_dict()
+            row_dict_sanitized = self._sanitize_nan_for_json(row_dict)
+            
             row_content = {
-                'data': row.to_dict(),
+                'data': row_dict_sanitized,
                 'platform': platform_info.get('platform', 'unknown'),
                 'columns': column_names
             }
@@ -9332,9 +9379,13 @@ async def get_performance_optimization_status():
                 # Prepare batch data
                 entities_batch = []
                 for entity in entities:
+                    # Normalize entity_type to match database constraints (singular form)
+                    raw_entity_type = entity.get('entity_type', 'vendor')
+                    normalized_entity_type = self._normalize_entity_type(raw_entity_type)
+                    
                     entity_data = {
                         'user_id': user_id,
-                        'entity_type': entity.get('entity_type', 'vendor'),
+                        'entity_type': normalized_entity_type,  # Use normalized singular form
                         'canonical_name': entity.get('canonical_name', ''),
                         'aliases': entity.get('aliases', []),
                         'email': entity.get('email'),
@@ -9601,6 +9652,31 @@ async def get_performance_optimization_status():
         except Exception as e:
             logger.error(f"Error storing computed metrics: {e}")
 
+    def _normalize_entity_type(self, entity_type: str) -> str:
+        """Normalize entity type to match database constraints
+        
+        Database expects: 'employee', 'vendor', 'customer', 'project' (singular)
+        AI often returns: 'employees', 'vendors', 'customers', 'projects' (plural)
+        """
+        # Map plural to singular
+        type_map = {
+            'employees': 'employee',
+            'vendors': 'vendor',
+            'customers': 'customer',
+            'projects': 'project',
+            # Already singular (pass through)
+            'employee': 'employee',
+            'vendor': 'vendor',
+            'customer': 'customer',
+            'project': 'project'
+        }
+        
+        normalized = type_map.get(entity_type.lower())
+        if not normalized:
+            logger.warning(f"Unknown entity type '{entity_type}', defaulting to 'vendor'")
+            return 'vendor'
+        return normalized
+    
     async def _extract_entities_from_events(self, user_id: str, supabase: Client, 
                                             file_id: Optional[str] = None, 
                                             transaction_id: Optional[str] = None) -> List[Dict]:

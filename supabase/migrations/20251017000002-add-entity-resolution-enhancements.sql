@@ -160,7 +160,7 @@ BEGIN
     SELECT 
         ne.id AS entity_id,
         ne.canonical_name,
-        similarity(ne.canonical_name, p_entity_name) AS similarity_score,
+        similarity(ne.canonical_name, p_entity_name)::NUMERIC AS similarity_score,  -- Cast real to numeric
         CASE 
             WHEN ne.canonical_name = p_entity_name THEN 'exact'
             WHEN similarity(ne.canonical_name, p_entity_name) > 0.9 THEN 'very_high'
