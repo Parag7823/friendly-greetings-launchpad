@@ -679,20 +679,50 @@ class UniversalPlatformDetectorOptimized:
                 raise
     
     def _parse_ai_response(self, response_text: str) -> Optional[Dict[str, Any]]:
-        """Parse AI response with robust error handling"""
+        """Parse AI response with robust error handling
+        
+        CRITICAL FIX: Handles multiple AI response formats:
+        1. JSON in markdown code blocks: ```json {...} ```
+        2. JSON with text before/after
+        3. Pure JSON
+        """
         try:
-            # Clean up the response text
-            if response_text.startswith('```json'):
-                response_text = response_text[7:]
-            if response_text.endswith('```'):
-                response_text = response_text[:-3]
+            import re
+            
+            # CRITICAL FIX: Try multiple extraction strategies
+            
+            # Strategy 1: Find JSON within markdown code blocks
+            json_match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', response_text, re.DOTALL)
+            if json_match:
+                response_text = json_match.group(1)
+            else:
+                # Strategy 2: Find JSON object anywhere in text (even with text before/after)
+                json_match = re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', response_text, re.DOTALL)
+                if json_match:
+                    response_text = json_match.group(0)
+                else:
+                    # Strategy 3: Remove markdown markers if present
+                    if response_text.startswith('```json'):
+                        response_text = response_text[7:]
+                    elif response_text.startswith('```'):
+                        response_text = response_text[3:]
+                    if response_text.endswith('```'):
+                        response_text = response_text[:-3]
+            
             response_text = response_text.strip()
             
             return json.loads(response_text)
         except json.JSONDecodeError as e:
-            logger.error(f"AI response JSON parsing failed: {e}")
-            logger.error(f"Raw AI response: {response_text}")
-            return None
+            logger.error(f"❌ AI response JSON parsing failed: {e}")
+            logger.error(f"Raw AI response (first 500 chars): {response_text[:500]}")
+            # Return fallback response instead of None
+            return {
+                "platform": "unknown",
+                "confidence": 0.0,
+                "indicators": [],
+                "reasoning": "Failed to parse AI response",
+                "category": "unknown"
+            }
     
     async def _get_cached_detection(self, detection_id: str) -> Optional[Dict[str, Any]]:
         """Get cached detection result (prefers AIClassificationCache)."""

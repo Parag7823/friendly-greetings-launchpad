@@ -263,9 +263,10 @@ class EnhancedRelationshipDetector:
                     'source_event_id': rel['source_event_id'],
                     'target_event_id': rel['target_event_id'],
                     'relationship_type': rel['relationship_type'],
-                    'confidence': rel['confidence_score'],
+                    'confidence_score': rel['confidence_score'],  # ✅ CRITICAL FIX: Use correct column name
                     'detection_method': rel.get('detection_method', 'unknown'),
-                    'metadata': rel.get('metadata', {}),
+                    # ✅ CRITICAL FIX: Remove 'metadata' - column doesn't exist in relationship_instances table
+                    # Metadata is stored in the rel object but not persisted to this table
                     'created_at': datetime.utcnow().isoformat()
                 })
             

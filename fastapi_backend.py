@@ -8320,6 +8320,7 @@ class ExcelProcessor:
                 'id': job_id,
                 'user_id': user_id,
                 'file_id': file_id,
+                'job_type': 'file_upload',  # ✅ CRITICAL FIX: Add required job_type field
                 'status': 'processing',
                 'created_at': datetime.utcnow().isoformat(),
                 'updated_at': datetime.utcnow().isoformat()
@@ -8741,8 +8742,8 @@ class ExcelProcessor:
             entities = await self._extract_entities_from_events(user_id, supabase, file_id=file_id)
             entity_matches = await self._resolve_entities(entities, user_id, filename, supabase)
             
-            # Store normalized entities and matches
-            await self._store_normalized_entities(entities, user_id, transaction_id, supabase)
+            # CRITICAL FIX: Entities already created by find_or_create_entity() in _resolve_entities()
+            # Only store entity_matches (not entities again - would create duplicates)
             await self._store_entity_matches(entity_matches, user_id, transaction_id, supabase)
             
             insights['entity_resolution'] = {
@@ -9811,16 +9812,23 @@ async def get_performance_optimization_status():
             return []
 
     async def _resolve_entities(self, entities: List[Dict], user_id: str, filename: str, supabase: Client) -> List[Dict]:
-        """Resolve entities using the database function"""
+        """Resolve entities using the database function
+        
+        CRITICAL FIX: Normalizes entity_type BEFORE calling database function to prevent constraint violations.
+        """
         try:
             matches = []
             
             for entity in entities:
+                # CRITICAL FIX: Normalize entity_type BEFORE calling database function
+                raw_entity_type = entity.get('entity_type', 'vendor')
+                normalized_entity_type = self._normalize_entity_type(raw_entity_type)
+                
                 # Use the database function to find or create entity
                 result = supabase.rpc('find_or_create_entity', {
                     'p_user_id': user_id,
                     'p_entity_name': entity['canonical_name'],
-                    'p_entity_type': entity['entity_type'],
+                    'p_entity_type': normalized_entity_type,  # ✅ Use normalized type
                     'p_platform': entity['platform_sources'][0] if entity['platform_sources'] else 'unknown',
                     'p_email': entity.get('email'),
                     'p_bank_account': entity.get('bank_account'),
@@ -9832,7 +9840,7 @@ async def get_performance_optimization_status():
                     entity_id = result.data[0] if isinstance(result.data, list) else result.data
                     match = {
                         'source_entity_name': entity['canonical_name'],
-                        'source_entity_type': entity['entity_type'],
+                        'source_entity_type': normalized_entity_type,  # ✅ Store normalized type
                         'source_platform': entity['platform_sources'][0] if entity['platform_sources'] else 'unknown',
                         'source_file': filename,
                         'normalized_entity_id': entity_id,
@@ -9842,13 +9850,15 @@ async def get_performance_optimization_status():
                         'matched_fields': ['name']
                     }
                     matches.append(match)
+                else:
+                    logger.warning(f"Failed to resolve entity: {entity['canonical_name']} (type: {normalized_entity_type})")
             
-            logger.info(f"Resolved {len(matches)} entity matches")
+            logger.info(f"✅ Resolved {len(matches)} entity matches out of {len(entities)} entities")
             return matches
             
         except Exception as e:
-            logger.error(f"Error resolving entities: {e}")
-            return []
+            logger.error(f"❌ Error resolving entities: {e}")
+            raise  # Re-raise to trigger transaction rollback
 
 
     async def _run_entity_pipeline_for_transaction(self, user_id: str, transaction_id: str, supabase: Client):
@@ -9859,7 +9869,8 @@ async def get_performance_optimization_status():
                 logger.info(f"No entities found for transaction {transaction_id}; skipping connector entity resolution")
                 return
             matches = await self._resolve_entities(entities, user_id, f"connector_txn:{transaction_id}", supabase)
-            await self._store_normalized_entities(entities, user_id, transaction_id, supabase)
+            # CRITICAL FIX: Entities already created by find_or_create_entity() in _resolve_entities()
+            # Only store entity_matches (not entities again - would create duplicates)
             await self._store_entity_matches(matches, user_id, transaction_id, supabase)
             logger.info(f"Connector entity pipeline completed for tx {transaction_id}: entities={len(entities)}, matches={len(matches)}")
         except Exception as e:

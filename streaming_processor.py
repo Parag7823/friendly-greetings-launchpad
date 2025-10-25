@@ -94,70 +94,142 @@ class StreamingExcelProcessor:
         """
         Stream process Excel file in chunks to avoid memory exhaustion.
         
+        CRITICAL FIX: Supports both .xlsx (openpyxl) and .xls (xlrd) formats.
+        
         Yields DataFrame chunks instead of loading entire file.
         """
         try:
-            from openpyxl import load_workbook
+            # CRITICAL FIX: Detect file format and use appropriate library
+            file_extension = os.path.splitext(file_path)[1].lower()
             
-            # Load workbook in read-only mode for memory efficiency
-            workbook = load_workbook(file_path, read_only=True, data_only=True)
-            
-            for sheet_name in workbook.sheetnames:
-                logger.info(f"Streaming sheet: {sheet_name}")
+            if file_extension == '.xls':
+                # Use xlrd for old .xls format
+                logger.info(f"✅ Processing .xls file with xlrd")
+                import xlrd
                 
-                sheet = workbook[sheet_name]
-                headers = None
-                chunk_data = []
-                row_count = 0
+                workbook = xlrd.open_workbook(file_path)
+                sheet_names = workbook.sheet_names()
                 
-                for row_idx, row in enumerate(sheet.iter_rows(values_only=True)):
-                    # Check memory usage periodically
-                    if row_idx % 100 == 0:
-                        if self.memory_monitor.check_memory_limit():
-                            logger.warning(f"Memory limit exceeded, forcing garbage collection")
-                            self.memory_monitor.force_garbage_collection()
+                for sheet_name in sheet_names:
+                    logger.info(f"Streaming sheet: {sheet_name}")
+                    sheet = workbook.sheet_by_name(sheet_name)
                     
-                    if row_idx == 0:
-                        # Extract headers
-                        headers = [str(cell) if cell is not None else f'Column_{i}' 
-                                 for i, cell in enumerate(row)]
-                        continue
+                    # Extract headers from first row
+                    headers = [str(sheet.cell_value(0, col)) if sheet.cell_value(0, col) else f'Column_{col}' 
+                              for col in range(sheet.ncols)]
                     
-                    # Skip empty rows
-                    if not any(cell is not None for cell in row):
-                        continue
+                    chunk_data = []
+                    row_count = 0
                     
-                    chunk_data.append(row)
-                    row_count += 1
+                    for row_idx in range(1, sheet.nrows):  # Skip header row
+                        # Check memory usage periodically
+                        if row_idx % 100 == 0:
+                            if self.memory_monitor.check_memory_limit():
+                                logger.warning(f"Memory limit exceeded, forcing garbage collection")
+                                self.memory_monitor.force_garbage_collection()
+                        
+                        row = [sheet.cell_value(row_idx, col) for col in range(sheet.ncols)]
+                        
+                        # Skip empty rows
+                        if not any(cell for cell in row):
+                            continue
+                        
+                        chunk_data.append(row)
+                        row_count += 1
+                        
+                        # Yield chunk when size limit reached
+                        if len(chunk_data) >= self.config.chunk_size:
+                            df_chunk = pd.DataFrame(chunk_data, columns=headers)
+                            df_chunk.attrs['sheet_name'] = sheet_name
+                            df_chunk.attrs['chunk_start_row'] = row_count - len(chunk_data)
+                            df_chunk.attrs['chunk_end_row'] = row_count
+                            
+                            yield df_chunk
+                            
+                            # Clear chunk data and force garbage collection
+                            chunk_data = []
+                            gc.collect()
+                            
+                            # Progress callback
+                            if progress_callback:
+                                await progress_callback(f"Processing {sheet_name}", 
+                                                       f"Processed {row_count} rows", 
+                                                       row_count)
                     
-                    # Yield chunk when size limit reached
-                    if len(chunk_data) >= self.config.chunk_size:
+                    # Yield remaining data
+                    if chunk_data:
                         df_chunk = pd.DataFrame(chunk_data, columns=headers)
                         df_chunk.attrs['sheet_name'] = sheet_name
                         df_chunk.attrs['chunk_start_row'] = row_count - len(chunk_data)
                         df_chunk.attrs['chunk_end_row'] = row_count
-                        
                         yield df_chunk
-                        
-                        # Clear chunk data and force garbage collection
-                        chunk_data = []
-                        gc.collect()
-                        
-                        # Progress callback
-                        if progress_callback:
-                            await progress_callback(f"Processing {sheet_name}", 
-                                                   f"Processed {row_count} rows", 
-                                                   row_count)
                 
-                # Yield remaining data
-                if chunk_data:
-                    df_chunk = pd.DataFrame(chunk_data, columns=headers)
-                    df_chunk.attrs['sheet_name'] = sheet_name
-                    df_chunk.attrs['chunk_start_row'] = row_count - len(chunk_data)
-                    df_chunk.attrs['chunk_end_row'] = row_count
-                    yield df_chunk
-            
-            workbook.close()
+                # xlrd doesn't need explicit close
+                
+            else:
+                # Use openpyxl for .xlsx format
+                logger.info(f"✅ Processing .xlsx file with openpyxl")
+                from openpyxl import load_workbook
+                
+                # Load workbook in read-only mode for memory efficiency
+                workbook = load_workbook(file_path, read_only=True, data_only=True)
+                
+                for sheet_name in workbook.sheetnames:
+                    logger.info(f"Streaming sheet: {sheet_name}")
+                    
+                    sheet = workbook[sheet_name]
+                    headers = None
+                    chunk_data = []
+                    row_count = 0
+                    
+                    for row_idx, row in enumerate(sheet.iter_rows(values_only=True)):
+                        # Check memory usage periodically
+                        if row_idx % 100 == 0:
+                            if self.memory_monitor.check_memory_limit():
+                                logger.warning(f"Memory limit exceeded, forcing garbage collection")
+                                self.memory_monitor.force_garbage_collection()
+                        
+                        if row_idx == 0:
+                            # Extract headers
+                            headers = [str(cell) if cell is not None else f'Column_{i}' 
+                                     for i, cell in enumerate(row)]
+                            continue
+                        
+                        # Skip empty rows
+                        if not any(cell is not None for cell in row):
+                            continue
+                        
+                        chunk_data.append(row)
+                        row_count += 1
+                        
+                        # Yield chunk when size limit reached
+                        if len(chunk_data) >= self.config.chunk_size:
+                            df_chunk = pd.DataFrame(chunk_data, columns=headers)
+                            df_chunk.attrs['sheet_name'] = sheet_name
+                            df_chunk.attrs['chunk_start_row'] = row_count - len(chunk_data)
+                            df_chunk.attrs['chunk_end_row'] = row_count
+                            
+                            yield df_chunk
+                            
+                            # Clear chunk data and force garbage collection
+                            chunk_data = []
+                            gc.collect()
+                            
+                            # Progress callback
+                            if progress_callback:
+                                await progress_callback(f"Processing {sheet_name}", 
+                                                       f"Processed {row_count} rows", 
+                                                       row_count)
+                    
+                    # Yield remaining data
+                    if chunk_data:
+                        df_chunk = pd.DataFrame(chunk_data, columns=headers)
+                        df_chunk.attrs['sheet_name'] = sheet_name
+                        df_chunk.attrs['chunk_start_row'] = row_count - len(chunk_data)
+                        df_chunk.attrs['chunk_end_row'] = row_count
+                        yield df_chunk
+                
+                workbook.close()
             
         except Exception as e:
             logger.error(f"Excel streaming failed: {e}")
