@@ -4285,6 +4285,30 @@ class VendorStandardizer:
         # Strip all whitespace including Unicode whitespace
         return len(text.strip()) == 0
     
+    def _rule_based_cleaning(self, vendor_name: str) -> str:
+        """Apply rule-based cleaning to vendor name"""
+        if not vendor_name:
+            return vendor_name
+        
+        # Convert to lowercase for comparison
+        cleaned = vendor_name.strip().lower()
+        
+        # Remove common suffixes
+        for suffix in self.common_suffixes:
+            if cleaned.endswith(suffix):
+                cleaned = cleaned[:-len(suffix)].strip()
+        
+        # Remove special characters but keep spaces
+        cleaned = ''.join(char if char.isalnum() or char.isspace() else ' ' for char in cleaned)
+        
+        # Normalize whitespace
+        cleaned = ' '.join(cleaned.split())
+        
+        # Title case for consistency
+        cleaned = cleaned.title()
+        
+        return cleaned if cleaned else vendor_name
+    
     async def standardize_vendor(self, vendor_name: str, platform: str = None) -> Dict[str, Any]:
         """Standardize vendor name using AI and rule-based cleaning"""
         try:

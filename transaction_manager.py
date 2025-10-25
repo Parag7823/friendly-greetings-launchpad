@@ -12,13 +12,30 @@ Version: 1.0.0
 import asyncio
 import logging
 import uuid
+import math
 from datetime import datetime
 from typing import Dict, List, Any, Optional, Callable, Union
 from dataclasses import dataclass
 from contextlib import asynccontextmanager
 from supabase import Client
+import pandas as pd
 
 logger = logging.getLogger(__name__)
+
+def _sanitize_for_json(obj):
+    """Recursively sanitize NaN/Inf values for JSON serialization"""
+    if isinstance(obj, dict):
+        return {k: _sanitize_for_json(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [_sanitize_for_json(item) for item in obj]
+    elif isinstance(obj, float):
+        if math.isnan(obj) or math.isinf(obj):
+            return None
+        return obj
+    elif pd.isna(obj):
+        return None
+    else:
+        return obj
 
 @dataclass
 class TransactionOperation:
@@ -257,8 +274,8 @@ class TransactionContext:
     async def insert(self, table: str, data: Dict[str, Any]) -> Dict[str, Any]:
         """Insert data with transaction tracking"""
         try:
-            # Add transaction_id to data
-            data_with_tx = {**data, 'transaction_id': self.transaction_id}
+            # Add transaction_id to data and sanitize NaN values
+            data_with_tx = _sanitize_for_json({**data, 'transaction_id': self.transaction_id})
             
             try:
                 result = self.manager.supabase.table(table).insert(data_with_tx).execute()
@@ -266,7 +283,8 @@ class TransactionContext:
                 # Retry without transaction_id if the column is missing
                 msg = str(e).lower()
                 if 'transaction_id' in msg and ('does not exist' in msg or 'could not find' in msg or 'schema cache' in msg):
-                    result = self.manager.supabase.table(table).insert(data).execute()
+                    sanitized_data = _sanitize_for_json(data)
+                    result = self.manager.supabase.table(table).insert(sanitized_data).execute()
                 else:
                     raise
             
@@ -343,9 +361,9 @@ class TransactionContext:
     async def insert_batch(self, table: str, data_list: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Insert multiple records with transaction tracking"""
         try:
-            # Add transaction_id to all records
+            # Add transaction_id to all records and sanitize NaN values
             data_with_tx = [
-                {**data, 'transaction_id': self.transaction_id}
+                _sanitize_for_json({**data, 'transaction_id': self.transaction_id})
                 for data in data_list
             ]
             
@@ -354,7 +372,9 @@ class TransactionContext:
             except Exception as e:
                 msg = str(e).lower()
                 if 'transaction_id' in msg and ('does not exist' in msg or 'could not find' in msg or 'schema cache' in msg):
-                    result = self.manager.supabase.table(table).insert(data_list).execute()
+                    # Fallback without transaction_id, but still sanitize
+                    sanitized_data = [_sanitize_for_json(data) for data in data_list]
+                    result = self.manager.supabase.table(table).insert(sanitized_data).execute()
                 else:
                     raise
             
