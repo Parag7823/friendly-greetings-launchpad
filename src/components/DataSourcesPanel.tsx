@@ -348,14 +348,34 @@ export const DataSourcesPanel = ({ isOpen, onClose }: DataSourcesPanelProps) => 
       const data = await response.json();
       const connectUrl = data?.connect_session?.url || data?.connect_session?.connect_url;
 
-      if (connectUrl) {
-        // Open popup and monitor when it closes
-        const popup = window.open(connectUrl, '_blank', 'width=600,height=700');
-        
+      if (!connectUrl) {
+        console.error('No connect URL received from backend:', data);
         toast({
-          title: 'Connection Started',
-          description: 'Complete the authorization in the popup window'
+          title: 'Connection Failed',
+          description: 'Could not get authorization URL from server',
+          variant: 'destructive'
         });
+        return;
+      }
+
+      console.log('Opening Nango popup with URL:', connectUrl);
+
+      // Open popup with the actual URL (not about:blank)
+      const popup = window.open(connectUrl, 'nango_oauth', 'width=600,height=700,scrollbars=yes,resizable=yes');
+      
+      if (!popup) {
+        toast({
+          title: 'Popup Blocked',
+          description: 'Please allow popups for this site and try again',
+          variant: 'destructive'
+        });
+        return;
+      }
+      
+      toast({
+        title: 'Connection Started',
+        description: 'Complete the authorization in the popup window'
+      });
         
         // Listen for messages from Nango popup (success callback)
         const messageHandler = (event: MessageEvent) => {

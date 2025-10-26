@@ -7034,7 +7034,7 @@ class BatchAIRowClassifier:
                 response = groq_client.chat.completions.create(
                     model="llama-3.3-70b-versatile",
                     messages=[{"role": "user", "content": prompt}],
-                    max_tokens=16000,  # CRITICAL FIX: Increased from 8000 to handle larger batches
+                    max_tokens=28000,  # INCREASED: 28K tokens (leaving 4K buffer for input)
                     temperature=0.1
                 )
                 
@@ -7042,9 +7042,9 @@ class BatchAIRowClassifier:
                 
                 # Check if response was truncated (ends mid-JSON)
                 if result and not result.rstrip().endswith((']', '}')):
-                    logger.warning(f"AI response appears truncated (length: {len(result)}). Batch too large for max_tokens=16000")
+                    logger.warning(f"AI response appears truncated (length: {len(result)}). Batch too large for max_tokens=28000")
                     # If batch is large, split it and retry
-                    if len(rows) > 15:  # CRITICAL FIX: Reduced threshold from 30 to 15
+                    if len(rows) > 25:  # INCREASED: Can handle larger batches now
                         logger.info(f"Splitting batch of {len(rows)} rows into smaller chunks")
                         mid = len(rows) // 2
                         first_half = await self.classify_rows_batch(rows[:mid], platform_info, column_names)

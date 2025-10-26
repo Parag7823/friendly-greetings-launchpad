@@ -441,22 +441,24 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
 
     toast({
       title: 'Uploading Files',
-      description: `Processing ${files.length} file(s)...`
+      description: `Processing ${files.length} file(s) in parallel...`
     });
 
-    // Process each file
-    for (const file of files) {
+    // Process all files in parallel using Promise.allSettled
+    const uploadPromises = files.map(async (file) => {
       try {
         await processFileWithFastAPI(file);
         
         // Add a system message to chat
         const systemMessage = {
-          id: `msg-${Date.now()}-${file.name}`,
+          id: `msg-${Date.now()}-${Math.random()}-${file.name}`,
           text: `✅ File uploaded: **${file.name}**`,
           isUser: false,
           timestamp: new Date()
         };
         setMessages(prev => [...prev, systemMessage]);
+        
+        return { status: 'success', file: file.name };
       } catch (error) {
         console.error('File upload failed:', error);
         toast({
@@ -464,8 +466,24 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
           description: `Failed to upload ${file.name}`,
           variant: 'destructive'
         });
+        
+        return { status: 'failed', file: file.name, error };
       }
-    }
+    });
+
+    // Wait for all uploads to complete
+    const results = await Promise.allSettled(uploadPromises);
+    
+    // Count successes and failures
+    const successful = results.filter(r => r.status === 'fulfilled').length;
+    const failed = results.filter(r => r.status === 'rejected').length;
+    
+    // Show final toast
+    toast({
+      title: 'Upload Complete',
+      description: `${successful} file(s) uploaded successfully${failed > 0 ? `, ${failed} failed` : ''}`,
+      variant: failed > 0 ? 'destructive' : 'default'
+    });
 
     setUploadingFile(false);
     

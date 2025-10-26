@@ -873,6 +873,21 @@ class UniversalPlatformDetectorOptimized:
         """Get current platform database"""
         return self.platform_database.copy()
     
+    def get_platform_info(self, platform_id: str) -> Dict[str, Any]:
+        """Get information about a specific platform"""
+        if platform_id in self.platform_database:
+            return self.platform_database[platform_id].copy()
+        else:
+            # Return default info for unknown platforms
+            return {
+                'name': platform_id.replace('_', ' ').title(),
+                'category': 'unknown',
+                'description': f'Platform: {platform_id}',
+                'indicators': [],
+                'field_patterns': [],
+                'confidence_boost': 0.5
+            }
+    
     def add_platform(self, platform_id: str, platform_info: Dict[str, Any]):
         """Add new platform to database"""
         self.platform_database[platform_id] = platform_info
