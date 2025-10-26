@@ -380,40 +380,20 @@ export const DataSourcesPanel = ({ isOpen, onClose }: DataSourcesPanelProps) => 
         
         window.addEventListener('message', messageHandler);
         
-        // Also monitor popup URL for success page
-        let urlCheckAttempts = 0;
-        const urlCheckTimer = setInterval(() => {
-          try {
-            urlCheckAttempts++;
-            // Try to access popup URL (will fail if cross-origin)
-            if (popup && !popup.closed) {
-              const popupUrl = popup.location.href;
-              // Check if we're on the callback success page
-              if (popupUrl.includes('/oauth/callback') || popupUrl.includes('success')) {
-                console.log('Success URL detected, closing popup in 2 seconds');
-                setTimeout(() => {
-                  if (popup && !popup.closed) {
-                    popup.close();
-                  }
-                }, 2000); // Give user 2 seconds to see success message
-                clearInterval(urlCheckTimer);
-              }
-            }
-            // Stop checking after 60 seconds
-            if (urlCheckAttempts > 120) {
-              clearInterval(urlCheckTimer);
-            }
-          } catch (e) {
-            // Cross-origin error is expected, ignore
+        // Force close popup after 5 seconds (user has time to see success message)
+        const forceCloseTimer = setTimeout(() => {
+          if (popup && !popup.closed) {
+            console.log('Force closing popup after 5 seconds');
+            popup.close();
           }
-        }, 500);
+        }, 5000);
         
         // Poll to detect when popup closes, then verify connection
         if (popup) {
           const pollTimer = setInterval(() => {
             if (popup.closed) {
               clearInterval(pollTimer);
-              clearInterval(urlCheckTimer);
+              clearTimeout(forceCloseTimer);
               window.removeEventListener('message', messageHandler);
               
               // Verify connection after popup closes (creates record if webhook failed)

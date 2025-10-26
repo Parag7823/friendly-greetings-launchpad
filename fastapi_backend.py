@@ -13320,26 +13320,50 @@ async def verify_connection(req: dict):
         # Generate connection_id (Nango uses format: {user_id}_{integration_id})
         connection_id = f"{user_id}_{integration_id}"
         
-        # Lookup connector_id
+        # Lookup or create connector_id
         connector_id = None
         try:
             conn_lookup = supabase.table('connectors').select('id').eq('integration_id', integration_id).limit(1).execute()
             if conn_lookup.data:
                 connector_id = conn_lookup.data[0]['id']
+            else:
+                # Create connector if it doesn't exist
+                logger.info(f"Creating connector for {integration_id}")
+                connector_result = supabase.table('connectors').insert({
+                    'integration_id': integration_id,
+                    'provider': provider,
+                    'name': provider.replace('-', ' ').title(),
+                    'auth_type': 'OAUTH2',
+                    'status': 'active'
+                }).execute()
+                if connector_result.data:
+                    connector_id = connector_result.data[0]['id']
+                    logger.info(f"✅ Created connector {connector_id} for {integration_id}")
         except Exception as e:
-            logger.warning(f"Failed to lookup connector_id for {integration_id}: {e}")
+            logger.error(f"Failed to lookup/create connector_id for {integration_id}: {e}")
+            # If connector creation fails, try without connector_id (make it optional in DB)
         
         # Upsert user_connection
         try:
-            supabase.table('user_connections').upsert({
+            connection_data = {
                 'user_id': user_id,
                 'nango_connection_id': connection_id,
-                'connector_id': connector_id,
+                'integration_id': integration_id,
+                'provider': provider,
                 'status': 'active',
                 'sync_frequency_minutes': 60,
                 'created_at': datetime.utcnow().isoformat(),
                 'updated_at': datetime.utcnow().isoformat()
-            }, on_conflict='nango_connection_id').execute()
+            }
+            
+            # Only add connector_id if we have one
+            if connector_id:
+                connection_data['connector_id'] = connector_id
+            
+            supabase.table('user_connections').upsert(
+                connection_data,
+                on_conflict='nango_connection_id'
+            ).execute()
             
             logger.info(f"✅ Manually verified connection: {connection_id} for user {user_id}")
             return {'status': 'ok', 'connection_id': connection_id}
