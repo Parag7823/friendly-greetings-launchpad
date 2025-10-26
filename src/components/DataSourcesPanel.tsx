@@ -380,15 +380,44 @@ export const DataSourcesPanel = ({ isOpen, onClose }: DataSourcesPanelProps) => 
         
         window.addEventListener('message', messageHandler);
         
+        // Also monitor popup URL for success page
+        let urlCheckAttempts = 0;
+        const urlCheckTimer = setInterval(() => {
+          try {
+            urlCheckAttempts++;
+            // Try to access popup URL (will fail if cross-origin)
+            if (popup && !popup.closed) {
+              const popupUrl = popup.location.href;
+              // Check if we're on the callback success page
+              if (popupUrl.includes('/oauth/callback') || popupUrl.includes('success')) {
+                console.log('Success URL detected, closing popup in 2 seconds');
+                setTimeout(() => {
+                  if (popup && !popup.closed) {
+                    popup.close();
+                  }
+                }, 2000); // Give user 2 seconds to see success message
+                clearInterval(urlCheckTimer);
+              }
+            }
+            // Stop checking after 60 seconds
+            if (urlCheckAttempts > 120) {
+              clearInterval(urlCheckTimer);
+            }
+          } catch (e) {
+            // Cross-origin error is expected, ignore
+          }
+        }, 500);
+        
         // Poll to detect when popup closes, then verify connection
         if (popup) {
           const pollTimer = setInterval(() => {
             if (popup.closed) {
               clearInterval(pollTimer);
+              clearInterval(urlCheckTimer);
               window.removeEventListener('message', messageHandler);
               
               // Verify connection after popup closes (creates record if webhook failed)
-              setTimeout(async () => {
+              const refreshConnection = async () => {
                 const { data: sessionData } = await supabase.auth.getSession();
                 const sessionToken = sessionData?.session?.access_token;
                 
@@ -434,7 +463,14 @@ export const DataSourcesPanel = ({ isOpen, onClose }: DataSourcesPanelProps) => 
                   setConnections(data.connections || []);
                   console.log('Connections refreshed:', data.connections);
                 }
-              }, 3000); // Wait 3 seconds for Nango to process
+              };
+              
+              // Try immediate refresh
+              setTimeout(refreshConnection, 1000);
+              // Try again after 3 seconds if first attempt fails
+              setTimeout(refreshConnection, 3000);
+              // Final attempt after 5 seconds
+              setTimeout(refreshConnection, 5000);
             }
           }, 500);
         }
