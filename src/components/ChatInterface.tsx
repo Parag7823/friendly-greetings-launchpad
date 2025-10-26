@@ -6,6 +6,7 @@ import { DataSourcesPanel } from './DataSourcesPanel';
 import { MarkdownMessage } from './MarkdownMessage';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
+import { StarBorder } from './ui/star-border';
 import { useAuth } from './AuthProvider';
 import { motion, AnimatePresence } from 'framer-motion';
 import { supabase } from '@/integrations/supabase/client';
@@ -500,12 +501,11 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
               {/* Chat Input Area - Rounded with animated questions */}
               <div className="border-t border-border/50 p-4 bg-background/80 backdrop-blur-md">
                 <div className="max-w-4xl mx-auto">
-                  <div className="relative rounded-3xl border border-border/50 bg-background/90 backdrop-blur-sm overflow-hidden group">
-                    {/* Minimal animated border effect */}
-                    <div className="absolute inset-0 rounded-3xl opacity-0 group-hover:opacity-100 transition-opacity duration-300">
-                      <div className="absolute inset-0 rounded-3xl border-2 border-primary/20 animate-pulse" />
-                    </div>
-                    
+                  <StarBorder
+                    as="div"
+                    speed="5s"
+                    className="w-full"
+                  >
                     <div className="relative">
                       <input
                         type="text"
@@ -525,7 +525,7 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
                         <Send className="w-4 h-4" />
                       </button>
                     </div>
-                  </div>
+                  </StarBorder>
                 </div>
               </div>
             </motion.div>
