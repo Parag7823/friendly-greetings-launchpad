@@ -341,18 +341,43 @@ export const DataSourcesPanel = ({ isOpen, onClose }: DataSourcesPanelProps) => 
 
       if (connectUrl) {
         // Open popup and monitor when it closes
-        const popup = window.open(connectUrl, '_blank', 'width=600,height=700,noopener,noreferrer');
+        const popup = window.open(connectUrl, '_blank', 'width=600,height=700');
         
         toast({
           title: 'Connection Started',
           description: 'Complete the authorization in the popup window'
         });
         
+        // Listen for messages from Nango popup (success callback)
+        const messageHandler = (event: MessageEvent) => {
+          // Check if message is from Nango
+          if (event.origin.includes('nango.dev') || event.origin.includes('api.nango.dev')) {
+            console.log('Received message from Nango:', event.data);
+            
+            // Check for success message
+            if (event.data?.type === 'connect' || event.data?.success || event.data?.status === 'success') {
+              console.log('Nango connection successful, closing popup');
+              
+              // Close the popup automatically
+              if (popup && !popup.closed) {
+                popup.close();
+              }
+              
+              // Remove the listener
+              window.removeEventListener('message', messageHandler);
+            }
+          }
+        };
+        
+        window.addEventListener('message', messageHandler);
+        
         // Poll to detect when popup closes, then verify connection
         if (popup) {
           const pollTimer = setInterval(() => {
             if (popup.closed) {
               clearInterval(pollTimer);
+              window.removeEventListener('message', messageHandler);
+              
               // Verify connection after popup closes (creates record if webhook failed)
               setTimeout(async () => {
                 const { data: sessionData } = await supabase.auth.getSession();
@@ -845,7 +870,7 @@ export const DataSourcesPanel = ({ isOpen, onClose }: DataSourcesPanelProps) => 
                                       key={integration.id}
                                       className={`flex items-center justify-between p-3 border rounded-md transition-all ${
                                         connected 
-                                          ? 'border-2 border-emerald-500/50 bg-emerald-500/5 shadow-sm shadow-emerald-500/20' 
+                                          ? 'border-2 border-emerald-500/60 bg-gradient-to-r from-emerald-500/10 via-green-500/5 to-emerald-500/10 shadow-md shadow-emerald-500/20 hover:shadow-emerald-500/30' 
                                           : 'finley-dynamic-bg hover:bg-muted/20'
                                       }`}
                                     >
@@ -857,7 +882,10 @@ export const DataSourcesPanel = ({ isOpen, onClose }: DataSourcesPanelProps) => 
                                           <div className="flex items-center gap-2">
                                             <p className="text-sm font-medium">{integration.name}</p>
                                             {connected && (
-                                              <Badge variant="default" className="text-[10px]">
+                                              <Badge 
+                                                variant="default" 
+                                                className="text-[10px] bg-gradient-to-r from-emerald-500 to-green-600 text-white border-0 shadow-sm"
+                                              >
                                                 <CheckCircle2 className="w-3 h-3 mr-1" />
                                                 Connected
                                               </Badge>
