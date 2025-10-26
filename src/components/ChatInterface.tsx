@@ -1,4 +1,4 @@
-import { MessageCircle, Send, Upload, Plug, FileSpreadsheet, Receipt, Database, Layers } from 'lucide-react';
+import { MessageCircle, Send, Upload, Plug, FileSpreadsheet, Receipt, Database, Layers, Paperclip, Image as ImageIcon } from 'lucide-react';
 import { useState, useEffect, useRef } from 'react';
 import { EnhancedFileUpload } from './EnhancedFileUpload';
 import { InlineUploadZone } from './InlineUploadZone';
@@ -14,6 +14,7 @@ import { useToast } from '@/components/ui/use-toast';
 import ConnectorConfigModal from './ConnectorConfigModal';
 import { useSearchParams } from 'react-router-dom';
 import { config } from '@/config';
+import { useFastAPIProcessor } from './FastAPIProcessor';
 
 interface ChatInterfaceProps {
   currentView?: string;
@@ -23,6 +24,8 @@ interface ChatInterfaceProps {
 export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfaceProps) => {
   const { user } = useAuth();
   const { toast } = useToast();
+  const { processFileWithFastAPI } = useFastAPIProcessor();
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [searchParams, setSearchParams] = useSearchParams();
   const [message, setMessage] = useState('');
   const [messages, setMessages] = useState<Array<{ id: string; text: string; isUser: boolean; timestamp: Date }>>([]);
@@ -32,6 +35,7 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
   const [loadingProviders, setLoadingProviders] = useState(false);
   const [connecting, setConnecting] = useState<string | null>(null);
   const [connections, setConnections] = useState<any[]>([]);
+  const [uploadingFile, setUploadingFile] = useState(false);
   const [loadingConnections, setLoadingConnections] = useState(false);
   const [syncing, setSyncing] = useState<string | null>(null);
   const [configOpen, setConfigOpen] = useState(false);
@@ -424,6 +428,56 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
     }));
   };
 
+  const handleFileUploadClick = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleFileSelect = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = event.target.files;
+    if (!files || files.length === 0) return;
+
+    const fileArray = Array.from(files);
+    setUploadingFile(true);
+
+    toast({
+      title: 'Uploading Files',
+      description: `Processing ${fileArray.length} file(s)...`
+    });
+
+    // Process each file
+    for (const file of fileArray) {
+      try {
+        await processFileWithFastAPI(file);
+        
+        // Add a system message to chat
+        const systemMessage = {
+          id: `msg-${Date.now()}-${file.name}`,
+          text: `✅ File uploaded: **${file.name}**`,
+          isUser: false,
+          timestamp: new Date()
+        };
+        setMessages(prev => [...prev, systemMessage]);
+      } catch (error) {
+        console.error('File upload failed:', error);
+        toast({
+          title: 'Upload Failed',
+          description: `Failed to upload ${file.name}`,
+          variant: 'destructive'
+        });
+      }
+    }
+
+    setUploadingFile(false);
+    
+    // Reset input
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+
+    // Open Data Sources panel to show uploaded files
+    setShowDataSources(true);
+  };
+
   const renderCurrentView = () => {
     switch (currentView) {
       case 'chat':
@@ -528,11 +582,36 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
                           onChange={(e) => setMessage(e.target.value)}
                           onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
                           placeholder={sampleQuestions[currentQuestionIndex]}
-                          className="w-full bg-transparent border-none px-6 py-4 pr-14 text-sm text-foreground placeholder-muted-foreground focus:outline-none"
+                          className="w-full bg-transparent border-none pl-14 pr-14 py-4 text-sm text-foreground placeholder-muted-foreground focus:outline-none"
                           key={currentQuestionIndex}
                           autoComplete="off"
                         />
                         
+                        {/* File Upload Button - Left side */}
+                        <button
+                          onClick={handleFileUploadClick}
+                          disabled={uploadingFile}
+                          className="absolute left-4 top-1/2 -translate-y-1/2 w-9 h-9 text-muted-foreground hover:text-foreground rounded-full flex items-center justify-center transition-all duration-200 hover:bg-muted/50 disabled:opacity-50 disabled:cursor-not-allowed"
+                          title="Upload files or images"
+                        >
+                          {uploadingFile ? (
+                            <Loader2 className="w-5 h-5 animate-spin" />
+                          ) : (
+                            <Paperclip className="w-5 h-5" />
+                          )}
+                        </button>
+                        
+                        {/* Hidden file input */}
+                        <input
+                          ref={fileInputRef}
+                          type="file"
+                          accept=".xlsx,.xls,.csv,.pdf,image/*"
+                          multiple
+                          onChange={handleFileSelect}
+                          className="hidden"
+                        />
+                        
+                        {/* Send Button - Right side */}
                         <button
                           onClick={handleSendMessage}
                           disabled={!message.trim()}
