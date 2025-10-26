@@ -504,9 +504,6 @@ export const DataSourcesPanel = ({ isOpen, onClose }: DataSourcesPanelProps) => 
             }
           }, 500);
         }
-      } else {
-        throw new Error('No authorization URL returned');
-      }
     } catch (e) {
       console.error('Connect failed', e);
       toast({
