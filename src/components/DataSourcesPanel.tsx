@@ -380,20 +380,50 @@ export const DataSourcesPanel = ({ isOpen, onClose }: DataSourcesPanelProps) => 
         
         window.addEventListener('message', messageHandler);
         
-        // Force close popup after 5 seconds (user has time to see success message)
-        const forceCloseTimer = setTimeout(() => {
-          if (popup && !popup.closed) {
-            console.log('Force closing popup after 5 seconds');
+        // Monitor popup for success state
+        let successDetected = false;
+        const successCheckTimer = setInterval(() => {
+          try {
+            // Check if popup is still open
+            if (popup && !popup.closed) {
+              // Try to detect success by checking popup title or URL
+              // This will fail due to CORS, but we'll catch it
+              const popupTitle = popup.document?.title || '';
+              if (popupTitle.toLowerCase().includes('success')) {
+                successDetected = true;
+                console.log('Success detected in popup');
+                // Close after 3 seconds to let user see success message
+                setTimeout(() => {
+                  if (popup && !popup.closed) {
+                    popup.close();
+                  }
+                }, 3000);
+                clearInterval(successCheckTimer);
+              }
+            } else {
+              clearInterval(successCheckTimer);
+            }
+          } catch (e) {
+            // CORS error is expected, ignore
+          }
+        }, 500);
+        
+        // Fallback: If popup is still open after 2 minutes, assume it's stuck
+        const fallbackTimer = setTimeout(() => {
+          if (popup && !popup.closed && !successDetected) {
+            console.log('Popup timeout - closing after 2 minutes');
             popup.close();
           }
-        }, 5000);
+          clearInterval(successCheckTimer);
+        }, 120000); // 2 minutes
         
         // Poll to detect when popup closes, then verify connection
         if (popup) {
           const pollTimer = setInterval(() => {
             if (popup.closed) {
               clearInterval(pollTimer);
-              clearTimeout(forceCloseTimer);
+              clearInterval(successCheckTimer);
+              clearTimeout(fallbackTimer);
               window.removeEventListener('message', messageHandler);
               
               // Verify connection after popup closes (creates record if webhook failed)
