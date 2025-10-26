@@ -434,20 +434,18 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
     fileInputRef.current?.click();
   };
 
-  const handleFileSelect = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const files = event.target.files;
-    if (!files || files.length === 0) return;
+  const processFiles = async (files: File[]) => {
+    if (files.length === 0) return;
 
-    const fileArray = Array.from(files);
     setUploadingFile(true);
 
     toast({
       title: 'Uploading Files',
-      description: `Processing ${fileArray.length} file(s)...`
+      description: `Processing ${files.length} file(s)...`
     });
 
     // Process each file
-    for (const file of fileArray) {
+    for (const file of files) {
       try {
         await processFileWithFastAPI(file);
         
@@ -471,13 +469,69 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
 
     setUploadingFile(false);
     
+    // Open Data Sources panel to show uploaded files
+    setShowDataSources(true);
+  };
+
+  const handleFileSelect = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = event.target.files;
+    if (!files || files.length === 0) return;
+
+    const fileArray = Array.from(files);
+    await processFiles(fileArray);
+    
     // Reset input
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
     }
+  };
 
-    // Open Data Sources panel to show uploaded files
-    setShowDataSources(true);
+  const handlePaste = async (event: React.ClipboardEvent) => {
+    const items = event.clipboardData?.items;
+    if (!items) return;
+
+    const files: File[] = [];
+    
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      
+      // Handle images from clipboard
+      if (item.type.indexOf('image') !== -1) {
+        const file = item.getAsFile();
+        if (file) {
+          // Rename with timestamp for clarity
+          const renamedFile = new File([file], `pasted-image-${Date.now()}.png`, { type: file.type });
+          files.push(renamedFile);
+        }
+      }
+      // Handle files from clipboard
+      else if (item.kind === 'file') {
+        const file = item.getAsFile();
+        if (file) {
+          files.push(file);
+        }
+      }
+    }
+
+    if (files.length > 0) {
+      event.preventDefault();
+      await processFiles(files);
+    }
+  };
+
+  const handleDragOver = (event: React.DragEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+  };
+
+  const handleDrop = async (event: React.DragEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+
+    const files = Array.from(event.dataTransfer.files);
+    if (files.length > 0) {
+      await processFiles(files);
+    }
   };
 
   const renderCurrentView = () => {
@@ -576,7 +630,11 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
                     />
                     
                     {/* Input wrapper with background */}
-                    <div className="relative z-10 border rounded-[20px] bg-gradient-to-b from-background via-background to-muted/50 border-border/60 dark:from-zinc-900 dark:via-zinc-900 dark:to-zinc-800 dark:border-zinc-700 shadow-sm">
+                    <div 
+                      className="relative z-10 border rounded-[20px] bg-gradient-to-b from-background via-background to-muted/50 border-border/60 dark:from-zinc-900 dark:via-zinc-900 dark:to-zinc-800 dark:border-zinc-700 shadow-sm"
+                      onDragOver={handleDragOver}
+                      onDrop={handleDrop}
+                    >
                       <div className="relative">
                         <input
                           type="text"
@@ -589,6 +647,7 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
                               handleSendMessage();
                             }
                           }}
+                          onPaste={handlePaste}
                           placeholder={sampleQuestions[currentQuestionIndex]}
                           className="w-full bg-transparent border-none pl-14 pr-14 py-4 text-sm text-foreground placeholder-muted-foreground focus:outline-none focus:ring-0"
                           autoComplete="off"
