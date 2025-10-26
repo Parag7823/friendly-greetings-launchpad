@@ -777,11 +777,10 @@ export const DataSourcesPanel = ({ isOpen, onClose }: DataSourcesPanelProps) => 
                     return (
                       <div 
                         key={file.id} 
-                        className="flex items-center justify-between p-3 bg-muted/50 rounded-md border border-border hover:bg-muted/70 transition-colors"
+                        className="flex items-center justify-between p-3 rounded-md border finley-dynamic-bg hover:bg-muted/20 transition-colors"
                       >
                         <div className="flex-1 min-w-0 space-y-1">
                           <div className="flex items-center gap-2">
-                            <FileSpreadsheet className="w-4 h-4 text-muted-foreground flex-shrink-0" />
                             <p className="text-sm font-medium truncate text-foreground">{file.filename || 'Unnamed File'}</p>
                             {isProcessing && (
                               <Loader2 className="w-3 h-3 animate-spin text-primary flex-shrink-0" />
