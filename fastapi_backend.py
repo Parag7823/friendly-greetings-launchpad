@@ -15380,7 +15380,7 @@ class UniversalComponentMonitoringSystem:
         total_duration = 0
         
         # Aggregate component metrics
-
+        for component, metrics in self.metrics_store.items():
             total_ops += metrics['total_operations']
             total_success += metrics['successful_operations']
             total_failed += metrics['failed_operations']
