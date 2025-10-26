@@ -498,31 +498,51 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
               {/* Chat Input Area - Rounded with animated questions */}
               <div className="border-t border-border/50 p-4 bg-background/80 backdrop-blur-md">
                 <div className="max-w-4xl mx-auto">
-                  <StarBorder
-                    as="div"
-                    speed="5s"
-                    className="w-full"
-                  >
-                    <div className="relative">
-                      <input
-                        type="text"
-                        value={message}
-                        onChange={(e) => setMessage(e.target.value)}
-                        onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
-                        placeholder={sampleQuestions[currentQuestionIndex]}
-                        className="w-full bg-transparent border-none px-6 py-4 pr-14 text-sm text-foreground placeholder-muted-foreground focus:outline-none transition-all duration-500"
-                        key={currentQuestionIndex}
-                      />
-                      
-                      <button
-                        onClick={handleSendMessage}
-                        disabled={!message.trim()}
-                        className="absolute right-4 top-1/2 -translate-y-1/2 w-9 h-9 bg-primary text-primary-foreground rounded-full flex items-center justify-center transition-all duration-200 hover:bg-primary/90 hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
-                      >
-                        <Send className="w-4 h-4" />
-                      </button>
+                  <div className="relative rounded-[20px] overflow-hidden">
+                    {/* Animated gradient border line */}
+                    <div
+                      className="absolute inset-0 opacity-75 animate-border-slide pointer-events-none"
+                      style={{
+                        background: `linear-gradient(90deg, 
+                          transparent 0%, 
+                          transparent 40%, 
+                          hsl(var(--foreground)) 50%, 
+                          transparent 60%, 
+                          transparent 100%)`,
+                        backgroundSize: '200% 100%',
+                        animationDuration: '5s',
+                        padding: '1px',
+                        borderRadius: '20px',
+                        WebkitMask: 'linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0)',
+                        WebkitMaskComposite: 'xor',
+                        maskComposite: 'exclude',
+                      }}
+                    />
+                    
+                    {/* Input wrapper with background */}
+                    <div className="relative z-10 border rounded-[20px] bg-gradient-to-b from-background via-background to-muted/50 border-border/60 dark:from-zinc-900 dark:via-zinc-900 dark:to-zinc-800 dark:border-zinc-700 transition-all duration-200 hover:from-muted/20 hover:to-muted/40 shadow-sm hover:shadow-md">
+                      <div className="relative">
+                        <input
+                          type="text"
+                          value={message}
+                          onChange={(e) => setMessage(e.target.value)}
+                          onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
+                          placeholder={sampleQuestions[currentQuestionIndex]}
+                          className="w-full bg-transparent border-none px-6 py-4 pr-14 text-sm text-foreground placeholder-muted-foreground focus:outline-none"
+                          key={currentQuestionIndex}
+                          autoComplete="off"
+                        />
+                        
+                        <button
+                          onClick={handleSendMessage}
+                          disabled={!message.trim()}
+                          className="absolute right-4 top-1/2 -translate-y-1/2 w-9 h-9 bg-primary text-primary-foreground rounded-full flex items-center justify-center transition-all duration-200 hover:bg-primary/90 hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
+                        >
+                          <Send className="w-4 h-4" />
+                        </button>
+                      </div>
                     </div>
-                  </StarBorder>
+                  </div>
                 </div>
               </div>
             </motion.div>

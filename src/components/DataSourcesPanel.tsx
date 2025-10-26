@@ -7,6 +7,7 @@ import quickbooksLogo from "@/assets/logos/quickbooks.svg";
 import xeroLogo from "@/assets/logos/xero.svg";
 import stripeLogo from "@/assets/logos/stripe.svg";
 import razorpayLogo from "@/assets/logos/razorpay.svg";
+import paypalLogo from "@/assets/logos/paypal.svg";
 import googleDriveLogo from "@/assets/logos/google-drive.svg";
 import dropboxLogo from "@/assets/logos/dropbox.svg";
 import { Card } from './ui/card';
@@ -121,6 +122,14 @@ const INTEGRATIONS: Integration[] = [
     provider: 'razorpay',
     description: 'Sync Razorpay payments',
     icon: <img src={razorpayLogo} alt="Razorpay" className="w-5 h-5 object-contain" />,
+    category: 'payment'
+  },
+  { 
+    id: 'paypal', 
+    name: 'PayPal', 
+    provider: 'paypal',
+    description: 'Sync PayPal transactions',
+    icon: <img src={paypalLogo} alt="PayPal" className="w-5 h-5 object-contain" />,
     category: 'payment'
   },
 ];
@@ -736,7 +745,8 @@ export const DataSourcesPanel = ({ isOpen, onClose }: DataSourcesPanelProps) => 
                       >
                         <div className="flex-1 min-w-0 space-y-1">
                           <div className="flex items-center gap-2">
-                            <p className="text-xs font-medium truncate">{file.filename}</p>
+                            <FileSpreadsheet className="w-4 h-4 text-muted-foreground flex-shrink-0" />
+                            <p className="text-sm font-medium truncate text-foreground">{file.filename || 'Unnamed File'}</p>
                             {isProcessing && (
                               <Loader2 className="w-3 h-3 animate-spin text-primary flex-shrink-0" />
                             )}
