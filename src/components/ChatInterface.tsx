@@ -1,4 +1,4 @@
-import { MessageCircle, Send, Upload, Plug, FileSpreadsheet, Receipt, Database, Layers, Paperclip, Image as ImageIcon } from 'lucide-react';
+import { MessageCircle, Send, Upload, Plug, FileSpreadsheet, Receipt, Database, Layers, Paperclip, Image as ImageIcon, Loader2 } from 'lucide-react';
 import { useState, useEffect, useRef } from 'react';
 import { EnhancedFileUpload } from './EnhancedFileUpload';
 import { InlineUploadZone } from './InlineUploadZone';
@@ -77,7 +77,9 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
       if (!user?.id || !currentChatId) return;
       
       try {
-        const { data, error } = await supabase
+        // TODO: Implement chat_messages table in Supabase schema
+        // For now, chat history is stored in component state only
+        /* const { data, error } = await supabase
           .from('chat_messages')
           .select('*')
           .eq('user_id', user.id)
@@ -95,7 +97,7 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
           }));
           setMessages(loadedMessages);
           setIsNewChat(false);
-        }
+        } */
       } catch (error) {
         console.error('Failed to load chat history:', error);
       }
