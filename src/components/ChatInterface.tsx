@@ -44,6 +44,7 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
   const [showInlineUpload, setShowInlineUpload] = useState(false);
   const [uploadingFiles, setUploadingFiles] = useState<File[]>([]);
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
+  const [pastedImages, setPastedImages] = useState<File[]>([]);
 
   // Sample questions showcasing platform capabilities
   const sampleQuestions = [
@@ -533,7 +534,12 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
 
     if (files.length > 0) {
       event.preventDefault();
-      await processFiles(files);
+      // Store pasted images for preview instead of auto-uploading
+      setPastedImages(prev => [...prev, ...files]);
+      toast({
+        title: 'Image Attached',
+        description: `${files.length} image(s) ready to send`
+      });
     }
   };
 
