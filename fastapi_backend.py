@@ -15380,7 +15380,7 @@ class UniversalComponentMonitoringSystem:
         total_duration = 0
         
         # Aggregate component metrics
-        for component, metrics in self.metrics_store.items():
+
             total_ops += metrics['total_operations']
             total_success += metrics['successful_operations']
             total_failed += metrics['failed_operations']
@@ -15586,14 +15586,16 @@ async def health_check():
             "version": "2.0.0",
             "environment": {
                 "supabase_configured": bool(supabase),
-                "openai_configured": bool(openai),
-                "available_env_vars": sorted([k for k in os.environ.keys() if any(x in k.upper() for x in ['SUPABASE', 'OPENAI', 'DATABASE'])]),
+                "anthropic_configured": bool(anthropic_client),
+                "groq_configured": bool(groq_client),
+                "available_env_vars": sorted([k for k in os.environ.keys() if any(x in k.upper() for x in ['SUPABASE', 'ANTHROPIC', 'GROQ', 'DATABASE'])]),
                 "python_version": f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
                 "advanced_features": ADVANCED_FEATURES
             },
             "services": {
                 "database": "connected" if supabase else "disconnected",
-                "ai": "connected" if openai else "disconnected"
+                "ai_anthropic": "connected" if anthropic_client else "disconnected",
+                "ai_groq": "connected" if groq_client else "disconnected"
             }
         }
         
