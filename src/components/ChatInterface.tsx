@@ -550,7 +550,7 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
             </div>
             
               {/* Chat Input Area - Rounded with animated questions */}
-              <div className="border-t border-border/50 p-4 bg-background/80 backdrop-blur-md">
+              <div className="border-t border-border/50 p-4 finley-dynamic-bg">
                 <div className="max-w-4xl mx-auto">
                   <div className="relative rounded-[20px]">
                     {/* Animated gradient border line */}
