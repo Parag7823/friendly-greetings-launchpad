@@ -483,10 +483,10 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
       case 'chat':
       default:
         return (
-          <div className="h-full flex bg-background relative">
+          <div className="h-full flex finley-dynamic-bg relative">
             {/* Main Chat Area - Responsive to Data Sources panel */}
             <motion.div 
-              className="flex-1 flex flex-col min-w-0"
+              className="flex-1 flex flex-col min-w-0 finley-dynamic-bg"
               animate={{ 
                 marginRight: showDataSources ? '500px' : '0px' 
               }}
