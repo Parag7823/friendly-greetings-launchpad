@@ -464,9 +464,6 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
                         I can help you understand your financial data. Let's get started!
                       </p>
                     </div>
-
-                    {/* Inline Upload Zone */}
-                    <InlineUploadZone onFilesSelected={handleInlineFilesSelected} />
                   </div>
                 </div>
               ) : (

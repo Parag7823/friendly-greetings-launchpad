@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react';
-import { FileSpreadsheet, Plug, RefreshCw, CheckCircle2, AlertCircle, ChevronDown, ChevronRight, X, Loader2, Mail, HardDrive, Calculator, CreditCard, Trash2 } from 'lucide-react';
+import { useState, useEffect, useRef } from 'react';
+import { FileSpreadsheet, Plug, RefreshCw, CheckCircle2, AlertCircle, ChevronDown, ChevronRight, X, Loader2, Mail, HardDrive, Calculator, CreditCard, Trash2, Plus } from 'lucide-react';
 import gmailLogo from "@/assets/logos/gmail.svg";
 import zohoMailLogo from "@/assets/logos/zoho-mail.svg";
 import zohoLogo from "@/assets/logos/zoho.svg";
@@ -135,6 +135,7 @@ export const DataSourcesPanel = ({ isOpen, onClose }: DataSourcesPanelProps) => 
   const { user } = useAuth();
   const { toast } = useToast();
   const { processFileWithFastAPI } = useFastAPIProcessor();
+  const fileInputRef = useRef<HTMLInputElement>(null);
   
   const [uploadedFiles, setUploadedFiles] = useState<any[]>([]);
   const [connections, setConnections] = useState<Connection[]>([]);
@@ -556,6 +557,41 @@ export const DataSourcesPanel = ({ isOpen, onClose }: DataSourcesPanelProps) => 
     }
   };
 
+  const handlePlusClick = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleFileSelect = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = event.target.files;
+    if (!files || files.length === 0) return;
+
+    const fileArray = Array.from(files);
+    
+    toast({
+      title: 'Uploading Files',
+      description: `Processing ${fileArray.length} file(s)...`
+    });
+
+    // Process each file
+    for (const file of fileArray) {
+      try {
+        await processFileWithFastAPI(file);
+      } catch (error) {
+        console.error('File upload failed:', error);
+        toast({
+          title: 'Upload Failed',
+          description: `Failed to upload ${file.name}`,
+          variant: 'destructive'
+        });
+      }
+    }
+
+    // Reset input
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  };
+
   const integrationsByCategory = INTEGRATIONS.reduce((acc, integration) => {
     if (!acc[integration.category]) {
       acc[integration.category] = [];
@@ -600,34 +636,56 @@ export const DataSourcesPanel = ({ isOpen, onClose }: DataSourcesPanelProps) => 
                     </Badge>
                   )}
                 </div>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={async () => {
-                    if (!user?.id) return;
-                    try {
-                      const { data, error } = await supabase
-                        .from('ingestion_jobs')
-                        .select('id, filename, status, created_at, progress, error_message')
-                        .eq('user_id', user.id)
-                        .order('created_at', { ascending: false })
-                        .limit(20);
-                      if (!error && data) {
-                        setUploadedFiles(data || []);
-                        toast({
-                          title: 'Refreshed',
-                          description: `Found ${data.length} files`
-                        });
+                <div className="flex items-center gap-1">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={handlePlusClick}
+                    className="h-7 px-2"
+                    title="Upload Files"
+                  >
+                    <Plus className="w-3 h-3" />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={async () => {
+                      if (!user?.id) return;
+                      try {
+                        const { data, error } = await supabase
+                          .from('ingestion_jobs')
+                          .select('id, filename, status, created_at, progress, error_message')
+                          .eq('user_id', user.id)
+                          .order('created_at', { ascending: false })
+                          .limit(20);
+                        if (!error && data) {
+                          setUploadedFiles(data || []);
+                          toast({
+                            title: 'Refreshed',
+                            description: `Found ${data.length} files`
+                          });
+                        }
+                      } catch (e) {
+                        console.error('Refresh failed:', e);
                       }
-                    } catch (e) {
-                      console.error('Refresh failed:', e);
-                    }
-                  }}
-                  className="h-7 px-2"
-                >
-                  <RefreshCw className="w-3 h-3" />
-                </Button>
+                    }}
+                    className="h-7 px-2"
+                    title="Refresh Files"
+                  >
+                    <RefreshCw className="w-3 h-3" />
+                  </Button>
+                </div>
               </div>
+              
+              {/* Hidden file input */}
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".xlsx,.xls,.csv"
+                multiple
+                onChange={handleFileSelect}
+                className="hidden"
+              />
               {loading ? (
                 <div className="flex items-center justify-center py-8">
                   <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
