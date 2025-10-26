@@ -552,10 +552,10 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
               {/* Chat Input Area - Rounded with animated questions */}
               <div className="border-t border-border/50 p-4 bg-background/80 backdrop-blur-md">
                 <div className="max-w-4xl mx-auto">
-                  <div className="relative rounded-[20px] overflow-hidden">
+                  <div className="relative rounded-[20px]">
                     {/* Animated gradient border line */}
                     <div
-                      className="absolute inset-0 opacity-75 animate-border-slide pointer-events-none"
+                      className="absolute inset-0 opacity-75 animate-border-slide pointer-events-none z-0"
                       style={{
                         background: `linear-gradient(90deg, 
                           transparent 0%, 
@@ -574,17 +574,23 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
                     />
                     
                     {/* Input wrapper with background */}
-                    <div className="relative z-10 border rounded-[20px] bg-gradient-to-b from-background via-background to-muted/50 border-border/60 dark:from-zinc-900 dark:via-zinc-900 dark:to-zinc-800 dark:border-zinc-700 transition-all duration-200 hover:from-muted/20 hover:to-muted/40 shadow-sm hover:shadow-md">
+                    <div className="relative z-10 border rounded-[20px] bg-gradient-to-b from-background via-background to-muted/50 border-border/60 dark:from-zinc-900 dark:via-zinc-900 dark:to-zinc-800 dark:border-zinc-700 shadow-sm">
                       <div className="relative">
                         <input
                           type="text"
                           value={message}
                           onChange={(e) => setMessage(e.target.value)}
                           onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault();
+                              handleSendMessage();
+                            }
+                          }}
                           placeholder={sampleQuestions[currentQuestionIndex]}
-                          className="w-full bg-transparent border-none pl-14 pr-14 py-4 text-sm text-foreground placeholder-muted-foreground focus:outline-none"
-                          key={currentQuestionIndex}
+                          className="w-full bg-transparent border-none pl-14 pr-14 py-4 text-sm text-foreground placeholder-muted-foreground focus:outline-none focus:ring-0"
                           autoComplete="off"
+                          spellCheck="false"
                         />
                         
                         {/* File Upload Button - Left side */}

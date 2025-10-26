@@ -767,7 +767,7 @@ export const DataSourcesPanel = ({ isOpen, onClose }: DataSourcesPanelProps) => 
                   <p className="text-[10px] text-muted-foreground/70">Upload files to see them here</p>
                 </div>
               ) : (
-                <div className="space-y-2">
+                <div className="max-h-[400px] overflow-y-auto space-y-2 pr-2 scrollbar-thin">
                   {uploadedFiles.map((file) => {
                     const isProcessing = file.status === 'processing' || file.status === 'pending';
                     const isCompleted = file.status === 'completed';
