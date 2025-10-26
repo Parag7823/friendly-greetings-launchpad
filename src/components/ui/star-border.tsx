@@ -23,31 +23,31 @@ export function StarBorder<T extends ElementType = "button">({
   return (
     <Component 
       className={cn(
-        "relative inline-block py-[1px] overflow-hidden rounded-[20px]",
+        "relative inline-block overflow-hidden rounded-[20px]",
         className
       )} 
       {...props}
     >
+      {/* Animated gradient border line */}
       <div
-        className={cn(
-          "absolute w-[100px] h-[100px] bottom-[-50px] right-[-50px] rounded-full animate-star-movement-bottom z-0",
-          "opacity-60 dark:opacity-90 blur-[4px]" 
-        )}
+        className="absolute inset-0 rounded-[20px] opacity-75 animate-border-slide"
         style={{
-          background: `radial-gradient(circle, ${defaultColor}, transparent 50%)`,
+          background: `linear-gradient(90deg, 
+            transparent 0%, 
+            transparent 40%, 
+            ${defaultColor} 50%, 
+            transparent 60%, 
+            transparent 100%)`,
+          backgroundSize: '200% 100%',
           animationDuration: speed,
+          padding: '1px',
+          WebkitMask: 'linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0)',
+          WebkitMaskComposite: 'xor',
+          maskComposite: 'exclude',
         }}
       />
-      <div
-        className={cn(
-          "absolute w-[100px] h-[100px] top-[-50px] left-[-50px] rounded-full animate-star-movement-top z-0",
-          "opacity-60 dark:opacity-90 blur-[4px]"
-        )}
-        style={{
-          background: `radial-gradient(circle, ${defaultColor}, transparent 50%)`,
-          animationDuration: speed,
-        }}
-      />
+      
+      {/* Button content */}
       <div className={cn(
         "relative z-10 border text-foreground text-center py-2 px-4 rounded-[20px]",
         "bg-gradient-to-b from-background via-background to-muted/50 border-border/60",
