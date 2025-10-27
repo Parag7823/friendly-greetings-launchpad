@@ -724,6 +724,58 @@ app = FastAPI(
     openapi_url="/openapi.json"
 )
 
+# IMPROVEMENT: Global exception handler for consistent error responses
+from fastapi.responses import JSONResponse
+from fastapi.exceptions import RequestValidationError
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    """
+    Global exception handler to ensure all errors return StandardErrorResponse format
+    This provides consistent error handling across the entire API
+    """
+    logger.error(f"Unhandled exception: {exc}", exc_info=True)
+    
+    # Determine if error is retryable
+    retryable = isinstance(exc, (TimeoutError, ConnectionError))
+    
+    return JSONResponse(
+        status_code=500,
+        content=StandardErrorResponse(
+            error=str(exc),
+            error_code="INTERNAL_ERROR",
+            retryable=retryable,
+            user_action="Please try again. If the problem persists, contact support."
+        ).dict()
+    )
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    """Handle validation errors with StandardErrorResponse format"""
+    return JSONResponse(
+        status_code=422,
+        content=StandardErrorResponse(
+            error="Invalid request data",
+            error_code="VALIDATION_ERROR",
+            error_details={"errors": exc.errors()},
+            retryable=False,
+            user_action="Please check your request data and try again."
+        ).dict()
+    )
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    """Handle HTTP exceptions with StandardErrorResponse format"""
+    return JSONResponse(
+        status_code=exc.status_code,
+        content=StandardErrorResponse(
+            error=exc.detail,
+            error_code=f"HTTP_{exc.status_code}",
+            retryable=exc.status_code in [408, 429, 500, 502, 503, 504],
+            user_action="Please try again later." if exc.status_code >= 500 else None
+        ).dict()
+    )
+
 # Enhanced# CRITICAL FIX: CORS middleware with environment-based configuration
 # Prevents CSRF attacks in production by restricting origins
 ALLOWED_ORIGINS = os.getenv('CORS_ALLOWED_ORIGINS', '*').split(',')
@@ -789,7 +841,6 @@ async def validate_critical_environment():
     
     logger.info("✅ All required environment variables present and valid")
     logger.info(f"   Queue Backend: {_queue_backend()}")
-    logger.info(f"   Celery Enabled: {_use_celery()}")
 
 # Application lifespan: startup/shutdown hooks for env validation and observability
 @asynccontextmanager

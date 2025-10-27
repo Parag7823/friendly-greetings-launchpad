@@ -19,12 +19,13 @@ Date: 2025-01-22
 
 import logging
 import json
+import os
 from datetime import datetime, timedelta
 from typing import Dict, Any, List, Optional, Tuple
 from enum import Enum
 from dataclasses import dataclass
 import asyncio
-from anthropic import AsyncAnthropic
+from groq import AsyncGroq  # CHANGED: Using Groq instead of Anthropic
 from causal_inference_engine import CausalInferenceEngine
 from temporal_pattern_learner import TemporalPatternLearner
 from enhanced_relationship_detector import EnhancedRelationshipDetector
@@ -90,11 +91,17 @@ class IntelligentChatOrchestrator:
         Initialize the orchestrator with all intelligence engines.
         
         Args:
-            openai_client: OpenAI client for GPT-4 calls
+            openai_client: DEPRECATED - Now using Groq/Llama internally
             supabase_client: Supabase client for database access
             cache_client: Optional cache client for performance
         """
-        self.openai = openai_client
+        # CHANGED: Initialize Groq client instead of using passed openai_client
+        groq_api_key = os.getenv('GROQ_API_KEY')
+        if not groq_api_key:
+            raise ValueError("GROQ_API_KEY environment variable is required")
+        
+        self.groq = AsyncGroq(api_key=groq_api_key)
+        self.openai = openai_client  # Keep for backward compatibility with other engines
         self.supabase = supabase_client
         self.cache = cache_client
         
@@ -275,12 +282,9 @@ class IntelligentChatOrchestrator:
                 "content": question
             })
             
-            # Use Claude 3.5 Sonnet (latest, most capable) to classify the question
-            response = await self.openai.messages.create(
-                model="claude-3-5-sonnet-20241022",
-                max_tokens=150,
-                temperature=0.1,
-                system="""You are Finley's question classifier. Classify user questions to route them to the right analysis engine.
+            # CHANGED: Use Groq/Llama-3.3-70B (fast, cost-effective) to classify the question
+            # Build prompt with conversation history
+            prompt = """You are Finley's question classifier. Classify user questions to route them to the right analysis engine.
 
 CRITICAL: Consider conversation history to understand context. Follow-up questions like "How?" or "Why?" refer to previous context.
 
@@ -294,11 +298,21 @@ QUESTION TYPES:
 - **general**: Platform questions, general advice, how-to
 - **unknown**: Cannot classify
 
-Respond with ONLY JSON: {"type": "question_type", "confidence": 0.0-1.0, "reasoning": "brief explanation"}""",
-                messages=messages
+Respond with ONLY JSON: {"type": "question_type", "confidence": 0.0-1.0, "reasoning": "brief explanation"}
+
+Question: """ + question
+            
+            response = await self.groq.chat.completions.create(
+                model="llama-3.3-70b-versatile",
+                messages=[
+                    {"role": "system", "content": prompt},
+                    *messages
+                ],
+                max_tokens=150,
+                temperature=0.1
             )
             
-            result = json.loads(response.content[0].text)
+            result = json.loads(response.choices[0].message.content)
             question_type_str = result.get('type', 'unknown')
             confidence = result.get('confidence', 0.5)
             

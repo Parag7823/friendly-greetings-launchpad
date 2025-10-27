@@ -45,6 +45,17 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
   const [uploadingFiles, setUploadingFiles] = useState<File[]>([]);
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
   const [pastedImages, setPastedImages] = useState<File[]>([]);
+  
+  // IMPROVEMENT: Cleanup Object URLs to prevent memory leaks
+  useEffect(() => {
+    // Create URLs for preview
+    const urls = pastedImages.map(f => URL.createObjectURL(f));
+    
+    // Cleanup function to revoke URLs when component unmounts or files change
+    return () => {
+      urls.forEach(url => URL.revokeObjectURL(url));
+    };
+  }, [pastedImages]);
 
   // Sample questions showcasing platform capabilities
   const sampleQuestions = [

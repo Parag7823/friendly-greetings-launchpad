@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { FileSpreadsheet, Plug, RefreshCw, CheckCircle2, AlertCircle, ChevronDown, ChevronRight, X, Loader2, Mail, HardDrive, Calculator, CreditCard, Trash2, Plus } from 'lucide-react';
+import { useConnections, useRefreshConnections } from '@/hooks/useConnections';
 import gmailLogo from "@/assets/logos/gmail.svg";
 import zohoMailLogo from "@/assets/logos/zoho-mail.svg";
 import zohoLogo from "@/assets/logos/zoho.svg";
@@ -147,8 +148,10 @@ export const DataSourcesPanel = ({ isOpen, onClose }: DataSourcesPanelProps) => 
   const fileInputRef = useRef<HTMLInputElement>(null);
   
   const [uploadedFiles, setUploadedFiles] = useState<any[]>([]);
-  const [connections, setConnections] = useState<Connection[]>([]);
-  const [loading, setLoading] = useState(false);
+  
+  // IMPROVEMENT: Use shared hook for connections (prevents duplicate polling)
+  const { data: connections = [], isLoading: loading, refetch: refetchConnections } = useConnections();
+  const refreshConnections = useRefreshConnections();
   const [syncing, setSyncing] = useState<string | null>(null);
   const [connecting, setConnecting] = useState<string | null>(null);
   const [verifying, setVerifying] = useState<string | null>(null); // Track which provider is being verified
@@ -156,64 +159,20 @@ export const DataSourcesPanel = ({ isOpen, onClose }: DataSourcesPanelProps) => 
     new Set(['accounting', 'data-sources', 'payment'])
   );
 
-  // Load connections
+  // IMPROVEMENT: Removed manual connection loading - now handled by useConnections hook
+  // Refresh when window regains focus (user returns from Nango popup)
   useEffect(() => {
-    let isInitialLoad = true;
+    if (!isOpen || !user?.id) return;
     
-    const loadConnections = async (showLoading = false) => {
-      if (!user?.id) return;
-      try {
-        // Only show loading spinner on initial load
-        if (showLoading) {
-          setLoading(true);
-        }
-        const { data: sessionData } = await supabase.auth.getSession();
-        const sessionToken = sessionData?.session?.access_token;
-
-        const response = await fetch(`${config.apiUrl}/api/connectors/user-connections`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            user_id: user.id,
-            session_token: sessionToken
-          })
-        });
-
-        if (response.ok) {
-          const data = await response.json();
-          setConnections(data.connections || []);
-        } else {
-          console.error('Failed to load connections: HTTP', response.status);
-        }
-      } catch (e) {
-        console.error('Failed to load connections', e);
-      } finally {
-        // ALWAYS set loading to false, even on error
-        if (showLoading) {
-          setLoading(false);
-        }
-      }
+    const handleFocus = () => {
+      refreshConnections();
     };
-
-    if (isOpen && user?.id) {
-      // Initial load with loading spinner
-      loadConnections(true);
-      
-      // Poll every 30 seconds for updates (no loading spinner)
-      const interval = setInterval(() => loadConnections(false), 30000);
-      
-      // Refresh when window regains focus (user returns from Nango popup)
-      const handleFocus = () => {
-        loadConnections(false);
-      };
-      window.addEventListener('focus', handleFocus);
-      
-      return () => {
-        clearInterval(interval);
-        window.removeEventListener('focus', handleFocus);
-      };
-    }
-  }, [user?.id, isOpen]);
+    window.addEventListener('focus', handleFocus);
+    
+    return () => {
+      window.removeEventListener('focus', handleFocus);
+    };
+  }, [user?.id, isOpen, refreshConnections]);
 
   // Load uploaded files with real-time polling
   useEffect(() => {
@@ -484,20 +443,9 @@ export const DataSourcesPanel = ({ isOpen, onClose }: DataSourcesPanelProps) => 
                   console.error('Failed to verify connection:', e);
                 }
                 
-                // Refresh connections list
-                const response = await fetch(`${config.apiUrl}/api/connectors/user-connections`, {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({
-                    user_id: user?.id,
-                    session_token: sessionToken
-                  })
-                });
-                if (response.ok) {
-                  const data = await response.json();
-                  setConnections(data.connections || []);
-                  console.log('Connections refreshed:', data.connections);
-                }
+                // Refresh connections list using shared hook
+                await refetchConnections();
+                console.log('Connections refreshed');
               };
               
               // CRITICAL FIX: More aggressive polling after OAuth to catch webhook processing
@@ -540,7 +488,7 @@ export const DataSourcesPanel = ({ isOpen, onClose }: DataSourcesPanelProps) => 
                   if (foundConnection) {
                     console.log('✅ Connection found! Stopping aggressive poll.', foundConnection);
                     clearInterval(aggressivePoll);
-                    setConnections(checkData.connections || []);
+                    await refetchConnections(); // Refresh using shared hook
                     setVerifying(null); // Clear verifying state
                     
                     // Show success toast
@@ -647,20 +595,8 @@ export const DataSourcesPanel = ({ isOpen, onClose }: DataSourcesPanelProps) => 
         throw new Error('Disconnect failed');
       }
 
-      // Refresh connections immediately
-      const connectionsResponse = await fetch(`${config.apiUrl}/api/connectors/user-connections`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          user_id: user?.id,
-          session_token: sessionToken
-        })
-      });
-
-      if (connectionsResponse.ok) {
-        const data = await connectionsResponse.json();
-        setConnections(data.connections || []);
-      }
+      // Refresh connections immediately using shared hook
+      await refetchConnections();
 
       toast({
         title: 'Disconnected',

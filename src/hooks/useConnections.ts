@@ -1,0 +1,64 @@
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { supabase } from '@/integrations/supabase/client';
+import { config } from '@/config';
+import { useAuth } from '@/components/AuthProvider';
+
+interface Connection {
+  connection_id: string;
+  integration_id: string;
+  provider: string;
+  status: string;
+  last_synced_at: string | null;
+  created_at: string;
+}
+
+/**
+ * Shared hook for fetching user connections
+ * Prevents duplicate polling and provides single source of truth
+ */
+export const useConnections = () => {
+  const { user } = useAuth();
+  const queryClient = useQueryClient();
+
+  return useQuery({
+    queryKey: ['connections', user?.id],
+    queryFn: async (): Promise<Connection[]> => {
+      if (!user?.id) return [];
+
+      const { data: sessionData } = await supabase.auth.getSession();
+      const sessionToken = sessionData?.session?.access_token;
+
+      const response = await fetch(`${config.apiUrl}/api/connectors/user-connections`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          user_id: user.id,
+          session_token: sessionToken
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to fetch connections');
+      }
+
+      const data = await response.json();
+      return data.connections || [];
+    },
+    enabled: !!user?.id,
+    refetchInterval: 30000, // Poll every 30 seconds
+    staleTime: 10000, // Consider data fresh for 10 seconds
+    retry: 2,
+  });
+};
+
+/**
+ * Hook to manually refresh connections
+ */
+export const useRefreshConnections = () => {
+  const { user } = useAuth();
+  const queryClient = useQueryClient();
+
+  return () => {
+    queryClient.invalidateQueries({ queryKey: ['connections', user?.id] });
+  };
+};
