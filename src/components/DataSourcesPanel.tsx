@@ -526,17 +526,36 @@ export const DataSourcesPanel = ({ isOpen, onClose }: DataSourcesPanelProps) => 
                 
                 if (checkResponse.ok) {
                   const checkData = await checkResponse.json();
+                  console.log('Polling response:', checkData);
+                  console.log('Looking for provider:', provider);
+                  console.log('Available connections:', checkData.connections);
+                  
                   const foundConnection = (checkData.connections || []).find(
-                    (c: any) => c.provider === provider
+                    (c: any) => {
+                      console.log('Checking connection:', c.provider, 'against', provider);
+                      return c.provider === provider;
+                    }
                   );
                   
                   if (foundConnection) {
-                    console.log('✅ Connection found! Stopping aggressive poll.');
+                    console.log('✅ Connection found! Stopping aggressive poll.', foundConnection);
                     clearInterval(aggressivePoll);
                     setConnections(checkData.connections || []);
                     setVerifying(null); // Clear verifying state
+                    
+                    // Show success toast
+                    const integrationName = INTEGRATIONS.find(i => i.provider === provider)?.name || provider;
+                    toast({
+                      title: 'Connected!',
+                      description: `${integrationName} connected successfully`,
+                      duration: 3000
+                    });
                     return;
+                  } else {
+                    console.log('❌ Connection not found yet, continuing to poll...');
                   }
+                } else {
+                  console.error('Failed to fetch connections:', checkResponse.status);
                 }
                 
                 // Stop after max attempts
@@ -563,9 +582,12 @@ export const DataSourcesPanel = ({ isOpen, onClose }: DataSourcesPanelProps) => 
         description: 'Unable to start connection. Please try again.',
         variant: 'destructive'
       });
-    } finally {
+      // CRITICAL FIX: Only clear connecting state on error
+      // Don't clear in finally block because verification is async
       setConnecting(null);
+      setVerifying(null);
     }
+    // REMOVED finally block - state is cleared by polling logic
   };
 
   const handleSync = async (connectionId: string, integrationId: string) => {

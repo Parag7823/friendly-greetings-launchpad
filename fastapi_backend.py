@@ -122,26 +122,12 @@ class DocumentClassificationRequest(BaseModel):
 from supabase import create_client, Client
 from prometheus_client import Counter, Histogram, Gauge, generate_latest, CONTENT_TYPE_LATEST
 
-# Celery app (Phase 4 orchestration)
-try:
-    from celery_app import celery_app
-except Exception:
-    celery_app = None
-
-# Optional Celery tasks (import safely to avoid cycles when not present)
-try:
-    from tasks import task_gmail_sync, task_pdf_processing, task_spreadsheet_processing
-except Exception:
-    task_gmail_sync = None
-    task_pdf_processing = None
-    task_spreadsheet_processing = None
-
-def _use_celery() -> bool:
-    return (os.environ.get("USE_CELERY", "").lower() in ("1", "true", "yes")) and bool(celery_app)
+# CLEANUP: Removed Celery support - Using ARQ only for async task queue
+# ARQ is async-native and better integrated with FastAPI
 
 def _queue_backend() -> str:
     """Return the queue backend mode: 'sync' (default) or 'arq'."""
-    return (os.environ.get("QUEUE_BACKEND") or "sync").lower()
+    return (os.environ.get("QUEUE_BACKEND") or "arq").lower()  # Default to ARQ
 
 # Global ARQ pool (singleton pattern for connection reuse)
 _arq_pool = None
@@ -13428,7 +13414,7 @@ async def _dispatch_connector_sync(
     
     arq_task_name, sync_func = provider_config[integration_id]
     
-    # Try ARQ worker first
+    # Queue via ARQ (async task queue)
     if _queue_backend() == 'arq':
         try:
             pool = await get_arq_pool()
@@ -13442,32 +13428,12 @@ async def _dispatch_connector_sync(
                 status_code=503,
                 detail="Background worker unavailable. Please try again in a few moments."
             )
-    
-    # Try Celery worker
-    if _use_celery():
-        celery_task_map = {
-            NANGO_GMAIL_INTEGRATION_ID: task_gmail_sync,
-        }
-        task = celery_task_map.get(integration_id)
-        if task:
-            try:
-                task.apply_async(args=[req.model_dump()])
-                JOBS_ENQUEUED.labels(provider=integration_id, mode=req.mode).inc()
-                logger.info(f"✅ Queued {integration_id} sync via Celery: {req.correlation_id}")
-                return {"status": "queued", "provider": integration_id, "mode": req.mode}
-            except Exception as e:
-                logger.error(f"❌ Celery dispatch failed for {integration_id}: {e}")
-                raise HTTPException(
-                    status_code=503,
-                    detail="Background worker unavailable. Please try again in a few moments."
-                )
-    
-    # No worker configured - fail fast
-    logger.error(f"❌ No worker configured for {integration_id} sync")
-    raise HTTPException(
-        status_code=503,
-        detail="Background worker not configured. Please contact support."
-    )
+    else:
+        # Fallback: Run inline if ARQ not configured
+        logger.warning(f"⚠️ ARQ not configured, running {integration_id} sync inline")
+        nango = NangoClient(base_url=NANGO_BASE_URL)
+        asyncio.create_task(sync_func(nango, req))
+        return {"status": "started_inline", "provider": integration_id, "mode": req.mode}
 
 
 @app.post("/api/connectors/sync")
@@ -13852,28 +13818,11 @@ async def nango_webhook(request: Request):
                                 }).eq('event_id', event_id).execute()
                             except Exception:
                                 pass
-                    elif _use_celery() and task_gmail_sync:
-                        try:
-                            task_gmail_sync.apply_async(args=[req.model_dump()])
-                            JOBS_ENQUEUED.labels(provider=NANGO_GMAIL_INTEGRATION_ID, mode='incremental').inc()
-                        except Exception as e:
-                            logger.error(f"Celery dispatch failed in webhook, persisting for retry: {e}")
-                            try:
-                                supabase.table('webhook_events').update({
-                                    'status': 'retry_pending',
-                                    'error': f'Queue dispatch failed: {str(e)}'
-                                }).eq('event_id', event_id).execute()
-                            except Exception:
-                                pass
                     else:
-                        logger.warning("No queue backend configured, persisting webhook for scheduler retry")
-                        try:
-                            supabase.table('webhook_events').update({
-                                'status': 'retry_pending',
-                                'error': 'No queue backend configured'
-                            }).eq('event_id', event_id).execute()
-                        except Exception:
-                            pass
+                        # Fallback: Run sync inline if ARQ is not available
+                        logger.warning("ARQ not available, running sync inline")
+                        nango = NangoClient(base_url=NANGO_BASE_URL)
+                        asyncio.create_task(_gmail_sync_run(nango, req))
                 elif provider == NANGO_DROPBOX_INTEGRATION_ID:
                     req = ConnectorSyncRequest(
                         user_id=user_id,
@@ -14181,14 +14130,8 @@ async def run_scheduled_syncs(request: Request, provider: Optional[str] = None, 
                         logger.warning(f"ARQ dispatch failed in scheduler: {e}")
                         nango = NangoClient(base_url=NANGO_BASE_URL)
                         asyncio.create_task(_gmail_sync_run(nango, req))
-                elif _use_celery() and task_gmail_sync:
-                    try:
-                        task_gmail_sync.apply_async(args=[req.model_dump()])
-                    except Exception as e:
-                        logger.warning(f"Celery dispatch failed in scheduler: {e}")
-                        nango = NangoClient(base_url=NANGO_BASE_URL)
-                        asyncio.create_task(_gmail_sync_run(nango, req))
                 else:
+                    # Fallback: Run inline if ARQ not available
                     nango = NangoClient(base_url=NANGO_BASE_URL)
                     asyncio.create_task(_gmail_sync_run(nango, req))
                 dispatched.append(row['nango_connection_id'])
