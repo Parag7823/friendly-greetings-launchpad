@@ -20,8 +20,8 @@ COPY eslint.config.js ./
 RUN npm ci --production=false
 RUN npm run build
 
-# Backend stage
-FROM python:3.11-slim
+# Backend stage - Pin to 3.11.9 to avoid pandas compatibility issues with 3.13
+FROM python:3.11.9-slim
 
 # Force cache invalidation - updated packages
 # Install system dependencies for python-magic, Tesseract (OCR), Java (Tabula), and basic functionality
