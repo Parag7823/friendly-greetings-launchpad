@@ -1,0 +1,39 @@
+# Core dependencies for Finley AI Backend
+fastapi==0.109.0
+uvicorn[standard]==0.27.0
+python-multipart==0.0.6
+pydantic==2.5.3
+pydantic-settings==2.1.0
+
+# Database & Storage
+supabase==2.3.0
+psycopg2-binary==2.9.9
+
+# AI & ML - CRITICAL: Groq for chat
+groq==0.4.1
+openai==1.10.0
+
+# Document Processing
+pdfplumber==0.10.3
+pandas==2.1.4
+openpyxl==3.1.2
+python-docx==1.1.0
+
+# Task Queue
+arq==0.25.0
+redis==5.0.1
+
+# HTTP & API
+httpx==0.26.0
+requests==2.31.0
+
+# Nango Integration
+nango==0.1.0
+
+# Utilities
+python-dotenv==1.0.0
+structlog==24.1.0
+prometheus-client==0.19.0
+
+# Neo4j (optional - falls back to PostgreSQL if not available)
+neo4j==5.16.0

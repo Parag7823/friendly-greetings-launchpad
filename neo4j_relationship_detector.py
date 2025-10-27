@@ -51,28 +51,66 @@ class Neo4jRelationshipDetector:
         self.password = password or os.getenv('NEO4J_PASSWORD')
         
         if not all([self.uri, self.user, self.password]):
-            logger.error("❌ Neo4j credentials not provided. Set NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD")
+            error_msg = """
+❌ Neo4j credentials missing! Set these environment variables:
+
+NEO4J_URI=neo4j+s://xxxxx.databases.neo4j.io
+NEO4J_USER=neo4j
+NEO4J_PASSWORD=your-password-here
+
+Get free Neo4j Aura instance: https://neo4j.com/cloud/aura-free/
+"""
+            logger.error(error_msg)
             raise ValueError("Neo4j credentials required")
         
         try:
+            logger.info(f"🔌 Connecting to Neo4j: {self.uri}")
+            logger.info(f"   User: {self.user}")
+            
             self.driver = GraphDatabase.driver(
                 self.uri,
                 auth=(self.user, self.password),
-                max_connection_pool_size=max_connection_pool_size
+                max_connection_pool_size=max_connection_pool_size,
+                connection_timeout=10.0,  # 10 second timeout
+                max_transaction_retry_time=5.0
             )
             
-            # Test connection
-            self.driver.verify_connectivity()
-            logger.info(f"✅ Neo4j connected: {self.uri}")
+            # Test connection with detailed error handling
+            try:
+                self.driver.verify_connectivity()
+                logger.info(f"✅ Neo4j connected successfully: {self.uri}")
+            except AuthError as auth_err:
+                logger.error(f"""
+❌ Neo4j authentication failed!
+   URI: {self.uri}
+   User: {self.user}
+   
+   Possible issues:
+   1. Wrong password - check NEO4J_PASSWORD in .env
+   2. Wrong username - should be 'neo4j' for Aura
+   3. Database not started in Neo4j Aura console
+   
+   Error: {auth_err}
+""")
+                raise
             
             # Create constraints and indexes
             self._setup_schema()
             
-        except AuthError as e:
-            logger.error(f"❌ Neo4j authentication failed: {e}")
-            raise
+        except AuthError:
+            raise  # Already logged above
         except ServiceUnavailable as e:
-            logger.error(f"❌ Neo4j service unavailable: {e}")
+            logger.error(f"""
+❌ Neo4j service unavailable!
+   URI: {self.uri}
+   
+   Possible issues:
+   1. Wrong URI - check NEO4J_URI in .env
+   2. Database paused in Neo4j Aura (free tier auto-pauses)
+   3. Network/firewall blocking connection
+   
+   Error: {e}
+""")
             raise
         except Exception as e:
             logger.error(f"❌ Neo4j connection failed: {e}")
