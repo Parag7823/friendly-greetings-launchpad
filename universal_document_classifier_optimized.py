@@ -22,6 +22,14 @@ from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
 
+# Import debug logger for capturing AI reasoning
+try:
+    from debug_logger import get_debug_logger
+    DEBUG_LOGGER_AVAILABLE = True
+except ImportError:
+    DEBUG_LOGGER_AVAILABLE = False
+    logger.warning("Debug logger not available - skipping detailed logging")
+
 @dataclass
 class DocumentClassificationResult:
     """Standardized document classification result"""
@@ -450,6 +458,25 @@ class UniversalDocumentClassifierOptimized:
             
             # 9. Audit logging
             await self._log_classification_audit(classification_id, final_result, user_id)
+            
+            # 10. Debug logging for developer console
+            if DEBUG_LOGGER_AVAILABLE and user_id:
+                try:
+                    debug_logger = get_debug_logger(self.supabase, None)
+                    await debug_logger.log_document_classification(
+                        job_id=final_result.get('metadata', {}).get('job_id', 'unknown'),
+                        user_id=user_id,
+                        document_type=final_result['document_type'],
+                        confidence=final_result['confidence'],
+                        method=final_result['method'],
+                        indicators=final_result['indicators'],
+                        reasoning=final_result['reasoning'],
+                        ai_prompt=final_result.get('metadata', {}).get('ai_prompt'),
+                        ai_response=final_result.get('metadata', {}).get('ai_response'),
+                        processing_time_ms=final_result['processing_time'] * 1000
+                    )
+                except Exception as debug_err:
+                    logger.warning(f"Debug logging failed: {debug_err}")
             
             return final_result
             
