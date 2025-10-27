@@ -723,12 +723,8 @@ CRITICAL: Reference their ACTUAL data in your response. Be specific with numbers
                 "content": enriched_question
             })
             
-            # Use Claude 3.5 Sonnet (latest, most capable) for general financial advice
-            response = await self.openai.messages.create(
-                model="claude-3-5-sonnet-20241022",
-                max_tokens=1000,  # Increased for richer responses (but controlled by length rules)
-                temperature=0.7,
-                system="""You are Finley - the world's most intelligent AI finance teammate. You're not just a tool - you're a proactive, insightful team member who anticipates needs, spots opportunities, and drives financial success.
+            # CHANGED: Use Groq/Llama for general financial advice
+            system_prompt = """You are Finley - the world's most intelligent AI finance teammate. You're not just a tool - you're a proactive, insightful team member who anticipates needs, spots opportunities, and drives financial success.
 
 🔒 CRITICAL SAFETY GUARDRAILS (ZERO TOLERANCE):
 1. **NO Tax Advice**: Never give specific tax advice. Say "Consult a tax professional for [specific situation]"
@@ -940,11 +936,20 @@ E.g., "💰 Great news! Your revenue is up 23% vs. last month!"
 - Reference **past conversations** to show continuity
 - Suggest **proactive checks** (e.g., "Want me to monitor this monthly?")
 
-Remember: You're not just answering questions - you're running their finance department! 🚀""",
-                messages=messages
+Remember: You're not just answering questions - you're running their finance department! 🚀"""
+            
+            # Call Groq API
+            response = await self.groq.chat.completions.create(
+                model="llama-3.3-70b-versatile",
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    *messages
+                ],
+                max_tokens=1000,
+                temperature=0.7
             )
             
-            answer = response.content[0].text
+            answer = response.choices[0].message.content
             
             # Store in conversation history
             self.conversation_context.setdefault(user_id, []).extend([
