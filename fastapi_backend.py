@@ -878,17 +878,19 @@ async def metrics_endpoint():
         logger.error(f"/metrics failed: {e}")
         raise HTTPException(status_code=500, detail="metrics unavailable")
 
+# DISABLED: Anthropic client - now using Groq/Llama for all AI operations
 # Initialize Anthropic client with error handling
-try:
-    anthropic_api_key = os.getenv('ANTHROPIC_API_KEY')
-    if not anthropic_api_key:
-        raise ValueError("ANTHROPIC_API_KEY environment variable is required")
-    
-    anthropic_client = Anthropic(api_key=anthropic_api_key)
-    logger.info("✅ Anthropic client initialized successfully")
-except Exception as e:
-    logger.error(f"❌ Failed to initialize Anthropic client: {e}")
-    anthropic_client = None
+# try:
+#     anthropic_api_key = os.getenv('ANTHROPIC_API_KEY')
+#     if not anthropic_api_key:
+#         raise ValueError("ANTHROPIC_API_KEY environment variable is required")
+#     
+#     anthropic_client = Anthropic(api_key=anthropic_api_key)
+#     logger.info("✅ Anthropic client initialized successfully")
+# except Exception as e:
+#     logger.error(f"❌ Failed to initialize Anthropic client: {e}")
+#     anthropic_client = None
+anthropic_client = None  # Not used - replaced with Groq/Llama
 
 # Initialize Groq client for cost-effective high-volume operations
 try:
@@ -4262,7 +4264,9 @@ async def _paypal_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> Dic
 class VendorStandardizer:
     """Handles vendor name standardization and cleaning"""
     
-    def __init__(self, anthropic_client, cache_client=None):
+    def __init__(self, anthropic_client=None, cache_client=None):
+        # Note: anthropic_client parameter kept for backward compatibility but not used
+        # Now using Groq/Llama instead
         self.anthropic = anthropic_client
         # Use centralized AIClassificationCache for persistent, shared caching
         self.cache = cache_client or safe_get_ai_cache()
@@ -4377,7 +4381,7 @@ class VendorStandardizer:
                         classification_type='vendor_standardization',
                         ttl_hours=48,
                         confidence_score=ai_result.get('confidence', 0.7),
-                        model_version='claude-3-5-sonnet-20241022'
+                        model_version='llama-3.3-70b-versatile'
                     )
                 except Exception as e:
                     logger.warning(f"Cache storage failed: {e}")
@@ -4414,15 +4418,18 @@ Return JSON with:
 Example:
 {{"vendor_raw": "Acme Corp.", "vendor_standard": "Acme", "confidence": 0.9, "cleaning_method": "ai"}}"""
 
-            # Use Anthropic for vendor standardization
-            response = await self.anthropic.messages.create(
-                model="claude-3-5-sonnet-20241022",
+            # Use Groq (Llama-3.3-70B) for vendor standardization
+            if not groq_client:
+                raise ValueError("Groq client not initialized. Please check GROQ_API_KEY.")
+            
+            response = groq_client.chat.completions.create(
+                model="llama-3.3-70b-versatile",
+                messages=[{"role": "user", "content": prompt}],
                 max_tokens=200,
-                temperature=0.1,
-                messages=[{"role": "user", "content": prompt}]
+                temperature=0.1
             )
             
-            result_text = response.content[0].text.strip()
+            result_text = response.choices[0].message.content.strip()
             
             # Parse JSON response
             import json
@@ -4866,7 +4873,9 @@ class DataEnrichmentProcessor:
     - Security validations and audit logging
     """
     
-    def __init__(self, anthropic_client, cache_client=None, config=None):
+    def __init__(self, anthropic_client=None, cache_client=None, config=None):
+        # Note: anthropic_client parameter kept for backward compatibility but not used
+        # Now using Groq/Llama instead
         self.anthropic = anthropic_client
         self.cache = cache_client  # Will be initialized with ProductionCache
         self.config = config or self._get_default_config()
@@ -6599,10 +6608,12 @@ class AIRowClassifier:
     """
     AI-powered row classification for financial data processing.
     
-    Uses Anthropic's Claude models to intelligently classify and categorize
+    Uses Groq's Llama models to intelligently classify and categorize
     financial data rows, providing enhanced data understanding and processing.
     """
-    def __init__(self, anthropic_client, entity_resolver = None):
+    def __init__(self, anthropic_client=None, entity_resolver = None):
+        # Note: anthropic_client parameter kept for backward compatibility but not used
+        # Now using Groq/Llama instead
         self.anthropic = anthropic_client
         self.entity_resolver = entity_resolver
     
@@ -6903,7 +6914,9 @@ class BatchAIRowClassifier:
     - Complex rows (many fields): 10 rows/batch
     """
     
-    def __init__(self, anthropic_client):
+    def __init__(self, anthropic_client=None):
+        # Note: anthropic_client parameter kept for backward compatibility but not used
+        # Now using Groq/Llama instead
         self.anthropic = anthropic_client
         self.cache = {}  # Simple cache for similar rows
         
@@ -7420,21 +7433,22 @@ class ExcelProcessor:
     """
     
     def __init__(self):
-        self.anthropic = Anthropic(api_key=os.getenv('ANTHROPIC_API_KEY'))
+        # Note: No longer using Anthropic, switched to Groq/Llama for all AI operations
+        self.anthropic = None
         
         # Initialize universal components with supabase_client for persistent learning
         self.universal_field_detector = UniversalFieldDetector()
-        self.universal_platform_detector = UniversalPlatformDetector(self.anthropic, cache_client=safe_get_ai_cache(), supabase_client=supabase)
-        self.universal_document_classifier = UniversalDocumentClassifier(self.anthropic, cache_client=safe_get_ai_cache(), supabase_client=supabase)
+        self.universal_platform_detector = UniversalPlatformDetector(openai_client=None, cache_client=safe_get_ai_cache(), supabase_client=supabase)
+        self.universal_document_classifier = UniversalDocumentClassifier(cache_client=safe_get_ai_cache(), supabase_client=supabase)
         self.universal_extractors = UniversalExtractors(cache_client=safe_get_ai_cache())
         
         # Entity resolver and AI classifier will be initialized per request with Supabase client
         self.entity_resolver = None
         self.ai_classifier = None
         self.row_processor = None
-        self.batch_classifier = BatchAIRowClassifier(self.anthropic)
+        self.batch_classifier = BatchAIRowClassifier(anthropic_client=None)
         # Initialize data enrichment processor
-        self.enrichment_processor = DataEnrichmentProcessor(self.anthropic)
+        self.enrichment_processor = DataEnrichmentProcessor(anthropic_client=None)
         
         # Financial field patterns for auto-detection
         self.financial_patterns = {
@@ -8286,7 +8300,7 @@ class ExcelProcessor:
         
         # Initialize EntityResolver and AI classifier with Supabase client
         self.entity_resolver = EntityResolver(supabase_client=supabase, cache_client=safe_get_ai_cache())
-        self.ai_classifier = AIRowClassifier(self.anthropic, self.entity_resolver)
+        self.ai_classifier = AIRowClassifier(anthropic_client=None, entity_resolver=self.entity_resolver)
         self.row_processor = RowProcessor(self.universal_platform_detector, self.ai_classifier, self.enrichment_processor)
         
         # Step 3: Start atomic transaction for all database operations
@@ -8882,9 +8896,8 @@ class ExcelProcessor:
         # Relationship detection - now always available (imported at top)
         try:
             # Initialize relationship detector
-            from anthropic import AsyncAnthropic
-            anthropic_client = AsyncAnthropic(api_key=os.getenv('ANTHROPIC_API_KEY'))
-            relationship_detector = EnhancedRelationshipDetector(anthropic_client, supabase)
+            # Note: Now using Groq/Llama instead of Anthropic
+            relationship_detector = EnhancedRelationshipDetector(anthropic_client=None, supabase_client=supabase)
 
             # CRITICAL FIX #5: Add timeout and file_id scope to prevent hanging on large datasets
             import asyncio
@@ -10946,27 +10959,19 @@ async def chat_endpoint(request: dict):
         
         # Initialize intelligent chat orchestrator
         from intelligent_chat_orchestrator import IntelligentChatOrchestrator
-        from anthropic import AsyncAnthropic
         
-        # Check for API key before initializing
-        anthropic_api_key = os.getenv('ANTHROPIC_API_KEY')
-        if not anthropic_api_key:
+        # Note: Now using Groq/Llama instead of Anthropic for chat
+        # Check for Groq API key
+        groq_api_key = os.getenv('GROQ_API_KEY')
+        if not groq_api_key:
             raise HTTPException(
                 status_code=503, 
-                detail="Chat service is temporarily unavailable. Please contact support. (Missing ANTHROPIC_API_KEY)"
+                detail="Chat service is temporarily unavailable. Please contact support. (Missing GROQ_API_KEY)"
             )
         
-        try:
-            anthropic_client = AsyncAnthropic(api_key=anthropic_api_key)
-        except Exception as api_error:
-            structured_logger.error("Failed to initialize Anthropic client", error=api_error)
-            raise HTTPException(
-                status_code=503,
-                detail=f"Chat service initialization failed: {str(api_error)}"
-            )
-        
+        # Pass None for openai_client - orchestrator will use Groq internally
         orchestrator = IntelligentChatOrchestrator(
-            openai_client=anthropic_client,  # Named openai_client for compatibility
+            openai_client=None,  # Now using Groq/Llama instead
             supabase_client=supabase,
             cache_client=safe_get_ai_cache()
         )
@@ -11048,7 +11053,8 @@ async def detect_platform_endpoint(request: PlatformDetectionRequest):
     """Detect platform using UniversalPlatformDetector"""
     try:
         # Initialize platform detector (with AI cache)
-        platform_detector = UniversalPlatformDetector(openai_client=anthropic_client, cache_client=safe_get_ai_cache())
+        # Note: Now using Groq/Llama instead of Anthropic
+        platform_detector = UniversalPlatformDetector(openai_client=None, cache_client=safe_get_ai_cache())
         
         # Detect platform
         result = await platform_detector.detect_platform_universal(
@@ -11637,7 +11643,7 @@ async def process_excel_universal_endpoint(
         # Initialize components
         excel_processor = ExcelProcessor()
         field_detector = UniversalFieldDetector()
-        platform_detector = UniversalPlatformDetector(openai_client=anthropic_client, cache_client=safe_get_ai_cache())
+        platform_detector = UniversalPlatformDetector(openai_client=None, cache_client=safe_get_ai_cache())
         document_classifier = UniversalDocumentClassifier(cache_client=safe_get_ai_cache())
         data_extractor = UniversalExtractors(cache_client=safe_get_ai_cache())
         
@@ -11713,7 +11719,7 @@ async def get_component_metrics():
     try:
         # Initialize components
         field_detector = UniversalFieldDetector()
-        platform_detector = UniversalPlatformDetector(openai_client=anthropic_client, cache_client=safe_get_ai_cache())
+        platform_detector = UniversalPlatformDetector(openai_client=None, cache_client=safe_get_ai_cache())
         document_classifier = UniversalDocumentClassifier(cache_client=safe_get_ai_cache())
         data_extractor = UniversalExtractors(cache_client=safe_get_ai_cache())
         
@@ -14782,7 +14788,7 @@ async def process_with_websocket_endpoint(
         # Initialize components
         excel_processor = ExcelProcessor()
         field_detector = UniversalFieldDetector()
-        platform_detector = UniversalPlatformDetector(openai_client=anthropic_client, cache_client=safe_get_ai_cache())
+        platform_detector = UniversalPlatformDetector(openai_client=None, cache_client=safe_get_ai_cache())
         document_classifier = UniversalDocumentClassifier(cache_client=safe_get_ai_cache())
         data_extractor = UniversalExtractors(cache_client=safe_get_ai_cache())
         
@@ -15463,7 +15469,7 @@ async def get_health_status():
                     test_instance = UniversalFieldDetector()
                     monitoring_system.update_health_status(component, 'healthy', {'initialized': True})
                 elif component == 'UniversalPlatformDetector':
-                    test_instance = UniversalPlatformDetector(openai_client=anthropic_client, cache_client=safe_get_ai_cache())
+                    test_instance = UniversalPlatformDetector(openai_client=None, cache_client=safe_get_ai_cache())
                     monitoring_system.update_health_status(component, 'healthy', {'initialized': True})
                 elif component == 'UniversalDocumentClassifier':
                     test_instance = UniversalDocumentClassifier(cache_client=safe_get_ai_cache())
@@ -15586,15 +15592,15 @@ async def health_check():
             "version": "2.0.0",
             "environment": {
                 "supabase_configured": bool(supabase),
-                "anthropic_configured": bool(anthropic_client),
+                "anthropic_configured": False,  # Disabled - using Groq/Llama instead
                 "groq_configured": bool(groq_client),
-                "available_env_vars": sorted([k for k in os.environ.keys() if any(x in k.upper() for x in ['SUPABASE', 'ANTHROPIC', 'GROQ', 'DATABASE'])]),
+                "available_env_vars": sorted([k for k in os.environ.keys() if any(x in k.upper() for x in ['SUPABASE', 'GROQ', 'DATABASE'])]),
                 "python_version": f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
                 "advanced_features": ADVANCED_FEATURES
             },
             "services": {
                 "database": "connected" if supabase else "disconnected",
-                "ai_anthropic": "connected" if anthropic_client else "disconnected",
+                "ai_anthropic": "disabled (using Groq/Llama)",
                 "ai_groq": "connected" if groq_client else "disconnected"
             }
         }
