@@ -1,4 +1,4 @@
-import { MessageCircle, Send, Upload, Plug, FileSpreadsheet, Receipt, Database, Layers, Paperclip, Image as ImageIcon, Loader2 } from 'lucide-react';
+import { MessageCircle, Send, Upload, Plug, FileSpreadsheet, Receipt, Database, Layers, Paperclip, Image as ImageIcon, Loader2, X } from 'lucide-react';
 import { useState, useEffect, useRef } from 'react';
 import { EnhancedFileUpload } from './EnhancedFileUpload';
 import { InlineUploadZone } from './InlineUploadZone';
@@ -297,7 +297,29 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
   }, [sampleQuestions.length]);
 
   const handleSendMessage = async () => {
-    if (message.trim()) {
+    if (message.trim() || pastedImages.length > 0) {
+      // CRITICAL FIX: Process pasted images before sending message
+      if (pastedImages.length > 0) {
+        // Show user message with file attachments
+        const fileNames = pastedImages.map(f => f.name).join(', ');
+        const attachmentMessage = {
+          id: `msg-${Date.now()}-attachments`,
+          text: `📎 Uploading ${pastedImages.length} file(s): ${fileNames}`,
+          isUser: true,
+          timestamp: new Date()
+        };
+        setMessages(prev => [...prev, attachmentMessage]);
+        
+        // Upload pasted images immediately
+        await processFiles(pastedImages);
+        setPastedImages([]); // Clear pasted images after processing
+      }
+      
+      // Only send text message if there's text content
+      if (!message.trim()) {
+        return; // Images are already being processed, no need to send empty message
+      }
+      
       const userMessage = {
         id: `msg-${Date.now()}`,
         text: message,
@@ -497,7 +519,15 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
     if (!files || files.length === 0) return;
 
     const fileArray = Array.from(files);
-    await processFiles(fileArray);
+    
+    // CRITICAL FIX: Attach files to chat input instead of uploading immediately
+    // This matches the paste behavior - files are shown as preview and uploaded on send
+    setPastedImages(prev => [...prev, ...fileArray]);
+    
+    toast({
+      title: 'Files Attached',
+      description: `${fileArray.length} file(s) ready to send`
+    });
     
     // Reset input
     if (fileInputRef.current) {
@@ -653,6 +683,43 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
                       }}
                     />
                     
+                    {/* Attached Files Preview - Above input */}
+                    {pastedImages.length > 0 && (
+                      <div className="mb-2 flex flex-wrap gap-2 p-2 bg-muted/30 rounded-lg border border-border/50">
+                        {pastedImages.map((file, index) => {
+                          const isImage = file.type.startsWith('image/');
+                          return (
+                            <div key={index} className="relative group">
+                              {isImage ? (
+                                <img
+                                  src={URL.createObjectURL(file)}
+                                  alt={file.name}
+                                  className="w-16 h-16 object-cover rounded border border-border"
+                                />
+                              ) : (
+                                <div className="w-16 h-16 flex flex-col items-center justify-center rounded border border-border bg-muted text-center p-1">
+                                  <FileSpreadsheet className="w-6 h-6 text-muted-foreground mb-1" />
+                                  <span className="text-[8px] text-muted-foreground truncate w-full px-1">
+                                    {file.name.split('.').pop()?.toUpperCase()}
+                                  </span>
+                                </div>
+                              )}
+                              <button
+                                onClick={() => setPastedImages(prev => prev.filter((_, i) => i !== index))}
+                                className="absolute -top-1 -right-1 w-5 h-5 bg-destructive text-destructive-foreground rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                                title={`Remove ${file.name}`}
+                              >
+                                <X className="w-3 h-3" />
+                              </button>
+                            </div>
+                          );
+                        })}
+                        <div className="flex items-center text-xs text-muted-foreground px-2">
+                          {pastedImages.length} file(s) ready to send
+                        </div>
+                      </div>
+                    )}
+                    
                     {/* Input wrapper with background */}
                     <div 
                       className="relative z-10 border rounded-[20px] bg-gradient-to-b from-background via-background to-muted/50 border-border/60 dark:from-zinc-900 dark:via-zinc-900 dark:to-zinc-800 dark:border-zinc-700 shadow-sm"
@@ -682,13 +749,20 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
                         <button
                           onClick={handleFileUploadClick}
                           disabled={uploadingFile}
-                          className="absolute left-4 top-1/2 -translate-y-1/2 w-9 h-9 text-muted-foreground hover:text-foreground rounded-full flex items-center justify-center transition-all duration-200 hover:bg-muted/50 disabled:opacity-50 disabled:cursor-not-allowed"
+                          className="absolute left-4 top-1/2 -translate-y-1/2 w-9 h-9 text-muted-foreground hover:text-foreground rounded-full flex items-center justify-center transition-all duration-200 hover:bg-muted/50 disabled:opacity-50 disabled:cursor-not-allowed relative"
                           title="Upload files or images"
                         >
                           {uploadingFile ? (
                             <Loader2 className="w-5 h-5 animate-spin" />
                           ) : (
-                            <Paperclip className="w-5 h-5" />
+                            <>
+                              <Paperclip className="w-5 h-5" />
+                              {pastedImages.length > 0 && (
+                                <span className="absolute -top-1 -right-1 w-4 h-4 bg-primary text-primary-foreground text-[10px] font-bold rounded-full flex items-center justify-center">
+                                  {pastedImages.length}
+                                </span>
+                              )}
+                            </>
                           )}
                         </button>
                         
@@ -705,7 +779,7 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
                         {/* Send Button - Right side */}
                         <button
                           onClick={handleSendMessage}
-                          disabled={!message.trim()}
+                          disabled={!message.trim() && pastedImages.length === 0}
                           className="absolute right-4 top-1/2 -translate-y-1/2 w-9 h-9 bg-primary text-primary-foreground rounded-full flex items-center justify-center transition-all duration-200 hover:bg-primary/90 hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
                         >
                           <Send className="w-4 h-4" />

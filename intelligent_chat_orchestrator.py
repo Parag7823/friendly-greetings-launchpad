@@ -22,8 +22,7 @@ import json
 from datetime import datetime, timedelta
 from typing import Dict, Any, List, Optional, Tuple
 from enum import Enum
-import json
-import logging
+from dataclasses import dataclass
 import asyncio
 from anthropic import AsyncAnthropic
 from causal_inference_engine import CausalInferenceEngine
