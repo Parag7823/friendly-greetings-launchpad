@@ -59,8 +59,9 @@ from universal_document_classifier_optimized import UniversalDocumentClassifierO
 from universal_extractors_optimized import UniversalExtractorsOptimized as UniversalExtractors
 from entity_resolver_optimized import EntityResolverOptimized as EntityResolver
 from enhanced_relationship_detector import EnhancedRelationshipDetector
+from debug_logger import get_debug_logger
 import pandas as pd
-import numpy as np
+import openpyxl as np
 import magic
 import filetype
 import requests
@@ -14507,6 +14508,32 @@ class UniversalWebSocketManager:
             logger.error(f"Failed to send component update for job {job_id}: {e}")
             return False
     
+    async def send_debug_update(self, job_id: str, stage: str, component: str, data: Dict[str, Any]):
+        """Send debug/reasoning update for developer console"""
+        try:
+            payload = {
+                "type": "debug",
+                "job_id": job_id,
+                "stage": stage,
+                "component": component,
+                "data": data,
+                "timestamp": datetime.utcnow().isoformat()
+            }
+            
+            # Send to connected WebSocket if exists
+            if job_id in self.active_connections:
+                ws = self.active_connections[job_id]
+                try:
+                    await ws.send_json(payload)
+                    logger.debug(f"Sent debug update for job {job_id}, stage {stage}")
+                except Exception as ws_err:
+                    logger.warning(f"Failed to send debug update via WebSocket: {ws_err}")
+            
+            return True
+        except Exception as e:
+            logger.error(f"Failed to send debug update for job {job_id}: {e}")
+            return False
+    
     async def send_overall_update(self, job_id: str, status: str, message: str, progress: int = None, results: Dict[str, Any] = None):
         """Send overall job progress update"""
         try:
@@ -15654,6 +15681,100 @@ if frontend_dist_path.exists():
             raise HTTPException(status_code=404, detail="Frontend not found")
 else:
     logger.warning("⚠️ Frontend dist directory not found - serving API only")
+
+# ============================================================================
+# DEVELOPER DEBUG ENDPOINTS
+# ============================================================================
+
+@app.get("/api/debug/job/{job_id}")
+async def get_debug_logs(job_id: str, user_id: Optional[str] = None):
+    """
+    Get complete debug trace for a job - shows AI reasoning, confidence scores,
+    entity resolution steps, and relationship detection details.
+    
+    For developer introspection and debugging.
+    """
+    try:
+        # Fetch all debug logs for this job
+        query = supabase.table('debug_logs').select('*').eq('job_id', job_id).order('created_at')
+        
+        # Optional user filter for security
+        if user_id:
+            query = query.eq('user_id', user_id)
+        
+        result = query.execute()
+        
+        if not result.data:
+            raise HTTPException(status_code=404, detail="No debug logs found for this job")
+        
+        # Organize by stage
+        stages = {}
+        for log in result.data:
+            stage = log['stage']
+            if stage not in stages:
+                stages[stage] = []
+            stages[stage].append({
+                'component': log['component'],
+                'data': log['data'],
+                'metadata': log.get('metadata', {}),
+                'created_at': log['created_at']
+            })
+        
+        # Get job metadata
+        job_result = supabase.table('ingestion_jobs').select('*').eq('id', job_id).single().execute()
+        
+        return {
+            'job_id': job_id,
+            'job_metadata': job_result.data if job_result.data else {},
+            'stages': stages,
+            'total_logs': len(result.data)
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to fetch debug logs: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/debug/jobs/recent")
+async def get_recent_debug_jobs(user_id: str, limit: int = 10):
+    """Get recent jobs with debug logs for a user"""
+    try:
+        result = supabase.table('debug_logs')\
+            .select('job_id, created_at')\
+            .eq('user_id', user_id)\
+            .order('created_at', desc=True)\
+            .limit(limit)\
+            .execute()
+        
+        # Get unique job IDs
+        job_ids = list(set([log['job_id'] for log in result.data]))
+        
+        # Get job details
+        jobs = []
+        for job_id in job_ids[:limit]:
+            job_result = supabase.table('ingestion_jobs').select('*').eq('id', job_id).single().execute()
+            if job_result.data:
+                jobs.append(job_result.data)
+        
+        return {
+            'jobs': jobs,
+            'total': len(jobs)
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to fetch recent debug jobs: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/api/debug/job/{job_id}")
+async def delete_debug_logs(job_id: str, user_id: str):
+    """Delete debug logs for a job (cleanup)"""
+    try:
+        supabase.table('debug_logs').delete().eq('job_id', job_id).eq('user_id', user_id).execute()
+        return {"status": "deleted", "job_id": job_id}
+    except Exception as e:
+        logger.error(f"Failed to delete debug logs: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 # ============================================================================
 # MAIN APPLICATION SETUP
