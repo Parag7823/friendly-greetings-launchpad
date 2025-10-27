@@ -151,6 +151,7 @@ export const DataSourcesPanel = ({ isOpen, onClose }: DataSourcesPanelProps) => 
   const [loading, setLoading] = useState(false);
   const [syncing, setSyncing] = useState<string | null>(null);
   const [connecting, setConnecting] = useState<string | null>(null);
+  const [verifying, setVerifying] = useState<string | null>(null); // Track which provider is being verified
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(
     new Set(['accounting', 'data-sources', 'payment'])
   );
@@ -446,6 +447,10 @@ export const DataSourcesPanel = ({ isOpen, onClose }: DataSourcesPanelProps) => 
               clearTimeout(fallbackTimer);
               window.removeEventListener('message', messageHandler);
               
+              // Set verifying state to show user we're confirming the connection
+              setConnecting(null); // Clear connecting state
+              setVerifying(provider);
+              
               // Verify connection after popup closes (creates record if webhook failed)
               const refreshConnection = async () => {
                 const { data: sessionData } = await supabase.auth.getSession();
@@ -495,12 +500,59 @@ export const DataSourcesPanel = ({ isOpen, onClose }: DataSourcesPanelProps) => 
                 }
               };
               
-              // Try immediate refresh
-              setTimeout(refreshConnection, 1000);
-              // Try again after 3 seconds if first attempt fails
-              setTimeout(refreshConnection, 3000);
-              // Final attempt after 5 seconds
-              setTimeout(refreshConnection, 5000);
+              // CRITICAL FIX: More aggressive polling after OAuth to catch webhook processing
+              // Nango webhook may take 1-3 seconds to process and update database
+              // Poll every second for 15 seconds to ensure we catch the connection
+              let pollAttempts = 0;
+              const maxPollAttempts = 15;
+              
+              const aggressivePoll = setInterval(async () => {
+                pollAttempts++;
+                console.log(`Polling for connection update (attempt ${pollAttempts}/${maxPollAttempts})`);
+                
+                await refreshConnection();
+                
+                // Check if connection now exists
+                const { data: sessionData } = await supabase.auth.getSession();
+                const sessionToken = sessionData?.session?.access_token;
+                const checkResponse = await fetch(`${config.apiUrl}/api/connectors/user-connections`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    user_id: user?.id,
+                    session_token: sessionToken
+                  })
+                });
+                
+                if (checkResponse.ok) {
+                  const checkData = await checkResponse.json();
+                  const foundConnection = (checkData.connections || []).find(
+                    (c: any) => c.provider === provider
+                  );
+                  
+                  if (foundConnection) {
+                    console.log('✅ Connection found! Stopping aggressive poll.');
+                    clearInterval(aggressivePoll);
+                    setConnections(checkData.connections || []);
+                    setVerifying(null); // Clear verifying state
+                    return;
+                  }
+                }
+                
+                // Stop after max attempts
+                if (pollAttempts >= maxPollAttempts) {
+                  console.warn('⚠️ Connection not found after 15 seconds. Webhook may be delayed.');
+                  clearInterval(aggressivePoll);
+                  setVerifying(null); // Clear verifying state even if not found
+                  
+                  // Show warning toast
+                  toast({
+                    title: 'Connection Delayed',
+                    description: 'The connection is taking longer than expected. Please refresh in a moment.',
+                    variant: 'default'
+                  });
+                }
+              }, 1000); // Poll every 1 second
             }
           }, 500);
         }
@@ -1005,6 +1057,16 @@ export const DataSourcesPanel = ({ isOpen, onClose }: DataSourcesPanelProps) => 
                                               <X className="w-4 h-4" />
                                             </Button>
                                           </>
+                                        ) : verifying === integration.provider ? (
+                                          <Button
+                                            size="sm"
+                                            variant="outline"
+                                            disabled
+                                            className="text-xs h-9 px-4"
+                                          >
+                                            <Loader2 className="w-3 h-3 mr-1.5 animate-spin" />
+                                            Verifying...
+                                          </Button>
                                         ) : (
                                           <StarBorder
                                             as="button"
