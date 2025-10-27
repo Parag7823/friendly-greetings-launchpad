@@ -454,65 +454,50 @@ export const DataSourcesPanel = ({ isOpen, onClose }: DataSourcesPanelProps) => 
               let pollAttempts = 0;
               const maxPollAttempts = 15;
               
+              let pollingStopped = false; // Flag to prevent multiple toasts
+              
               const aggressivePoll = setInterval(async () => {
+                if (pollingStopped) return; // Already found or timed out
+                
                 pollAttempts++;
                 console.log(`Polling for connection update (attempt ${pollAttempts}/${maxPollAttempts})`);
                 
                 await refreshConnection();
                 
-                // Check if connection now exists
-                const { data: sessionData } = await supabase.auth.getSession();
-                const sessionToken = sessionData?.session?.access_token;
-                const checkResponse = await fetch(`${config.apiUrl}/api/connectors/user-connections`, {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({
-                    user_id: user?.id,
-                    session_token: sessionToken
-                  })
-                });
+                // Refresh connections using shared hook and check result
+                const result = await refetchConnections();
                 
-                if (checkResponse.ok) {
-                  const checkData = await checkResponse.json();
-                  console.log('Polling response:', checkData);
-                  console.log('Looking for provider:', provider);
-                  console.log('Available connections:', checkData.connections);
+                // Check if connection now exists in the refreshed data
+                const foundConnection = (result.data || connections).find(
+                  (c: any) => c.provider === provider
+                );
+                
+                if (foundConnection) {
+                  console.log('✅ Connection found! Stopping aggressive poll.', foundConnection);
+                  pollingStopped = true;
+                  clearInterval(aggressivePoll);
+                  setVerifying(null); // Clear verifying state
                   
-                  const foundConnection = (checkData.connections || []).find(
-                    (c: any) => {
-                      console.log('Checking connection:', c.provider, 'against', provider);
-                      return c.provider === provider;
-                    }
-                  );
-                  
-                  if (foundConnection) {
-                    console.log('✅ Connection found! Stopping aggressive poll.', foundConnection);
-                    clearInterval(aggressivePoll);
-                    await refetchConnections(); // Refresh using shared hook
-                    setVerifying(null); // Clear verifying state
-                    
-                    // Show success toast
-                    const integrationName = INTEGRATIONS.find(i => i.provider === provider)?.name || provider;
-                    toast({
-                      title: 'Connected!',
-                      description: `${integrationName} connected successfully`,
-                      duration: 3000
-                    });
-                    return;
-                  } else {
-                    console.log('❌ Connection not found yet, continuing to poll...');
-                  }
+                  // Show success toast ONCE
+                  const integrationName = INTEGRATIONS.find(i => i.provider === provider)?.name || provider;
+                  toast({
+                    title: 'Connected!',
+                    description: `${integrationName} connected successfully`,
+                    duration: 3000
+                  });
+                  return;
                 } else {
-                  console.error('Failed to fetch connections:', checkResponse.status);
+                  console.log('❌ Connection not found yet, continuing to poll...');
                 }
                 
                 // Stop after max attempts
-                if (pollAttempts >= maxPollAttempts) {
+                if (pollAttempts >= maxPollAttempts && !pollingStopped) {
                   console.warn('⚠️ Connection not found after 15 seconds. Webhook may be delayed.');
+                  pollingStopped = true;
                   clearInterval(aggressivePoll);
                   setVerifying(null); // Clear verifying state even if not found
                   
-                  // Show warning toast
+                  // Show warning toast ONCE
                   toast({
                     title: 'Connection Delayed',
                     description: 'The connection is taking longer than expected. Please refresh in a moment.',
