@@ -651,7 +651,7 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
                       <div
                         className={`max-w-[80%] rounded-md px-3 py-2 border ${
                           msg.isUser
-                            ? 'bg-primary text-primary-foreground border-primary'
+                            ? 'bg-gradient-to-b from-background via-background to-muted/50 border-border/60 dark:from-zinc-900 dark:via-zinc-900 dark:to-zinc-800 dark:border-zinc-700 text-foreground'
                             : 'bg-[#1a1a1a]/90 backdrop-blur-sm text-white border-white/10'
                         }`}
                       >
@@ -733,7 +733,7 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
                     
                     {/* Input wrapper with background */}
                     <div 
-                      className="relative z-10 border rounded-[20px] bg-gradient-to-b from-background via-background to-muted/50 border-border/60 dark:from-zinc-900 dark:via-zinc-900 dark:to-zinc-800 dark:border-zinc-700 shadow-sm"
+                      className="relative z-10 border rounded-[20px] bg-black/40 backdrop-blur-sm border-white/10 shadow-lg"
                       onDragOver={handleDragOver}
                       onDrop={handleDrop}
                     >
@@ -751,7 +751,7 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
                           }}
                           onPaste={handlePaste}
                           placeholder={sampleQuestions[currentQuestionIndex]}
-                          className="w-full bg-transparent border-none pl-14 pr-14 py-4 text-sm text-foreground placeholder-muted-foreground focus:outline-none focus:ring-0"
+                          className="w-full bg-transparent border-none pl-14 pr-14 py-4 text-sm text-white placeholder-white/50 focus:outline-none focus:ring-0"
                           autoComplete="off"
                           spellCheck="false"
                         />
