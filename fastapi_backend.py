@@ -7476,7 +7476,7 @@ class ExcelProcessor:
         
         # Initialize universal components with supabase_client for persistent learning
         self.universal_field_detector = UniversalFieldDetector()
-        self.universal_platform_detector = UniversalPlatformDetector(openai_client=None, cache_client=safe_get_ai_cache(), supabase_client=supabase)
+        self.universal_platform_detector = UniversalPlatformDetector(anthropic_client=None, cache_client=safe_get_ai_cache(), supabase_client=supabase)
         self.universal_document_classifier = UniversalDocumentClassifier(cache_client=safe_get_ai_cache(), supabase_client=supabase)
         self.universal_extractors = UniversalExtractors(cache_client=safe_get_ai_cache())
         
@@ -11092,7 +11092,7 @@ async def detect_platform_endpoint(request: PlatformDetectionRequest):
     try:
         # Initialize platform detector (with AI cache)
         # Note: Now using Groq/Llama instead of Anthropic
-        platform_detector = UniversalPlatformDetector(openai_client=None, cache_client=safe_get_ai_cache())
+        platform_detector = UniversalPlatformDetector(anthropic_client=None, cache_client=safe_get_ai_cache())
         
         # Detect platform
         result = await platform_detector.detect_platform_universal(
@@ -11681,7 +11681,7 @@ async def process_excel_universal_endpoint(
         # Initialize components
         excel_processor = ExcelProcessor()
         field_detector = UniversalFieldDetector()
-        platform_detector = UniversalPlatformDetector(openai_client=None, cache_client=safe_get_ai_cache())
+        platform_detector = UniversalPlatformDetector(anthropic_client=None, cache_client=safe_get_ai_cache())
         document_classifier = UniversalDocumentClassifier(cache_client=safe_get_ai_cache())
         data_extractor = UniversalExtractors(cache_client=safe_get_ai_cache())
         
@@ -11757,7 +11757,7 @@ async def get_component_metrics():
     try:
         # Initialize components
         field_detector = UniversalFieldDetector()
-        platform_detector = UniversalPlatformDetector(openai_client=None, cache_client=safe_get_ai_cache())
+        platform_detector = UniversalPlatformDetector(anthropic_client=None, cache_client=safe_get_ai_cache())
         document_classifier = UniversalDocumentClassifier(cache_client=safe_get_ai_cache())
         data_extractor = UniversalExtractors(cache_client=safe_get_ai_cache())
         
@@ -14809,7 +14809,7 @@ async def process_with_websocket_endpoint(
         # Initialize components
         excel_processor = ExcelProcessor()
         field_detector = UniversalFieldDetector()
-        platform_detector = UniversalPlatformDetector(openai_client=None, cache_client=safe_get_ai_cache())
+        platform_detector = UniversalPlatformDetector(anthropic_client=None, cache_client=safe_get_ai_cache())
         document_classifier = UniversalDocumentClassifier(cache_client=safe_get_ai_cache())
         data_extractor = UniversalExtractors(cache_client=safe_get_ai_cache())
         
@@ -15490,7 +15490,7 @@ async def get_health_status():
                     test_instance = UniversalFieldDetector()
                     monitoring_system.update_health_status(component, 'healthy', {'initialized': True})
                 elif component == 'UniversalPlatformDetector':
-                    test_instance = UniversalPlatformDetector(openai_client=None, cache_client=safe_get_ai_cache())
+                    test_instance = UniversalPlatformDetector(anthropic_client=None, cache_client=safe_get_ai_cache())
                     monitoring_system.update_health_status(component, 'healthy', {'initialized': True})
                 elif component == 'UniversalDocumentClassifier':
                     test_instance = UniversalDocumentClassifier(cache_client=safe_get_ai_cache())

@@ -38,7 +38,7 @@ from fastapi_backend import (
 # --------------- ARQ Task Functions ---------------
 # Each task is fully functional and reuses the existing application logic.
 
-async def _retry_or_dlq(ctx, provider: str, req: Dict[str, Any], err: Exception, max_retries: int, base_delay: int) -> None | int:
+async def _retry_or_dlq(ctx, provider: str, req: Dict[str, Any], err: Exception, max_retries: int, base_delay: int) -> Optional[int]:
     """Increment a Redis-backed retry counter; return next delay if should retry, else record to DLQ and return None."""
     try:
         redis = ctx.get('redis') if hasattr(ctx, 'get') else ctx['redis']
