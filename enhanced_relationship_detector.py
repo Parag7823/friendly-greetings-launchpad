@@ -65,8 +65,8 @@ except ImportError:
 class EnhancedRelationshipDetector:
     """Enhanced relationship detector that actually finds relationships between events"""
     
-    def __init__(self, openai_client: AsyncAnthropic, supabase_client: Client, cache_client=None):
-        self.anthropic = openai_client
+    def __init__(self, anthropic_client: AsyncAnthropic = None, supabase_client: Client = None, cache_client=None):
+        self.anthropic = anthropic_client
         self.supabase = supabase_client
         self.cache = cache_client  # Use centralized cache, no local cache
         
