@@ -23,10 +23,11 @@ RUN npm run build
 # Backend stage - Use Python 3.9 for maximum pandas compatibility (most stable)
 FROM python:3.9.18-slim
 
-# Force cache invalidation - updated 2025-01-29 to force Render rebuild
-ARG CACHEBUST=20250129-v2
+# Force cache invalidation - updated 2025-10-28 to include BGE embeddings
+ARG CACHEBUST=20251028-v3
 # Install system dependencies for python-magic, Tesseract (OCR), Java (Tabula), and basic functionality
 # Added gfortran and build-essential for scipy compilation
+# Added dependencies for PyTorch/sentence-transformers (BGE embeddings)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libmagic1 \
     tesseract-ocr \
@@ -40,6 +41,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libglib2.0-0 \
     libgomp1 \
     pkg-config \
+    libssl-dev \
+    libffi-dev \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -68,6 +71,7 @@ COPY entity_resolver_optimized.py .
 COPY enhanced_relationship_detector.py .
 COPY neo4j_relationship_detector.py .
 COPY semantic_relationship_extractor.py .
+COPY embedding_service.py .
 COPY causal_inference_engine.py .
 COPY temporal_pattern_learner.py .
 COPY intelligent_chat_orchestrator.py .

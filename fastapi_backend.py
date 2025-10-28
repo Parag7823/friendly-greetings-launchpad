@@ -8898,13 +8898,21 @@ class ExcelProcessor:
             })
             
         except Exception as e:
-            logger.error(f"Entity resolution failed: {e}")
-            insights['entity_resolution'] = {'error': str(e)}
+            import traceback
+            error_details = {
+                'error_type': type(e).__name__,
+                'error_message': str(e),
+                'traceback': traceback.format_exc(),
+                'method': '_extract_entities_from_events or _resolve_entities'
+            }
+            logger.error(f"❌ Entity resolution failed: {error_details}")
+            insights['entity_resolution'] = {'error': str(e), 'details': error_details}
             # Send error to frontend
             await manager.send_update(job_id, {
                 "step": "entity_resolution_failed",
-                "message": f"Entity resolution encountered an issue: {str(e)}",
-                "progress": 90
+                "message": f"Entity resolution encountered an issue: {type(e).__name__}: {str(e)}",
+                "progress": 90,
+                "error_details": error_details
             })
 
         # Step 9: Platform Pattern Learning
@@ -8930,18 +8938,26 @@ class ExcelProcessor:
             
             await manager.send_update(job_id, {
                 "step": "platform_learning_completed",
-                "message": format_progress_message(ProcessingStage.EXPLAIN, "Learned some patterns", f"{len(platform_patterns)} new insights"),
+                "message": format_progress_message(ProcessingStage.EXPLAIN, "Learned from your data", f"{len(platform_patterns)} patterns, {len(discovered_platforms)} new platforms"),
                 "progress": 95
             })
             
         except Exception as e:
-            logger.error(f"Platform learning failed: {e}")
-            insights['platform_learning'] = {'error': str(e)}
+            import traceback
+            error_details = {
+                'error_type': type(e).__name__,
+                'error_message': str(e),
+                'traceback': traceback.format_exc(),
+                'method': '_learn_platform_patterns or _discover_new_platforms'
+            }
+            logger.error(f"❌ Platform learning failed: {error_details}")
+            insights['platform_learning'] = {'error': str(e), 'details': error_details}
             # Send error to frontend
             await manager.send_update(job_id, {
                 "step": "platform_learning_failed",
-                "message": f"Pattern learning encountered an issue: {str(e)}",
-                "progress": 95
+                "message": f"Platform learning encountered an issue: {type(e).__name__}: {str(e)}",
+                "progress": 92,
+                "error_details": error_details
             })
 
         # Step 10: Relationship Detection
@@ -9103,6 +9119,124 @@ class ExcelProcessor:
         insights['file_hash'] = file_hash_for_check
         insights['duplicate_analysis'] = duplicate_analysis
         return insights
+    
+    async def _resolve_entities(self, entities: List[Dict], user_id: str, filename: str, supabase: Client) -> List[Dict]:
+        """
+        FIX #16: Resolve extracted entities to normalized entities in database.
+        Matches entities to existing ones or creates new normalized entities.
+        """
+        try:
+            if not entities:
+                return []
+            
+            logger.info(f"Resolving {len(entities)} entities for user {user_id}")
+            entity_matches = []
+            
+            for entity in entities:
+                try:
+                    entity_type = entity.get('type', 'vendor')
+                    entity_name = entity.get('name', '')
+                    
+                    if not entity_name:
+                        continue
+                    
+                    # Search for existing normalized entity
+                    existing = supabase.table('normalized_entities').select('id, canonical_name').eq(
+                        'user_id', user_id
+                    ).ilike('canonical_name', f"%{entity_name}%").limit(1).execute()
+                    
+                    if existing.data:
+                        # Match found
+                        normalized_id = existing.data[0]['id']
+                        match_confidence = 0.9
+                    else:
+                        # Create new normalized entity
+                        normalized_entity = {
+                            'user_id': user_id,
+                            'entity_type': self._normalize_entity_type(entity_type),
+                            'canonical_name': entity_name,
+                            'aliases': [entity_name],
+                            'platform_sources': [filename],
+                            'confidence_score': 0.8
+                        }
+                        result = supabase.table('normalized_entities').insert(normalized_entity).execute()
+                        if result.data:
+                            normalized_id = result.data[0]['id']
+                            match_confidence = 0.8
+                        else:
+                            logger.warning(f"Failed to create normalized entity: {entity_name}")
+                            continue
+                    
+                    # Create entity match record
+                    entity_matches.append({
+                        'user_id': user_id,
+                        'source_entity_name': entity_name,
+                        'source_file': filename,
+                        'normalized_entity_id': normalized_id,
+                        'match_confidence': match_confidence,
+                        'match_reason': 'vendor_match' if entity_type == 'vendor' else 'entity_match'
+                    })
+                    
+                except Exception as e:
+                    logger.warning(f"Failed to resolve entity {entity.get('name', 'unknown')}: {e}")
+                    continue
+            
+            logger.info(f"Resolved {len(entity_matches)} entity matches")
+            return entity_matches
+            
+        except Exception as e:
+            logger.error(f"Entity resolution failed: {e}")
+            return []
+    
+    async def _discover_new_platforms(self, user_id: str, filename: str, supabase: Client) -> List[Dict]:
+        """
+        FIX #16: Discover new platforms from processed events.
+        Analyzes events to identify platforms not yet seen for this user.
+        """
+        try:
+            logger.info(f"Discovering new platforms for user {user_id} from file {filename}")
+            
+            # Query recent events for this file
+            events_result = supabase.table('raw_events').select(
+                'source_platform, classification_metadata'
+            ).eq('user_id', user_id).execute()
+            
+            if not events_result.data:
+                logger.info("No events found for platform discovery")
+                return []
+            
+            # Get unique platforms from events
+            platforms_found = set()
+            for event in events_result.data:
+                platform = event.get('source_platform')
+                if platform:
+                    platforms_found.add(platform)
+            
+            # Check which platforms are new (not in user_connections)
+            existing_platforms = supabase.table('user_connections').select(
+                'integration_id'
+            ).eq('user_id', user_id).execute()
+            
+            existing_platform_ids = {conn.get('integration_id') for conn in existing_platforms.data or []}
+            
+            discovered = []
+            for platform in platforms_found:
+                if platform not in existing_platform_ids:
+                    discovered.append({
+                        'platform_name': platform,
+                        'platform_type': 'file_upload',
+                        'detection_confidence': 0.95,
+                        'detection_method': 'event_analysis',
+                        'characteristics': {'source': 'file_upload'},
+                        'source_files': [filename]
+                    })
+            
+            logger.info(f"Discovered {len(discovered)} new platforms")
+            return discovered
+            
+        except Exception as e:
+            logger.error(f"Platform discovery failed: {e}")
+            return []
 
 # ============================================================================
 # CRITICAL FIXES VERIFICATION ENDPOINTS
@@ -9988,124 +10122,6 @@ async def get_performance_optimization_status():
             
         except Exception as e:
             logger.error(f"Error learning platform patterns: {e}")
-            return []
-    
-    async def _resolve_entities(self, entities: List[Dict], user_id: str, filename: str, supabase: Client) -> List[Dict]:
-        """
-        FIX #16: Resolve extracted entities to normalized entities in database.
-        Matches entities to existing ones or creates new normalized entities.
-        """
-        try:
-            if not entities:
-                return []
-            
-            logger.info(f"Resolving {len(entities)} entities for user {user_id}")
-            entity_matches = []
-            
-            for entity in entities:
-                try:
-                    entity_type = entity.get('type', 'vendor')
-                    entity_name = entity.get('name', '')
-                    
-                    if not entity_name:
-                        continue
-                    
-                    # Search for existing normalized entity
-                    existing = supabase.table('normalized_entities').select('id, canonical_name').eq(
-                        'user_id', user_id
-                    ).ilike('canonical_name', f"%{entity_name}%").limit(1).execute()
-                    
-                    if existing.data:
-                        # Match found
-                        normalized_id = existing.data[0]['id']
-                        match_confidence = 0.9
-                    else:
-                        # Create new normalized entity
-                        normalized_entity = {
-                            'user_id': user_id,
-                            'entity_type': self._normalize_entity_type(entity_type),
-                            'canonical_name': entity_name,
-                            'aliases': [entity_name],
-                            'platform_sources': [filename],
-                            'confidence_score': 0.8
-                        }
-                        result = supabase.table('normalized_entities').insert(normalized_entity).execute()
-                        if result.data:
-                            normalized_id = result.data[0]['id']
-                            match_confidence = 0.8
-                        else:
-                            logger.warning(f"Failed to create normalized entity: {entity_name}")
-                            continue
-                    
-                    # Create entity match record
-                    entity_matches.append({
-                        'user_id': user_id,
-                        'source_entity_name': entity_name,
-                        'source_file': filename,
-                        'normalized_entity_id': normalized_id,
-                        'match_confidence': match_confidence,
-                        'match_reason': 'vendor_match' if entity_type == 'vendor' else 'entity_match'
-                    })
-                    
-                except Exception as e:
-                    logger.warning(f"Failed to resolve entity {entity.get('name', 'unknown')}: {e}")
-                    continue
-            
-            logger.info(f"Resolved {len(entity_matches)} entity matches")
-            return entity_matches
-            
-        except Exception as e:
-            logger.error(f"Entity resolution failed: {e}")
-            return []
-    
-    async def _discover_new_platforms(self, user_id: str, filename: str, supabase: Client) -> List[Dict]:
-        """
-        FIX #16: Discover new platforms from processed events.
-        Analyzes events to identify platforms not yet seen for this user.
-        """
-        try:
-            logger.info(f"Discovering new platforms for user {user_id} from file {filename}")
-            
-            # Query recent events for this file
-            events_result = supabase.table('raw_events').select(
-                'source_platform, classification_metadata'
-            ).eq('user_id', user_id).execute()
-            
-            if not events_result.data:
-                logger.info("No events found for platform discovery")
-                return []
-            
-            # Get unique platforms from events
-            platforms_found = set()
-            for event in events_result.data:
-                platform = event.get('source_platform')
-                if platform:
-                    platforms_found.add(platform)
-            
-            # Check which platforms are new (not in user_connections)
-            existing_platforms = supabase.table('user_connections').select(
-                'integration_id'
-            ).eq('user_id', user_id).execute()
-            
-            existing_platform_ids = {conn.get('integration_id') for conn in existing_platforms.data or []}
-            
-            discovered = []
-            for platform in platforms_found:
-                if platform not in existing_platform_ids:
-                    discovered.append({
-                        'platform_name': platform,
-                        'platform_type': 'file_upload',
-                        'detection_confidence': 0.95,
-                        'detection_method': 'event_analysis',
-                        'characteristics': {'source': 'file_upload'},
-                        'source_files': [filename]
-                    })
-            
-            logger.info(f"Discovered {len(discovered)} new platforms")
-            return discovered
-            
-        except Exception as e:
-            logger.error(f"Platform discovery failed: {e}")
             return []
 
 

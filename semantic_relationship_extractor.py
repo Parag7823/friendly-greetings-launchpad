@@ -34,6 +34,7 @@ from dataclasses import dataclass, asdict
 from enum import Enum
 
 from groq import AsyncGroq
+from embedding_service import get_embedding_service
 
 logger = logging.getLogger(__name__)
 
@@ -126,8 +127,8 @@ class SemanticRelationshipExtractor:
             'enable_caching': True,
             'cache_ttl_hours': 48,  # Semantic relationships are stable
             'enable_embeddings': True,
-            'embedding_model': 'text-embedding-3-small',
-            'semantic_model': 'claude-3-5-sonnet-20241022',  # Latest and most capable for semantic understanding
+            'embedding_model': 'bge-large-en-v1.5',  # FIX #17: Free, open-source BGE embeddings
+            'semantic_model': 'llama-3.3-70b-versatile',  # Using Groq Llama (consistent with repo)
             'temperature': 0.1,  # Low temperature for consistency
             'max_tokens': 500,
             'confidence_threshold': 0.7,
@@ -468,7 +469,10 @@ Provide ONLY the JSON response, no additional text."""
         }
     
     async def _generate_relationship_embedding(self, semantic_result: Dict) -> Optional[List[float]]:
-        """Generate embedding for semantic similarity search"""
+        """
+        FIX #17: Generate embedding for semantic similarity search using BGE.
+        BGE (BAAI General Embeddings) is free, open-source, and state-of-the-art.
+        """
         try:
             # Combine key semantic information for embedding
             embedding_text = (
@@ -478,11 +482,12 @@ Provide ONLY the JSON response, no additional text."""
                 f"{' '.join(semantic_result['key_factors'])}"
             )
             
-            # Note: Anthropic doesn't have embeddings API
-            # TODO: Use a separate embedding service (OpenAI, Cohere, etc.) if needed
-            # For now, return None to disable embedding functionality
-            logger.warning("Embedding generation disabled - Anthropic doesn't support embeddings")
-            return None
+            # Use BGE embeddings (free, open-source, no API key required)
+            embedding_service = await get_embedding_service()
+            embedding = await embedding_service.embed_text(embedding_text)
+            
+            logger.info(f"✅ Generated BGE embedding (1024 dimensions) for relationship: {semantic_result['relationship_type']}")
+            return embedding
             
         except Exception as e:
             logger.error(f"Embedding generation failed: {e}")

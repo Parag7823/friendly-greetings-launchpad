@@ -45,6 +45,11 @@ scipy==1.11.4
 statsmodels==0.14.1
 scikit-learn==1.4.0
 
+# Semantic Embeddings (BGE - Free, Open-Source)
+# FIX #17: For semantic relationship embeddings and similarity search
+sentence-transformers>=2.2.0
+torch>=2.0.0
+
 # Monitoring and Metrics
 prometheus-client==0.19.0
 structlog==23.2.0
