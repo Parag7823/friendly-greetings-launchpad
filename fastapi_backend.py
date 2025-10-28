@@ -6737,11 +6737,17 @@ class AIRowClassifier:
             response = groq_client.chat.completions.create(
                 model="llama-3.3-70b-versatile",
                 messages=[{"role": "user", "content": prompt}],
-                max_tokens=2000,
-                temperature=0.1
+                max_tokens=1000,
+                temperature=0.0,
+                response_format={"type": "json_object"}
             )
             
             result = response.choices[0].message.content.strip()
+            
+            # Validate response is not garbage
+            if len(result) < 10 or not any(c in result for c in ['{', '[']):
+                logger.error(f"AI returned invalid response (too short or no JSON): {result[:100]}")
+                return self._fallback_classification(row, platform_info, column_names)
             
             # Clean and parse JSON response
             cleaned_result = result.strip()
@@ -9783,7 +9789,7 @@ async def get_performance_optimization_status():
                     
         except Exception as e:
             logger.error(f"Error storing discovered platforms: {e}")
-
+    
     async def _store_computed_metrics(self, metrics: Dict, user_id: str, transaction_id: str, supabase: Client):
         """Store computed metrics in the database"""
         try:
@@ -9836,8 +9842,8 @@ async def get_performance_optimization_status():
         return normalized
     
     async def _extract_entities_from_events(self, user_id: str, supabase: Client, 
-                                            file_id: Optional[str] = None, 
-                                            transaction_id: Optional[str] = None) -> List[Dict]:
+                                          file_id: Optional[str] = None, 
+                                          transaction_id: Optional[str] = None) -> List[Dict]:
         """Extract entities from processed events for normalization
         
         Args:
@@ -9887,127 +9893,66 @@ async def get_performance_optimization_status():
             vendor_fields_found = []
             
             for event in events_data:
-                # CRITICAL FIX: Extract vendor from enriched columns FIRST, then fallback to payload
-                # Priority 1: vendor_standard from enriched column (Phase 5 standardization)
-                vendor_name = event.get('vendor_standard')
+                # Extract vendor information
+                vendor_standard = event.get('vendor_standard')
+                vendor_raw = event.get('vendor_raw')
                 
-                # Priority 2: vendor_raw from enriched column
-                if not vendor_name:
-                    vendor_name = event.get('vendor_raw')
-                
-                # Priority 3: Fallback to payload fields (for old data or non-enriched events)
-                if not vendor_name:
-                    payload = event.get('payload', {})
-                    vendor_name = (
-                        payload.get('vendor_standard') or
-                        payload.get('vendor_raw') or
-                        payload.get('vendor') or
-                        payload.get('merchant') or
-                        payload.get('payee') or
-                        payload.get('description') or
-                        payload.get('name') or
-                        payload.get('counterparty') or
-                        payload.get('customer') or
-                        payload.get('client')
-                    )
-                
-                # Track what fields we found for debugging
-                if vendor_name:
-                    vendor_fields_found.append(f"vendor: {vendor_name}")
-
-                if vendor_name and vendor_name not in entity_map:
-                    # Extract contact info from enriched columns first, then payload
-                    payload = event.get('payload', {})
-                    entity = {
+                if vendor_standard and vendor_standard not in entity_map:
+                    entity_map[vendor_standard] = {
+                        'entity_name': vendor_standard,
                         'entity_type': 'vendor',
-                        'canonical_name': vendor_name,
-                        'aliases': [vendor_name],
-                        'email': event.get('email') or payload.get('email'),
-                        'phone': event.get('phone') or payload.get('phone'),
-                        'bank_account': event.get('bank_account') or payload.get('bank_account'),
-                        'platform_sources': [event.get('source_platform', 'unknown')],
-                        'source_files': [event.get('source_filename', '')],
-                        'confidence_score': 0.9 if event.get('vendor_standard') else 0.7  # Higher confidence for standardized names
+                        'platform': event.get('source_platform', 'unknown'),
+                        'identifiers': {
+                            'email': event.get('email'),
+                            'phone': event.get('phone'),
+                            'bank_account': event.get('bank_account')
+                        },
+                        'source_file': event.get('source_filename'),
+                        'confidence': 0.9  # High confidence for standardized vendors
                     }
-                    entities.append(entity)
-                    entity_map[vendor_name] = entity
+                    vendor_fields_found.append(vendor_standard)
+                
+                # Extract other entity types from payload
+                payload = event.get('payload', {})
+                for key, value in payload.items():
+                    if isinstance(value, str) and len(value) > 2:
+                        # Look for email patterns
+                        if '@' in value and '.' in value:
+                            email_entity = {
+                                'entity_name': value,
+                                'entity_type': 'contact',
+                                'platform': event.get('source_platform', 'unknown'),
+                                'identifiers': {'email': value},
+                                'source_file': event.get('source_filename'),
+                                'confidence': 0.8
+                            }
+                            if value not in entity_map:
+                                entity_map[value] = email_entity
+                        
+                        # Look for phone patterns
+                        elif re.match(r'^\+?[\d\s\-\(\)]{10,}$', value):
+                            phone_entity = {
+                                'entity_name': value,
+                                'entity_type': 'contact',
+                                'platform': event.get('source_platform', 'unknown'),
+                                'identifiers': {'phone': value},
+                                'source_file': event.get('source_filename'),
+                                'confidence': 0.7
+                            }
+                            if value not in entity_map:
+                                entity_map[value] = phone_entity
+            
+            # Convert to list
+            entities = list(entity_map.values())
             
             logger.info(f"Extracted {len(entities)} entities from {len(events_data)} events")
-            if vendor_fields_found:
-                logger.info(f"Found vendor fields: {vendor_fields_found[:5]}")  # Show first 5
-            else:
-                logger.warning("No vendor/merchant fields found in any events - entity extraction returns 0")
+            logger.info(f"Vendor fields found: {vendor_fields_found[:5]}...")  # Log first 5
             
             return entities
             
         except Exception as e:
-            logger.error(f"Error extracting entities: {e}")
+            logger.error(f"Entity extraction failed: {e}")
             return []
-
-    async def _resolve_entities(self, entities: List[Dict], user_id: str, filename: str, supabase: Client) -> List[Dict]:
-        """Resolve entities using the database function
-        
-        CRITICAL FIX: Normalizes entity_type BEFORE calling database function to prevent constraint violations.
-        """
-        try:
-            matches = []
-            
-            for entity in entities:
-                # CRITICAL FIX: Normalize entity_type BEFORE calling database function
-                raw_entity_type = entity.get('entity_type', 'vendor')
-                normalized_entity_type = self._normalize_entity_type(raw_entity_type)
-                
-                # Use the database function to find or create entity
-                result = supabase.rpc('find_or_create_entity', {
-                    'p_user_id': user_id,
-                    'p_entity_name': entity['canonical_name'],
-                    'p_entity_type': normalized_entity_type,  # ✅ Use normalized type
-                    'p_platform': entity['platform_sources'][0] if entity['platform_sources'] else 'unknown',
-                    'p_email': entity.get('email'),
-                    'p_bank_account': entity.get('bank_account'),
-                    'p_phone': entity.get('phone'),
-                    'p_source_file': filename
-                }).execute()
-                
-                if result.data:
-                    entity_id = result.data[0] if isinstance(result.data, list) else result.data
-                    match = {
-                        'source_entity_name': entity['canonical_name'],
-                        'source_entity_type': normalized_entity_type,  # ✅ Store normalized type
-                        'source_platform': entity['platform_sources'][0] if entity['platform_sources'] else 'unknown',
-                        'source_file': filename,
-                        'normalized_entity_id': entity_id,
-                        'match_confidence': entity['confidence_score'],
-                        'match_reason': 'exact_match',
-                        'similarity_score': 1.0,
-                        'matched_fields': ['name']
-                    }
-                    matches.append(match)
-                else:
-                    logger.warning(f"Failed to resolve entity: {entity['canonical_name']} (type: {normalized_entity_type})")
-            
-            logger.info(f"✅ Resolved {len(matches)} entity matches out of {len(entities)} entities")
-            return matches
-            
-        except Exception as e:
-            logger.error(f"❌ Error resolving entities: {e}")
-            raise  # Re-raise to trigger transaction rollback
-
-
-    async def _run_entity_pipeline_for_transaction(self, user_id: str, transaction_id: str, supabase: Client):
-        """Run extraction + resolution + persistence for connector-ingested events referenced by transaction_id."""
-        try:
-            entities = await self._extract_entities_from_events(user_id, supabase, transaction_id=transaction_id)
-            if not entities:
-                logger.info(f"No entities found for transaction {transaction_id}; skipping connector entity resolution")
-                return
-            matches = await self._resolve_entities(entities, user_id, f"connector_txn:{transaction_id}", supabase)
-            # CRITICAL FIX: Entities already created by find_or_create_entity() in _resolve_entities()
-            # Only store entity_matches (not entities again - would create duplicates)
-            await self._store_entity_matches(matches, user_id, transaction_id, supabase)
-            logger.info(f"Connector entity pipeline completed for tx {transaction_id}: entities={len(entities)}, matches={len(matches)}")
-        except Exception as e:
-            logger.error(f"Connector entity pipeline failed for tx {transaction_id}: {e}")
 
     async def _learn_platform_patterns(self, platform_info: Dict, user_id: str, filename: str, supabase: Client) -> List[Dict]:
         """Learn platform patterns from the detected platform"""
@@ -10045,73 +9990,13 @@ async def get_performance_optimization_status():
             logger.error(f"Error learning platform patterns: {e}")
             return []
 
-    async def _discover_new_platforms(self, user_id: str, filename: str, supabase: Client) -> List[Dict]:
-        """Discover new platforms from the data by analyzing patterns"""
-        try:
-            platforms = []
-            
-            # Query recent events to analyze platform patterns
-            events_response = supabase.table('raw_events').select(
-                'source_platform, payload, classification_metadata'
-            ).eq('user_id', user_id).limit(100).execute()
-            
-            if not events_response.data:
-                logger.info("No events found for platform discovery")
-                return []
-            
-            # Analyze platform distribution
-            platform_counts = {}
-            platform_samples = {}
-            
-            for event in events_response.data:
-                platform = event.get('source_platform', 'unknown')
-                if platform not in platform_counts:
-                    platform_counts[platform] = 0
-                    platform_samples[platform] = []
-                
-                platform_counts[platform] += 1
-                if len(platform_samples[platform]) < 5:
-                    platform_samples[platform].append(event)
-            
-            # Discover platforms that appear frequently but aren't in discovered_platforms yet
-            for platform, count in platform_counts.items():
-                if count >= 5 and platform not in ['unknown', '']:  # Minimum threshold
-                    # Check if already discovered
-                    existing = supabase.table('discovered_platforms').select('id').eq(
-                        'user_id', user_id
-                    ).eq('platform_name', platform).execute()
-                    
-                    if not existing.data:
-                        # Extract characteristics from samples
-                        sample_payloads = [e.get('payload', {}) for e in platform_samples[platform]]
-                        common_fields = set()
-                        if sample_payloads:
-                            # Find common fields across samples
-                            common_fields = set(sample_payloads[0].keys())
-                            for payload in sample_payloads[1:]:
-                                common_fields &= set(payload.keys())
-                        
-                        platform_info = {
-                            'platform_name': platform,
-                            'confidence_score': min(0.9, 0.5 + (count / 100)),  # Higher count = higher confidence
-                            'detection_method': 'pattern_analysis',
-                            'characteristics': {
-                                'common_fields': list(common_fields),
-                                'event_count': count,
-                                'sample_file': filename
-                            }
-                        }
-                        platforms.append(platform_info)
-            
-            logger.info(f"Discovered {len(platforms)} new platforms from {len(events_response.data)} events")
-            return platforms
-            
-        except Exception as e:
-            logger.error(f"Error discovering platforms: {e}")
-            return []
+
+# ExcelProcessor class ends here
 
 
-
+# ============================================================================
+# LEGACY ENTITY RESOLVER (DEPRECATED - Use EntityResolverOptimized)
+# ============================================================================
 
 
 class LegacyEntityResolver:

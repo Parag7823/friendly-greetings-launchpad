@@ -73,7 +73,7 @@ class EnhancedRelationshipDetector:
         # Initialize semantic relationship extractor for AI-powered analysis
         if SEMANTIC_EXTRACTOR_AVAILABLE:
             self.semantic_extractor = SemanticRelationshipExtractor(
-                openai_client=openai_client,
+                openai_client=anthropic_client,
                 supabase_client=supabase_client,
                 cache_client=cache_client
             )
