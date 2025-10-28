@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { FileSpreadsheet, Plug, RefreshCw, CheckCircle2, AlertCircle, ChevronDown, ChevronRight, X, Loader2, Mail, HardDrive, Calculator, CreditCard, Trash2, Plus } from 'lucide-react';
+import { FileSpreadsheet, Plug, RefreshCw, CheckCircle2, AlertCircle, ChevronDown, ChevronRight, X, Loader2, Mail, HardDrive, Calculator, CreditCard, Trash2, Plus, Eye, GripVertical } from 'lucide-react';
 import { useConnections, useRefreshConnections } from '@/hooks/useConnections';
 import gmailLogo from "@/assets/logos/gmail.svg";
 import zohoMailLogo from "@/assets/logos/zoho-mail.svg";
@@ -26,6 +26,7 @@ import { useFastAPIProcessor } from './FastAPIProcessor';
 interface DataSourcesPanelProps {
   isOpen: boolean;
   onClose: () => void;
+  onFilePreview?: (fileId: string, filename: string) => void;
 }
 
 interface Integration {
@@ -141,7 +142,7 @@ const CATEGORY_INFO = {
   payment: { name: 'Payment Processors', icon: <CreditCard className="w-4 h-4" /> },
 };
 
-export const DataSourcesPanel = ({ isOpen, onClose }: DataSourcesPanelProps) => {
+export const DataSourcesPanel = ({ isOpen, onClose, onFilePreview }: DataSourcesPanelProps) => {
   const { user } = useAuth();
   const { toast } = useToast();
   const { processFileWithFastAPI } = useFastAPIProcessor();
@@ -799,11 +800,14 @@ export const DataSourcesPanel = ({ isOpen, onClose }: DataSourcesPanelProps) => 
                     return (
                       <div 
                         key={file.id} 
-                        className="flex items-center justify-between p-3 rounded-md border finley-dynamic-bg hover:bg-muted/20 transition-colors"
+                        className="flex items-center justify-between p-3 rounded-md border finley-dynamic-bg hover:bg-muted/20 transition-colors group cursor-pointer"
+                        onClick={() => onFilePreview?.(file.id, file.filename || file.id)}
                       >
                         <div className="flex-1 min-w-0 space-y-1">
                           <div className="flex items-center gap-2">
-                            <p className="text-sm font-medium truncate text-foreground">{file.filename || 'Unnamed File'}</p>
+                            <p className="text-sm font-medium truncate text-foreground">
+                              {file.filename || file.id || 'Unnamed File'}
+                            </p>
                             {isProcessing && (
                               <Loader2 className="w-3 h-3 animate-spin text-primary flex-shrink-0" />
                             )}
@@ -838,6 +842,18 @@ export const DataSourcesPanel = ({ isOpen, onClose }: DataSourcesPanelProps) => 
                         </div>
                         
                         <div className="ml-3 flex items-center gap-2 flex-shrink-0">
+                          {/* Preview button */}
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onFilePreview?.(file.id, file.filename || file.id);
+                            }}
+                            className="p-1.5 hover:bg-primary/10 rounded transition-colors opacity-0 group-hover:opacity-100"
+                            title="Preview file"
+                          >
+                            <Eye className="w-3.5 h-3.5 text-primary" />
+                          </button>
+                          
                           <div>
                             {isProcessing && (
                               <Badge variant="secondary" className="text-[10px]">
@@ -865,11 +881,14 @@ export const DataSourcesPanel = ({ isOpen, onClose }: DataSourcesPanelProps) => 
                           
                           {/* Delete button */}
                           <button
-                            onClick={() => handleDeleteFile(file.id, file.filename)}
-                            className="p-1 hover:bg-destructive/10 rounded transition-colors group"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleDeleteFile(file.id, file.filename || file.id);
+                            }}
+                            className="p-1 hover:bg-destructive/10 rounded transition-colors opacity-0 group-hover:opacity-100"
                             title="Delete file"
                           >
-                            <Trash2 className="w-3.5 h-3.5 text-muted-foreground group-hover:text-destructive transition-colors" />
+                            <Trash2 className="w-3.5 h-3.5 text-muted-foreground hover:text-destructive transition-colors" />
                           </button>
                         </div>
                       </div>

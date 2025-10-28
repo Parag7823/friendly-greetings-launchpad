@@ -3,6 +3,7 @@ import { useState, useEffect, useRef } from 'react';
 import { EnhancedFileUpload } from './EnhancedFileUpload';
 import { InlineUploadZone } from './InlineUploadZone';
 import { DataSourcesPanel } from './DataSourcesPanel';
+import { FilePreviewPanel } from './FilePreviewPanel';
 import { MarkdownMessage } from './MarkdownMessage';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
@@ -45,6 +46,9 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
   const [uploadingFiles, setUploadingFiles] = useState<File[]>([]);
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
   const [pastedImages, setPastedImages] = useState<File[]>([]);
+  const [previewFileId, setPreviewFileId] = useState<string | null>(null);
+  const [previewFilename, setPreviewFilename] = useState<string>('');
+  const [showFilePreview, setShowFilePreview] = useState(false);
   
   // IMPROVEMENT: Cleanup Object URLs to prevent memory leaks
   useEffect(() => {
@@ -805,7 +809,24 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
             {/* Data Sources Panel - Positioned absolutely */}
             <DataSourcesPanel 
               isOpen={showDataSources} 
-              onClose={() => setShowDataSources(false)} 
+              onClose={() => setShowDataSources(false)}
+              onFilePreview={(fileId, filename) => {
+                setPreviewFileId(fileId);
+                setPreviewFilename(filename);
+                setShowFilePreview(true);
+              }}
+            />
+            
+            {/* File Preview Panel - Between Data Sources and Chat */}
+            <FilePreviewPanel
+              fileId={previewFileId}
+              filename={previewFilename}
+              isOpen={showFilePreview}
+              onClose={() => {
+                setShowFilePreview(false);
+                setPreviewFileId(null);
+                setPreviewFilename('');
+              }}
             />
           </div>
         );
