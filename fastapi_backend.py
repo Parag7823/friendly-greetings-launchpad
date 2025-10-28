@@ -5317,13 +5317,27 @@ class DataEnrichmentProcessor:
             return 'USD'
     
     def _extract_amount(self, row_data: Dict) -> float:
-        """Extract amount from row data"""
+        """Extract amount from row data - case-insensitive field matching"""
         try:
-            # Look for amount fields
+            # Look for amount fields (case-insensitive)
             amount_fields = ['amount', 'total', 'value', 'sum', 'payment_amount', 'price']
+            
+            # First try exact match (case-sensitive for performance)
             for field in amount_fields:
                 if field in row_data:
                     value = row_data[field]
+                    if isinstance(value, (int, float)):
+                        return float(value)
+                    elif isinstance(value, str):
+                        # Remove currency symbols and convert
+                        cleaned = re.sub(r'[^\d.-]', '', value)
+                        return float(cleaned) if cleaned else 0.0
+            
+            # Then try case-insensitive match
+            row_data_lower = {k.lower(): v for k, v in row_data.items()}
+            for field in amount_fields:
+                if field in row_data_lower:
+                    value = row_data_lower[field]
                     if isinstance(value, (int, float)):
                         return float(value)
                     elif isinstance(value, str):
