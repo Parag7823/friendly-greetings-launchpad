@@ -1,12 +1,12 @@
 """
 Live Deployment Tests for Production Backend
-Tests against: https://friendly-greetings-launchpad-amey.onrender.com
+Tests against: https://friendly-greetings-launchpad-1uby.onrender.com
 """
 
 import requests
 import json
 
-BASE_URL = "https://friendly-greetings-launchpad-amey.onrender.com"
+BASE_URL = "https://friendly-greetings-launchpad-1uby.onrender.com"
 
 def test_health_endpoint():
     """Test health endpoint"""
@@ -43,7 +43,7 @@ def test_websocket_endpoint_exists():
     """Test WebSocket endpoint exists"""
     print("Testing WebSocket endpoint structure...")
     # Just verify the endpoint path is valid (can't test WS over HTTP)
-    print("  WebSocket URL: wss://friendly-greetings-launchpad-amey.onrender.com/ws/{job_id}")
+    print("  WebSocket URL: wss://friendly-greetings-launchpad-1uby.onrender.com/ws/{job_id}")
     print("  ✅ PASSED\n")
 
 def test_all_critical_systems_operational():
@@ -71,7 +71,7 @@ def test_all_critical_systems_operational():
 if __name__ == "__main__":
     print("=" * 70)
     print("LIVE DEPLOYMENT TESTS")
-    print("Backend: https://friendly-greetings-launchpad-amey.onrender.com")
+    print("Backend: https://friendly-greetings-launchpad-1uby.onrender.com")
     print("=" * 70)
     print()
     
