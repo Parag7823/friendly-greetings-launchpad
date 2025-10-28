@@ -244,10 +244,10 @@ class EnhancedRelationshipDetector:
                                 'target_event_id': rel['target_event_id'],
                                 'relationship_type': rel['relationship_type'],
                                 'confidence_score': float(rel['confidence']),
-                                'amount_match': rel['amount_match'],
-                                'date_match': rel['date_match'],
-                                'entity_match': rel['entity_match'],
-                                'metadata': rel['metadata'],
+                                'amount_match': rel.get('amount_match', False),
+                                'date_match': rel.get('date_match', False),
+                                'entity_match': rel.get('entity_match', False),
+                                'metadata': rel.get('metadata', {}),
                                 'detection_method': 'database_join'
                             })
                         
@@ -291,7 +291,7 @@ class EnhancedRelationshipDetector:
                         'target_event_id': rel['target_event_id'],
                         'relationship_type': rel['relationship_type'],
                         'confidence_score': float(rel['confidence']),
-                        'metadata': rel['metadata'],
+                        'metadata': rel.get('metadata', {}),
                         'detection_method': 'database_self_join'
                     })
                 

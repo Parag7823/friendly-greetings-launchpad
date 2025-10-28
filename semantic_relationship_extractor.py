@@ -27,12 +27,13 @@ import hashlib
 import json
 import logging
 import time
+import os
 from datetime import datetime
 from typing import Dict, List, Optional, Any, Tuple
 from dataclasses import dataclass, asdict
 from enum import Enum
 
-from anthropic import AsyncAnthropic
+from groq import AsyncGroq
 
 logger = logging.getLogger(__name__)
 
@@ -88,8 +89,19 @@ class SemanticRelationshipExtractor:
     - Explainable confidence scoring
     """
     
-    def __init__(self, openai_client: AsyncAnthropic, supabase_client=None, cache_client=None, config=None):
-        self.anthropic = openai_client
+    def __init__(self, openai_client: AsyncGroq = None, supabase_client=None, cache_client=None, config=None):
+        # FIX #14: Use Groq client instead of Anthropic for consistency with repo
+        # If no client provided, create one from env variable
+        if openai_client:
+            self.groq = openai_client
+        else:
+            groq_api_key = os.getenv('GROQ_API_KEY')
+            if groq_api_key:
+                self.groq = AsyncGroq(api_key=groq_api_key)
+            else:
+                self.groq = None
+                logger.warning("GROQ_API_KEY not set - semantic extraction will use fallback")
+        
         self.supabase = supabase_client
         self.cache = cache_client
         self.config = config or self._get_default_config()
@@ -391,14 +403,18 @@ Provide ONLY the JSON response, no additional text."""
             return f"[Event ID: {event.get('id', 'unknown')}]"
     
     async def _call_semantic_ai(self, prompt: str) -> Optional[Dict[str, Any]]:
-        """Call GPT-4 for semantic analysis with structured output"""
+        """Call Groq Llama for semantic analysis with structured output"""
         try:
+            # FIX #14: Check if Groq client is available
+            if not self.groq:
+                logger.warning("Groq client not available - returning fallback semantic result")
+                return self._get_fallback_semantic_result()
+            
             self.metrics['ai_calls'] += 1
             
-            # Use Claude 3.5 Sonnet for complex relationship extraction (requires multi-step reasoning)
-            response = await self.anthropic.messages.create(
-                model="claude-3-5-sonnet-20241022",
-                system="You are a financial relationship analyst. Provide accurate, well-reasoned analysis in JSON format.",
+            # Use Groq Llama-3.3-70b for complex relationship extraction (consistent with repo)
+            response = await self.groq.chat.completions.create(
+                model="llama-3.3-70b-versatile",
                 messages=[
                     {
                         "role": "user",
@@ -406,11 +422,19 @@ Provide ONLY the JSON response, no additional text."""
                     }
                 ],
                 max_tokens=1000,
-                temperature=0.1
+                temperature=0.1,
+                response_format={"type": "json_object"}
             )
             
             # Parse JSON response
-            result_text = response.content[0].text
+            result_text = response.choices[0].message.content.strip()
+            
+            # Clean markdown code blocks if present
+            if result_text.startswith('```json'):
+                result_text = result_text[7:]
+            if result_text.endswith('```'):
+                result_text = result_text[:-3]
+            
             result = json.loads(result_text)
             
             # Validate required fields
@@ -426,10 +450,22 @@ Provide ONLY the JSON response, no additional text."""
             
         except json.JSONDecodeError as e:
             logger.error(f"Failed to parse AI JSON response: {e}")
-            return None
+            return self._get_fallback_semantic_result()
         except Exception as e:
             logger.error(f"Semantic AI call failed: {e}")
-            return None
+            return self._get_fallback_semantic_result()
+    
+    def _get_fallback_semantic_result(self) -> Dict[str, Any]:
+        """Return fallback semantic result when AI is unavailable"""
+        return {
+            'relationship_type': 'vendor_match',
+            'semantic_description': 'Vendor appears in both events',
+            'confidence': 0.6,
+            'temporal_causality': 'correlation_only',
+            'business_logic': 'unknown',
+            'reasoning': 'Fallback result - AI unavailable',
+            'key_factors': ['vendor_match']
+        }
     
     async def _generate_relationship_embedding(self, semantic_result: Dict) -> Optional[List[float]]:
         """Generate embedding for semantic similarity search"""

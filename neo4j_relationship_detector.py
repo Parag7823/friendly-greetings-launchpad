@@ -47,7 +47,8 @@ class Neo4jRelationshipDetector:
             max_connection_pool_size: Max connections in pool
         """
         self.uri = uri or os.getenv('NEO4J_URI')
-        self.user = user or os.getenv('NEO4J_USER', 'neo4j')
+        # FIX #15: Check both NEO4J_USER and NEO4J_USERNAME for compatibility
+        self.user = user or os.getenv('NEO4J_USER') or os.getenv('NEO4J_USERNAME', 'neo4j')
         self.password = password or os.getenv('NEO4J_PASSWORD')
         
         if not all([self.uri, self.user, self.password]):
