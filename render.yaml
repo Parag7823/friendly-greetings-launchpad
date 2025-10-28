@@ -7,9 +7,12 @@ services:
     dockerContext: .
     healthCheckPath: /
     autoDeploy: true
-    buildCommand: docker build -t friendly-greetings-launchpad .
+    # Force Docker build and disable pip install
+    buildCommand: docker build --no-cache -t friendly-greetings-launchpad .
     envVars:
       - key: CORS_ALLOWED_ORIGINS
         value: https://friendly-greetings-launchpad-1-v831.onrender.com,http://localhost:5173,http://localhost:8080
       - key: PYTHON_VERSION
         value: "3.9.18"
+      - key: PIP_NO_BUILD_ISOLATION
+        value: "false"

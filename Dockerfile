@@ -52,7 +52,7 @@ RUN python --version && echo "Python version check passed" && pip install --upgr
 
 # Install pandas first with specific strategy to avoid compilation issues
 RUN echo "Installing pandas with Python $(python --version)" && \
-    pip install --no-cache-dir --only-binary=all pandas==2.2.3 numpy==1.26.4 && \
+    pip install --no-cache-dir --only-binary=all pandas==2.0.3 numpy==1.24.4 && \
     echo "Pandas installation completed successfully"
 
 # Install remaining dependencies
