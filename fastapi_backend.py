@@ -9120,6 +9120,119 @@ class ExcelProcessor:
         insights['duplicate_analysis'] = duplicate_analysis
         return insights
     
+    async def _extract_entities_from_events(self, user_id: str, supabase: Client, 
+                                          file_id: Optional[str] = None, 
+                                          transaction_id: Optional[str] = None) -> List[Dict]:
+        """Extract entities from processed events for normalization
+        
+        Args:
+            user_id: User ID to filter events
+            supabase: Supabase client instance
+            file_id: Optional file_id filter (for file upload flow)
+            transaction_id: Optional transaction_id filter (for connector flow)
+            
+        Returns:
+            List of extracted entity dictionaries
+        """
+        try:
+            # Validate that exactly one filter is provided
+            if not file_id and not transaction_id:
+                raise ValueError("Either file_id or transaction_id must be provided")
+            if file_id and transaction_id:
+                raise ValueError("Cannot provide both file_id and transaction_id")
+            
+            # Get events based on filter criteria
+            # CRITICAL FIX: Query enriched columns (vendor_standard, amount_usd, etc.) from Phase 5
+            if file_id:
+                # File upload flow - use optimized query when available
+                if optimized_db:
+                    events_data = await optimized_db.get_events_for_entity_extraction(user_id, file_id)
+                else:
+                    events = supabase.table('raw_events').select(
+                        'id, payload, kind, source_platform, row_index, '
+                        'vendor_standard, vendor_raw, amount_usd, currency, '
+                        'email, phone, bank_account, source_filename'
+                    ).eq('user_id', user_id).eq('file_id', file_id).execute()
+                    events_data = events.data or []
+                filter_desc = f"file_id={file_id}"
+            else:
+                # Connector flow - filter by transaction_id
+                events = supabase.table('raw_events').select(
+                    'id, payload, kind, source_platform, row_index, '
+                    'vendor_standard, vendor_raw, amount_usd, currency, '
+                    'email, phone, bank_account, source_filename'
+                ).eq('user_id', user_id).eq('transaction_id', transaction_id).execute()
+                events_data = events.data or []
+                filter_desc = f"transaction_id={transaction_id}"
+            
+            logger.info(f"Found {len(events_data)} events for entity extraction ({filter_desc})")
+            
+            entities = []
+            entity_map = {}
+            vendor_fields_found = []
+            
+            for event in events_data:
+                # Extract vendor information
+                vendor_standard = event.get('vendor_standard')
+                vendor_raw = event.get('vendor_raw')
+                
+                if vendor_standard and vendor_standard not in entity_map:
+                    entity_map[vendor_standard] = {
+                        'entity_name': vendor_standard,
+                        'entity_type': 'vendor',
+                        'platform': event.get('source_platform', 'unknown'),
+                        'identifiers': {
+                            'email': event.get('email'),
+                            'phone': event.get('phone'),
+                            'bank_account': event.get('bank_account')
+                        },
+                        'source_file': event.get('source_filename'),
+                        'confidence': 0.9  # High confidence for standardized vendors
+                    }
+                    vendor_fields_found.append(vendor_standard)
+                
+                # Extract other entity types from payload
+                payload = event.get('payload', {})
+                for key, value in payload.items():
+                    if isinstance(value, str) and len(value) > 2:
+                        # Look for email patterns
+                        if '@' in value and '.' in value:
+                            email_entity = {
+                                'entity_name': value,
+                                'entity_type': 'contact',
+                                'platform': event.get('source_platform', 'unknown'),
+                                'identifiers': {'email': value},
+                                'source_file': event.get('source_filename'),
+                                'confidence': 0.8
+                            }
+                            if value not in entity_map:
+                                entity_map[value] = email_entity
+                        
+                        # Look for phone patterns
+                        elif re.match(r'^\+?[\d\s\-\(\)]{10,}$', value):
+                            phone_entity = {
+                                'entity_name': value,
+                                'entity_type': 'contact',
+                                'platform': event.get('source_platform', 'unknown'),
+                                'identifiers': {'phone': value},
+                                'source_file': event.get('source_filename'),
+                                'confidence': 0.7
+                            }
+                            if value not in entity_map:
+                                entity_map[value] = phone_entity
+            
+            # Convert to list
+            entities = list(entity_map.values())
+            
+            logger.info(f"Extracted {len(entities)} entities from {len(events_data)} events")
+            logger.info(f"Vendor fields found: {vendor_fields_found[:5]}...")  # Log first 5
+            
+            return entities
+            
+        except Exception as e:
+            logger.error(f"Entity extraction failed: {e}")
+            return []
+    
     async def _resolve_entities(self, entities: List[Dict], user_id: str, filename: str, supabase: Client) -> List[Dict]:
         """
         FIX #16: Resolve extracted entities to normalized entities in database.
@@ -9186,6 +9299,42 @@ class ExcelProcessor:
             
         except Exception as e:
             logger.error(f"Entity resolution failed: {e}")
+            return []
+    
+    async def _learn_platform_patterns(self, platform_info: Dict, user_id: str, filename: str, supabase: Client) -> List[Dict]:
+        """Learn platform patterns from the detected platform"""
+        try:
+            patterns = []
+            
+            # CRITICAL FIX: Learn patterns for ALL platforms including 'general' and 'unknown'
+            # This allows the system to learn from CSV files and custom formats
+            platform = platform_info.get('platform')
+            if platform:  # Only skip if platform is None or empty string
+                pattern = {
+                    'platform': platform,
+                    'pattern_type': 'column_structure',
+                    'pattern_data': {
+                        'matched_columns': platform_info.get('matched_columns', []),
+                        'matched_patterns': platform_info.get('matched_patterns', []),
+                        'confidence': platform_info.get('confidence', 0.0),
+                        'reasoning': platform_info.get('reasoning', ''),
+                        'file_name': filename,  # Track which file this pattern came from
+                        'column_count': len(platform_info.get('matched_columns', [])),
+                        'is_generic': platform in ['general', 'unknown']  # Flag generic platforms
+                    },
+                    'confidence_score': platform_info.get('confidence', 0.0),
+                    'detection_method': 'ai_analysis'
+                }
+                patterns.append(pattern)
+                logger.info(f"Learned pattern for platform '{platform}' from file '{filename}'")
+            else:
+                logger.warning(f"No platform detected for file '{filename}', skipping pattern learning")
+            
+            logger.info(f"Learned {len(patterns)} platform patterns")
+            return patterns
+            
+        except Exception as e:
+            logger.error(f"Error learning platform patterns: {e}")
             return []
     
     async def _discover_new_platforms(self, user_id: str, filename: str, supabase: Client) -> List[Dict]:
@@ -9974,155 +10123,6 @@ async def get_performance_optimization_status():
             logger.warning(f"Unknown entity type '{entity_type}', defaulting to 'vendor'")
             return 'vendor'
         return normalized
-    
-    async def _extract_entities_from_events(self, user_id: str, supabase: Client, 
-                                          file_id: Optional[str] = None, 
-                                          transaction_id: Optional[str] = None) -> List[Dict]:
-        """Extract entities from processed events for normalization
-        
-        Args:
-            user_id: User ID to filter events
-            supabase: Supabase client instance
-            file_id: Optional file_id filter (for file upload flow)
-            transaction_id: Optional transaction_id filter (for connector flow)
-            
-        Returns:
-            List of extracted entity dictionaries
-        """
-        try:
-            # Validate that exactly one filter is provided
-            if not file_id and not transaction_id:
-                raise ValueError("Either file_id or transaction_id must be provided")
-            if file_id and transaction_id:
-                raise ValueError("Cannot provide both file_id and transaction_id")
-            
-            # Get events based on filter criteria
-            # CRITICAL FIX: Query enriched columns (vendor_standard, amount_usd, etc.) from Phase 5
-            if file_id:
-                # File upload flow - use optimized query when available
-                if optimized_db:
-                    events_data = await optimized_db.get_events_for_entity_extraction(user_id, file_id)
-                else:
-                    events = supabase.table('raw_events').select(
-                        'id, payload, kind, source_platform, row_index, '
-                        'vendor_standard, vendor_raw, amount_usd, currency, '
-                        'email, phone, bank_account, source_filename'
-                    ).eq('user_id', user_id).eq('file_id', file_id).execute()
-                    events_data = events.data or []
-                filter_desc = f"file_id={file_id}"
-            else:
-                # Connector flow - filter by transaction_id
-                events = supabase.table('raw_events').select(
-                    'id, payload, kind, source_platform, row_index, '
-                    'vendor_standard, vendor_raw, amount_usd, currency, '
-                    'email, phone, bank_account, source_filename'
-                ).eq('user_id', user_id).eq('transaction_id', transaction_id).execute()
-                events_data = events.data or []
-                filter_desc = f"transaction_id={transaction_id}"
-            
-            logger.info(f"Found {len(events_data)} events for entity extraction ({filter_desc})")
-            
-            entities = []
-            entity_map = {}
-            vendor_fields_found = []
-            
-            for event in events_data:
-                # Extract vendor information
-                vendor_standard = event.get('vendor_standard')
-                vendor_raw = event.get('vendor_raw')
-                
-                if vendor_standard and vendor_standard not in entity_map:
-                    entity_map[vendor_standard] = {
-                        'entity_name': vendor_standard,
-                        'entity_type': 'vendor',
-                        'platform': event.get('source_platform', 'unknown'),
-                        'identifiers': {
-                            'email': event.get('email'),
-                            'phone': event.get('phone'),
-                            'bank_account': event.get('bank_account')
-                        },
-                        'source_file': event.get('source_filename'),
-                        'confidence': 0.9  # High confidence for standardized vendors
-                    }
-                    vendor_fields_found.append(vendor_standard)
-                
-                # Extract other entity types from payload
-                payload = event.get('payload', {})
-                for key, value in payload.items():
-                    if isinstance(value, str) and len(value) > 2:
-                        # Look for email patterns
-                        if '@' in value and '.' in value:
-                            email_entity = {
-                                'entity_name': value,
-                                'entity_type': 'contact',
-                                'platform': event.get('source_platform', 'unknown'),
-                                'identifiers': {'email': value},
-                                'source_file': event.get('source_filename'),
-                                'confidence': 0.8
-                            }
-                            if value not in entity_map:
-                                entity_map[value] = email_entity
-                        
-                        # Look for phone patterns
-                        elif re.match(r'^\+?[\d\s\-\(\)]{10,}$', value):
-                            phone_entity = {
-                                'entity_name': value,
-                                'entity_type': 'contact',
-                                'platform': event.get('source_platform', 'unknown'),
-                                'identifiers': {'phone': value},
-                                'source_file': event.get('source_filename'),
-                                'confidence': 0.7
-                            }
-                            if value not in entity_map:
-                                entity_map[value] = phone_entity
-            
-            # Convert to list
-            entities = list(entity_map.values())
-            
-            logger.info(f"Extracted {len(entities)} entities from {len(events_data)} events")
-            logger.info(f"Vendor fields found: {vendor_fields_found[:5]}...")  # Log first 5
-            
-            return entities
-            
-        except Exception as e:
-            logger.error(f"Entity extraction failed: {e}")
-            return []
-
-    async def _learn_platform_patterns(self, platform_info: Dict, user_id: str, filename: str, supabase: Client) -> List[Dict]:
-        """Learn platform patterns from the detected platform"""
-        try:
-            patterns = []
-            
-            # CRITICAL FIX: Learn patterns for ALL platforms including 'general' and 'unknown'
-            # This allows the system to learn from CSV files and custom formats
-            platform = platform_info.get('platform')
-            if platform:  # Only skip if platform is None or empty string
-                pattern = {
-                    'platform': platform,
-                    'pattern_type': 'column_structure',
-                    'pattern_data': {
-                        'matched_columns': platform_info.get('matched_columns', []),
-                        'matched_patterns': platform_info.get('matched_patterns', []),
-                        'confidence': platform_info.get('confidence', 0.0),
-                        'reasoning': platform_info.get('reasoning', ''),
-                        'file_name': filename,  # Track which file this pattern came from
-                        'column_count': len(platform_info.get('matched_columns', [])),
-                        'is_generic': platform in ['general', 'unknown']  # Flag generic platforms
-                    },
-                    'confidence_score': platform_info.get('confidence', 0.0),
-                    'detection_method': 'ai_analysis'
-                }
-                patterns.append(pattern)
-                logger.info(f"Learned pattern for platform '{platform}' from file '{filename}'")
-            else:
-                logger.warning(f"No platform detected for file '{filename}', skipping pattern learning")
-            
-            logger.info(f"Learned {len(patterns)} platform patterns")
-            return patterns
-            
-        except Exception as e:
-            logger.error(f"Error learning platform patterns: {e}")
-            return []
 
 
 # ExcelProcessor class ends here
