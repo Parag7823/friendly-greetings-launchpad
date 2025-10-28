@@ -5344,16 +5344,16 @@ class DataEnrichmentProcessor:
     
     def _extract_vendor_name(self, row_data: Dict, column_names: List[str]) -> str:
         """Extract vendor name from row data"""
-        vendor_fields = ['vendor', 'vendor_name', 'payee', 'recipient', 'company', 'merchant']
+        vendor_fields = ['vendor', 'vendor_name', 'payee', 'recipient', 'company', 'merchant', 'description']
         for field in vendor_fields:
-            if field in row_data:
-                return str(row_data[field])
+            if field in row_data and row_data[field]:
+                return str(row_data[field]).strip()
         
         # Check column names for vendor patterns
         for col in column_names:
-            if any(vendor_word in col.lower() for vendor_word in ['vendor', 'payee', 'recipient', 'company']):
-                if col in row_data:
-                    return str(row_data[col])
+            if any(vendor_word in col.lower() for vendor_word in ['vendor', 'payee', 'recipient', 'company', 'description']):
+                if col in row_data and row_data[col]:
+                    return str(row_data[col]).strip()
         
         return ""
     
