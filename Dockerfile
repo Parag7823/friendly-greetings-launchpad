@@ -20,11 +20,11 @@ COPY eslint.config.js ./
 RUN npm ci --production=false
 RUN npm run build
 
-# Backend stage - Pin to 3.11.9 to avoid pandas compatibility issues with 3.13
-FROM python:3.11.9-slim
+# Backend stage - Use Python 3.10 for maximum pandas compatibility
+FROM python:3.10.12-slim
 
-# Force cache invalidation - updated 2025-01-28
-ARG CACHEBUST=20250128
+# Force cache invalidation - updated 2025-01-29
+ARG CACHEBUST=20250129
 # Install system dependencies for python-magic, Tesseract (OCR), Java (Tabula), and basic functionality
 # Added gfortran and build-essential for scipy compilation
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -47,10 +47,13 @@ WORKDIR /app
 # Copy Python requirements and install
 COPY backend-requirements.txt .
 
-# Upgrade pip and install wheel to use pre-built binaries when possible
-RUN pip install --upgrade pip wheel setuptools
+# Verify Python version and upgrade pip
+RUN python --version && pip install --upgrade pip wheel setuptools
 
-# Install Python dependencies with pre-built wheels when available
+# Install pandas first with specific strategy to avoid compilation issues
+RUN pip install --no-cache-dir --only-binary=all pandas==2.2.3 numpy==1.26.4
+
+# Install remaining dependencies
 RUN pip install --no-cache-dir -r backend-requirements.txt
 
 # Copy all necessary Python files and modules
