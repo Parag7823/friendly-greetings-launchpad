@@ -23,7 +23,8 @@ RUN npm run build
 # Backend stage - Pin to 3.11.9 to avoid pandas compatibility issues with 3.13
 FROM python:3.11.9-slim
 
-# Force cache invalidation - updated packages
+# Force cache invalidation - updated 2025-01-28
+ARG CACHEBUST=20250128
 # Install system dependencies for python-magic, Tesseract (OCR), Java (Tabula), and basic functionality
 # Added gfortran and build-essential for scipy compilation
 RUN apt-get update && apt-get install -y --no-install-recommends \
