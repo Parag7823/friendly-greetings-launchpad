@@ -4,6 +4,7 @@ import { EnhancedFileUpload } from './EnhancedFileUpload';
 import { InlineUploadZone } from './InlineUploadZone';
 import { DataSourcesPanel } from './DataSourcesPanel';
 import { EnhancedFilePreview } from './EnhancedFilePreview';
+import { FilePreviewPanel } from './FilePreviewPanel';
 import { MarkdownMessage } from './MarkdownMessage';
 import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
