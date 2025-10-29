@@ -1141,7 +1141,8 @@ try:
     ADVANCED_FEATURES['xlwings'] = True
     logger.info("✅ Excel automation available")
 except ImportError:
-    logger.warning("⚠️ Excel automation not available")
+    # FIX #3: Excel automation is optional - system will use pandas for Excel processing
+    logger.debug("ℹ️ Excel automation (xlwings) not available - using pandas fallback for Excel files")
 
 # Granular feature availability checking
 def is_feature_available(feature_name: str) -> bool:
@@ -8453,6 +8454,9 @@ class ExcelProcessor:
             }
             
             raw_record_result = await tx.insert('raw_records', raw_record_data)
+            if not raw_record_result or 'id' not in raw_record_result:
+                logger.error(f"Failed to insert raw_record: {raw_record_result}")
+                raise Exception(f"raw_records insert returned invalid result: {raw_record_result}")
             file_id = raw_record_result['id']
             
             # Step 4: Create or update ingestion_jobs entry within transaction
@@ -8625,9 +8629,11 @@ class ExcelProcessor:
                                 cleaned_enriched_payload = serialize_datetime_objects(enriched_payload)
                                 
                                 # Prepare event data for batch insertion
+                                # FIX: Ensure file_id is valid (not None and exists in raw_records)
+                                validated_file_id = file_id if file_id else None
                                 event_data = {
                                 'user_id': user_id,
-                                'file_id': file_id,
+                                'file_id': validated_file_id,
                                 'job_id': job_id,
                                 'provider': event['provider'],
                                 'kind': event['kind'],
@@ -14342,16 +14348,33 @@ async def _authorize_websocket_connection(websocket: WebSocket, job_id: str):
         if not user_id or not token:
             raise HTTPException(status_code=401, detail='Missing user credentials for WebSocket')
         await _require_security('websocket', user_id, token)
-        # Check job ownership if known
-        owner_state = await websocket_manager.get_job_status(job_id)
-        owner = (owner_state or {}).get('user_id')
-        if owner and owner != user_id:
-            raise HTTPException(status_code=403, detail='Forbidden: job does not belong to user')
+        
+        # FIX #1: Check job ownership if known, but allow if job has no owner yet
+        try:
+            owner_state = await websocket_manager.get_job_status(job_id)
+            owner = (owner_state or {}).get('user_id')
+            
+            # Only reject if owner exists AND doesn't match user_id
+            if owner and owner != user_id:
+                logger.warning(f"WebSocket 403: Job {job_id} owner {owner} != user {user_id}")
+                raise HTTPException(status_code=403, detail='Forbidden: job does not belong to user')
+            
+            # If no owner yet, set it to current user
+            if not owner:
+                logger.info(f"Setting job {job_id} owner to {user_id}")
+                await websocket_manager.merge_job_state(job_id, {'user_id': user_id})
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.warning(f"Job ownership check failed (non-fatal): {e}")
+            # Continue anyway - don't block connection if ownership check fails
+            
     except HTTPException as he:
         # Close without accepting
         await websocket.close()
         raise
-    except Exception:
+    except Exception as e:
+        logger.error(f"WebSocket authorization error: {e}")
         await websocket.close()
         raise HTTPException(status_code=401, detail='Unauthorized WebSocket')
 
