@@ -153,16 +153,23 @@ class ErrorRecoverySystem:
                 if events_result.data:
                     cleaned_records.extend([f"raw_event:{record['id']}" for record in events_result.data])
             
-            # Step 3: Clean up raw_records if no other jobs reference it
+            # Step 3: Preserve raw_records row for potential retries (do not delete)
             if file_id:
                 other_jobs = self.supabase.table('ingestion_jobs').select('id').eq('file_id', file_id).neq('id', job_id).execute()
-                
+
                 if not other_jobs.data:
-                    # Safe to delete raw_record
-                    record_result = self.supabase.table('raw_records').delete().eq('id', file_id).execute()
-                    if record_result.data:
-                        cleaned_records.extend([f"raw_record:{record['id']}" for record in record_result.data])
-            
+                    try:
+                        # Mark the raw record as failed but keep it to satisfy FK dependencies during retries
+                        record_update = self.supabase.table('raw_records').update({
+                            'status': 'failed',
+                            'classification_status': 'failed'
+                        }).eq('id', file_id).execute()
+
+                        if record_update.data:
+                            cleaned_records.extend([f"raw_record_preserved:{record['id']}" for record in record_update.data])
+                    except Exception as preserve_err:
+                        logger.warning(f"Failed to mark raw_record {file_id} as failed during cleanup: {preserve_err}")
+
             # Step 4: Clean up transaction-related data
             if transaction_id:
                 await self._cleanup_transaction_data(transaction_id, cleaned_records)

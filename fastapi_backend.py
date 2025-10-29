@@ -45,7 +45,7 @@ import re
 import asyncio
 import io
 import random
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, Any, List, Optional, Tuple
 from contextlib import asynccontextmanager
 import redis.asyncio as aioredis
@@ -7538,6 +7538,60 @@ class ExcelProcessor:
             'memory_usage': 0.0
         }
     
+    def _parse_iso_timestamp(self, timestamp_str: str) -> datetime:
+        """
+        FIX #6: Parse ISO format timestamps safely, handling microseconds with timezone.
+        
+        Handles formats like:
+        - 2025-10-29T07:32:17.358600+00:00
+        - 2025-10-29T07:32:17.3586+00:00
+        - 2025-10-29T07:32:17+00:00
+        """
+        try:
+            # Replace 'Z' with '+00:00' for UTC
+            ts = timestamp_str.replace('Z', '+00:00')
+            
+            # Try direct parsing first (Python 3.7+)
+            return datetime.fromisoformat(ts)
+        except ValueError:
+            try:
+                # Fallback: handle microseconds with timezone
+                # Split timezone from main timestamp
+                if '+' in ts:
+                    main_part, tz_part = ts.rsplit('+', 1)
+                    tz = '+' + tz_part
+                elif ts.count('-') >= 3:  # Has timezone with minus
+                    # Find last minus (timezone)
+                    parts = ts.rsplit('-', 1)
+                    main_part = parts[0]
+                    tz = '-' + parts[1]
+                else:
+                    main_part = ts
+                    tz = '+00:00'
+                
+                # Parse main part
+                dt = datetime.fromisoformat(main_part)
+                
+                # Parse timezone
+                tz_hours, tz_mins = 0, 0
+                if tz.startswith('+') or tz.startswith('-'):
+                    sign = 1 if tz.startswith('+') else -1
+                    tz_str = tz[1:]
+                    if ':' in tz_str:
+                        h, m = tz_str.split(':')
+                        tz_hours, tz_mins = int(h), int(m)
+                    else:
+                        tz_hours = int(tz_str[:2]) if len(tz_str) >= 2 else 0
+                        tz_mins = int(tz_str[2:]) if len(tz_str) > 2 else 0
+                    
+                    offset = timedelta(hours=sign*tz_hours, minutes=sign*tz_mins)
+                    dt = dt.replace(tzinfo=timezone(offset))
+                
+                return dt
+            except Exception as e:
+                logger.warning(f"Failed to parse timestamp '{timestamp_str}': {e}, using current time")
+                return datetime.utcnow()
+    
     async def detect_anomalies(self, df: pd.DataFrame, sheet_name: str) -> Dict[str, Any]:
         """Detect anomalies in Excel data (corrupted cells, broken formulas, etc.)"""
         anomalies = {
@@ -8980,7 +9034,7 @@ class ExcelProcessor:
             relationship_detector = EnhancedRelationshipDetector(anthropic_client=None, supabase_client=supabase)
 
             # CRITICAL FIX #5: Add timeout and file_id scope to prevent hanging on large datasets
-            import asyncio
+            # FIX #7: asyncio already imported at top of file, removed redundant import
             try:
                 relationship_results = await asyncio.wait_for(
                     relationship_detector.detect_all_relationships(user_id, file_id=file_id),  # FIX #5: Pass file_id
@@ -9061,7 +9115,7 @@ class ExcelProcessor:
                     'platform_confidence': platform_info.get('confidence', 0.0),
                     'entities_resolved': len(entities) if 'entities' in locals() else 0,
                     'relationships_found': relationship_results.get('total_relationships', 0) if 'relationship_results' in locals() and relationship_results is not None else 0,
-                    'processing_time_seconds': (datetime.utcnow() - datetime.fromisoformat(transaction_data['started_at'])).total_seconds() if transaction_id else 0
+                    'processing_time_seconds': (datetime.utcnow() - self._parse_iso_timestamp(transaction_data['started_at'])).total_seconds() if transaction_id else 0
                 }
             }
             
