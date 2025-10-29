@@ -36,7 +36,7 @@ if env_test_file.exists():
 from supabase import create_client, Client
 
 # Test configuration
-BACKEND_URL = os.getenv("TEST_API_URL", "https://friendly-greetings-launchpad-1uby.onrender.com")
+BACKEND_URL = os.getenv("TEST_API_URL", "https://friendly-greetings-launchpad-production-2a5b.up.railway.app")
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY")
 SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")

@@ -1,4 +1,23 @@
 // Environment-based configuration for API endpoints
+const resolveDefaultApiUrl = () => {
+  if (import.meta.env.VITE_API_URL) {
+    return import.meta.env.VITE_API_URL;
+  }
+
+  if (import.meta.env.DEV) {
+    // Local development fallback when running Vite dev server
+    return 'http://localhost:8000';
+  }
+
+  // When deployed (e.g. on Railway) the frontend and backend share the same origin.
+  if (typeof window !== 'undefined' && window.location?.origin) {
+    return window.location.origin;
+  }
+
+  // Final fallback for non-browser contexts
+  return 'http://localhost:8000';
+};
+
 export const config = {
   supabase: {
     url: import.meta.env.VITE_SUPABASE_URL || '',
@@ -13,8 +32,8 @@ export const config = {
     reconnectAttempts: parseInt(import.meta.env.VITE_WS_RECONNECT_ATTEMPTS || '5', 10),
     reconnectBaseDelay: parseInt(import.meta.env.VITE_WS_RECONNECT_BASE_DELAY || '1000', 10), // milliseconds
   },
-  // API base URL - defaults to production, can be overridden with VITE_API_URL
-  apiUrl: import.meta.env.VITE_API_URL || 'https://friendly-greetings-launchpad-1uby.onrender.com',
+  // API base URL - defaults to same-origin in production, can be overridden with VITE_API_URL
+  apiUrl: resolveDefaultApiUrl(),
   
   // WebSocket URL derived from API URL
   get wsUrl() {

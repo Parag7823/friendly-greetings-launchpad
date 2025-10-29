@@ -9,7 +9,7 @@ export default defineConfig({
   reporter: 'html',
   use: {
     // Use deployed frontend for E2E tests, fallback to local
-    baseURL: process.env.E2E_APP_URL || 'https://friendly-greetings-launchpad-1.onrender.com',
+    baseURL: process.env.E2E_APP_URL || 'https://friendly-greetings-launchpad-production-2a5b.up.railway.app',
     trace: 'on-first-retry',
     screenshot: 'only-on-failure',
   },

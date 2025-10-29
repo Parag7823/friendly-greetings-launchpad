@@ -2,8 +2,8 @@
 E2E Tests for Phase 1: Authentication with DEPLOYED Backend
 ===========================================================
 
-TESTING: Real deployed backend on Render
-URL: https://friendly-greetings-launchpad-1uby.onrender.com
+TESTING: Real deployed backend on Railway
+URL: https://friendly-greetings-launchpad-production-2a5b.up.railway.app
 NO MOCKS: Tests actual production environment
 
 PURPOSE: Verify authentication works in real deployment
@@ -33,8 +33,8 @@ if env_test_file.exists():
                 os.environ[key.strip()] = value.strip()
 
 # Test configuration
-BACKEND_URL = os.getenv("TEST_API_URL", "https://friendly-greetings-launchpad-1uby.onrender.com")
-FRONTEND_URL = os.getenv("FRONTEND_URL", "https://friendly-greetings-launchpad-1-o4pr.onrender.com")
+BACKEND_URL = os.getenv("TEST_API_URL", "https://friendly-greetings-launchpad-production-2a5b.up.railway.app")
+FRONTEND_URL = os.getenv("FRONTEND_URL", "https://friendly-greetings-launchpad-production-2a5b.up.railway.app")
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY")
 
@@ -309,8 +309,8 @@ E2E TESTS WITH DEPLOYED BACKEND:
 ✅ Concurrent request handling
 
 REAL ENVIRONMENT:
-✅ Backend: https://friendly-greetings-launchpad-1uby.onrender.com
-✅ Frontend: https://friendly-greetings-launchpad-1-o4pr.onrender.com
+✅ Backend: https://friendly-greetings-launchpad-production-2a5b.up.railway.app
+✅ Frontend: https://friendly-greetings-launchpad-production-2a5b.up.railway.app
 ✅ Supabase: https://gnrbafqifucxlaihtyuv.supabase.co
 
 NO MOCKS:
