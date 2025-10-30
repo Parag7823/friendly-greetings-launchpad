@@ -10445,9 +10445,12 @@ async def get_performance_optimization_status():
                 await tx.insert('metrics', metrics_data)
                 logger.debug("Stored computed metrics")
 
-        AI often returns: 'employees', 'vendors', 'customers', 'projects' (plural)
+    def _normalize_entity_type(self, entity_type: str) -> str:
+        """Normalize entity types to the canonical singular labels used in storage.
+
+        AI outputs often return plural words (e.g., "vendors"), while the database
+        expects singular forms. This helper keeps that mapping centralized.
         """
-        # Map plural to singular
         type_map = {
             'employees': 'employee',
             'vendors': 'vendor',
@@ -10459,7 +10462,7 @@ async def get_performance_optimization_status():
             'customer': 'customer',
             'project': 'project'
         }
-        
+
         normalized = type_map.get(entity_type.lower())
         if not normalized:
             logger.warning(f"Unknown entity type '{entity_type}', defaulting to 'vendor'")
