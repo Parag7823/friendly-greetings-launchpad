@@ -583,15 +583,28 @@ class UniversalDocumentClassifierOptimized:
         """Use OCR to classify document from image content"""
         if not self.ocr_available:
             return None
-        
+
         try:
             import pytesseract
             from PIL import Image
+            from PIL import UnidentifiedImageError
             import io
-            
+            import filetype
+
+            # Only attempt OCR when the uploaded file is an image
+            if not file_content:
+                return None
+
+            file_info = filetype.guess(file_content)
+            if not file_info or not file_info.mime.startswith("image/"):
+                return None
+
             # Open image
-            image = Image.open(io.BytesIO(file_content))
-            
+            try:
+                image = Image.open(io.BytesIO(file_content))
+            except UnidentifiedImageError:
+                return None
+
             # Perform OCR
             extracted_text = pytesseract.image_to_string(image, lang='eng')
             

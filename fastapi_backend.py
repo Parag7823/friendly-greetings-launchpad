@@ -10201,33 +10201,37 @@ async def get_performance_optimization_status():
         except Exception as e:
             logger.error(f"❌ Error storing entity matches (transaction rolled back): {e}")
 
-    async def _store_platform_patterns(self, patterns: List[Dict], user_id: str, transaction_id: str):
-        """Store platform patterns in the database"""
+    async def _store_platform_patterns(self, patterns: List[Dict], user_id: str, transaction_id: str, supabase: Client):
+        """Store platform patterns in the database atomically."""
         try:
-            if not patterns:
+            if not patterns or not supabase:
                 return
-                
+
             logger.info(f"Storing {len(patterns)} platform patterns")
-            
-            for pattern in patterns:
-                pattern_data = {
-                    'user_id': user_id,
-                    'platform': pattern.get('platform', 'unknown'),
-                    'pattern_type': pattern.get('pattern_type', 'column'),
-                    'pattern_data': pattern.get('pattern_data', {}),
-                    'confidence_score': pattern.get('confidence_score', 0.5),
-                    'detection_method': pattern.get('detection_method', 'ai'),
-                    'transaction_id': transaction_id
-                }
-                
-                result = self.supabase.table('platform_patterns').insert(pattern_data).execute()
-                if result.data:
-                    logger.debug(f"Stored platform pattern: {pattern_data['platform']}")
-                else:
-                    logger.warning(f"Failed to store platform pattern: {pattern_data['platform']}")
-                    
+
+            transaction_manager = get_transaction_manager()
+            async with transaction_manager.transaction(
+                user_id=user_id,
+                operation_type="platform_pattern_storage"
+            ) as tx:
+                batch = []
+                for pattern in patterns:
+                    batch.append({
+                        'user_id': user_id,
+                        'platform': pattern.get('platform', 'unknown'),
+                        'pattern_type': pattern.get('pattern_type', 'column'),
+                        'pattern_data': pattern.get('pattern_data', {}),
+                        'confidence_score': pattern.get('confidence_score', 0.5),
+                        'detection_method': pattern.get('detection_method', 'ai'),
+                        'transaction_id': transaction_id
+                    })
+
+                if batch:
+                    await tx.insert_batch('platform_patterns', batch)
+                    logger.info(f"✅ Stored {len(batch)} platform patterns atomically")
+
         except Exception as e:
-            logger.error(f"Error storing platform patterns: {e}")
+            logger.error(f"❌ Error storing platform patterns (transaction rolled back): {e}")
 
     async def _store_relationship_instances(self, relationships: List[Dict], user_id: str, transaction_id: str, supabase: Client):
         """Store relationship instances in the database atomically with batch insert
@@ -10346,16 +10350,16 @@ async def get_performance_optimization_status():
         except Exception as e:
             logger.error(f"❌ Error storing cross-platform relationships (transaction rolled back): {e}")
 
-    async def _store_discovered_platforms(self, platforms: List[Dict], user_id: str, transaction_id: str):
+    async def _store_discovered_platforms(self, platforms: List[Dict], user_id: str, transaction_id: str, supabase: Client):
         """
         UNIVERSAL FIX: Store discovered platforms with deduplication via UPSERT.
         Uses transaction manager for atomicity and prevents duplicate entries.
         """
         try:
-            if not platforms:
+            if not platforms or not supabase:
                 return
                 
-            logger.info(f"Storing {len(platforms)} discovered platforms")
+            logger.info(f"Storing discovered platforms for user {user_id}")
             
             # Deduplicate by platform_name per user
             unique_platforms = {}
@@ -10417,35 +10421,30 @@ async def get_performance_optimization_status():
             logger.error(f"❌ Error storing discovered platforms (transaction rolled back): {e}")
     
     async def _store_computed_metrics(self, metrics: Dict, user_id: str, transaction_id: str, supabase: Client):
-        """Store computed metrics in the database"""
+        """Store computed metrics in the database atomically."""
         try:
-            if not metrics:
+            if not metrics or not supabase:
                 return
-                
-            logger.info("Storing computed metrics")
-            
-            metrics_data = {
-                'user_id': user_id,
-                'metric_type': metrics.get('metric_type', 'processing_summary'),
-                'metric_value': metrics.get('metric_value', 0),
-                'metric_data': metrics.get('metric_data', {}),
-                'computed_at': datetime.utcnow().isoformat(),
-                'transaction_id': transaction_id
-            }
-            
-            result = supabase.table('metrics').insert(metrics_data).execute()
-            if result.data:
-                logger.debug("Stored computed metrics")
-            else:
-                logger.warning("Failed to store computed metrics")
-                
-        except Exception as e:
-            logger.error(f"Error storing computed metrics: {e}")
 
-    def _normalize_entity_type(self, entity_type: str) -> str:
-        """Normalize entity type to match database constraints
-        
-        Database expects: 'employee', 'vendor', 'customer', 'project' (singular)
+            logger.info("Storing computed metrics")
+
+            transaction_manager = get_transaction_manager()
+            async with transaction_manager.transaction(
+                user_id=user_id,
+                operation_type="metrics_storage"
+            ) as tx:
+                metrics_data = {
+                    'user_id': user_id,
+                    'metric_type': metrics.get('metric_type', 'processing_summary'),
+                    'metric_value': metrics.get('metric_value', 0),
+                    'metric_data': metrics.get('metric_data', {}),
+                    'computed_at': datetime.utcnow().isoformat(),
+                    'transaction_id': transaction_id
+                }
+
+                await tx.insert('metrics', metrics_data)
+                logger.debug("Stored computed metrics")
+
         AI often returns: 'employees', 'vendors', 'customers', 'projects' (plural)
         """
         # Map plural to singular

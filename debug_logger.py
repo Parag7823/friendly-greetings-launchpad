@@ -10,6 +10,7 @@ Date: 2025-01-27
 
 import logging
 import json
+import uuid
 from datetime import datetime
 from typing import Dict, Any, Optional, List
 from dataclasses import dataclass, asdict
@@ -90,11 +91,20 @@ class DebugLogger:
             )
             
             # Store in database
-            if self.supabase:
+            job_id_value = entry.job_id
+            job_id_valid = True
+            try:
+                uuid.UUID(str(job_id_value))
+            except (ValueError, TypeError, AttributeError):
+                job_id_valid = False
+
+            if self.supabase and job_id_valid:
                 try:
                     self.supabase.table('debug_logs').insert(entry.to_dict()).execute()
                 except Exception as db_err:
                     logger.warning(f"Failed to store debug log in DB: {db_err}")
+            elif self.supabase and not job_id_valid:
+                logger.debug("Skipping debug log persistence due to invalid job_id: %s", job_id_value)
             
             # Stream to WebSocket for real-time monitoring
             if self.websocket_manager:
