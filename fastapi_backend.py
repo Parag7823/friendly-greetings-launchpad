@@ -16166,7 +16166,7 @@ async def delete_debug_logs(job_id: str, user_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.delete("/api/files/{job_id}")
-async def delete_file_completely(job_id: str, user_id: str = Depends(get_current_user_id)):
+async def delete_file_completely(job_id: str, user_id: str):
     """
     🗑️ COMPREHENSIVE FILE DELETION - Cascades to all related tables
     
