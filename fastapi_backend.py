@@ -7343,10 +7343,20 @@ class BatchAIRowClassifier:
             # Fallback to individual classifications
             return [self._fallback_classification(row, platform_info, column_names) for row in rows]
     
-    def _fallback_classification(self, row: pd.Series, platform_info: Dict, column_names: List[str]) -> Dict[str, Any]:
+    def _fallback_classification(self, row: Any, platform_info: Dict, column_names: List[str]) -> Dict[str, Any]:
         """Fallback classification when AI fails"""
         platform = platform_info.get('platform', 'unknown')
-        row_str = ' '.join(str(val).lower() for val in row.values if pd.notna(val))
+
+        if isinstance(row, dict):
+            iterable_values = [val for val in row.values() if val is not None and str(val).strip().lower() != 'nan']
+        elif isinstance(row, pd.Series):
+            iterable_values = [val for val in row.values if pd.notna(val)]
+        elif hasattr(row, '__iter__'):
+            iterable_values = [val for val in row if val is not None and str(val).strip().lower() != 'nan']
+        else:
+            iterable_values = [row]
+
+        row_str = ' '.join(str(val).lower() for val in iterable_values)
         
         # Basic classification
         if any(word in row_str for word in ['salary', 'wage', 'payroll', 'employee']):
