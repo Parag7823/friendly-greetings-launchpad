@@ -60,6 +60,7 @@ from universal_extractors_optimized import UniversalExtractorsOptimized as Unive
 from entity_resolver_optimized import EntityResolverOptimized as EntityResolver
 from enhanced_relationship_detector import EnhancedRelationshipDetector
 from debug_logger import get_debug_logger
+from field_mapping_learner import learn_field_mapping, get_learned_mappings
 import pandas as pd
 import openpyxl as np
 import magic
@@ -5198,8 +5199,6 @@ class DataEnrichmentProcessor:
             return {}
         
         try:
-            from field_mapping_learner import get_learned_mappings
-            
             # Get learned mappings for this user and platform
             mappings = await get_learned_mappings(
                 user_id=user_id,
@@ -5318,8 +5317,6 @@ class DataEnrichmentProcessor:
             return
             
         try:
-            from field_mapping_learner import learn_field_mapping
-            
             # Infer mappings from successful extractions
             # We look for columns that match the extracted values
             
@@ -7166,7 +7163,7 @@ class BatchAIRowClassifier:
         
         return batch_size
     
-    async def classify_row_with_ai(self, row: pd.Series, platform_info: Dict, column_names: List[str]) -> Dict[str, Any]:
+    async def classify_row_with_ai(self, row: pd.Series, platform_info: Dict, column_names: List[str], file_context: Dict = None) -> Dict[str, Any]:
         """Individual row classification - wrapper for batch processing compatibility"""
         # For individual row processing, we'll use the fallback classification
         # This maintains compatibility with the existing RowProcessor
@@ -10197,7 +10194,7 @@ async def get_performance_optimization_status():
         except Exception as e:
             logger.error(f"❌ Error storing entity matches (transaction rolled back): {e}")
 
-    async def _store_platform_patterns(self, patterns: List[Dict], user_id: str, transaction_id: str, supabase: Client):
+    async def _store_platform_patterns(self, patterns: List[Dict], user_id: str, transaction_id: str):
         """Store platform patterns in the database"""
         try:
             if not patterns:
@@ -10216,7 +10213,7 @@ async def get_performance_optimization_status():
                     'transaction_id': transaction_id
                 }
                 
-                result = supabase.table('platform_patterns').insert(pattern_data).execute()
+                result = self.supabase.table('platform_patterns').insert(pattern_data).execute()
                 if result.data:
                     logger.debug(f"Stored platform pattern: {pattern_data['platform']}")
                 else:
@@ -10342,7 +10339,7 @@ async def get_performance_optimization_status():
         except Exception as e:
             logger.error(f"❌ Error storing cross-platform relationships (transaction rolled back): {e}")
 
-    async def _store_discovered_platforms(self, platforms: List[Dict], user_id: str, transaction_id: str, supabase: Client):
+    async def _store_discovered_platforms(self, platforms: List[Dict], user_id: str, transaction_id: str):
         """
         UNIVERSAL FIX: Store discovered platforms with deduplication via UPSERT.
         Uses transaction manager for atomicity and prevents duplicate entries.

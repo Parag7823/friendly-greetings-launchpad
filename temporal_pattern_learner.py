@@ -138,6 +138,38 @@ class TemporalPatternLearner:
         
         logger.info("✅ TemporalPatternLearner initialized")
     
+    @staticmethod
+    def _parse_iso_timestamp(timestamp_str: str) -> datetime:
+        """
+        Safely parse ISO timestamp with various formats.
+        Handles fractional seconds with varying precision.
+        
+        Args:
+            timestamp_str: ISO format timestamp string
+            
+        Returns:
+            Parsed datetime object
+        """
+        try:
+            # Replace 'Z' with '+00:00' for timezone
+            ts = timestamp_str.replace('Z', '+00:00')
+            
+            # Handle fractional seconds with more than 6 digits
+            # Python's fromisoformat expects at most 6 digits for microseconds
+            import re
+            # Match pattern: YYYY-MM-DDTHH:MM:SS.ffffff+TZ
+            match = re.match(r'(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})\.(\d+)([\+\-]\d{2}:\d{2})', ts)
+            if match:
+                date_part, fractional, tz_part = match.groups()
+                # Truncate or pad fractional seconds to 6 digits
+                fractional = fractional[:6].ljust(6, '0')
+                ts = f"{date_part}.{fractional}{tz_part}"
+            
+            return datetime.fromisoformat(ts)
+        except Exception as e:
+            logger.warning(f"Failed to parse timestamp '{timestamp_str}': {e}, using current time")
+            return datetime.now()
+    
     def _get_default_config(self) -> Dict[str, Any]:
         """Get default configuration"""
         return {
@@ -305,7 +337,7 @@ class TemporalPatternLearner:
             
             # Convert to time series
             timestamps = sorted([
-                datetime.fromisoformat(e['source_ts'].replace('Z', '+00:00'))
+                self._parse_iso_timestamp(e['source_ts'])
                 for e in events_result.data
             ])
             
@@ -390,8 +422,8 @@ class TemporalPatternLearner:
                         continue
                     
                     # Calculate expected date range (±2 std dev)
-                    expected_date = datetime.fromisoformat(
-                        pred_data['expected_date'].replace('Z', '+00:00')
+                    expected_date = self._parse_iso_timestamp(
+                        pred_data['expected_date']
                     )
                     
                     # Get pattern for std dev
