@@ -9324,7 +9324,7 @@ class ExcelProcessor:
                 }
             }
             
-            await self._store_computed_metrics(metrics, user_id, transaction_id, supabase)
+            await self.store_computed_metrics(metrics, user_id, transaction_id, supabase)
             insights['processing_metrics'] = metrics
             
         except Exception as e:
@@ -10420,7 +10420,7 @@ async def get_performance_optimization_status():
         except Exception as e:
             logger.error(f"❌ Error storing discovered platforms (transaction rolled back): {e}")
     
-    async def _store_computed_metrics(self, metrics: Dict, user_id: str, transaction_id: str, supabase: Client):
+    async def store_computed_metrics(self, metrics: Dict, user_id: str, transaction_id: str, supabase: Client):
         """Store computed metrics in the database atomically."""
         try:
             if not metrics or not supabase:

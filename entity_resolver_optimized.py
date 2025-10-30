@@ -592,36 +592,55 @@ class EntityResolverOptimized:
         if not self.supabase:
             return None
         
-        try:
-            # Call database function to create entity
-            result = self.supabase.rpc('find_or_create_entity', {
-                'p_user_id': user_id,
-                'p_entity_name': entity_name,
-                'p_entity_type': entity_type,
-                'p_platform': platform,
-                'p_email': identifiers.get('email'),
-                'p_bank_account': identifiers.get('bank_account'),
-                'p_phone': identifiers.get('phone'),
-                'p_tax_id': identifiers.get('tax_id'),
-                'p_source_file': source_file
-            }).execute()
-            
-            if result.data:
-                entity_id = result.data
-                
-                # Get entity details
-                entity_details = self.supabase.table('normalized_entities').select(
-                    'id, canonical_name, email, tax_id, bank_account, phone'
-                ).eq('id', entity_id).single().execute()
-                
-                if entity_details.data:
-                    return entity_details.data
-            
-            return None
-            
-        except Exception as e:
-            logger.error(f"Entity creation failed: {e}")
-            return None
+        payload = {
+            'p_user_id': user_id,
+            'p_entity_name': entity_name,
+            'p_entity_type': entity_type,
+            'p_platform': platform,
+            'p_email': identifiers.get('email'),
+            'p_bank_account': identifiers.get('bank_account'),
+            'p_phone': identifiers.get('phone'),
+            'p_tax_id': identifiers.get('tax_id'),
+            'p_source_file': source_file
+        }
+
+        # Retry the RPC a couple of times to ride out transient socket closes
+        for attempt in range(1, 3):
+            try:
+                result = self.supabase.rpc('find_or_create_entity', payload).execute()
+
+                if result.error:
+                    logger.warning(
+                        "find_or_create_entity RPC failed (attempt %s/%s): %s",
+                        attempt,
+                        2,
+                        result.error
+                    )
+                    continue
+
+                if result.data:
+                    entity_id = result.data
+
+                    entity_details = self.supabase.table('normalized_entities').select(
+                        'id, canonical_name, email, tax_id, bank_account, phone'
+                    ).eq('id', entity_id).single().execute()
+
+                    if entity_details.data:
+                        return entity_details.data
+
+            except Exception as e:
+                logger.warning(
+                    "find_or_create_entity RPC exception (attempt %s/%s): %s",
+                    attempt,
+                    2,
+                    e
+                )
+                await asyncio.sleep(0.5 * attempt)
+
+        logger.error(
+            "Entity creation via find_or_create_entity failed after retries: %s / %s", entity_name, user_id
+        )
+        return None
     
     async def _build_resolution_result(self, entity: Dict[str, Any], entity_name: str, 
                                      entity_type: str, platform: str, identifiers: Dict[str, str],
