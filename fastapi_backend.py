@@ -73,7 +73,7 @@ import tabula
 import hmac
 
 # FastAPI and web framework imports
-from fastapi import FastAPI, HTTPException, BackgroundTasks, WebSocket, WebSocketDisconnect, UploadFile, Form, File, Response
+from fastapi import FastAPI, HTTPException, BackgroundTasks, WebSocket, WebSocketDisconnect, UploadFile, Form, File, Response, Depends
 from starlette.requests import Request
 from starlette.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
