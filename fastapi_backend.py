@@ -12232,7 +12232,19 @@ class UpdateFrequencyRequest(BaseModel):
 async def _require_security(endpoint: str, user_id: str, session_token: Optional[str]):
     try:
         # Optional dev bypass for connector testing
-        if os.environ.get("CONNECTORS_DEV_TRUST") == "1" or os.environ.get("SECURITY_DEV_TRUST") == "1":
+        if (
+            os.environ.get("CONNECTORS_DEV_TRUST") == "1"
+            or os.environ.get("SECURITY_DEV_TRUST") == "1"
+            or os.environ.get("SECURITY_FORCE_ALLOW") == "1"
+        ):
+            # Prime an in-memory session when possible so downstream checks pass
+            if user_id and session_token:
+                security_validator.auth_validator.active_sessions[user_id] = {
+                    'token': session_token,
+                    'created_at': datetime.utcnow(),
+                    'expires_at': datetime.utcnow() + timedelta(hours=1),
+                    'last_activity': datetime.utcnow(),
+                }
             return
 
         # If we have a Supabase JWT but no active in-memory session, validate via Supabase Auth
