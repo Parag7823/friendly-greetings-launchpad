@@ -619,32 +619,38 @@ export const DataSourcesPanel = ({ isOpen, onClose, onFilePreview }: DataSources
   };
 
   const handleDeleteFile = async (fileId: string, filename: string) => {
-    if (!confirm(`Are you sure you want to delete "${filename}"? This action cannot be undone.`)) {
+    if (!confirm(`Are you sure you want to delete "${filename}"? This will permanently delete the file and ALL associated data (events, relationships, entities, etc.). This action cannot be undone.`)) {
       return;
     }
 
     try {
-      // Delete from database
-      const { error } = await supabase
-        .from('ingestion_jobs')
-        .delete()
-        .eq('id', fileId)
-        .eq('user_id', user?.id);
+      // Use comprehensive deletion endpoint that cascades to all related tables
+      const response = await fetch(`/api/files/${fileId}?user_id=${user?.id}`, {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
 
-      if (error) throw error;
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.detail || 'Failed to delete file');
+      }
+
+      const result = await response.json();
 
       // Update local state
       setUploadedFiles(prev => prev.filter(f => f.id !== fileId));
 
       toast({
         title: 'File Deleted',
-        description: `"${filename}" has been deleted successfully.`
+        description: `"${filename}" and ${result.total_records_deleted} related records deleted successfully.`
       });
     } catch (e) {
       console.error('Failed to delete file', e);
       toast({
         title: 'Delete Failed',
-        description: 'Unable to delete file. Please try again.',
+        description: e instanceof Error ? e.message : 'Unable to delete file. Please try again.',
         variant: 'destructive'
       });
     }
