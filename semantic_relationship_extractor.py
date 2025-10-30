@@ -584,10 +584,9 @@ Provide ONLY the JSON response, no additional text."""
                 'temporal_causality': semantic_rel.temporal_causality.value,
                 'business_logic': semantic_rel.business_logic.value,
                 'reasoning': semantic_rel.reasoning,
-                'metadata': {
-                    **semantic_rel.metadata,
-                    'key_factors': semantic_rel.key_factors
-                }
+                'key_factors': semantic_rel.key_factors,  # ✅ FIX: Store in key_factors column, not metadata
+                'metadata': semantic_rel.metadata,
+                'updated_at': datetime.utcnow().isoformat()
             }
             
             # If embeddings are enabled, add to update

@@ -4912,12 +4912,13 @@ class DataEnrichmentProcessor:
     - Security validations and audit logging
     """
     
-    def __init__(self, anthropic_client=None, cache_client=None, config=None):
+    def __init__(self, anthropic_client=None, cache_client=None, config=None, supabase_client=None):
         # Note: anthropic_client parameter kept for backward compatibility but not used
         # Now using Groq/Llama instead
         self.anthropic = anthropic_client
         self.cache = cache_client  # Will be initialized with ProductionCache
         self.config = config or self._get_default_config()
+        self.supabase = supabase_client  # Store Supabase client for field mapping learning
         
         # Initialize caching system
         self._cache_initialized = False
@@ -7112,18 +7113,37 @@ class BatchAIRowClassifier:
         OPTIMIZATION 2: Calculate optimal batch size based on row complexity.
         
         Returns:
-            Optimal batch size (10-50) based on average row complexity
+            Optimal batch size (10-30) based on average row complexity and token limits
         """
         if not rows:
             return self.default_batch_size
         
         # Calculate average number of non-null fields per row
         total_fields = 0
-        for row in rows[:min(10, len(rows))]:  # Sample first 10 rows
+        avg_field_length = 0
+        sample_size = min(10, len(rows))
+        
+        for row in rows[:sample_size]:  # Sample first 10 rows
             non_null_count = row.notna().sum()
             total_fields += non_null_count
+            # Calculate average field length for token estimation
+            for val in row.values:
+                if pd.notna(val):
+                    avg_field_length += len(str(val))
         
-        avg_fields = total_fields / min(10, len(rows))
+        avg_fields = total_fields / sample_size
+        avg_field_length = avg_field_length / (total_fields if total_fields > 0 else 1)
+        
+        # Estimate tokens per row (rough approximation: 1 token ≈ 4 chars)
+        estimated_tokens_per_row = (avg_fields * avg_field_length) / 4
+        
+        # LLM has 32K context, we use 28K for output, leaving ~4K for input
+        # But we need to be conservative: aim for ~20K output tokens max
+        MAX_OUTPUT_TOKENS = 20000
+        # Each classification response is ~200 tokens
+        TOKENS_PER_CLASSIFICATION = 200
+        # Calculate max rows based on token budget
+        token_limited_batch = int(MAX_OUTPUT_TOKENS / (estimated_tokens_per_row + TOKENS_PER_CLASSIFICATION))
         
         # Determine batch size based on complexity
         if avg_fields <= self.simple_row_field_threshold:
@@ -7138,6 +7158,11 @@ class BatchAIRowClassifier:
             # Medium complexity: use default
             batch_size = self.default_batch_size
             logger.debug(f"🚀 OPTIMIZATION: Medium rows detected (avg {avg_fields:.1f} fields) → batch_size={batch_size}")
+        
+        # Cap batch size based on token limits
+        if token_limited_batch < batch_size:
+            logger.warning(f"⚠️ Token limit capping batch size from {batch_size} to {token_limited_batch} (est. {estimated_tokens_per_row:.0f} tokens/row)")
+            batch_size = max(5, token_limited_batch)  # Minimum batch size of 5
         
         return batch_size
     
@@ -7623,11 +7648,16 @@ class ExcelProcessor:
         
         # Entity resolver and AI classifier will be initialized per request with Supabase client
         self.entity_resolver = None
-        self.ai_classifier = None
-        self.row_processor = None
+        self.ai_classifier = BatchAIRowClassifier(anthropic_client=None)
         self.batch_classifier = BatchAIRowClassifier(anthropic_client=None)
-        # Initialize data enrichment processor
-        self.enrichment_processor = DataEnrichmentProcessor(anthropic_client=None)
+        # Initialize data enrichment processor with Supabase client
+        self.enrichment_processor = DataEnrichmentProcessor(anthropic_client=None, supabase_client=supabase)
+        # Initialize RowProcessor with all dependencies
+        self.row_processor = RowProcessor(
+            platform_detector=self.universal_platform_detector,
+            ai_classifier=self.ai_classifier,
+            enrichment_processor=self.enrichment_processor
+        )
         
         # Financial field patterns for auto-detection
         self.financial_patterns = {

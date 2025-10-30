@@ -137,22 +137,26 @@ class EnhancedRelationshipDetector:
             # Combine and store relationships
             all_relationships = cross_file_relationships + within_file_relationships
             
-            # Store relationships in Supabase database
+            # Store relationships in Supabase database and get back stored records with IDs
+            stored_relationships = []
             if all_relationships:
-                await self._store_relationships(all_relationships, user_id)
+                stored_relationships = await self._store_relationships(all_relationships, user_id)
+                logger.info(f"✅ Stored {len(stored_relationships)} relationships with database IDs")
             
             # NEW: Sync relationships to Neo4j graph database
-            if all_relationships and self.neo4j:
-                await self._sync_to_neo4j(all_relationships, user_id)
+            if stored_relationships and self.neo4j:
+                await self._sync_to_neo4j(stored_relationships, user_id)
             
             # PHASE 2B: Enrich relationships with semantic analysis
+            # Use stored_relationships (with IDs) instead of all_relationships
             semantic_enrichment_stats = await self._enrich_relationships_with_semantics(
-                all_relationships, user_id
+                stored_relationships, user_id
             )
             
             # PHASE 3: Causal inference using Bradford Hill criteria
+            # Use stored_relationships (with IDs) instead of all_relationships
             causal_analysis_stats = await self._analyze_causal_relationships(
-                all_relationships, user_id
+                stored_relationships, user_id
             )
             
             # PHASE 4: Temporal pattern learning and prediction
@@ -303,11 +307,18 @@ class EnhancedRelationshipDetector:
             logger.error(f"Within-file relationship detection failed: {e}")
             return []
     
-    async def _store_relationships(self, relationships: List[Dict], user_id: str):
-        """Store detected relationships in the database"""
+    async def _store_relationships(self, relationships: List[Dict], user_id: str) -> List[Dict]:
+        """
+        Store detected relationships in the database and return stored records with IDs.
+        
+        Returns:
+            List of stored relationship records with database-assigned IDs
+        """
         try:
             if not relationships:
-                return
+                return []
+            
+            stored_relationships = []
             
             # Prepare relationship instances for insertion
             relationship_instances = []
@@ -324,19 +335,23 @@ class EnhancedRelationshipDetector:
                     'created_at': datetime.utcnow().isoformat()
                 })
             
-            # Batch insert relationships
+            # Batch insert relationships and collect results
             batch_size = 100
             for i in range(0, len(relationship_instances), batch_size):
                 batch = relationship_instances[i:i + batch_size]
                 try:
-                    self.supabase.table('relationship_instances').insert(batch).execute()
+                    result = self.supabase.table('relationship_instances').insert(batch).execute()
+                    if result.data:
+                        stored_relationships.extend(result.data)
                 except Exception as e:
                     logger.warning(f"Failed to insert relationship batch: {e}")
             
-            logger.info(f"Stored {len(relationship_instances)} relationships in database")
+            logger.info(f"Stored {len(stored_relationships)} relationships in database with IDs")
+            return stored_relationships
             
         except Exception as e:
             logger.error(f"Failed to store relationships: {e}")
+            return []
     
     # DEPRECATED: Old methods below are kept for backward compatibility but should not be used
     def _group_events_by_file(self, events: List[Dict]) -> Dict[str, List[Dict]]:
