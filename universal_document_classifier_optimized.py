@@ -885,34 +885,32 @@ class UniversalDocumentClassifierOptimized:
         if len(self.classification_history) > 100:  # Keep only last 100 in memory
             self.classification_history = self.classification_history[-100:]
         
-        # CRITICAL FIX: Persist to database for permanent learning
-        if self.supabase and user_id:
+        # CRITICAL FIX: Persist to database using production-grade log writer
+        if user_id:
             try:
-                detection_log_entry = {
-                    'user_id': user_id,
-                    'detection_id': result.get('classification_id', 'unknown'),
-                    'detection_type': 'document',
-                    'detected_value': result['document_type'],
-                    'confidence': float(result['confidence']),
-                    'method': result['method'],
-                    'indicators': result['indicators'],
-                    'payload_keys': list(payload.keys()) if isinstance(payload, dict) else [],
-                    'filename': filename,
-                    'detected_at': datetime.utcnow().isoformat(),
-                    'metadata': {
+                from detection_log_writer import log_document_classification
+                
+                await log_document_classification(
+                    user_id=user_id,
+                    classification_id=result.get('classification_id', 'unknown'),
+                    document_type=result['document_type'],
+                    confidence=float(result['confidence']),
+                    method=result['method'],
+                    indicators=result.get('indicators', []),
+                    payload_keys=list(payload.keys()) if isinstance(payload, dict) else [],
+                    filename=filename,
+                    metadata={
                         'processing_time': result.get('processing_time'),
                         'category': result.get('category'),
-                        'ocr_used': result.get('ocr_used', False)
-                    }
-                }
-                
-                # Insert into detection_log table (async, non-blocking)
-                self.supabase.table('detection_log').insert(detection_log_entry).execute()
-                logger.debug(f"✅ Document classification logged to database: {result['document_type']}")
+                        'ocr_used': result.get('ocr_used', False),
+                    },
+                    supabase_client=self.supabase,
+                )
+                logger.debug(f"✅ Document classification logged: {result['document_type']}")
                 
             except Exception as e:
                 # Don't fail classification if logging fails
-                logger.warning(f"Failed to persist document classification to database: {e}")
+                logger.warning(f"Failed to log document classification: {e}")
     
     async def classify_rows_batch(self, rows: List[Dict], platform_info: Dict, column_names: List[str], user_id: str = None) -> List[Dict[str, Any]]:
         """

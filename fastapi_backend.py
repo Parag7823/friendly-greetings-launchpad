@@ -5188,51 +5188,33 @@ class DataEnrichmentProcessor:
     async def _get_field_mappings(self, user_id: str, column_names: List[str], 
                                   platform: str = None, document_type: str = None) -> Dict[str, str]:
         """
-        Get field mappings from database for smart field extraction.
+        UNIVERSAL FIX: Get learned field mappings from database.
         Returns dict mapping target_field -> source_column
         
-        CRITICAL FIX: Disabled until field_mappings feature is fully implemented.
-        This feature requires supabase client to be passed as parameter.
+        Uses the field_mapping_learner module for robust retrieval.
         """
-        if not user_id:
+        if not user_id or not self.supabase:
             return {}
         
-        # CRITICAL FIX: Return empty dict for now - field_mappings feature not yet implemented
-        logger.debug("Field mappings feature disabled - returning empty mappings")
-        return {}
-        
-        # TODO: Re-enable when field_mappings table and RPC function are implemented
-        # try:
-        #     # Query field_mappings table for this user
-        #     supabase = get_supabase_client()  # Need to pass this as parameter
-        #     
-        #     mappings = {}
-        #     for column in column_names:
-        #         try:
-        #             # Call the get_field_mapping function
-        #             result = supabase.rpc('get_field_mapping', {
-        #                 'p_user_id': user_id,
-        #                 'p_source_column': column,
-        #                 'p_platform': platform,
-        #                 'p_document_type': document_type
-        #             }).execute()
-        #             
-        #             if result.data and len(result.data) > 0:
-        #                 mapping = result.data[0]
-        #                 target_field = mapping.get('target_field')
-        #                 if target_field:
-        #                     mappings[target_field] = column
-        #                     logger.debug(f"✅ Field mapping found: {column} -> {target_field}")
-        #         except Exception as e:
-        #             logger.debug(f"No mapping found for column {column}: {e}")
-        #             continue
-        #     
-        #     return mappings
-        #     
-        # except Exception as e:
-        #     logger.warning(f"Failed to get field mappings: {e}")
-        #     return {}
-        return {}
+        try:
+            from field_mapping_learner import get_learned_mappings
+            
+            # Get learned mappings for this user and platform
+            mappings = await get_learned_mappings(
+                user_id=user_id,
+                platform=platform,
+                min_confidence=0.5,
+                supabase=self.supabase
+            )
+            
+            if mappings:
+                logger.debug(f"Retrieved {len(mappings)} learned field mappings for user {user_id}")
+            
+            return mappings
+            
+        except Exception as e:
+            logger.warning(f"Failed to get field mappings: {e}")
+            return {}
     
     async def _extract_amount_smart(self, row_data: Dict, field_mappings: Dict[str, str]) -> float:
         """Extract amount using smart field mapping"""
@@ -5316,6 +5298,128 @@ class DataEnrichmentProcessor:
             return row_data.get('currency', 'USD')
         except:
             return 'USD'
+    
+    async def _learn_field_mappings_from_extraction(
+        self,
+        user_id: str,
+        row_data: Dict,
+        extraction_results: Dict,
+        platform: Optional[str] = None,
+        document_type: Optional[str] = None
+    ):
+        """
+        UNIVERSAL FIX: Learn field mappings from successful extractions.
+        
+        This method infers which columns were used for each field and records
+        them in the field_mappings table for future use.
+        """
+        if not user_id or not self.supabase:
+            return
+            
+        try:
+            from field_mapping_learner import learn_field_mapping
+            
+            # Infer mappings from successful extractions
+            # We look for columns that match the extracted values
+            
+            # Amount mapping
+            amount = extraction_results.get('amount', 0.0)
+            if amount and amount > 0:
+                for col_name, col_value in row_data.items():
+                    if isinstance(col_value, (int, float)) and abs(float(col_value) - amount) < 0.01:
+                        await learn_field_mapping(
+                            user_id=user_id,
+                            source_column=col_name,
+                            target_field='amount',
+                            platform=platform,
+                            document_type=document_type,
+                            confidence=0.9,
+                            extraction_success=True,
+                            metadata={'inferred_from': 'extraction'},
+                            supabase=self.supabase
+                        )
+                        break
+            
+            # Vendor mapping
+            vendor = extraction_results.get('vendor_name', '')
+            if vendor:
+                for col_name, col_value in row_data.items():
+                    if isinstance(col_value, str) and col_value.strip() == vendor.strip():
+                        await learn_field_mapping(
+                            user_id=user_id,
+                            source_column=col_name,
+                            target_field='vendor',
+                            platform=platform,
+                            document_type=document_type,
+                            confidence=0.85,
+                            extraction_success=True,
+                            metadata={'inferred_from': 'extraction'},
+                            supabase=self.supabase
+                        )
+                        break
+            
+            # Date mapping
+            date = extraction_results.get('date', '')
+            if date and date != datetime.now().strftime('%Y-%m-%d'):
+                for col_name, col_value in row_data.items():
+                    if isinstance(col_value, str):
+                        try:
+                            from dateutil import parser
+                            parsed = parser.parse(col_value)
+                            if parsed.strftime('%Y-%m-%d') == date:
+                                await learn_field_mapping(
+                                    user_id=user_id,
+                                    source_column=col_name,
+                                    target_field='date',
+                                    platform=platform,
+                                    document_type=document_type,
+                                    confidence=0.9,
+                                    extraction_success=True,
+                                    metadata={'inferred_from': 'extraction'},
+                                    supabase=self.supabase
+                                )
+                                break
+                        except:
+                            continue
+            
+            # Description mapping
+            description = extraction_results.get('description', '')
+            if description:
+                for col_name, col_value in row_data.items():
+                    if isinstance(col_value, str) and col_value.strip() == description.strip():
+                        await learn_field_mapping(
+                            user_id=user_id,
+                            source_column=col_name,
+                            target_field='description',
+                            platform=platform,
+                            document_type=document_type,
+                            confidence=0.8,
+                            extraction_success=True,
+                            metadata={'inferred_from': 'extraction'},
+                            supabase=self.supabase
+                        )
+                        break
+            
+            # Currency mapping
+            currency = extraction_results.get('currency', 'USD')
+            if currency != 'USD':
+                for col_name, col_value in row_data.items():
+                    if isinstance(col_value, str) and col_value.strip().upper() == currency.upper():
+                        await learn_field_mapping(
+                            user_id=user_id,
+                            source_column=col_name,
+                            target_field='currency',
+                            platform=platform,
+                            document_type=document_type,
+                            confidence=0.95,
+                            extraction_success=True,
+                            metadata={'inferred_from': 'extraction'},
+                            supabase=self.supabase
+                        )
+                        break
+                        
+        except Exception as e:
+            logger.warning(f"Failed to learn field mappings from extraction: {e}")
     
     def _extract_amount(self, row_data: Dict) -> float:
         """Extract amount from row data - case-insensitive field matching"""
@@ -5575,7 +5679,7 @@ class DataEnrichmentProcessor:
             ])
             confidence = fields_found / 4.0
             
-            return {
+            extraction_results = {
                 'amount': amount,
                 'vendor_name': vendor_name,
                 'date': date,
@@ -5584,6 +5688,18 @@ class DataEnrichmentProcessor:
                 'confidence': confidence,
                 'fields_extracted': fields_found
             }
+            
+            # UNIVERSAL FIX: Learn field mappings from successful extraction
+            if confidence > 0.5:  # Only learn from reasonably successful extractions
+                await self._learn_field_mappings_from_extraction(
+                    user_id=user_id,
+                    row_data=row_data,
+                    extraction_results=extraction_results,
+                    platform=platform_info.get('platform'),
+                    document_type=platform_info.get('document_type')
+                )
+            
+            return extraction_results
             
         except Exception as e:
             logger.error(f"Core field extraction failed: {e}")
@@ -9454,7 +9570,7 @@ class ExcelProcessor:
     
     async def _discover_new_platforms(self, user_id: str, filename: str, supabase: Client) -> List[Dict]:
         """
-        FIX #16: Discover new platforms from processed events.
+        UNIVERSAL FIX: Discover new platforms from processed events with proper ID mapping.
         Analyzes events to identify platforms not yet seen for this user.
         """
         try:
@@ -9473,8 +9589,11 @@ class ExcelProcessor:
             platforms_found = set()
             for event in events_result.data:
                 platform = event.get('source_platform')
-                if platform:
+                if platform and platform != 'unknown':
                     platforms_found.add(platform)
+            
+            # Get platform database for ID mapping
+            platform_id_map = self._build_platform_id_map()
             
             # Check which platforms are new (not in user_connections)
             existing_platforms = supabase.table('user_connections').select(
@@ -9484,23 +9603,57 @@ class ExcelProcessor:
             existing_platform_ids = {conn.get('integration_id') for conn in existing_platforms.data or []}
             
             discovered = []
-            for platform in platforms_found:
-                if platform not in existing_platform_ids:
+            for platform_name in platforms_found:
+                # Map platform name to integration ID
+                platform_id = platform_id_map.get(platform_name.lower(), platform_name.lower().replace(' ', '-'))
+                
+                # Check if this platform is new
+                if platform_id not in existing_platform_ids:
                     discovered.append({
-                        'platform_name': platform,
-                        'platform_type': 'file_upload',
+                        'platform_name': platform_name,
+                        'platform_id': platform_id,
                         'detection_confidence': 0.95,
                         'detection_method': 'event_analysis',
-                        'characteristics': {'source': 'file_upload'},
+                        'discovery_reason': f'Detected from file: {filename}',
                         'source_files': [filename]
                     })
             
-            logger.info(f"Discovered {len(discovered)} new platforms")
+            logger.info(f"Discovered {len(discovered)} new platforms: {[d['platform_name'] for d in discovered]}")
             return discovered
             
         except Exception as e:
             logger.error(f"Platform discovery failed: {e}")
             return []
+    
+    def _build_platform_id_map(self) -> Dict[str, str]:
+        """Build mapping from platform display names to integration IDs."""
+        # Get platform database from detector
+        platform_db = self.universal_platform_detector.get_platform_database()
+        
+        # Build name -> ID mapping
+        name_to_id = {}
+        for platform_id, platform_info in platform_db.items():
+            platform_name = platform_info.get('name', platform_id)
+            name_to_id[platform_name.lower()] = platform_id
+            
+            # Also map common variations
+            name_to_id[platform_id.lower()] = platform_id
+        
+        # Add common manual mappings
+        name_to_id.update({
+            'quickbooks': 'quickbooks-online',
+            'quickbooks online': 'quickbooks-online',
+            'xero': 'xero',
+            'stripe': 'stripe',
+            'paypal': 'paypal',
+            'square': 'square',
+            'shopify': 'shopify',
+            'amazon': 'amazon',
+            'ebay': 'ebay',
+            'etsy': 'etsy',
+        })
+        
+        return name_to_id
 
 # ============================================================================
 # CRITICAL FIXES VERIFICATION ENDPOINTS
@@ -10160,33 +10313,74 @@ async def get_performance_optimization_status():
             logger.error(f"❌ Error storing cross-platform relationships (transaction rolled back): {e}")
 
     async def _store_discovered_platforms(self, platforms: List[Dict], user_id: str, transaction_id: str, supabase: Client):
-        """Store discovered platforms in the database"""
+        """
+        UNIVERSAL FIX: Store discovered platforms with deduplication via UPSERT.
+        Uses transaction manager for atomicity and prevents duplicate entries.
+        """
         try:
             if not platforms:
                 return
                 
             logger.info(f"Storing {len(platforms)} discovered platforms")
             
+            # Deduplicate by platform_name per user
+            unique_platforms = {}
             for platform in platforms:
-                platform_data = {
-                    'user_id': user_id,
-                    'platform_name': platform.get('platform_name', ''),
-                    'platform_type': platform.get('platform_type', 'unknown'),
-                    'detection_confidence': platform.get('detection_confidence', 0.5),
-                    'detection_method': platform.get('detection_method', 'ai'),
-                    'characteristics': platform.get('characteristics', {}),
-                    'source_files': platform.get('source_files', []),
-                    'transaction_id': transaction_id
-                }
+                platform_name = platform.get('platform_name', '')
+                if platform_name and platform_name not in unique_platforms:
+                    unique_platforms[platform_name] = platform
+            
+            if not unique_platforms:
+                logger.warning("No unique platforms to store after deduplication")
+                return
+            
+            # Use transaction manager for atomic operations
+            transaction_manager = get_transaction_manager()
+            
+            async with transaction_manager.transaction(
+                user_id=user_id,
+                operation_type="discovered_platform_storage"
+            ) as tx:
+                for platform_name, platform in unique_platforms.items():
+                    platform_data = {
+                        'user_id': user_id,
+                        'platform_name': platform_name,
+                        'discovery_reason': platform.get('discovery_reason', 'Detected from uploaded file'),
+                        'confidence_score': float(platform.get('detection_confidence', 0.95)),
+                        'discovered_at': datetime.utcnow().isoformat()
+                    }
+                    
+                    # UPSERT: Check if exists, update if so, insert if not
+                    try:
+                        existing = supabase.table('discovered_platforms').select('id').eq(
+                            'user_id', user_id
+                        ).eq('platform_name', platform_name).limit(1).execute()
+                        
+                        if existing.data:
+                            # Update existing record
+                            await tx.update(
+                                'discovered_platforms',
+                                {
+                                    'confidence_score': platform_data['confidence_score'],
+                                    'discovery_reason': platform_data['discovery_reason'],
+                                    'discovered_at': platform_data['discovered_at']
+                                },
+                                {'id': existing.data[0]['id']}
+                            )
+                            logger.debug(f"Updated existing platform: {platform_name}")
+                        else:
+                            # Insert new record
+                            await tx.insert('discovered_platforms', platform_data)
+                            logger.debug(f"Inserted new platform: {platform_name}")
+                            
+                    except Exception as e:
+                        logger.warning(f"Failed to upsert platform {platform_name}: {e}")
+                        continue
                 
-                result = supabase.table('discovered_platforms').insert(platform_data).execute()
-                if result.data:
-                    logger.debug(f"Stored discovered platform: {platform_data['platform_name']}")
-                else:
-                    logger.warning(f"Failed to store discovered platform: {platform_data['platform_name']}")
+                logger.info(f"✅ Stored {len(unique_platforms)} discovered platforms atomically")
                     
         except Exception as e:
-            logger.error(f"Error storing discovered platforms: {e}")
+            logger.error(f"❌ Error storing discovered platforms (transaction rolled back): {e}")
     
     async def _store_computed_metrics(self, metrics: Dict, user_id: str, transaction_id: str, supabase: Client):
         """Store computed metrics in the database"""

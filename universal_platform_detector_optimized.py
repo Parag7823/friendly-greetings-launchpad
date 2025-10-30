@@ -839,33 +839,32 @@ class UniversalPlatformDetectorOptimized:
         if len(self.detection_history) > 100:  # Keep only last 100 in memory
             self.detection_history = self.detection_history[-100:]
         
-        # CRITICAL FIX: Persist to database for permanent learning
-        if self.supabase and user_id:
+        # CRITICAL FIX: Persist to database using production-grade log writer
+        if user_id:
             try:
-                detection_log_entry = {
-                    'user_id': user_id,
-                    'detection_id': result['detection_id'],
-                    'detection_type': 'platform',
-                    'detected_value': result['platform'],
-                    'confidence': float(result['confidence']),
-                    'method': result['method'],
-                    'indicators': result['indicators'],
-                    'payload_keys': list(payload.keys()) if isinstance(payload, dict) else [],
-                    'filename': filename,
-                    'detected_at': datetime.utcnow().isoformat(),
-                    'metadata': {
-                        'processing_time': result.get('processing_time'),
-                        'fallback_used': result.get('fallback_used', False)
-                    }
-                }
+                from detection_log_writer import log_platform_detection
                 
-                # Insert into detection_log table (async, non-blocking)
-                self.supabase.table('detection_log').insert(detection_log_entry).execute()
-                logger.debug(f"✅ Platform detection logged to database: {result['platform']}")
+                await log_platform_detection(
+                    user_id=user_id,
+                    detection_id=result['detection_id'],
+                    platform=result['platform'],
+                    confidence=float(result['confidence']),
+                    method=result['method'],
+                    indicators=result.get('indicators', []),
+                    payload_keys=list(payload.keys()) if isinstance(payload, dict) else [],
+                    filename=filename,
+                    metadata={
+                        'processing_time': result.get('processing_time'),
+                        'fallback_used': result.get('fallback_used', False),
+                        'category': result.get('category', 'unknown'),
+                    },
+                    supabase_client=self.supabase,
+                )
+                logger.debug(f"✅ Platform detection logged: {result['platform']}")
                 
             except Exception as e:
                 # Don't fail detection if logging fails
-                logger.warning(f"Failed to persist platform detection to database: {e}")
+                logger.warning(f"Failed to log platform detection: {e}")
     
     async def _log_detection_audit(self, detection_id: str, result: Dict[str, Any], user_id: str):
         """Log detection audit information"""
