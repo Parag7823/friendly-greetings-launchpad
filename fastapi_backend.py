@@ -7420,6 +7420,10 @@ class RowProcessor:
                 "platform_detection": platform_info,
                 "ai_classification": ai_classification,
                 "enrichment_data": enriched_payload,
+                "document_type": platform_info.get('document_type', 'unknown'),
+                "document_confidence": platform_info.get('document_confidence', 0.0),
+                "document_classification_method": platform_info.get('document_classification_method', 'unknown'),
+                "document_indicators": platform_info.get('document_indicators', []),
                 "row_type": enriched_payload.get('kind', 'transaction'),
                 "category": enriched_payload.get('category', 'other'),
                 "subcategory": enriched_payload.get('subcategory', 'general'),
@@ -8399,22 +8403,67 @@ class ExcelProcessor:
                 "progress": 22
             })
         
-        # Fast document classification using patterns
-        doc_analysis = {
-            'document_type': 'financial_data',
-            'confidence': 0.8,
-            'classification_method': 'pattern_based',
-            'indicators': ['financial_columns', 'numeric_data']
+        # Universal document classification (AI + pattern + OCR)
+        doc_cache_key = {
+            'columns': list(first_sheet.columns),
+            'filename': filename,
+            'user_id': user_id,
+            'sample_hash': hashlib.sha256(first_sheet.head(10).to_json().encode()).hexdigest() if not first_sheet.empty else None
         }
-        
-        # FIX #2: Add document_type to platform_info for Phase 5
-        platform_info['document_type'] = doc_analysis['document_type']
-        platform_info['document_confidence'] = doc_analysis['confidence']
-        
-        # Initialize EntityResolver and AI classifier with Supabase client
-        self.entity_resolver = EntityResolver(supabase_client=supabase, cache_client=safe_get_ai_cache())
-        self.ai_classifier = AIRowClassifier(anthropic_client=None, entity_resolver=self.entity_resolver)
-        self.row_processor = RowProcessor(self.universal_platform_detector, self.ai_classifier, self.enrichment_processor)
+
+        cached_doc = None
+        try:
+            cached_doc = await ai_cache.get_cached_classification(doc_cache_key, "document_classification")
+        except Exception as cache_err:
+            logger.warning(f"Document classification cache lookup failed: {cache_err}")
+
+        if cached_doc:
+            doc_analysis = cached_doc
+        else:
+            try:
+                doc_analysis = await self.universal_document_classifier.classify_document_universal(
+                    payload_for_detection,
+                    filename=filename,
+                    file_content=file_content,
+                    user_id=user_id
+                )
+                if not doc_analysis or doc_analysis.get('document_type') in (None, '', 'unknown'):
+                    doc_analysis = {
+                        'document_type': 'financial_data',
+                        'confidence': 0.4,
+                        'classification_method': 'fallback',
+                        'indicators': []
+                    }
+                try:
+                    await ai_cache.store_classification(doc_cache_key, doc_analysis, "document_classification", ttl_hours=48)
+                except Exception as cache_store_err:
+                    logger.warning(f"Document classification cache store failed: {cache_store_err}")
+            except Exception as doc_err:
+                logger.error(f"Document classification failed for {filename}: {doc_err}")
+                doc_analysis = {
+                    'document_type': 'financial_data',
+                    'confidence': 0.3,
+                    'classification_method': 'error_fallback',
+                    'indicators': []
+                }
+
+        # Normalize classification result structure
+        document_type = doc_analysis.get('document_type') or doc_analysis.get('type') or 'financial_data'
+        document_confidence = float(doc_analysis.get('confidence', 0.0))
+        classification_method = doc_analysis.get('classification_method') or doc_analysis.get('method') or 'unknown'
+        doc_indicators = doc_analysis.get('indicators') or doc_analysis.get('key_columns') or []
+
+        platform_info['document_type'] = document_type
+        platform_info['document_confidence'] = document_confidence
+        platform_info['document_classification_method'] = classification_method
+        platform_info['document_indicators'] = doc_indicators
+
+        doc_analysis['document_type'] = document_type
+        doc_analysis['confidence'] = document_confidence
+        doc_analysis['classification_method'] = classification_method
+        if 'method' not in doc_analysis:
+            doc_analysis['method'] = classification_method
+        doc_analysis['indicators'] = doc_indicators
         
         # Step 3: Start atomic transaction for all database operations
         await manager.send_update(job_id, {
@@ -8687,8 +8736,6 @@ class ExcelProcessor:
                                 validated_file_id = file_id if file_id else None
                                 event_data = {
                                 'user_id': user_id,
-                                'file_id': validated_file_id,
-                                'job_id': job_id,
                                 'provider': event['provider'],
                                 'kind': event['kind'],
                                 'source_platform': event['source_platform'],
@@ -8702,13 +8749,19 @@ class ExcelProcessor:
                                 'ingest_ts': event['ingest_ts'],
                                 'status': event['status'],
                                 'confidence_score': event['confidence_score'],
-                                'classification_metadata': event['classification_metadata'],
+                                'classification_metadata': {
+                                    **event['classification_metadata'],
+                                    'document_type': platform_info.get('document_type', 'unknown'),
+                                    'document_confidence': platform_info.get('document_confidence', 0.0),
+                                    'document_classification_method': platform_info.get('document_classification_method', 'unknown'),
+                                    'document_indicators': platform_info.get('document_indicators', [])
+                                },
                                 # FIX #4: Extract entities from enriched_payload (standardized names)
                                 'entities': cleaned_enriched_payload.get('entities', event['classification_metadata'].get('entities', {})),
                                 'relationships': cleaned_enriched_payload.get('relationships', event['classification_metadata'].get('relationships', {})),
                                 # FIX #2: Add document_type from Phase 3
-                                'document_type': event['classification_metadata'].get('platform_detection', {}).get('document_type'),
-                                'document_confidence': event['classification_metadata'].get('platform_detection', {}).get('document_confidence'),
+                                'document_type': platform_info.get('document_type', 'unknown'),
+                                'document_confidence': platform_info.get('document_confidence', 0.0),
                                 # Enrichment fields
                                 'amount_original': cleaned_enriched_payload.get('amount_original'),
                                 'amount_usd': cleaned_enriched_payload.get('amount_usd'),
@@ -8888,8 +8941,10 @@ class ExcelProcessor:
         insights = {
             "analysis": "File processed successfully",
             "summary": f"Processed {processed_rows} rows with {events_created} events created",
-            "document_type": doc_analysis.get('type', 'financial_data'),
-            "confidence": doc_analysis.get('confidence', 0.8)
+            "document_type": doc_analysis.get('document_type', 'financial_data'),
+            "confidence": doc_analysis.get('confidence', 0.8),
+            "classification_method": doc_analysis.get('classification_method', 'unknown'),
+            "document_indicators": doc_analysis.get('indicators', [])
         }
         
         # Add processing statistics
