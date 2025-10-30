@@ -71,6 +71,7 @@ COPY entity_resolver_optimized.py .
 COPY enhanced_relationship_detector.py .
 COPY neo4j_relationship_detector.py .
 COPY semantic_relationship_extractor.py .
+COPY field_mapping_learner.py .
 COPY embedding_service.py .
 COPY causal_inference_engine.py .
 COPY temporal_pattern_learner.py .

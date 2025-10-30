@@ -60,7 +60,14 @@ from universal_extractors_optimized import UniversalExtractorsOptimized as Unive
 from entity_resolver_optimized import EntityResolverOptimized as EntityResolver
 from enhanced_relationship_detector import EnhancedRelationshipDetector
 from debug_logger import get_debug_logger
-from field_mapping_learner import learn_field_mapping, get_learned_mappings
+
+# Lazy import for field_mapping_learner to avoid circular dependencies
+try:
+    from field_mapping_learner import learn_field_mapping, get_learned_mappings
+except ImportError:
+    print("⚠️ field_mapping_learner module not found, field mapping learning disabled")
+    learn_field_mapping = None
+    get_learned_mappings = None
 import pandas as pd
 import openpyxl as np
 import magic
