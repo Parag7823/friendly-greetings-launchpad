@@ -10445,6 +10445,9 @@ async def get_performance_optimization_status():
                 await tx.insert('metrics', metrics_data)
                 logger.debug("Stored computed metrics")
 
+        except Exception as e:
+            logger.error(f"❌ Error storing computed metrics (transaction rolled back): {e}")
+
     def _normalize_entity_type(self, entity_type: str) -> str:
         """Normalize entity types to the canonical singular labels used in storage.
 
