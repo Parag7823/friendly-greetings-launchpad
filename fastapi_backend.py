@@ -10173,6 +10173,30 @@ async def get_performance_optimization_status():
             "description": "Failed to check performance optimization status"
         }
 
+    def _normalize_entity_type(self, entity_type: str) -> str:
+        """Normalize entity types to the canonical singular labels used in storage.
+
+        AI outputs often return plural words (e.g., "vendors"), while the database
+        expects singular forms. This helper keeps that mapping centralized.
+        """
+        type_map = {
+            'employees': 'employee',
+            'vendors': 'vendor',
+            'customers': 'customer',
+            'projects': 'project',
+            # Already singular (pass through)
+            'employee': 'employee',
+            'vendor': 'vendor',
+            'customer': 'customer',
+            'project': 'project'
+        }
+
+        normalized = type_map.get(entity_type.lower())
+        if not normalized:
+            logger.warning(f"Unknown entity type '{entity_type}', defaulting to 'vendor'")
+            return 'vendor'
+        return normalized
+
     async def _store_normalized_entities(self, entities: List[Dict], user_id: str, transaction_id: str, supabase: Client):
         """Store normalized entities in the database atomically with transaction manager
         
@@ -10514,30 +10538,6 @@ async def get_performance_optimization_status():
 
         except Exception as e:
             logger.error(f"❌ Error storing computed metrics (transaction rolled back): {e}")
-
-    def _normalize_entity_type(self, entity_type: str) -> str:
-        """Normalize entity types to the canonical singular labels used in storage.
-
-        AI outputs often return plural words (e.g., "vendors"), while the database
-        expects singular forms. This helper keeps that mapping centralized.
-        """
-        type_map = {
-            'employees': 'employee',
-            'vendors': 'vendor',
-            'customers': 'customer',
-            'projects': 'project',
-            # Already singular (pass through)
-            'employee': 'employee',
-            'vendor': 'vendor',
-            'customer': 'customer',
-            'project': 'project'
-        }
-
-        normalized = type_map.get(entity_type.lower())
-        if not normalized:
-            logger.warning(f"Unknown entity type '{entity_type}', defaulting to 'vendor'")
-            return 'vendor'
-        return normalized
 
 
 # ExcelProcessor class ends here
