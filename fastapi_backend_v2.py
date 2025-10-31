@@ -9605,11 +9605,22 @@ class ExcelProcessor:
                         normalized_id = existing.data[0]['id']
                         match_confidence = 0.9
                     else:
-                        # Create new normalized entity
+                        # Create new normalized entity with phonetic encodings
+                        try:
+                            import jellyfish
+                            soundex = jellyfish.soundex(entity_name) if entity_name else ''
+                            metaphone = jellyfish.metaphone(entity_name) if entity_name else ''
+                            dmetaphone = jellyfish.dmetaphone(entity_name)[0] if entity_name else ''
+                        except Exception:
+                            soundex = metaphone = dmetaphone = ''
+                        
                         normalized_entity = {
                             'user_id': user_id,
                             'entity_type': self._normalize_entity_type(entity_type),
                             'canonical_name': entity_name,
+                            'canonical_name_soundex': soundex,
+                            'canonical_name_metaphone': metaphone,
+                            'canonical_name_dmetaphone': dmetaphone,
                             'aliases': [entity_name],
                             'platform_sources': [filename],
                             'confidence_score': 0.8
@@ -9622,14 +9633,19 @@ class ExcelProcessor:
                             logger.warning(f"Failed to create normalized entity: {entity_name}")
                             continue
                     
-                    # Create entity match record
+                    # Create entity match record with all required fields
                     entity_matches.append({
                         'user_id': user_id,
                         'source_entity_name': entity_name,
+                        'source_entity_type': self._normalize_entity_type(entity_type),
+                        'source_platform': entity.get('source_platform', 'unknown'),
                         'source_file': filename,
+                        'source_row_id': entity.get('source_row_id'),
                         'normalized_entity_id': normalized_id,
                         'match_confidence': match_confidence,
-                        'match_reason': 'vendor_match' if entity_type == 'vendor' else 'entity_match'
+                        'match_reason': 'exact_match' if existing.data else 'new_entity',
+                        'similarity_score': match_confidence,
+                        'matched_fields': ['canonical_name']
                     })
                     
                 except Exception as e:
@@ -9777,17 +9793,26 @@ class ExcelProcessor:
             'vendors': 'vendor',
             'customers': 'customer',
             'projects': 'project',
+            'contacts': 'contact',
             # Already singular (pass through)
             'employee': 'employee',
             'vendor': 'vendor',
             'customer': 'customer',
-            'project': 'project'
+            'project': 'project',
+            'contact': 'contact',
+            # Common aliases
+            'supplier': 'vendor',
+            'suppliers': 'vendor',
+            'client': 'customer',
+            'clients': 'customer',
+            'person': 'contact',
+            'people': 'contact'
         }
 
         normalized = type_map.get(entity_type.lower())
         if not normalized:
-            logger.warning(f"Unknown entity type '{entity_type}', defaulting to 'vendor'")
-            return 'vendor'
+            logger.warning(f"Unknown entity type '{entity_type}', defaulting to 'contact'")
+            return 'contact'
         return normalized
 
     async def _store_normalized_entities(self, entities: List[Dict], user_id: str, transaction_id: str, supabase: Client):
@@ -9816,10 +9841,25 @@ class ExcelProcessor:
                     raw_entity_type = entity.get('entity_type', 'vendor')
                     normalized_entity_type = self._normalize_entity_type(raw_entity_type)
                     
+                    canonical_name = entity.get('canonical_name', '')
+                    
+                    # Generate phonetic encodings for fuzzy matching (jellyfish library)
+                    try:
+                        import jellyfish
+                        soundex = jellyfish.soundex(canonical_name) if canonical_name else ''
+                        metaphone = jellyfish.metaphone(canonical_name) if canonical_name else ''
+                        dmetaphone = jellyfish.dmetaphone(canonical_name)[0] if canonical_name else ''
+                    except Exception as phonetic_err:
+                        logger.warning(f"Phonetic encoding failed for '{canonical_name}': {phonetic_err}")
+                        soundex = metaphone = dmetaphone = ''
+                    
                     entity_data = {
                         'user_id': user_id,
                         'entity_type': normalized_entity_type,  # Use normalized singular form
-                        'canonical_name': entity.get('canonical_name', ''),
+                        'canonical_name': canonical_name,
+                        'canonical_name_soundex': soundex,
+                        'canonical_name_metaphone': metaphone,
+                        'canonical_name_dmetaphone': dmetaphone,
                         'aliases': entity.get('aliases', []),
                         'email': entity.get('email'),
                         'phone': entity.get('phone'),
