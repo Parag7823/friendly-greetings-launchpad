@@ -15,12 +15,30 @@ Key Improvements:
 import os
 import logging
 import re
+import json
 from datetime import datetime
 from typing import Dict, List, Optional, Any, Tuple
 from anthropic import AsyncAnthropic
 from supabase import create_client, Client
 
 logger = logging.getLogger(__name__)
+
+# Initialize Groq client for semantic analysis
+try:
+    from groq import Groq
+    groq_api_key = os.getenv('GROQ_API_KEY')
+    if groq_api_key:
+        groq_client = Groq(api_key=groq_api_key)
+        GROQ_AVAILABLE = True
+        logger.info("✅ Groq client initialized for semantic analysis")
+    else:
+        groq_client = None
+        GROQ_AVAILABLE = False
+        logger.warning("⚠️ GROQ_API_KEY not found - semantic analysis disabled")
+except ImportError:
+    groq_client = None
+    GROQ_AVAILABLE = False
+    logger.warning("⚠️ Groq package not installed - semantic analysis disabled")
 
 # Import debug logger for capturing relationship detection reasoning
 try:
@@ -307,6 +325,68 @@ class EnhancedRelationshipDetector:
             logger.error(f"Within-file relationship detection failed: {e}")
             return []
     
+    async def _enrich_relationship_with_ai(self, rel: Dict, source_event: Dict, target_event: Dict) -> Dict:
+        """
+        Enrich a relationship with AI-generated semantic fields using Groq/Llama.
+        
+        Populates: semantic_description, reasoning, temporal_causality, business_logic
+        """
+        if not GROQ_AVAILABLE or not groq_client:
+            return {}
+        
+        try:
+            # Build context for AI
+            prompt = f"""Analyze this financial relationship and provide structured insights:
+
+SOURCE EVENT:
+- Type: {source_event.get('document_type', 'unknown')}
+- Platform: {source_event.get('source_platform', 'unknown')}
+- Amount: ${source_event.get('amount_usd', 0):.2f}
+- Date: {source_event.get('source_ts', 'unknown')}
+- Vendor: {source_event.get('vendor_standard', 'unknown')}
+
+TARGET EVENT:
+- Type: {target_event.get('document_type', 'unknown')}
+- Platform: {target_event.get('source_platform', 'unknown')}
+- Amount: ${target_event.get('amount_usd', 0):.2f}
+- Date: {target_event.get('source_ts', 'unknown')}
+- Vendor: {target_event.get('vendor_standard', 'unknown')}
+
+RELATIONSHIP:
+- Type: {rel.get('relationship_type', 'unknown')}
+- Confidence: {rel.get('confidence_score', 0):.2f}
+- Match Factors: {', '.join(rel.get('key_factors', []))}
+
+Provide a JSON response with:
+1. "semantic_description": Brief natural language description (1-2 sentences)
+2. "reasoning": Why this relationship exists (key evidence)
+3. "temporal_causality": One of: source_causes_target, target_causes_source, bidirectional, correlation_only
+4. "business_logic": One of: standard_payment_flow, revenue_recognition, expense_reimbursement, payroll_processing, tax_withholding, recurring_billing, unknown
+
+Return ONLY valid JSON, no markdown."""
+
+            response = groq_client.chat.completions.create(
+                model="llama-3.3-70b-versatile",
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=500,
+                temperature=0.3
+            )
+            
+            content = response.choices[0].message.content.strip()
+            # Remove markdown code blocks if present
+            if content.startswith('```'):
+                content = content.split('```')[1]
+                if content.startswith('json'):
+                    content = content[4:]
+                content = content.strip()
+            
+            enrichment = json.loads(content)
+            return enrichment
+            
+        except Exception as e:
+            logger.warning(f"AI enrichment failed: {e}")
+            return {}
+    
     async def _store_relationships(self, relationships: List[Dict], user_id: str) -> List[Dict]:
         """
         Store detected relationships in the database and return stored records with IDs.
@@ -319,6 +399,26 @@ class EnhancedRelationshipDetector:
                 return []
             
             stored_relationships = []
+            
+            # Fetch event details for AI enrichment (batch fetch for efficiency)
+            event_ids = set()
+            for rel in relationships:
+                event_ids.add(rel['source_event_id'])
+                event_ids.add(rel['target_event_id'])
+            
+            # Fetch all events in one query
+            events_map = {}
+            if GROQ_AVAILABLE and event_ids:
+                try:
+                    events_result = self.supabase.table('raw_events').select(
+                        'id, source_platform, document_type, amount_usd, source_ts, vendor_standard'
+                    ).in_('id', list(event_ids)).execute()
+                    
+                    if events_result.data:
+                        events_map = {e['id']: e for e in events_result.data}
+                        logger.info(f"Fetched {len(events_map)} events for AI enrichment")
+                except Exception as e:
+                    logger.warning(f"Failed to fetch events for enrichment: {e}")
             
             # Prepare relationship instances for insertion
             relationship_instances = []
@@ -341,6 +441,23 @@ class EnhancedRelationshipDetector:
                 if rel.get('entity_match'):
                     key_factors.append('entity_match')
                 
+                # ✅ NEW: AI-powered semantic enrichment using Groq/Llama
+                semantic_description = None
+                reasoning = None
+                temporal_causality = None
+                business_logic = None
+                
+                if events_map:
+                    source_event = events_map.get(rel['source_event_id'])
+                    target_event = events_map.get(rel['target_event_id'])
+                    
+                    if source_event and target_event:
+                        enrichment = await self._enrich_relationship_with_ai(rel, source_event, target_event)
+                        semantic_description = enrichment.get('semantic_description')
+                        reasoning = enrichment.get('reasoning')
+                        temporal_causality = enrichment.get('temporal_causality')
+                        business_logic = enrichment.get('business_logic')
+                
                 relationship_instances.append({
                     'user_id': user_id,
                     'source_event_id': rel['source_event_id'],
@@ -348,8 +465,12 @@ class EnhancedRelationshipDetector:
                     'relationship_type': rel['relationship_type'],
                     'confidence_score': rel['confidence_score'],
                     'detection_method': rel.get('detection_method', 'unknown'),
-                    'metadata': metadata,  # ✅ FIX: Store metadata (column exists per migration)
-                    'key_factors': key_factors,  # ✅ FIX: Store key factors
+                    'metadata': metadata,
+                    'key_factors': key_factors,
+                    'semantic_description': semantic_description,  # ✅ NEW: AI-generated description
+                    'reasoning': reasoning,  # ✅ NEW: AI-generated reasoning
+                    'temporal_causality': temporal_causality,  # ✅ NEW: AI-determined causality
+                    'business_logic': business_logic,  # ✅ NEW: AI-classified business pattern
                     'created_at': datetime.utcnow().isoformat()
                 })
             
