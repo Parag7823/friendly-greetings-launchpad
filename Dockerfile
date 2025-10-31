@@ -24,9 +24,9 @@ RUN npm run build
 # NUCLEAR CACHE BUST: Changed base image tag to force complete rebuild
 FROM python:3.9-slim
 
-# Force cache invalidation - updated 2025-10-31 to include file_id fix and AI enrichment
-ARG CACHEBUST=20251031-v4-ABSOLUTE-NUCLEAR
-ENV DEPLOYMENT_VERSION="2025-10-31-13:12-ABSOLUTE-FORCE-REBUILD"
+# Force cache invalidation - updated 2025-10-31 to fix ExcelProcessor method binding
+ARG CACHEBUST=20251031-v5-METHOD-BINDING-FIX
+ENV DEPLOYMENT_VERSION="2025-10-31-15:30-EXCELPROCESSOR-FIX"
 RUN echo "🚨 ABSOLUTE NUCLEAR CACHE BUST: $CACHEBUST - Forcing complete rebuild"
 RUN echo "🚨 DEPLOYMENT VERSION: $DEPLOYMENT_VERSION"
 RUN echo "🚨 TIMESTAMP: $(date +%s)"
