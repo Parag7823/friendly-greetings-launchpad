@@ -9187,9 +9187,13 @@ class ExcelProcessor:
             entities = await self._extract_entities_from_events(user_id, supabase, file_id=file_id)
             entity_matches = await self._resolve_entities(entities, user_id, filename, supabase)
             
+            # CRITICAL FIX #24: Ensure transaction_id exists for entity storage
+            # If transaction_id is None (transaction creation failed), create a new one
+            entity_transaction_id = transaction_id if transaction_id else str(uuid.uuid4())
+            
             # CRITICAL FIX: Entities already created by find_or_create_entity() in _resolve_entities()
             # Only store entity_matches (not entities again - would create duplicates)
-            await self._store_entity_matches(entity_matches, user_id, transaction_id, supabase)
+            await self._store_entity_matches(entity_matches, user_id, entity_transaction_id, supabase)
             
             insights['entity_resolution'] = {
                 'entities_found': len(entities),
@@ -9243,9 +9247,12 @@ class ExcelProcessor:
             platform_patterns = await self._learn_platform_patterns(platform_info, user_id, filename, supabase)
             discovered_platforms = await self._discover_new_platforms(user_id, filename, supabase)
             
+            # CRITICAL FIX #24: Ensure transaction_id exists for platform storage
+            platform_transaction_id = transaction_id if transaction_id else str(uuid.uuid4())
+            
             # Store platform patterns and discoveries
-            await self._store_platform_patterns(platform_patterns, user_id, transaction_id, supabase)
-            await self._store_discovered_platforms(discovered_platforms, user_id, transaction_id, supabase)
+            await self._store_platform_patterns(platform_patterns, user_id, platform_transaction_id, supabase)
+            await self._store_discovered_platforms(discovered_platforms, user_id, platform_transaction_id, supabase)
             
             insights['platform_learning'] = {
                 'patterns_learned': len(platform_patterns),
@@ -9336,11 +9343,14 @@ class ExcelProcessor:
                     'status': 'deferred_to_background'
                 }
             
+            # CRITICAL FIX #24: Ensure transaction_id exists for relationship storage
+            relationship_transaction_id = transaction_id if transaction_id else str(uuid.uuid4())
+            
             # Store relationship instances atomically
             if relationship_results.get('relationships'):
-                await self._store_relationship_instances(relationship_results['relationships'], user_id, transaction_id, supabase)  # FIX #6: Pass transaction_id
+                await self._store_relationship_instances(relationship_results['relationships'], user_id, relationship_transaction_id, supabase)  # FIX #6: Pass transaction_id
                 # Also store cross-platform relationships for analytics
-                await self._store_cross_platform_relationships(relationship_results['relationships'], user_id, transaction_id, supabase)  # FIX #9: Pass transaction_id
+                await self._store_cross_platform_relationships(relationship_results['relationships'], user_id, relationship_transaction_id, supabase)  # FIX #9: Pass transaction_id
             
             # Add relationship results to insights
             insights['relationship_analysis'] = relationship_results
