@@ -8718,9 +8718,10 @@ class ExcelProcessor:
             
             raw_record_result = await tx.insert('raw_records', raw_record_data)
             if not raw_record_result or 'id' not in raw_record_result:
-                logger.error(f"Failed to insert raw_record: {raw_record_result}")
+                logger.error(f"❌ CRITICAL: Failed to insert raw_record: {raw_record_result}")
                 raise Exception(f"raw_records insert returned invalid result: {raw_record_result}")
             file_id = raw_record_result['id']
+            logger.info(f"✅ Created raw_record with file_id={file_id}")
             
             # Step 4: Create or update ingestion_jobs entry within transaction
             job_data = {
@@ -8770,7 +8771,14 @@ class ExcelProcessor:
         
         # Process sheets directly (already in memory from duplicate detection)
         # TODO: Refactor to stream from storage for files > 500MB
-        logger.info(f"🔄 Starting row processing transaction for {len(sheets)} sheets, {total_rows} total rows")
+        
+        # ✅ CRITICAL FIX #23: Validate file_id exists before processing rows
+        if not file_id:
+            error_msg = "❌ CRITICAL: file_id is None, cannot process rows"
+            logger.error(error_msg)
+            raise ValueError(error_msg)
+        
+        logger.info(f"🔄 Starting row processing transaction for {len(sheets)} sheets, {total_rows} total rows with file_id={file_id}")
         async with transaction_manager.transaction(
             transaction_id=None,
             user_id=user_id,
