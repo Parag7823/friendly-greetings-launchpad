@@ -62,6 +62,10 @@ RUN echo "Installing pandas with Python $(python --version)" && \
 # Install remaining dependencies
 RUN pip install --no-cache-dir -r backend-requirements.txt
 
+# CRITICAL: Force cache invalidation for Python file copies
+ARG CACHEBUST=20251031-v2
+RUN echo "Copying Python files with cache bust: $CACHEBUST"
+
 # Copy all necessary Python files and modules
 COPY fastapi_backend.py .
 COPY universal_field_detector.py .

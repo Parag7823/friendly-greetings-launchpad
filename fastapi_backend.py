@@ -7654,6 +7654,20 @@ class ExcelProcessor:
         # Note: No longer using Anthropic, switched to Groq/Llama for all AI operations
         self.anthropic = None
         
+        # DIAGNOSTIC: Log critical methods on initialization
+        critical_methods = [
+            '_normalize_entity_type', '_store_entity_matches', '_store_platform_patterns',
+            '_extract_entities_from_events', '_resolve_entities', '_learn_platform_patterns',
+            '_discover_new_platforms', '_store_discovered_platforms'
+        ]
+        missing_methods = [m for m in critical_methods if not hasattr(self, m)]
+        if missing_methods:
+            logger.error(f" CRITICAL: ExcelProcessor missing methods on init: {missing_methods}")
+            logger.error(f" File: {__file__}")
+            logger.error(f" Total methods: {len([m for m in dir(self) if not m.startswith('__')])}")
+        else:
+            logger.info(f" ExcelProcessor initialized with all {len(critical_methods)} critical methods")
+        
         # Initialize universal components with supabase_client for persistent learning
         self.universal_field_detector = UniversalFieldDetector()
         self.universal_platform_detector = UniversalPlatformDetector(anthropic_client=None, cache_client=safe_get_ai_cache(), supabase_client=supabase)
@@ -9190,11 +9204,22 @@ class ExcelProcessor:
             
         except Exception as e:
             import traceback
+            
+            # DIAGNOSTIC: Check if methods exist
+            diagnostic_info = {
+                '_extract_entities_from_events': hasattr(self, '_extract_entities_from_events'),
+                '_resolve_entities': hasattr(self, '_resolve_entities'),
+                '_store_entity_matches': hasattr(self, '_store_entity_matches'),
+                '_normalize_entity_type': hasattr(self, '_normalize_entity_type'),
+                'ExcelProcessor_methods': [m for m in dir(self) if not m.startswith('__')][:20]
+            }
+            
             error_details = {
                 'error_type': type(e).__name__,
                 'error_message': str(e),
                 'traceback': traceback.format_exc(),
-                'method': '_extract_entities_from_events or _resolve_entities'
+                'method': '_extract_entities_from_events or _resolve_entities',
+                'diagnostic': diagnostic_info
             }
             logger.error(f"❌ Entity resolution failed: {error_details}")
             insights['entity_resolution'] = {'error': str(e), 'details': error_details}
@@ -9235,11 +9260,23 @@ class ExcelProcessor:
             
         except Exception as e:
             import traceback
+            
+            # DIAGNOSTIC: Check if methods exist
+            diagnostic_info = {
+                '_learn_platform_patterns': hasattr(self, '_learn_platform_patterns'),
+                '_discover_new_platforms': hasattr(self, '_discover_new_platforms'),
+                '_store_platform_patterns': hasattr(self, '_store_platform_patterns'),
+                '_store_discovered_platforms': hasattr(self, '_store_discovered_platforms'),
+                'ExcelProcessor_methods_count': len([m for m in dir(self) if not m.startswith('__')]),
+                'file_path': __file__ if '__file__' in globals() else 'unknown'
+            }
+            
             error_details = {
                 'error_type': type(e).__name__,
                 'error_message': str(e),
                 'traceback': traceback.format_exc(),
-                'method': '_learn_platform_patterns or _discover_new_platforms'
+                'method': '_learn_platform_patterns or _discover_new_platforms',
+                'diagnostic': diagnostic_info
             }
             logger.error(f"❌ Platform learning failed: {error_details}")
             insights['platform_learning'] = {'error': str(e), 'details': error_details}
