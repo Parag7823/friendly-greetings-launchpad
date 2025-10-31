@@ -11154,7 +11154,7 @@ async def handle_duplicate_decision(request: DuplicateDecisionRequest):
             async def resume_processing():
                 try:
                     # Re-trigger processing with resume flag
-                    from fastapi_backend import process_file_inline
+                    from fastapi_backend_v2 import process_file_inline
                     await process_file_inline({
                         'user_id': user_id,
                         'storage_path': storage_path,

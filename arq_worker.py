@@ -6,7 +6,7 @@ from arq import Retry
 from arq.connections import RedisSettings
 
 # Import application code to reuse existing logic end-to-end
-from fastapi_backend import (
+from fastapi_backend_v2 import (
     NangoClient,
     ConnectorSyncRequest,
     _gmail_sync_run,

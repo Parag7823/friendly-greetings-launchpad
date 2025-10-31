@@ -17,7 +17,7 @@ project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
 # Import FastAPI app
-from fastapi_backend import app
+from fastapi_backend_v2 import app
 from fastapi.testclient import TestClient
 
 def before_all(context):

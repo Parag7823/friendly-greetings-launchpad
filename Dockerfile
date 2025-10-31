@@ -71,7 +71,7 @@ ARG CACHEBUST=20251031-v2
 RUN echo "Copying Python files with cache bust: $CACHEBUST"
 
 # Copy all necessary Python files and modules
-COPY fastapi_backend.py .
+COPY fastapi_backend_v2.py .
 COPY universal_field_detector.py .
 COPY universal_document_classifier_optimized.py .
 COPY universal_platform_detector_optimized.py .

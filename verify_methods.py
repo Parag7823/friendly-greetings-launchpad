@@ -14,7 +14,7 @@ def verify_excel_processor_methods():
     """Verify all critical methods exist in ExcelProcessor class"""
     try:
         # Import the class
-        from fastapi_backend import ExcelProcessor
+        from fastapi_backend_v2 import ExcelProcessor
         
         # Critical methods that must exist
         critical_methods = [
