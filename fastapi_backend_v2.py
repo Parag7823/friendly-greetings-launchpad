@@ -10552,6 +10552,15 @@ async def get_performance_optimization_status():
 
 # ExcelProcessor class ends here
 
+ExcelProcessor._normalize_entity_type = _normalize_entity_type
+ExcelProcessor._store_normalized_entities = _store_normalized_entities
+ExcelProcessor._store_entity_matches = _store_entity_matches
+ExcelProcessor._store_platform_patterns = _store_platform_patterns
+ExcelProcessor._store_relationship_instances = _store_relationship_instances
+ExcelProcessor._store_cross_platform_relationships = _store_cross_platform_relationships
+ExcelProcessor._store_discovered_platforms = _store_discovered_platforms
+ExcelProcessor.store_computed_metrics = store_computed_metrics
+
 
 # ============================================================================
 # LEGACY ENTITY RESOLVER (DEPRECATED - Use EntityResolverOptimized)
