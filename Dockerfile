@@ -26,7 +26,9 @@ FROM python:3.9-slim
 
 # Force cache invalidation - updated 2025-10-31 to include file_id fix and AI enrichment
 ARG CACHEBUST=20251031-v3-NUCLEAR
+ENV DEPLOYMENT_VERSION="2025-10-31-09:30-FORCE-REBUILD"
 RUN echo "🚨 NUCLEAR CACHE BUST: $CACHEBUST - Forcing complete rebuild"
+RUN echo "🚨 DEPLOYMENT VERSION: $DEPLOYMENT_VERSION"
 # Install system dependencies for python-magic, Tesseract (OCR), Java (Tabula), and basic functionality
 # Added gfortran and build-essential for scipy compilation
 # Added dependencies for PyTorch/sentence-transformers (BGE embeddings)
