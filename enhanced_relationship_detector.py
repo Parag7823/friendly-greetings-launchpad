@@ -323,15 +323,33 @@ class EnhancedRelationshipDetector:
             # Prepare relationship instances for insertion
             relationship_instances = []
             for rel in relationships:
+                # Build metadata from match flags
+                metadata = rel.get('metadata', {})
+                if rel.get('amount_match'):
+                    metadata['amount_match'] = True
+                if rel.get('date_match'):
+                    metadata['date_match'] = True
+                if rel.get('entity_match'):
+                    metadata['entity_match'] = True
+                
+                # Build key factors array
+                key_factors = []
+                if rel.get('amount_match'):
+                    key_factors.append('amount_match')
+                if rel.get('date_match'):
+                    key_factors.append('date_match')
+                if rel.get('entity_match'):
+                    key_factors.append('entity_match')
+                
                 relationship_instances.append({
                     'user_id': user_id,
                     'source_event_id': rel['source_event_id'],
                     'target_event_id': rel['target_event_id'],
                     'relationship_type': rel['relationship_type'],
-                    'confidence_score': rel['confidence_score'],  # ✅ CRITICAL FIX: Use correct column name
+                    'confidence_score': rel['confidence_score'],
                     'detection_method': rel.get('detection_method', 'unknown'),
-                    # ✅ CRITICAL FIX: Remove 'metadata' - column doesn't exist in relationship_instances table
-                    # Metadata is stored in the rel object but not persisted to this table
+                    'metadata': metadata,  # ✅ FIX: Store metadata (column exists per migration)
+                    'key_factors': key_factors,  # ✅ FIX: Store key factors
                     'created_at': datetime.utcnow().isoformat()
                 })
             
