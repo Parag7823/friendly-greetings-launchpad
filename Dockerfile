@@ -23,8 +23,8 @@ RUN npm run build
 # Backend stage - Use Python 3.9 for maximum pandas compatibility (most stable)
 FROM python:3.9.18-slim
 
-# Force cache invalidation - updated 2025-10-28 to include BGE embeddings
-ARG CACHEBUST=20251028-v3
+# Force cache invalidation - updated 2025-10-31 to include file_id fix and AI enrichment
+ARG CACHEBUST=20251031-v1
 # Install system dependencies for python-magic, Tesseract (OCR), Java (Tabula), and basic functionality
 # Added gfortran and build-essential for scipy compilation
 # Added dependencies for PyTorch/sentence-transformers (BGE embeddings)
