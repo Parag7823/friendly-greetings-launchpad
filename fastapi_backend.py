@@ -8898,6 +8898,7 @@ class ExcelProcessor:
                                 validated_file_id = file_id if file_id else None
                                 event_data = {
                                 'user_id': user_id,
+                                'file_id': validated_file_id,  # CRITICAL FIX #20: Add file_id to enable entity extraction queries
                                 'provider': event['provider'],
                                 'kind': event['kind'],
                                 'source_platform': event['source_platform'],
