@@ -21,11 +21,12 @@ RUN npm ci --production=false
 RUN npm run build
 
 # Backend stage - Use Python 3.9 for maximum pandas compatibility (most stable)
-FROM python:3.9.18-slim
+# NUCLEAR CACHE BUST: Changed base image tag to force complete rebuild
+FROM python:3.9-slim
 
 # Force cache invalidation - updated 2025-10-31 to include file_id fix and AI enrichment
-ARG CACHEBUST=20251031-v2
-RUN echo "Cache bust: $CACHEBUST"
+ARG CACHEBUST=20251031-v3-NUCLEAR
+RUN echo "🚨 NUCLEAR CACHE BUST: $CACHEBUST - Forcing complete rebuild"
 # Install system dependencies for python-magic, Tesseract (OCR), Java (Tabula), and basic functionality
 # Added gfortran and build-essential for scipy compilation
 # Added dependencies for PyTorch/sentence-transformers (BGE embeddings)
@@ -94,6 +95,7 @@ COPY nango_client.py .
 COPY arq_worker.py .
 COPY provenance_tracker.py .
 COPY debug_logger.py .
+COPY verify_methods.py .
 COPY start.sh .
  
 # Copy built frontend from frontend stage
