@@ -8770,11 +8770,13 @@ class ExcelProcessor:
         
         # Process sheets directly (already in memory from duplicate detection)
         # TODO: Refactor to stream from storage for files > 500MB
+        logger.info(f"🔄 Starting row processing transaction for {len(sheets)} sheets, {total_rows} total rows")
         async with transaction_manager.transaction(
             transaction_id=None,
             user_id=user_id,
             operation_type="row_processing"
         ) as tx:
+            logger.info(f"✅ Transaction context entered successfully")
             
             # Process each sheet
             for sheet_name, sheet_df in sheets.items():
@@ -9058,6 +9060,11 @@ class ExcelProcessor:
                         "message": format_progress_message(ProcessingStage.ACT, "Working through your data", f"{processed_rows:,} rows completed"),
                         "progress": int(progress)
                     })
+            
+            logger.info(f"✅ Completed row processing loop: {processed_rows} rows, {events_created} events")
+            logger.info(f"🔄 Exiting transaction context manager...")
+        
+        logger.info(f"✅ Transaction committed successfully! Proceeding to Step 6...")
         
         # Step 6: Update raw_records with completion status
         await manager.send_update(job_id, {
@@ -9512,6 +9519,9 @@ class ExcelProcessor:
         """
         FIX #16: Resolve extracted entities to normalized entities in database.
         Matches entities to existing ones or creates new normalized entities.
+        
+        CRITICAL FIX #17: Fixed key mismatch - _extract_entities_from_events returns
+        'entity_name' and 'entity_type', not 'name' and 'type'
         """
         try:
             if not entities:
@@ -9522,8 +9532,9 @@ class ExcelProcessor:
             
             for entity in entities:
                 try:
-                    entity_type = entity.get('type', 'vendor')
-                    entity_name = entity.get('name', '')
+                    # CRITICAL FIX #17: Use correct keys from _extract_entities_from_events
+                    entity_type = entity.get('entity_type', 'vendor')
+                    entity_name = entity.get('entity_name', '')
                     
                     if not entity_name:
                         continue
