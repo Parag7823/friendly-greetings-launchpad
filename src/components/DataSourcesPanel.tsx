@@ -20,7 +20,7 @@ import { useAuth } from './AuthProvider';
 import { supabase } from '@/integrations/supabase/client';
 import { config } from '@/config';
 import { useToast } from './ui/use-toast';
-import { AnimatePresence } from 'framer-motion';
+import { AnimatePresence, motion } from 'framer-motion';
 import { useFastAPIProcessor } from './FastAPIProcessor';
 
 interface DataSourcesPanelProps {
@@ -267,412 +267,7 @@ export const DataSourcesPanel = ({ isOpen, onClose, onFilePreview }: DataSources
     }
   }, [user?.id, isOpen]);
 
-  const handleConnect = async (provider: string) => {
-    try {
-      setConnecting(provider);
-      const { data: sessionData } = await supabase.auth.getSession();
-      const sessionToken = sessionData?.session?.access_token;
-
-      const response = await fetch(`${config.apiUrl}/api/connectors/initiate`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          provider,
-          user_id: user?.id,
-          session_token: sessionToken
-        })
-      });
-
-      if (!response.ok) {
-        // Check if it's a connection limit error (HTTP 402)
-        if (response.status === 402) {
-          const errorData = await response.json();
-          toast({
-            title: '⚠️ Connection Limit Reached',
-            description: errorData.detail?.message || 'You have reached the maximum number of connections. Please upgrade your Nango plan or delete unused connections.',
-            variant: 'destructive',
-            duration: 10000,
-            action: errorData.detail?.upgrade_url ? (
-              <ToastAction 
-                altText="Upgrade Plan" 
-                onClick={() => window.open(errorData.detail.upgrade_url, '_blank')}
-              >
-                Upgrade Plan
-              </ToastAction>
-            ) : undefined
-          });
-          return;
-        }
-        throw new Error('Failed to initiate connection');
-      }
-
-      const data = await response.json();
-      const connectUrl = data?.connect_session?.url || data?.connect_session?.connect_url;
-
-      if (!connectUrl) {
-        console.error('No connect URL received from backend:', data);
-        toast({
-          title: 'Connection Failed',
-          description: 'Could not get authorization URL from server',
-          variant: 'destructive'
-        });
-        return;
-      }
-
-      console.log('Opening Nango popup with URL:', connectUrl);
-
-      // Open popup with the actual URL (not about:blank)
-      const popup = window.open(connectUrl, 'nango_oauth', 'width=600,height=700,scrollbars=yes,resizable=yes');
-      
-      if (!popup) {
-        toast({
-          title: 'Popup Blocked',
-          description: 'Please allow popups for this site and try again',
-          variant: 'destructive'
-        });
-        return;
-      }
-      
-      toast({
-        title: 'Connection Started',
-        description: 'Complete the authorization in the popup window'
-      });
-        
-        // Listen for messages from Nango popup (success callback)
-        const messageHandler = (event: MessageEvent) => {
-          // Check if message is from Nango
-          if (event.origin.includes('nango.dev') || event.origin.includes('api.nango.dev')) {
-            console.log('Received message from Nango:', event.data);
-            
-            // Check for success message
-            if (event.data?.type === 'connect' || event.data?.success || event.data?.status === 'success') {
-              console.log('Nango connection successful, closing popup');
-              
-              // Close the popup automatically
-              if (popup && !popup.closed) {
-                popup.close();
-              }
-              
-              // Remove the listener
-              window.removeEventListener('message', messageHandler);
-            }
-          }
-        };
-        
-        window.addEventListener('message', messageHandler);
-        
-        // Monitor popup for success state
-        let successDetected = false;
-        const successCheckTimer = setInterval(() => {
-          try {
-            // Check if popup is still open
-            if (popup && !popup.closed) {
-              // Try to detect success by checking popup title or URL
-              // This will fail due to CORS, but we'll catch it
-              const popupTitle = popup.document?.title || '';
-              if (popupTitle.toLowerCase().includes('success')) {
-                successDetected = true;
-                console.log('Success detected in popup');
-                // Close after 3 seconds to let user see success message
-                setTimeout(() => {
-                  if (popup && !popup.closed) {
-                    popup.close();
-                  }
-                }, 3000);
-                clearInterval(successCheckTimer);
-              }
-            } else {
-              clearInterval(successCheckTimer);
-            }
-          } catch (e) {
-            // CORS error is expected, ignore
-          }
-        }, 500);
-        
-        // Fallback: If popup is still open after 2 minutes, assume it's stuck
-        const fallbackTimer = setTimeout(() => {
-          if (popup && !popup.closed && !successDetected) {
-            console.log('Popup timeout - closing after 2 minutes');
-            popup.close();
-          }
-          clearInterval(successCheckTimer);
-        }, 120000); // 2 minutes
-        
-        // Poll to detect when popup closes, then verify connection
-        if (popup) {
-          const pollTimer = setInterval(() => {
-            if (popup.closed) {
-              clearInterval(pollTimer);
-              clearInterval(successCheckTimer);
-              clearTimeout(fallbackTimer);
-              window.removeEventListener('message', messageHandler);
-              
-              // Set verifying state to show user we're confirming the connection
-              setConnecting(null); // Clear connecting state
-              setVerifying(provider);
-              
-              // Verify connection after popup closes (creates record if webhook failed)
-              const refreshConnection = async () => {
-                const { data: sessionData } = await supabase.auth.getSession();
-                const sessionToken = sessionData?.session?.access_token;
-                
-                // Call verify endpoint to ensure connection is saved
-                try {
-                  console.log('Verifying connection for provider:', provider);
-                  const verifyResponse = await fetch(`${config.apiUrl}/api/connectors/verify-connection`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                      user_id: user?.id,
-                      provider: provider,
-                      session_token: sessionToken
-                    })
-                  });
-                  
-                  if (verifyResponse.ok) {
-                    console.log('Connection verified successfully');
-                    const integrationName = INTEGRATIONS.find(i => i.provider === provider)?.name || provider;
-                    toast({
-                      title: 'Connected!',
-                      description: `${integrationName} connected successfully`
-                    });
-                  } else {
-                    const error = await verifyResponse.text();
-                    console.error('Verify failed:', error);
-                  }
-                } catch (e) {
-                  console.error('Failed to verify connection:', e);
-                }
-                
-                // Refresh connections list using shared hook
-                await refetchConnections();
-                console.log('Connections refreshed');
-              };
-              
-              // CRITICAL FIX: More aggressive polling after OAuth to catch webhook processing
-              // Nango webhook may take 1-3 seconds to process and update database
-              // Poll every second for 15 seconds to ensure we catch the connection
-              let pollAttempts = 0;
-              const maxPollAttempts = 15;
-              
-              let pollingStopped = false; // Flag to prevent multiple toasts
-              
-              const aggressivePoll = setInterval(async () => {
-                if (pollingStopped) return; // Already found or timed out
-                
-                pollAttempts++;
-                console.log(`Polling for connection update (attempt ${pollAttempts}/${maxPollAttempts})`);
-                
-                await refreshConnection();
-                
-                // Refresh connections using shared hook and check result
-                const result = await refetchConnections();
-                
-                // Check if connection now exists in the refreshed data
-                const foundConnection = (result.data || connections).find(
-                  (c: any) => c.provider === provider
-                );
-                
-                if (foundConnection) {
-                  console.log('✅ Connection found! Stopping aggressive poll.', foundConnection);
-                  pollingStopped = true;
-                  clearInterval(aggressivePoll);
-                  pollingStopped = true;
-                  clearInterval(aggressivePoll);
-                  setVerifying(null); // Clear verifying state even if not found
-                  
-                  // Show warning toast ONCE
-                  toast({
-                    title: 'Connection Delayed',
-                    description: 'The connection is taking longer than expected. Please refresh in a moment.',
-                    variant: 'default'
-                  });
-                }
-              }, 1000); // Poll every 1 second
-            }
-          }, 500);
-        }
-    } catch (e) {
-      console.error('Connect failed', e);
-      toast({
-        title: 'Connection Failed',
-        description: 'Unable to start connection. Please try again.',
-        variant: 'destructive'
-      });
-      // CRITICAL FIX: Only clear connecting state on error
-      // Don't clear in finally block because verification is async
-      setConnecting(null);
-      setVerifying(null);
-    }
-    // REMOVED finally block - state is cleared by polling logic
-  };
-
-  const handleSync = async (connectionId: string, integrationId: string) => {
-    try {
-      setSyncing(connectionId);
-      const { data: sessionData } = await supabase.auth.getSession();
-      const sessionToken = sessionData?.session?.access_token;
-
-      const response = await fetch(`${config.apiUrl}/api/connectors/sync`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          user_id: user?.id,
-          connection_id: connectionId,
-          integration_id: integrationId,
-          mode: 'incremental',
-          session_token: sessionToken
-        })
-      });
-
-      if (!response.ok) {
-        throw new Error('Sync failed');
-      }
-
-      toast({
-        title: 'Sync Started',
-        description: 'Your data is being synchronized'
-      });
-    } catch (e) {
-      console.error('Sync failed', e);
-      toast({
-        title: 'Sync Failed',
-        description: 'Unable to sync. Please try again.',
-        variant: 'destructive'
-      });
-    } finally {
-      setSyncing(null);
-    }
-  };
-
-  const handleDisconnect = async (connectionId: string, integrationName: string) => {
-    try {
-      const { data: sessionData } = await supabase.auth.getSession();
-      const sessionToken = sessionData?.session?.access_token;
-
-      const response = await fetch(`${config.apiUrl}/api/connectors/disconnect`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          user_id: user?.id,
-          connection_id: connectionId,
-          session_token: sessionToken
-        })
-      });
-
-      if (!response.ok) {
-        throw new Error('Disconnect failed');
-      }
-
-      // Refresh connections immediately using shared hook
-      await refetchConnections();
-
-      toast({
-        title: 'Disconnected',
-        description: `${integrationName} has been disconnected`
-      });
-    } catch (e) {
-      console.error('Disconnect failed', e);
-      toast({
-        title: 'Disconnect Failed',
-        description: 'Unable to disconnect. Please try again.',
-        variant: 'destructive'
-      });
-    }
-  };
-
-  const toggleCategory = (category: string) => {
-    setExpandedCategories(prev => {
-      const next = new Set(prev);
-      if (next.has(category)) {
-        next.delete(category);
-      } else {
-        next.add(category);
-      }
-      return next;
-    });
-  };
-
-  const isConnected = (provider: string) => {
-    return connections.some(c => c.integration_id === provider || c.provider === provider);
-  };
-
-  const getConnection = (provider: string) => {
-    return connections.find(c => c.integration_id === provider || c.provider === provider);
-  };
-
-  const handleDeleteFile = async (fileId: string, filename: string) => {
-    if (!confirm(`Are you sure you want to delete "${filename}"? This will permanently delete the file and ALL associated data (events, relationships, entities, etc.). This action cannot be undone.`)) {
-      return;
-    }
-
-    try {
-      // Use comprehensive deletion endpoint that cascades to all related tables
-      const response = await fetch(`/api/files/${fileId}?user_id=${user?.id}`, {
-        method: 'DELETE',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.detail || 'Failed to delete file');
-      }
-
-      const result = await response.json();
-
-      // Update local state
-      setUploadedFiles(prev => prev.filter(f => f.id !== fileId));
-
-      toast({
-        title: 'File Deleted',
-        description: `"${filename}" and ${result.total_records_deleted} related records deleted successfully.`
-      });
-    } catch (e) {
-      console.error('Failed to delete file', e);
-      toast({
-        title: 'Delete Failed',
-        description: e instanceof Error ? e.message : 'Unable to delete file. Please try again.',
-        variant: 'destructive'
-      });
-    }
-  };
-
-  const handlePlusClick = () => {
-    fileInputRef.current?.click();
-  };
-
-  const handleFileSelect = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const files = event.target.files;
-    if (!files || files.length === 0) return;
-
-    const fileArray = Array.from(files);
-    
-    toast({
-      title: 'Uploading Files',
-      description: `Processing ${fileArray.length} file(s)...`
-    });
-
-    // Process each file
-    for (const file of fileArray) {
-      try {
-        await processFileWithFastAPI(file);
-      } catch (error) {
-        console.error('File upload failed:', error);
-        toast({
-          title: 'Upload Failed',
-          description: `Failed to upload ${file.name}`,
-          variant: 'destructive'
-        });
-      }
-    }
-
-    // Reset input
-    if (fileInputRef.current) {
-      fileInputRef.current.value = '';
-    }
-  };
+  // ...
 
   const integrationsByCategory = INTEGRATIONS.reduce((acc, integration) => {
     if (!acc[integration.category]) {
@@ -682,13 +277,27 @@ export const DataSourcesPanel = ({ isOpen, onClose, onFilePreview }: DataSources
     return acc;
   }, {} as Record<string, Integration[]>);
 
+  if (!isOpen) return null;
+
   return (
-    <div className="h-full w-full finley-dynamic-bg flex flex-col">
-      {/* Header */}
-      <div className="flex items-center gap-2 p-4 border-b border-border">
-        <Plug className="w-5 h-5 text-primary" />
-        <h2 className="text-base font-semibold">Data Sources</h2>
-      </div>
+    <AnimatePresence>
+      <motion.div
+        initial={{ x: '100%' }}
+        animate={{ x: 0 }}
+        exit={{ x: '100%' }}
+        transition={{ type: 'spring', damping: 25, stiffness: 200 }}
+        className="fixed right-0 top-0 h-full w-full md:w-[500px] finley-dynamic-bg border-l border-border shadow-2xl z-50 flex flex-col"
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between p-4 border-b border-border">
+          <div className="flex items-center gap-2">
+            <Plug className="w-5 h-5 text-primary" />
+            <h2 className="text-base font-semibold">Data Sources</h2>
+          </div>
+          <Button variant="ghost" size="sm" onClick={onClose}>
+            <X className="w-4 h-4" />
+          </Button>
+        </div>
 
         <div className="flex-1 overflow-y-auto">
           <div className="p-4 space-y-6">
@@ -1028,7 +637,7 @@ export const DataSourcesPanel = ({ isOpen, onClose, onFilePreview }: DataSources
             </div>
           </div>
         </div>
-      </div>
-    </div>
+      </motion.div>
+    </AnimatePresence>
   );
 };
