@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { FileSpreadsheet, Plug, RefreshCw, CheckCircle2, AlertCircle, ChevronDown, ChevronRight, X, Loader2, Mail, HardDrive, Calculator, CreditCard, Trash2, Plus, Eye, GripVertical } from 'lucide-react';
 import { useConnections, useRefreshConnections } from '@/hooks/useConnections';
 import gmailLogo from "@/assets/logos/gmail.svg";
@@ -149,6 +149,181 @@ export const DataSourcesPanel = ({ isOpen, onClose, onFilePreview }: DataSources
   const fileInputRef = useRef<HTMLInputElement>(null);
   
   const [uploadedFiles, setUploadedFiles] = useState<any[]>([]);
+
+  const handlePlusClick = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleFileSelect = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = event.target.files;
+    if (!files || files.length === 0) return;
+
+    const customEvent = new CustomEvent('files-selected-for-upload', {
+      detail: { files }
+    });
+
+    window.dispatchEvent(customEvent);
+    event.target.value = '';
+  };
+
+  const toggleCategory = (category: string) => {
+    setExpandedCategories((prev) => {
+      const next = new Set(prev);
+      if (next.has(category)) {
+        next.delete(category);
+      } else {
+        next.add(category);
+      }
+      return next;
+    });
+  };
+
+  const getConnection = (provider: string) => {
+    return connections.find(
+      (connection) =>
+        connection.provider === provider || connection.integration_id === provider
+    );
+  };
+
+  const handleConnect = async (provider: string) => {
+    if (!user?.id) return;
+
+    setConnecting(provider);
+    try {
+      const response = await fetch(`${config.apiUrl}/integrations/${provider}/connect`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ user_id: user.id })
+      });
+
+      if (!response.ok) {
+        throw new Error(`Failed to start connection for ${provider}`);
+      }
+
+      const data = await response.json();
+      const { auth_url } = data;
+
+      if (auth_url) {
+        window.open(auth_url, '_blank', 'width=600,height=800');
+      }
+
+      toast({
+        title: 'Connecting...',
+        description: 'Complete the flow in the newly opened window.'
+      });
+    } catch (error: any) {
+      console.error('Connection error:', error);
+      toast({
+        title: 'Connection failed',
+        description: error?.message || 'Unable to start connection.',
+        variant: 'destructive'
+      });
+    } finally {
+      setConnecting(null);
+      refreshConnections();
+    }
+  };
+
+  const handleDisconnect = async (connectionId: string, integrationName: string) => {
+    if (!user?.id) return;
+
+    try {
+      const response = await fetch(`${config.apiUrl}/integrations/disconnect`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          user_id: user.id,
+          connection_id: connectionId
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to disconnect');
+      }
+
+      toast({
+        title: `${integrationName} disconnected`,
+        description: 'The integration has been successfully disconnected.'
+      });
+      refreshConnections();
+    } catch (error: any) {
+      console.error('Disconnect error:', error);
+      toast({
+        title: 'Disconnect failed',
+        description: error?.message || 'Unable to disconnect integration.',
+        variant: 'destructive'
+      });
+    }
+  };
+
+  const handleSync = async (connectionId: string, integrationId: string) => {
+    if (!user?.id) return;
+
+    setSyncing(connectionId);
+    try {
+      const response = await fetch(`${config.apiUrl}/integrations/${integrationId}/sync`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          user_id: user.id,
+          connection_id: connectionId
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to start sync');
+      }
+
+      toast({
+        title: 'Sync started',
+        description: 'We’ll notify you once the sync completes.'
+      });
+      await refreshConnections();
+    } catch (error: any) {
+      console.error('Sync error:', error);
+      toast({
+        title: 'Sync failed',
+        description: error?.message || 'Unable to start sync.',
+        variant: 'destructive'
+      });
+    } finally {
+      setSyncing(null);
+    }
+  };
+
+  const handleDeleteFile = async (fileId: string, filename: string) => {
+    if (!user?.id) return;
+
+    try {
+      const response = await fetch(`${config.apiUrl}/ingestion/${fileId}`, {
+        method: 'DELETE'
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to delete file');
+      }
+
+      toast({
+        title: 'File deleted',
+        description: `${filename} has been removed.`
+      });
+
+      setUploadedFiles((prev) => prev.filter((file) => file.id !== fileId));
+    } catch (error: any) {
+      console.error('Delete file error:', error);
+      toast({
+        title: 'Delete failed',
+        description: error?.message || 'Unable to delete file.',
+        variant: 'destructive'
+      });
+    }
+  };
   
   // IMPROVEMENT: Use shared hook for connections (prevents duplicate polling)
   const { data: connections = [], isLoading: loading, refetch: refetchConnections } = useConnections();
