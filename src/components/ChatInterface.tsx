@@ -594,10 +594,10 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
                 <div className="h-full flex items-center justify-center">
                   <div className="max-w-2xl w-full space-y-6 px-4">
                     <div className="text-center">
-                      <h1 className="text-2xl font-semibold text-foreground tracking-tight mb-2">
+                      <h1 className="text-lg font-semibold text-foreground tracking-tight mb-2">
                         Finance Meets Intelligence
                       </h1>
-                      <p className="text-muted-foreground text-base mb-6">
+                      <p className="text-muted-foreground text-sm mb-6">
                         I can help you understand your financial data. Let's get started!
                       </p>
                     </div>

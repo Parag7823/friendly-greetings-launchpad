@@ -37,41 +37,11 @@ export const TabbedFilePreview = ({
   onFileClose 
 }: TabbedFilePreviewProps) => {
   const { user } = useAuth();
-  const [events, setEvents] = useState<Record<string, any[]>>({});
-  const [loadingEvents, setLoadingEvents] = useState<Record<string, boolean>>({});
-  const [showMetadata, setShowMetadata] = useState<Record<string, boolean>>({});
   const [fileContent, setFileContent] = useState<Record<string, any[]>>({});
   const [loadingContent, setLoadingContent] = useState<Record<string, boolean>>({});
-  const [viewMode, setViewMode] = useState<'raw' | 'events'>('raw'); // Default to raw file view
+  const [showMetadata, setShowMetadata] = useState<Record<string, boolean>>({});
 
   const activeFile = openFiles.find(f => f.id === activeFileId);
-
-  // Load events for active file
-  useEffect(() => {
-    if (!activeFileId || loadingEvents[activeFileId] || events[activeFileId]) return;
-
-    const loadEvents = async () => {
-      setLoadingEvents(prev => ({ ...prev, [activeFileId]: true }));
-      try {
-        const { data, error } = await supabase
-          .from('raw_events')
-          .select('id, payload, kind, source_platform, amount_usd, vendor_standard, source_ts, created_at')
-          .eq('file_id', activeFileId)
-          .order('created_at', { ascending: false })
-          .limit(100);
-
-        if (!error && data) {
-          setEvents(prev => ({ ...prev, [activeFileId]: data }));
-        }
-      } catch (error) {
-        console.error('Failed to load events:', error);
-      } finally {
-        setLoadingEvents(prev => ({ ...prev, [activeFileId]: false }));
-      }
-    };
-
-    loadEvents();
-  }, [activeFileId]);
 
   // Load raw file content for active file
   useEffect(() => {
@@ -298,31 +268,8 @@ export const TabbedFilePreview = ({
                 </Card>
               )}
 
-              {/* View Mode Toggle */}
-              <div className="flex items-center gap-2 mb-4">
-                <Button
-                  variant={viewMode === 'raw' ? 'default' : 'outline'}
-                  size="sm"
-                  onClick={() => setViewMode('raw')}
-                  className="text-xs"
-                >
-                  <FileText className="w-3 h-3 mr-1" />
-                  Raw Data
-                </Button>
-                <Button
-                  variant={viewMode === 'events' ? 'default' : 'outline'}
-                  size="sm"
-                  onClick={() => setViewMode('events')}
-                  className="text-xs"
-                >
-                  <FileSpreadsheet className="w-3 h-3 mr-1" />
-                  Events
-                </Button>
-              </div>
-
-              {/* Raw File Content */}
-              {viewMode === 'raw' && (
-                loadingContent[activeFile.id] ? (
+              {/* File Content Table */}
+              {loadingContent[activeFile.id] ? (
                   <div className="flex items-center justify-center py-12">
                     <Loader2 className="w-8 h-8 animate-spin text-primary" />
                   </div>
@@ -356,95 +303,11 @@ export const TabbedFilePreview = ({
                 ) : (
                   <Card className="p-12 text-center">
                     <FileSpreadsheet className="w-16 h-16 mx-auto text-muted-foreground/30 mb-4" />
-                    <h3 className="text-xs font-semibold mb-2">No file content</h3>
-                    <p className="text-[10px] text-muted-foreground">Unable to load file content</p>
+                    <h3 className="text-[10px] font-semibold mb-2">No file content</h3>
+                    <p className="text-[8px] text-muted-foreground">Unable to load file content</p>
                   </Card>
                 )
-              )}
-
-              {/* Events Table */}
-              {viewMode === 'events' && (loadingEvents[activeFile.id] ? (
-                <div className="flex items-center justify-center py-12">
-                  <Loader2 className="w-8 h-8 animate-spin text-primary" />
-                </div>
-              ) : events[activeFile.id] && events[activeFile.id].length > 0 ? (
-                <div className="space-y-4">
-                  <div className="flex items-center justify-between">
-                    <h3 className="text-sm font-semibold text-foreground">
-                      Extracted Events ({events[activeFile.id].length})
-                    </h3>
-                    <Badge variant="outline" className="text-[10px]">
-                      {activeFile.platform || 'Unknown Platform'}
-                    </Badge>
-                  </div>
-
-                  {/* Events Grid */}
-                  <div className="grid gap-3">
-                    {events[activeFile.id].map((event, index) => (
-                      <Card key={event.id} className="p-4 hover:bg-muted/20 transition-colors">
-                        <div className="flex items-start justify-between mb-3">
-                          <div className="flex items-center gap-2">
-                            <Badge variant="outline" className="text-[10px]">
-                              {event.kind || 'Unknown'}
-                            </Badge>
-                            <span className="text-xs text-muted-foreground">
-                              #{index + 1}
-                            </span>
-                          </div>
-                          {event.source_ts && (
-                            <span className="text-[10px] text-muted-foreground">
-                              {new Date(event.source_ts).toLocaleDateString()}
-                            </span>
-                          )}
-                        </div>
-
-                        <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
-                          {event.vendor_standard && (
-                            <div>
-                              <span className="text-muted-foreground text-xs">Vendor:</span>
-                              <p className="font-medium truncate">{event.vendor_standard}</p>
-                            </div>
-                          )}
-                          {event.amount_usd !== null && event.amount_usd !== undefined && (
-                            <div>
-                              <span className="text-muted-foreground text-xs">Amount:</span>
-                              <p className="font-medium">${Number(event.amount_usd).toFixed(2)}</p>
-                            </div>
-                          )}
-                          {event.source_platform && (
-                            <div>
-                              <span className="text-muted-foreground text-xs">Platform:</span>
-                              <p className="font-medium truncate">{event.source_platform}</p>
-                            </div>
-                          )}
-                        </div>
-
-                        {/* Payload Preview */}
-                        {event.payload && Object.keys(event.payload).length > 0 && (
-                          <details className="mt-3">
-                            <summary className="text-xs text-muted-foreground cursor-pointer hover:text-foreground transition-colors">
-                              View full payload ({Object.keys(event.payload).length} fields)
-                            </summary>
-                            <div className="mt-2 p-3 bg-muted/30 rounded-md text-xs font-mono overflow-x-auto">
-                              <pre className="text-[10px]">{JSON.stringify(event.payload, null, 2)}</pre>
-                            </div>
-                          </details>
-                        )}
-                      </Card>
-                    ))}
-                  </div>
-                </div>
-              ) : (
-                <Card className="p-12 text-center">
-                  <FileSpreadsheet className="w-16 h-16 mx-auto text-muted-foreground/30 mb-4" />
-                  <h3 className="text-sm font-semibold text-foreground mb-2">No events yet</h3>
-                  <p className="text-xs text-muted-foreground">
-                    {activeFile.status === 'processing' || activeFile.status === 'pending'
-                      ? 'Events will appear here as processing completes'
-                      : 'No events were extracted from this file'}
-                  </p>
-                </Card>
-              ))}
+              }
             </motion.div>
           )}
         </AnimatePresence>
