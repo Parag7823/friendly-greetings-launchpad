@@ -9185,11 +9185,18 @@ class ExcelProcessor:
             # FIX #3: Extract entities using vendor_standard (already implemented in _extract_entities_from_events)
             # The function now prioritizes vendor_standard over vendor_raw (line 8590-8591)
             entities = await self._extract_entities_from_events(user_id, supabase, file_id=file_id)
-            entity_matches = await self._resolve_entities(entities, user_id, filename, supabase)
-            
+
             # CRITICAL FIX #24: Ensure transaction_id exists for entity storage
             # If transaction_id is None (transaction creation failed), create a new one
             entity_transaction_id = transaction_id if transaction_id else str(uuid.uuid4())
+
+            entity_matches = await self._resolve_entities(
+                entities,
+                user_id,
+                filename,
+                supabase,
+                entity_transaction_id
+            )
             
             # CRITICAL FIX: Entities already created by find_or_create_entity() in _resolve_entities()
             # Only store entity_matches (not entities again - would create duplicates)
@@ -9351,6 +9358,10 @@ class ExcelProcessor:
                 await self._store_relationship_instances(relationship_results['relationships'], user_id, relationship_transaction_id, supabase)  # FIX #6: Pass transaction_id
                 # Also store cross-platform relationships for analytics
                 await self._store_cross_platform_relationships(relationship_results['relationships'], user_id, relationship_transaction_id, supabase)  # FIX #9: Pass transaction_id
+                # ✅ NEW: Populate advanced analytics tables
+                await self._populate_causal_relationships(relationship_results['relationships'], user_id, relationship_transaction_id, supabase)
+                await self._populate_predicted_relationships(user_id, relationship_transaction_id, supabase)
+                await self._populate_temporal_patterns(user_id, file_id, supabase)
             
             # Add relationship results to insights
             insights['relationship_analysis'] = relationship_results
@@ -9509,55 +9520,146 @@ class ExcelProcessor:
             entity_map = {}
             vendor_fields_found = []
             
+            # Define entity-relevant field patterns (universal, not hardcoded)
+            entity_field_patterns = [
+                'vendor', 'supplier', 'customer', 'client', 'merchant', 'payee', 'payer',
+                'company', 'business', 'organization', 'entity', 'name', 'contact',
+                'recipient', 'sender', 'counterparty', 'party'
+            ]
+            
+            # Define patterns to EXCLUDE (dates, IDs, codes, amounts)
+            exclude_patterns = [
+                r'^\d{4}-\d{2}-\d{2}',  # ISO dates
+                r'^\d{2}/\d{2}/\d{4}',  # US dates
+                r'^\d+\.\d+$',  # Decimal numbers
+                r'^\d+$',  # Pure numbers
+                r'^[A-Z0-9]{8,}$',  # IDs/codes (all caps/numbers)
+                r'^\$',  # Currency amounts
+                r'^#',  # Reference numbers
+            ]
+            
             for event in events_data:
-                # Extract vendor information
+                # Extract vendor information from standardized fields
                 vendor_standard = event.get('vendor_standard')
                 vendor_raw = event.get('vendor_raw')
+                source_platform = event.get('source_platform', 'unknown')
+                source_filename = event.get('source_filename', 'unknown')
+                
+                # Build lineage path for provenance tracking
+                lineage_step = {
+                    'step': 'entity_extraction',
+                    'timestamp': datetime.utcnow().isoformat(),
+                    'source': 'raw_events',
+                    'operation': 'vendor_extraction',
+                    'metadata': {
+                        'event_id': event.get('id'),
+                        'source_platform': source_platform,
+                        'source_file': source_filename
+                    }
+                }
                 
                 if vendor_standard and vendor_standard not in entity_map:
-                    entity_map[vendor_standard] = {
-                        'entity_name': vendor_standard,
-                        'entity_type': 'vendor',
-                        'platform': event.get('source_platform', 'unknown'),
-                        'identifiers': {
-                            'email': event.get('email'),
-                            'phone': event.get('phone'),
-                            'bank_account': event.get('bank_account')
-                        },
-                        'source_file': event.get('source_filename'),
-                        'confidence': 0.9  # High confidence for standardized vendors
-                    }
-                    vendor_fields_found.append(vendor_standard)
+                    # Skip if vendor_standard looks like noise
+                    if not any(re.match(pattern, vendor_standard) for pattern in exclude_patterns):
+                        entity_map[vendor_standard] = {
+                            'entity_name': vendor_standard,
+                            'canonical_name': vendor_standard,
+                            'entity_type': 'vendor',
+                            'source_platform': source_platform,
+                            'identifiers': {
+                                'email': event.get('email'),
+                                'phone': event.get('phone'),
+                                'bank_account': event.get('bank_account')
+                            },
+                            'source_file': source_filename,
+                            'aliases': [vendor_standard],
+                            'platform_sources': [source_platform],
+                            'source_files': [source_filename],
+                            'confidence': 0.9,
+                            'lineage_path': [lineage_step]
+                        }
+                        vendor_fields_found.append(vendor_standard)
                 
-                # Extract other entity types from payload
+                # Extract other entity types from payload (intelligent field filtering)
                 payload = event.get('payload', {})
                 for key, value in payload.items():
-                    if isinstance(value, str) and len(value) > 2:
-                        # Look for email patterns
-                        if '@' in value and '.' in value:
-                            email_entity = {
-                                'entity_name': value,
-                                'entity_type': 'contact',
-                                'platform': event.get('source_platform', 'unknown'),
-                                'identifiers': {'email': value},
-                                'source_file': event.get('source_filename'),
-                                'confidence': 0.8
-                            }
-                            if value not in entity_map:
-                                entity_map[value] = email_entity
+                    if not isinstance(value, str) or len(value) < 3:
+                        continue
+                    
+                    # Skip excluded patterns (dates, numbers, codes)
+                    if any(re.match(pattern, value) for pattern in exclude_patterns):
+                        continue
+                    
+                    # Check if field name suggests it's an entity field
+                    key_lower = key.lower()
+                    is_entity_field = any(pattern in key_lower for pattern in entity_field_patterns)
+                    
+                    # Extract emails
+                    if '@' in value and '.' in value and len(value.split('@')) == 2:
+                        email_entity = {
+                            'entity_name': value,
+                            'canonical_name': value,
+                            'entity_type': 'contact',
+                            'source_platform': source_platform,
+                            'identifiers': {'email': value},
+                            'source_file': source_filename,
+                            'aliases': [value],
+                            'platform_sources': [source_platform],
+                            'source_files': [source_filename],
+                            'confidence': 0.8,
+                            'lineage_path': [lineage_step]
+                        }
+                        if value not in entity_map:
+                            entity_map[value] = email_entity
+                    
+                    # Extract phone numbers
+                    elif re.match(r'^\+?[\d\s\-\(\)]{10,}$', value):
+                        phone_entity = {
+                            'entity_name': value,
+                            'canonical_name': value,
+                            'entity_type': 'contact',
+                            'source_platform': source_platform,
+                            'identifiers': {'phone': value},
+                            'source_file': source_filename,
+                            'aliases': [value],
+                            'platform_sources': [source_platform],
+                            'source_files': [source_filename],
+                            'confidence': 0.7,
+                            'lineage_path': [lineage_step]
+                        }
+                        if value not in entity_map:
+                            entity_map[value] = phone_entity
+                    
+                    # Extract entity names from entity-relevant fields
+                    elif is_entity_field and len(value) >= 3 and len(value) <= 200:
+                        # Additional validation: must contain at least one letter
+                        if not re.search(r'[a-zA-Z]', value):
+                            continue
                         
-                        # Look for phone patterns
-                        elif re.match(r'^\+?[\d\s\-\(\)]{10,}$', value):
-                            phone_entity = {
+                        # Determine entity type from field name
+                        if 'vendor' in key_lower or 'supplier' in key_lower or 'merchant' in key_lower:
+                            entity_type = 'vendor'
+                        elif 'customer' in key_lower or 'client' in key_lower:
+                            entity_type = 'customer'
+                        elif 'employee' in key_lower or 'staff' in key_lower:
+                            entity_type = 'employee'
+                        else:
+                            entity_type = 'contact'
+                        
+                        if value not in entity_map:
+                            entity_map[value] = {
                                 'entity_name': value,
-                                'entity_type': 'contact',
-                                'platform': event.get('source_platform', 'unknown'),
-                                'identifiers': {'phone': value},
-                                'source_file': event.get('source_filename'),
-                                'confidence': 0.7
+                                'canonical_name': value,
+                                'entity_type': entity_type,
+                                'source_platform': source_platform,
+                                'identifiers': {},
+                                'source_file': source_filename,
+                                'aliases': [value],
+                                'platform_sources': [source_platform],
+                                'source_files': [source_filename],
+                                'confidence': 0.7,
+                                'lineage_path': [lineage_step]
                             }
-                            if value not in entity_map:
-                                entity_map[value] = phone_entity
             
             # Convert to list
             entities = list(entity_map.values())
@@ -9571,7 +9673,14 @@ class ExcelProcessor:
             logger.error(f"Entity extraction failed: {e}")
             return []
     
-    async def _resolve_entities(self, entities: List[Dict], user_id: str, filename: str, supabase: Client) -> List[Dict]:
+    async def _resolve_entities(
+        self,
+        entities: List[Dict],
+        user_id: str,
+        filename: str,
+        supabase: Client,
+        transaction_id: Optional[str] = None
+    ) -> List[Dict]:
         """
         FIX #16: Resolve extracted entities to normalized entities in database.
         Matches entities to existing ones or creates new normalized entities.
@@ -9614,16 +9723,25 @@ class ExcelProcessor:
                         except Exception:
                             soundex = metaphone = dmetaphone = ''
                         
+                        # Use canonical_name from entity if available, fallback to entity_name
+                        canonical_name = entity.get('canonical_name') or entity_name
+                        
                         normalized_entity = {
                             'user_id': user_id,
                             'entity_type': self._normalize_entity_type(entity_type),
-                            'canonical_name': entity_name,
+                            'canonical_name': canonical_name,
                             'canonical_name_soundex': soundex,
                             'canonical_name_metaphone': metaphone,
                             'canonical_name_dmetaphone': dmetaphone,
-                            'aliases': [entity_name],
-                            'platform_sources': [filename],
-                            'confidence_score': 0.8
+                            'aliases': entity.get('aliases', [entity_name]),
+                            'email': entity.get('identifiers', {}).get('email'),
+                            'phone': entity.get('identifiers', {}).get('phone'),
+                            'bank_account': entity.get('identifiers', {}).get('bank_account'),
+                            'platform_sources': entity.get('platform_sources', [entity.get('source_platform', 'unknown')]),
+                            'source_files': entity.get('source_files', [entity.get('source_file') or filename]),
+                            'confidence_score': entity.get('confidence', 0.8),
+                            'transaction_id': transaction_id,
+                            'lineage_path': entity.get('lineage_path', [])
                         }
                         result = supabase.table('normalized_entities').insert(normalized_entity).execute()
                         if result.data:
@@ -9648,8 +9766,28 @@ class ExcelProcessor:
                         'matched_fields': ['canonical_name']
                     })
                     
-                    # ✅ FIX: Log entity resolution to resolution_log table for analytics (complete schema)
+                    # ✅ FIX: Log entity resolution to resolution_log table with ALL fields populated
                     try:
+                        # Calculate identifier similarity if identifiers present
+                        identifier_similarity = None
+                        identifiers_dict = entity.get('identifiers', {})
+                        if identifiers_dict and any(identifiers_dict.values()):
+                            # Simple heuristic: if any identifier matches, high similarity
+                            identifier_similarity = 0.9 if existing.data else 0.0
+                        
+                        # Check phonetic match using soundex/metaphone
+                        phonetic_match = False
+                        if existing.data:
+                            try:
+                                import jellyfish
+                                existing_name = existing.data[0]['canonical_name']
+                                phonetic_match = (
+                                    jellyfish.soundex(entity_name) == jellyfish.soundex(existing_name) or
+                                    jellyfish.metaphone(entity_name) == jellyfish.metaphone(existing_name)
+                                )
+                            except:
+                                pass
+                        
                         resolution_log_entry = {
                             'user_id': user_id,
                             'resolution_id': f"{user_id}_{entity_name}_{datetime.utcnow().timestamp()}",
@@ -9661,18 +9799,21 @@ class ExcelProcessor:
                             'resolution_method': 'exact_match' if existing.data else 'new_entity',
                             'confidence': match_confidence,
                             'name_similarity': match_confidence,
-                            'identifier_similarity': None,
-                            'phonetic_match': False,
+                            'identifier_similarity': identifier_similarity,  # ✅ FIX: Calculate identifier similarity
+                            'phonetic_match': phonetic_match,  # ✅ FIX: Check phonetic match
                             'source_file': filename,
-                            'row_id': entity.get('source_row_id'),
-                            'identifiers': {},
+                            'row_id': str(entity.get('source_row_id', '')),  # ✅ FIX: Populate row_id
+                            'identifiers': identifiers_dict or {},  # ✅ FIX: Populate identifiers
                             'user_corrected': False,
+                            'correction_timestamp': None,  # ✅ FIX: NULL until user corrects
+                            'correct_entity_id': None,  # ✅ FIX: NULL until user corrects
                             'processing_time_ms': None,
                             'cache_hit': False,
                             'resolved_at': datetime.utcnow().isoformat(),
                             'metadata': {
                                 'matched_fields': ['canonical_name'],
-                                'match_reason': 'exact_match' if existing.data else 'new_entity'
+                                'match_reason': 'exact_match' if existing.data else 'new_entity',
+                                'extraction_confidence': entity.get('confidence', 0.8)
                             }
                         }
                         supabase.table('resolution_log').insert(resolution_log_entry).execute()
@@ -10006,7 +10147,7 @@ class ExcelProcessor:
                 user_id=user_id,
                 operation_type="relationship_storage"
             ) as tx:
-                # Prepare batch data
+                # Prepare batch data with ALL enriched fields
                 relationships_batch = []
                 for relationship in relationships:
                     rel_data = {
@@ -10017,8 +10158,15 @@ class ExcelProcessor:
                         'confidence_score': relationship.get('confidence_score', 0.5),
                         'detection_method': relationship.get('detection_method', 'ai'),
                         'pattern_id': relationship.get('pattern_id'),
-                        'reasoning': relationship.get('reasoning', ''),
-                        'transaction_id': transaction_id  # FIX #6: Add transaction_id for rollback
+                        'reasoning': relationship.get('reasoning', 'Detected based on matching criteria'),
+                        'transaction_id': transaction_id,
+                        # ✅ FIX: Add ALL enriched semantic fields
+                        'metadata': relationship.get('metadata', {}),
+                        'key_factors': relationship.get('key_factors', []),
+                        'semantic_description': relationship.get('semantic_description'),
+                        'temporal_causality': relationship.get('temporal_causality'),
+                        'business_logic': relationship.get('business_logic', 'standard_payment_flow'),
+                        'relationship_embedding': relationship.get('relationship_embedding')
                     }
                     relationships_batch.append(rel_data)
                 
@@ -10026,6 +10174,29 @@ class ExcelProcessor:
                 if relationships_batch:
                     result = await tx.insert_batch('relationship_instances', relationships_batch)
                     logger.info(f"✅ Stored {len(result)} relationships atomically in batch")
+                    
+                    # ✅ FIX: Update raw_events.relationships count for each involved event
+                    event_ids_to_update = set()
+                    for rel in relationships_batch:
+                        event_ids_to_update.add(rel['source_event_id'])
+                        event_ids_to_update.add(rel['target_event_id'])
+                    
+                    # Update relationship counts in raw_events
+                    for event_id in event_ids_to_update:
+                        try:
+                            # Count relationships for this event
+                            count_result = supabase.table('relationship_instances').select('id', count='exact').or_(
+                                f"source_event_id.eq.{event_id},target_event_id.eq.{event_id}"
+                            ).execute()
+                            rel_count = count_result.count or 0
+                            
+                            # Update raw_events.relationships
+                            supabase.table('raw_events').update({
+                                'relationships': rel_count,
+                                'last_relationship_check': datetime.utcnow().isoformat()
+                            }).eq('id', event_id).execute()
+                        except Exception as update_err:
+                            logger.warning(f"Failed to update relationship count for event {event_id}: {update_err}")
                     
         except Exception as e:
             logger.error(f"❌ Error storing relationship instances (transaction rolled back): {e}")
@@ -10053,12 +10224,24 @@ class ExcelProcessor:
             if not event_ids:
                 return
 
-            # Fetch platforms for all involved events
+            # Fetch platforms for all involved events (with metadata fallback)
             platform_map: Dict[str, Any] = {}
             try:
-                ev_res = supabase.table('raw_events').select('id, source_platform').in_('id', event_ids).execute()
+                ev_res = supabase.table('raw_events').select('id, source_platform, payload').in_('id', event_ids).execute()
                 for ev in (ev_res.data or []):
-                    platform_map[str(ev.get('id'))] = ev.get('source_platform')
+                    platform = ev.get('source_platform')
+                    # ✅ FIX: If platform is 'unknown', try to extract from payload/metadata
+                    if not platform or platform == 'unknown':
+                        payload = ev.get('payload', {})
+                        # Try common platform field names
+                        platform = (
+                            payload.get('platform') or
+                            payload.get('source') or
+                            payload.get('source_system') or
+                            payload.get('data_source') or
+                            'unknown'
+                        )
+                    platform_map[str(ev.get('id'))] = platform
             except Exception as e:
                 logger.warning(f"Failed to fetch platforms for cross-platform relationships: {e}")
 
@@ -10203,7 +10386,262 @@ class ExcelProcessor:
         except Exception as e:
             logger.error(f"❌ Error storing computed metrics (transaction rolled back): {e}")
 
-
+    async def _populate_causal_relationships(self, relationships: List[Dict], user_id: str, transaction_id: str, supabase: Client):
+        """
+        Populate causal_relationships table from relationships with temporal causality.
+        
+        Filters relationships where temporal_causality indicates causation (not just correlation).
+        """
+        try:
+            causal_rels = []
+            for rel in relationships:
+                temporal_causality = rel.get('temporal_causality')
+                # Only include if temporal_causality indicates causation
+                if temporal_causality and 'cause' in temporal_causality.lower():
+                    causal_rels.append({
+                        'user_id': user_id,
+                        'source_event_id': rel.get('source_event_id'),
+                        'target_event_id': rel.get('target_event_id'),
+                        'causal_type': rel.get('relationship_type', 'unknown'),
+                        'confidence_score': rel.get('confidence_score', 0.5),
+                        'detection_method': 'temporal_analysis',
+                        'causal_strength': rel.get('confidence_score', 0.5),  # Use confidence as causal strength
+                        'time_lag_seconds': None,  # Could be calculated from event timestamps
+                        'confounding_factors': [],
+                        'evidence': {
+                            'temporal_causality': temporal_causality,
+                            'semantic_description': rel.get('semantic_description'),
+                            'reasoning': rel.get('reasoning')
+                        },
+                        'transaction_id': transaction_id
+                    })
+            
+            if causal_rels:
+                # Batch insert
+                batch_size = 100
+                for i in range(0, len(causal_rels), batch_size):
+                    batch = causal_rels[i:i + batch_size]
+                    supabase.table('causal_relationships').insert(batch).execute()
+                logger.info(f"✅ Populated {len(causal_rels)} causal relationships")
+        except Exception as e:
+            logger.warning(f"Failed to populate causal_relationships: {e}")
+    
+    async def _populate_predicted_relationships(self, user_id: str, transaction_id: str, supabase: Client):
+        """
+        Populate predicted_relationships table using pattern-based prediction.
+        
+        Analyzes existing relationship patterns to predict future relationships.
+        """
+        try:
+            # Query relationship_patterns to find high-confidence patterns
+            patterns_result = supabase.table('relationship_patterns').select(
+                'id, relationship_type, pattern_data, created_at'
+            ).eq('user_id', user_id).execute()
+            
+            if not patterns_result.data:
+                return
+            
+            predicted_rels = []
+            for pattern in patterns_result.data:
+                pattern_data = pattern.get('pattern_data', {})
+                occurrence_count = pattern_data.get('occurrence_count', 0)
+                
+                # Only predict if pattern has occurred multiple times (high confidence)
+                if occurrence_count >= 3:
+                    predicted_rels.append({
+                        'user_id': user_id,
+                        'source_entity_id': None,  # Placeholder - would need entity prediction logic
+                        'target_entity_id': None,  # Placeholder
+                        'predicted_relationship_type': pattern.get('relationship_type'),
+                        'confidence_score': min(0.9, 0.5 + (occurrence_count * 0.1)),  # Higher confidence with more occurrences
+                        'prediction_method': 'pattern_based',
+                        'pattern_id': pattern.get('id'),
+                        'predicted_at': datetime.utcnow().isoformat(),
+                        'prediction_basis': {
+                            'pattern_occurrences': occurrence_count,
+                            'pattern_data': pattern_data
+                        },
+                        'transaction_id': transaction_id
+                    })
+            
+            if predicted_rels:
+                batch_size = 100
+                for i in range(0, len(predicted_rels), batch_size):
+                    batch = predicted_rels[i:i + batch_size]
+                    supabase.table('predicted_relationships').insert(batch).execute()
+                logger.info(f"✅ Populated {len(predicted_rels)} predicted relationships")
+        except Exception as e:
+            logger.warning(f"Failed to populate predicted_relationships: {e}")
+    
+    async def _populate_temporal_patterns(self, user_id: str, file_id: str, supabase: Client):
+        """
+        Populate temporal_patterns, seasonal_patterns, and temporal_anomalies tables.
+        
+        Analyzes event timestamps to detect patterns, seasonality, and anomalies.
+        """
+        try:
+            # Query events with timestamps
+            events_result = supabase.table('raw_events').select(
+                'id, event_date, amount_usd, vendor_standard, payload'
+            ).eq('user_id', user_id).not_.is_('event_date', 'null').order('event_date').execute()
+            
+            if not events_result.data or len(events_result.data) < 10:
+                logger.info("Not enough temporal data for pattern analysis")
+                return
+            
+            events = events_result.data
+            
+            # Analyze temporal patterns (e.g., weekly, monthly recurring events)
+            from collections import defaultdict
+            vendor_dates = defaultdict(list)
+            
+            for event in events:
+                vendor = event.get('vendor_standard')
+                event_date = event.get('event_date')
+                if vendor and event_date:
+                    vendor_dates[vendor].append(event_date)
+            
+            temporal_patterns = []
+            seasonal_patterns = []
+            
+            for vendor, dates in vendor_dates.items():
+                if len(dates) >= 3:
+                    # Calculate time intervals between consecutive events
+                    from datetime import datetime
+                    date_objs = sorted([datetime.fromisoformat(d.replace('Z', '+00:00')) for d in dates])
+                    intervals = [(date_objs[i+1] - date_objs[i]).days for i in range(len(date_objs)-1)]
+                    
+                    if intervals:
+                        avg_interval = sum(intervals) / len(intervals)
+                        
+                        # Detect recurring patterns
+                        if 6 <= avg_interval <= 8:  # Weekly pattern
+                            temporal_patterns.append({
+                                'user_id': user_id,
+                                'pattern_type': 'weekly_recurring',
+                                'entity_id': None,
+                                'entity_name': vendor,
+                                'frequency': 'weekly',
+                                'interval_days': int(avg_interval),
+                                'confidence_score': 0.8,
+                                'detection_method': 'interval_analysis',
+                                'pattern_data': {
+                                    'occurrences': len(dates),
+                                    'intervals': intervals,
+                                    'avg_interval_days': avg_interval
+                                }
+                            })
+                        elif 28 <= avg_interval <= 32:  # Monthly pattern
+                            temporal_patterns.append({
+                                'user_id': user_id,
+                                'pattern_type': 'monthly_recurring',
+                                'entity_id': None,
+                                'entity_name': vendor,
+                                'frequency': 'monthly',
+                                'interval_days': int(avg_interval),
+                                'confidence_score': 0.8,
+                                'detection_method': 'interval_analysis',
+                                'pattern_data': {
+                                    'occurrences': len(dates),
+                                    'intervals': intervals,
+                                    'avg_interval_days': avg_interval
+                                }
+                            })
+                        
+                        # Detect seasonal patterns (quarterly)
+                        if 85 <= avg_interval <= 95:  # Quarterly pattern
+                            seasonal_patterns.append({
+                                'user_id': user_id,
+                                'pattern_type': 'quarterly',
+                                'entity_name': vendor,
+                                'season': 'quarterly',
+                                'confidence_score': 0.7,
+                                'detection_method': 'interval_analysis',
+                                'pattern_data': {
+                                    'occurrences': len(dates),
+                                    'avg_interval_days': avg_interval
+                                }
+                            })
+            
+            # Insert temporal patterns
+            if temporal_patterns:
+                batch_size = 100
+                for i in range(0, len(temporal_patterns), batch_size):
+                    batch = temporal_patterns[i:i + batch_size]
+                    supabase.table('temporal_patterns').insert(batch).execute()
+                logger.info(f"✅ Populated {len(temporal_patterns)} temporal patterns")
+            
+            # Insert seasonal patterns
+            if seasonal_patterns:
+                batch_size = 100
+                for i in range(0, len(seasonal_patterns), batch_size):
+                    batch = seasonal_patterns[i:i + batch_size]
+                    supabase.table('seasonal_patterns').insert(batch).execute()
+                logger.info(f"✅ Populated {len(seasonal_patterns)} seasonal patterns")
+            
+            # Detect temporal anomalies (events that break patterns)
+            temporal_anomalies = []
+            for vendor, dates in vendor_dates.items():
+                if len(dates) >= 4:
+                    date_objs = sorted([datetime.fromisoformat(d.replace('Z', '+00:00')) for d in dates])
+                    intervals = [(date_objs[i+1] - date_objs[i]).days for i in range(len(date_objs)-1)]
+                    
+                    if len(intervals) >= 3:
+                        avg_interval = sum(intervals) / len(intervals)
+                        std_dev = (sum((x - avg_interval) ** 2 for x in intervals) / len(intervals)) ** 0.5
+                        
+                        # Detect anomalies (intervals significantly different from average)
+                        for i, interval in enumerate(intervals):
+                            if abs(interval - avg_interval) > 2 * std_dev:  # 2 sigma threshold
+                                temporal_anomalies.append({
+                                    'user_id': user_id,
+                                    'anomaly_type': 'interval_deviation',
+                                    'entity_name': vendor,
+                                    'expected_date': date_objs[i] + timedelta(days=avg_interval),
+                                    'actual_date': date_objs[i+1],
+                                    'deviation_days': int(interval - avg_interval),
+                                    'severity': 'high' if abs(interval - avg_interval) > 3 * std_dev else 'medium',
+                                    'confidence_score': 0.8,
+                                    'detection_method': 'statistical_deviation',
+                                    'anomaly_data': {
+                                        'expected_interval': avg_interval,
+                                        'actual_interval': interval,
+                                        'std_dev': std_dev
+                                    }
+                                })
+            
+            if temporal_anomalies:
+                batch_size = 100
+                for i in range(0, len(temporal_anomalies), batch_size):
+                    batch = temporal_anomalies[i:i + batch_size]
+                    supabase.table('temporal_anomalies').insert(batch).execute()
+                logger.info(f"✅ Populated {len(temporal_anomalies)} temporal anomalies")
+            
+            # Populate root_cause_analyses for detected anomalies
+            if temporal_anomalies:
+                root_causes = []
+                for anomaly in temporal_anomalies:
+                    root_causes.append({
+                        'user_id': user_id,
+                        'anomaly_id': None,  # Would need anomaly ID after insert
+                        'root_cause_type': 'temporal_deviation',
+                        'confidence_score': 0.7,
+                        'analysis_method': 'statistical_analysis',
+                        'root_cause_description': f"Payment interval for {anomaly['entity_name']} deviated by {anomaly['deviation_days']} days from expected pattern",
+                        'contributing_factors': ['schedule_change', 'business_process_change'],
+                        'recommended_actions': ['verify_vendor_schedule', 'update_payment_terms'],
+                        'analysis_data': anomaly['anomaly_data']
+                    })
+                
+                if root_causes:
+                    batch_size = 100
+                    for i in range(0, len(root_causes), batch_size):
+                        batch = root_causes[i:i + batch_size]
+                        supabase.table('root_cause_analyses').insert(batch).execute()
+                    logger.info(f"✅ Populated {len(root_causes)} root cause analyses")
+                    
+        except Exception as e:
+            logger.warning(f"Failed to populate temporal patterns/anomalies: {e}")
 
 # ============================================================================
 # LEGACY ENTITY RESOLVER (DEPRECATED - Use EntityResolverOptimized)

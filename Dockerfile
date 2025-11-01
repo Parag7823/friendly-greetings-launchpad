@@ -24,9 +24,9 @@ RUN npm run build
 # NUCLEAR CACHE BUST: Changed base image tag to force complete rebuild
 FROM python:3.9-slim
 
-# Force cache invalidation - updated 2025-11-01 for relationship & entity resolution fixes
-ARG CACHEBUST=20251101-v1-RELATIONSHIP-ENTITY-FIX
-ENV DEPLOYMENT_VERSION="2025-11-01-04:56-RELATIONSHIP-RESOLUTION-FIX"
+# Force cache invalidation - updated 2025-11-01 for ALL analytics tables population
+ARG CACHEBUST=20251101-v3-COMPLETE-ANALYTICS-POPULATION
+ENV DEPLOYMENT_VERSION="2025-11-01-08:00-ALL-TABLES-COMPREHENSIVE-FIX"
 RUN echo "🚨 ABSOLUTE NUCLEAR CACHE BUST: $CACHEBUST - Forcing complete rebuild"
 RUN echo "🚨 DEPLOYMENT VERSION: $DEPLOYMENT_VERSION"
 RUN echo "🚨 TIMESTAMP: $(date +%s)"
