@@ -20,7 +20,7 @@ import { useAuth } from './AuthProvider';
 import { supabase } from '@/integrations/supabase/client';
 import { config } from '@/config';
 import { useToast } from './ui/use-toast';
-import { AnimatePresence, motion } from 'framer-motion';
+// Removed framer-motion - not needed in 3-panel layout
 import { useFastAPIProcessor } from './FastAPIProcessor';
 
 interface DataSourcesPanelProps {
@@ -452,27 +452,13 @@ export const DataSourcesPanel = ({ isOpen, onClose, onFilePreview }: DataSources
     return acc;
   }, {} as Record<string, Integration[]>);
 
-  if (!isOpen) return null;
-
   return (
-    <AnimatePresence>
-      <motion.div
-        initial={{ x: '100%' }}
-        animate={{ x: 0 }}
-        exit={{ x: '100%' }}
-        transition={{ type: 'spring', damping: 25, stiffness: 200 }}
-        className="fixed right-0 top-0 h-full w-full md:w-[500px] finley-dynamic-bg border-l border-border shadow-2xl z-50 flex flex-col"
-      >
-        {/* Header */}
-        <div className="flex items-center justify-between p-4 border-b border-border">
-          <div className="flex items-center gap-2">
-            <Plug className="w-5 h-5 text-primary" />
-            <h2 className="text-base font-semibold">Data Sources</h2>
-          </div>
-          <Button variant="ghost" size="sm" onClick={onClose}>
-            <X className="w-4 h-4" />
-          </Button>
-        </div>
+    <div className="h-full w-full finley-dynamic-bg flex flex-col">
+      {/* Header - NO X button */}
+      <div className="flex items-center gap-2 p-3 border-b border-border">
+        <Plug className="w-4 h-4 text-primary" />
+        <h2 className="text-xs font-semibold">Data Sources</h2>
+      </div>
 
         <div className="flex-1 overflow-y-auto">
           <div className="p-4 space-y-6">
@@ -481,9 +467,9 @@ export const DataSourcesPanel = ({ isOpen, onClose, onFilePreview }: DataSources
               <div className="flex items-center justify-between mb-3">
                 <div className="flex items-center gap-2">
                   <FileSpreadsheet className="w-4 h-4 text-muted-foreground" />
-                  <h3 className="text-sm font-medium">Uploaded Files</h3>
+                  <h3 className="text-xs font-medium">Uploaded Files</h3>
                   {uploadedFiles.length > 0 && (
-                    <Badge variant="outline" className="text-[10px]">
+                    <Badge variant="outline" className="text-[8px]">
                       {uploadedFiles.length}
                     </Badge>
                   )}
@@ -545,8 +531,8 @@ export const DataSourcesPanel = ({ isOpen, onClose, onFilePreview }: DataSources
               ) : uploadedFiles.length === 0 ? (
                 <div className="text-center py-8 space-y-2">
                   <FileSpreadsheet className="w-8 h-8 mx-auto text-muted-foreground/50" />
-                  <p className="text-xs text-muted-foreground">No files uploaded yet</p>
-                  <p className="text-[10px] text-muted-foreground/70">Upload files to see them here</p>
+                  <p className="text-[10px] text-muted-foreground">No files uploaded yet</p>
+                  <p className="text-[8px] text-muted-foreground/70">Upload files to see them here</p>
                 </div>
               ) : (
                 <div className="max-h-[400px] overflow-y-auto space-y-2 pr-2 scrollbar-thin">
@@ -564,7 +550,7 @@ export const DataSourcesPanel = ({ isOpen, onClose, onFilePreview }: DataSources
                       >
                         <div className="flex-1 min-w-0 space-y-1">
                           <div className="flex items-center gap-2">
-                            <p className="text-sm font-medium truncate text-foreground">
+                            <p className="text-xs font-medium truncate text-foreground">
                               {file.filename || file.id || 'Unnamed File'}
                             </p>
                             {isProcessing && (
@@ -579,11 +565,11 @@ export const DataSourcesPanel = ({ isOpen, onClose, onFilePreview }: DataSources
                           </div>
                           
                           <div className="flex items-center gap-2">
-                            <p className="text-[10px] text-muted-foreground">
+                            <p className="text-[8px] text-muted-foreground">
                               {new Date(file.created_at).toLocaleString()}
                             </p>
                             {isProcessing && progress > 0 && (
-                              <span className="text-[10px] text-primary font-medium">
+                              <span className="text-[8px] text-primary font-medium">
                                 {progress}%
                               </span>
                             )}
@@ -683,8 +669,8 @@ export const DataSourcesPanel = ({ isOpen, onClose, onFilePreview }: DataSources
                         >
                           <div className="flex items-center gap-2">
                             {categoryInfo.icon}
-                            <span className="text-sm font-medium">{categoryInfo.name}</span>
-                            <Badge variant="outline" className="text-[10px]">
+                            <span className="text-xs font-medium">{categoryInfo.name}</span>
+                            <Badge variant="outline" className="text-[8px]">
                               {integrations.length}
                             </Badge>
                           </div>
@@ -717,11 +703,11 @@ export const DataSourcesPanel = ({ isOpen, onClose, onFilePreview }: DataSources
                                     </div>
                                     <div className="flex-1 min-w-0">
                                       <div className="flex items-center gap-2">
-                                        <p className="text-sm font-medium">{integration.name}</p>
+                                        <p className="text-[10px] font-medium">{integration.name}</p>
                                         {connected && (
                                           <Badge 
                                             variant="default" 
-                                            className="text-[10px] bg-gradient-to-r from-emerald-500 to-green-600 text-white border-0 shadow-sm"
+                                            className="text-[8px] bg-gradient-to-r from-emerald-500 to-green-600 text-white border-0 shadow-sm"
                                           >
                                             <CheckCircle2 className="w-3 h-3 mr-1" />
                                             Connected
@@ -812,7 +798,6 @@ export const DataSourcesPanel = ({ isOpen, onClose, onFilePreview }: DataSources
             </div>
           </div>
         </div>
-      </motion.div>
-    </AnimatePresence>
+    </div>
   );
 };

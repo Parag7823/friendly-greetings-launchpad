@@ -19,6 +19,8 @@ interface OpenFile {
   platform?: string;
   events_count?: number;
   error_message?: string;
+  file_path?: string;
+  storage_path?: string;
 }
 
 interface TabbedFilePreviewProps {
@@ -38,6 +40,9 @@ export const TabbedFilePreview = ({
   const [events, setEvents] = useState<Record<string, any[]>>({});
   const [loadingEvents, setLoadingEvents] = useState<Record<string, boolean>>({});
   const [showMetadata, setShowMetadata] = useState<Record<string, boolean>>({});
+  const [fileContent, setFileContent] = useState<Record<string, any[]>>({});
+  const [loadingContent, setLoadingContent] = useState<Record<string, boolean>>({});
+  const [viewMode, setViewMode] = useState<'raw' | 'events'>('raw'); // Default to raw file view
 
   const activeFile = openFiles.find(f => f.id === activeFileId);
 
@@ -66,6 +71,63 @@ export const TabbedFilePreview = ({
     };
 
     loadEvents();
+  }, [activeFileId]);
+
+  // Load raw file content for active file
+  useEffect(() => {
+    if (!activeFileId || loadingContent[activeFileId] || fileContent[activeFileId]) return;
+
+    const loadFileContent = async () => {
+      setLoadingContent(prev => ({ ...prev, [activeFileId]: true }));
+      try {
+        // Fetch file metadata to get storage path
+        const { data: fileData, error: fileError } = await supabase
+          .from('ingestion_jobs')
+          .select('file_path, storage_path')
+          .eq('id', activeFileId)
+          .single();
+
+        if (fileError || !fileData?.storage_path) {
+          console.error('Failed to get file path:', fileError);
+          return;
+        }
+
+        // Download file from Supabase Storage
+        const { data: fileBlob, error: downloadError } = await supabase.storage
+          .from('uploaded-files')
+          .download(fileData.storage_path);
+
+        if (downloadError || !fileBlob) {
+          console.error('Failed to download file:', downloadError);
+          return;
+        }
+
+        // Parse CSV content
+        const text = await fileBlob.text();
+        const lines = text.split('\n').filter(line => line.trim());
+        
+        if (lines.length === 0) return;
+
+        // Parse CSV (simple parser - handles basic CSV)
+        const headers = lines[0].split(',').map(h => h.trim());
+        const rows = lines.slice(1, 101).map(line => { // Limit to 100 rows for performance
+          const values = line.split(',').map(v => v.trim());
+          const row: any = {};
+          headers.forEach((header, index) => {
+            row[header] = values[index] || '';
+          });
+          return row;
+        });
+
+        setFileContent(prev => ({ ...prev, [activeFileId]: rows }));
+      } catch (error) {
+        console.error('Failed to load file content:', error);
+      } finally {
+        setLoadingContent(prev => ({ ...prev, [activeFileId]: false }));
+      }
+    };
+
+    loadFileContent();
   }, [activeFileId]);
 
   const getFileIcon = (filename: string) => {
@@ -236,8 +298,72 @@ export const TabbedFilePreview = ({
                 </Card>
               )}
 
+              {/* View Mode Toggle */}
+              <div className="flex items-center gap-2 mb-4">
+                <Button
+                  variant={viewMode === 'raw' ? 'default' : 'outline'}
+                  size="sm"
+                  onClick={() => setViewMode('raw')}
+                  className="text-xs"
+                >
+                  <FileText className="w-3 h-3 mr-1" />
+                  Raw Data
+                </Button>
+                <Button
+                  variant={viewMode === 'events' ? 'default' : 'outline'}
+                  size="sm"
+                  onClick={() => setViewMode('events')}
+                  className="text-xs"
+                >
+                  <FileSpreadsheet className="w-3 h-3 mr-1" />
+                  Events
+                </Button>
+              </div>
+
+              {/* Raw File Content */}
+              {viewMode === 'raw' && (
+                loadingContent[activeFile.id] ? (
+                  <div className="flex items-center justify-center py-12">
+                    <Loader2 className="w-8 h-8 animate-spin text-primary" />
+                  </div>
+                ) : fileContent[activeFile.id] && fileContent[activeFile.id].length > 0 ? (
+                  <div className="border border-border rounded-lg overflow-auto max-h-[600px]">
+                    <table className="w-full text-[10px]">
+                      <thead className="bg-muted/50 sticky top-0">
+                        <tr>
+                          <th className="px-2 py-1.5 text-left font-medium text-muted-foreground border-r border-border w-10">#</th>
+                          {Object.keys(fileContent[activeFile.id][0] || {}).map((header) => (
+                            <th key={header} className="px-2 py-1.5 text-left font-medium border-r border-border whitespace-nowrap">
+                              {header}
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody className="font-mono text-[9px]">
+                        {fileContent[activeFile.id].map((row, index) => (
+                          <tr key={index} className="border-t border-border hover:bg-muted/20">
+                            <td className="px-2 py-1 text-muted-foreground border-r border-border text-right">{index + 1}</td>
+                            {Object.values(row).map((value: any, colIndex) => (
+                              <td key={colIndex} className="px-2 py-1 border-r border-border whitespace-nowrap">
+                                {value}
+                              </td>
+                            ))}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <Card className="p-12 text-center">
+                    <FileSpreadsheet className="w-16 h-16 mx-auto text-muted-foreground/30 mb-4" />
+                    <h3 className="text-xs font-semibold mb-2">No file content</h3>
+                    <p className="text-[10px] text-muted-foreground">Unable to load file content</p>
+                  </Card>
+                )
+              )}
+
               {/* Events Table */}
-              {loadingEvents[activeFile.id] ? (
+              {viewMode === 'events' && (loadingEvents[activeFile.id] ? (
                 <div className="flex items-center justify-center py-12">
                   <Loader2 className="w-8 h-8 animate-spin text-primary" />
                 </div>
@@ -318,7 +444,7 @@ export const TabbedFilePreview = ({
                       : 'No events were extracted from this file'}
                   </p>
                 </Card>
-              )}
+              ))}
             </motion.div>
           )}
         </AnimatePresence>
