@@ -9319,7 +9319,11 @@ class ExcelProcessor:
             # FIX #7: asyncio already imported at top of file, removed redundant import
             try:
                 relationship_results = await asyncio.wait_for(
-                    relationship_detector.detect_all_relationships(user_id, file_id=file_id),  # FIX #5: Pass file_id
+                    relationship_detector.detect_all_relationships(
+                        user_id,
+                        file_id=file_id,
+                        transaction_id=transaction_id
+                    ),  # FIX #5: Pass file_id and reuse processing transaction
                     timeout=300  # 5 minutes max
                 )
             except asyncio.TimeoutError:

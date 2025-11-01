@@ -24,9 +24,9 @@ RUN npm run build
 # NUCLEAR CACHE BUST: Changed base image tag to force complete rebuild
 FROM python:3.9-slim
 
-# Force cache invalidation - updated 2025-11-01 for VS Code-style 3-panel layout
-ARG CACHEBUST=20251101-v6-VSCODE-3PANEL-LAYOUT
-ENV DEPLOYMENT_VERSION="2025-11-01-11:44-VSCODE-RESIZABLE-PANELS"
+# Force cache invalidation - updated 2025-11-01 for VS Code-style 3-panel layout (fixed)
+ARG CACHEBUST=20251101-v7-VSCODE-3PANEL-FIXED
+ENV DEPLOYMENT_VERSION="2025-11-01-13:59-VSCODE-PANELS-CLEAN"
 RUN echo "🚨 ABSOLUTE NUCLEAR CACHE BUST: $CACHEBUST - Forcing complete rebuild"
 RUN echo "🚨 DEPLOYMENT VERSION: $DEPLOYMENT_VERSION"
 RUN echo "🚨 TIMESTAMP: $(date +%s)"

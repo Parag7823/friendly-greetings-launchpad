@@ -639,11 +639,20 @@ class TemporalPatternLearner:
     ) -> Optional[Dict[str, Any]]:
         """Fetch event by ID"""
         try:
-            result = self.supabase.table('raw_events').select(
-                'id, document_type, amount_usd, source_ts, vendor_standard'
-            ).eq('id', event_id).eq('user_id', user_id).execute()
+            events_result = self.supabase.table('raw_events').select(
+                'id, source_ts, amount_usd, vendor_standard, payload'
+            ).eq('user_id', user_id).not_.is_('source_ts', 'null').order('source_ts').execute()
             
-            return result.data[0] if result.data else None
+            events = events_result.data
+            
+            vendor_dates = defaultdict(list)
+            for event in events:
+                vendor = event.get('vendor_standard')
+                event_timestamp = event.get('source_ts')
+                if vendor and event_timestamp:
+                    vendor_dates[vendor].append(event_timestamp)
+                    
+            return events[0] if events else None
             
         except Exception as e:
             logger.error(f"Failed to fetch event: {e}")

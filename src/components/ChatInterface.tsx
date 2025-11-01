@@ -1,20 +1,9 @@
-import { MessageCircle, Send, Upload, Plug, FileSpreadsheet, Receipt, Database, Layers, Paperclip, Image as ImageIcon, Loader2, X } from 'lucide-react';
+import { Send, FileSpreadsheet, Paperclip, Loader2, X } from 'lucide-react';
 import { useState, useEffect, useRef } from 'react';
-import { EnhancedFileUpload } from './EnhancedFileUpload';
-import { InlineUploadZone } from './InlineUploadZone';
-import { DataSourcesPanel } from './DataSourcesPanel';
-import { EnhancedFilePreview } from './EnhancedFilePreview';
-import { FilePreviewPanel } from './FilePreviewPanel';
 import { MarkdownMessage } from './MarkdownMessage';
-import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
-import { Button } from './ui/button';
-import { StarBorder } from './ui/star-border';
 import { useAuth } from './AuthProvider';
-import { motion, AnimatePresence } from 'framer-motion';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/components/ui/use-toast';
-import ConnectorConfigModal from './ConnectorConfigModal';
 import { useSearchParams } from 'react-router-dom';
 import { config } from '@/config';
 import { useFastAPIProcessor } from './FastAPIProcessor';
@@ -43,14 +32,8 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
   const [syncing, setSyncing] = useState<string | null>(null);
   const [configOpen, setConfigOpen] = useState(false);
   const [configConnId, setConfigConnId] = useState<string | null>(null);
-  const [showDataSources, setShowDataSources] = useState(false);
-  const [showInlineUpload, setShowInlineUpload] = useState(false);
-  const [uploadingFiles, setUploadingFiles] = useState<File[]>([]);
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
   const [pastedImages, setPastedImages] = useState<File[]>([]);
-  const [previewFileId, setPreviewFileId] = useState<string | null>(null);
-  const [previewFilename, setPreviewFilename] = useState<string>('');
-  const [showFilePreview, setShowFilePreview] = useState(false);
   
   // IMPROVEMENT: Cleanup Object URLs to prevent memory leaks
   useEffect(() => {
@@ -460,9 +443,6 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
   };
 
   const handleInlineFilesSelected = (files: File[]) => {
-    // Open Data Sources panel immediately (non-blocking)
-    setShowDataSources(true);
-    
     // Trigger file upload event for Data Sources panel to handle
     // No chat message needed - user can see progress in Data Sources panel
     window.dispatchEvent(new CustomEvent('files-selected-for-upload', {
@@ -526,9 +506,6 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
     });
 
     setUploadingFile(false);
-    
-    // Open Data Sources panel to show uploaded files
-    setShowDataSources(true);
   };
 
   const handleFileSelect = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -610,30 +587,9 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
       case 'chat':
       default:
         return (
-          <div className="h-full flex finley-dynamic-bg relative">
-            {/* Main Chat Area - Responsive to Data Sources panel */}
-            <motion.div 
-              className="flex-1 flex flex-col min-w-0 finley-dynamic-bg"
-              animate={{ 
-                marginRight: showDataSources ? '500px' : '0px' 
-              }}
-              transition={{ type: 'spring', damping: 25, stiffness: 200 }}
-            >
-              {/* Data Sources Button - Fixed top right */}
-              <div className="absolute top-4 right-4 z-10">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setShowDataSources(true)}
-                  className="shadow-lg"
-                >
-                  <Layers className="w-4 h-4 mr-2" />
-                  Data Sources
-                </Button>
-              </div>
-
-              {/* Chat Messages Area */}
-              <div className={`flex-1 overflow-y-auto p-4 transition-all duration-300 ${showDataSources ? 'pr-8' : ''}`}>
+          <div className="h-full flex flex-col finley-dynamic-bg">
+            {/* Chat Messages Area */}
+            <div className="flex-1 overflow-y-auto p-4">
               {messages.length === 0 ? (
                 <div className="h-full flex items-center justify-center">
                   <div className="max-w-2xl w-full space-y-6 px-4">
@@ -806,30 +762,6 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
                   </div>
                 </div>
               </div>
-            </motion.div>
-
-            {/* Data Sources Panel - Positioned absolutely */}
-            <DataSourcesPanel 
-              isOpen={showDataSources} 
-              onClose={() => setShowDataSources(false)}
-              onFilePreview={(fileId, filename) => {
-                setPreviewFileId(fileId);
-                setPreviewFilename(filename);
-                setShowFilePreview(true);
-              }}
-            />
-            
-            {/* File Preview Panel - Between Data Sources and Chat */}
-            <FilePreviewPanel
-              fileId={previewFileId}
-              filename={previewFilename}
-              isOpen={showFilePreview}
-              onClose={() => {
-                setShowFilePreview(false);
-                setPreviewFileId(null);
-                setPreviewFilename('');
-              }}
-            />
           </div>
         );
     }

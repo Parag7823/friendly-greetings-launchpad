@@ -23,6 +23,40 @@ from supabase import create_client, Client
 
 logger = logging.getLogger(__name__)
 
+# Allowed values enforced by relationship_instances_business_logic_check
+ALLOWED_BUSINESS_LOGIC = {
+    'standard_payment_flow',
+    'revenue_recognition',
+    'expense_reimbursement',
+    'payroll_processing',
+    'tax_withholding',
+    'asset_depreciation',
+    'loan_repayment',
+    'refund_processing',
+    'recurring_billing',
+    'unknown'
+}
+
+# Map commonly generated synonyms to allowed business logic categories
+BUSINESS_LOGIC_ALIASES = {
+    'invoice_payment': 'standard_payment_flow',
+    'vendor_payment': 'standard_payment_flow',
+    'vendor_payments': 'standard_payment_flow',
+    'payment_workflow': 'standard_payment_flow',
+    'cash_outflow': 'standard_payment_flow',
+    'cash_inflow': 'revenue_recognition',
+    'revenue_collection': 'revenue_recognition',
+    'recurring_revenue': 'recurring_billing',
+    'subscription_billing': 'recurring_billing',
+    'refunds': 'refund_processing',
+    'loan_payments': 'loan_repayment',
+    'asset_management': 'asset_depreciation',
+    'depreciation_schedule': 'asset_depreciation',
+    'payroll': 'payroll_processing',
+    'tax_payments': 'tax_withholding',
+    'expense_management': 'expense_reimbursement'
+}
+
 # Initialize Groq client for semantic analysis
 try:
     from groq import Groq
@@ -132,7 +166,7 @@ class EnhancedRelationshipDetector:
             self.neo4j = None
             logger.warning("⚠️ Neo4j not available - graph features disabled")
         
-    async def detect_all_relationships(self, user_id: str, file_id: Optional[str] = None) -> Dict[str, Any]:
+    async def detect_all_relationships(self, user_id: str, file_id: Optional[str] = None, transaction_id: Optional[str] = None) -> Dict[str, Any]:
         """
         CRITICAL FIX: Detect relationships using document_type classification and database-level JOINs.
         
@@ -158,7 +192,7 @@ class EnhancedRelationshipDetector:
             # Store relationships in Supabase database and get back stored records with IDs
             stored_relationships = []
             if all_relationships:
-                stored_relationships = await self._store_relationships(all_relationships, user_id)
+                stored_relationships = await self._store_relationships(all_relationships, user_id, transaction_id)
                 logger.info(f"✅ Stored {len(stored_relationships)} relationships with database IDs")
             
             # NEW: Sync relationships to Neo4j graph database
@@ -454,24 +488,44 @@ Return ONLY valid JSON, no markdown blocks or explanations."""
             temporal_causality = "target_causes_source"
         
         # Determine business logic
-        business_logic = "standard_payment_flow"
+        business_logic_source = None
         if 'invoice' in source_doc.lower() or 'invoice' in target_doc.lower():
-            business_logic = "invoice_payment"
+            business_logic_source = "invoice_payment"
         elif 'payroll' in source_doc.lower() or 'payroll' in target_doc.lower():
-            business_logic = "payroll_processing"
+            business_logic_source = "payroll_processing"
         elif 'expense' in source_doc.lower() or 'expense' in target_doc.lower():
-            business_logic = "expense_reimbursement"
+            business_logic_source = "expense_reimbursement"
         elif 'revenue' in source_doc.lower():
-            business_logic = "revenue_collection"
-        
+            business_logic_source = "revenue_collection"
+
         return {
             'semantic_description': semantic_description,
             'reasoning': reasoning,
             'temporal_causality': temporal_causality,
-            'business_logic': business_logic
+            'business_logic': self._normalize_business_logic(business_logic_source)
         }
-    
-    async def _store_relationships(self, relationships: List[Dict], user_id: str) -> List[Dict]:
+
+    def _normalize_business_logic(self, value: Optional[str]) -> str:
+        """Normalize model outputs to the allowed business_logic values."""
+        if not value:
+            return 'standard_payment_flow'
+
+        normalized = value.strip().lower().replace(' ', '_')
+        if normalized in ALLOWED_BUSINESS_LOGIC:
+            return normalized
+
+        alias = BUSINESS_LOGIC_ALIASES.get(normalized)
+        if alias:
+            return alias
+
+        # Attempt to match simple prefixes (e.g., "refund" -> "refund_processing")
+        for prefix, mapped in BUSINESS_LOGIC_ALIASES.items():
+            if normalized.startswith(prefix):
+                return mapped
+
+        return 'unknown'
+
+    async def _store_relationships(self, relationships: List[Dict], user_id: str, transaction_id: Optional[str] = None) -> List[Dict]:
         """
         Store detected relationships in the database and return stored records with IDs.
         
@@ -481,15 +535,15 @@ Return ONLY valid JSON, no markdown blocks or explanations."""
         try:
             if not relationships:
                 return []
-            
+
             stored_relationships = []
-            
+
             # Fetch event details for AI enrichment (batch fetch for efficiency)
             event_ids = set()
             for rel in relationships:
                 event_ids.add(rel['source_event_id'])
                 event_ids.add(rel['target_event_id'])
-            
+
             # Fetch all events in one query
             events_map = {}
             if GROQ_AVAILABLE and event_ids:
@@ -546,10 +600,6 @@ Return ONLY valid JSON, no markdown blocks or explanations."""
                 pattern_signature = f"{rel['relationship_type']}_{'-'.join(sorted(key_factors))}"
                 pattern_id = await self._get_or_create_pattern_id(pattern_signature, rel['relationship_type'], key_factors, user_id)
                 
-                # Generate transaction_id for grouping related operations
-                import uuid
-                transaction_id = str(uuid.uuid4())
-                
                 # Generate relationship embedding for semantic search (if semantic extractor available)
                 relationship_embedding = None
                 if self.semantic_extractor and semantic_description:
@@ -566,14 +616,14 @@ Return ONLY valid JSON, no markdown blocks or explanations."""
                     'confidence_score': rel['confidence_score'],
                     'detection_method': rel.get('detection_method', 'unknown'),
                     'pattern_id': pattern_id,  # ✅ FIX: Add pattern_id
-                    'transaction_id': transaction_id,  # ✅ FIX: Add transaction_id
+                    'transaction_id': transaction_id if transaction_id else None,  # ✅ FIX: Use provided transaction_id
                     'relationship_embedding': relationship_embedding,  # ✅ FIX: Add embedding
                     'metadata': metadata,
                     'key_factors': key_factors,
                     'semantic_description': semantic_description,  # ✅ NEW: AI-generated description
                     'reasoning': reasoning or 'Detected based on matching criteria',  # ✅ FIX: Ensure reasoning is never NULL
                     'temporal_causality': temporal_causality,  # ✅ NEW: AI-determined causality
-                    'business_logic': business_logic or 'standard_payment_flow',  # ✅ FIX: Default business logic
+                    'business_logic': self._normalize_business_logic(business_logic),  # ✅ FIX: Normalize business logic
                     'created_at': datetime.utcnow().isoformat()
                 })
             
