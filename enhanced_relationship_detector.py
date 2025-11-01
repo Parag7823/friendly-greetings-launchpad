@@ -540,36 +540,57 @@ Return ONLY valid JSON, no markdown blocks or explanations."""
             return []
     
     async def _get_or_create_pattern_id(self, pattern_signature: str, relationship_type: str, key_factors: List[str], user_id: str) -> Optional[str]:
-        """Get existing pattern_id or create new pattern in relationship_patterns table"""
+        """Get existing pattern_id or create new pattern in relationship_patterns table
+        
+        Schema: id, user_id, relationship_type, pattern_data (JSONB), created_at, updated_at
+        """
         try:
-            # Check if pattern already exists
-            result = self.supabase.table('relationship_patterns').select('id').eq(
-                'pattern_signature', pattern_signature
-            ).eq('user_id', user_id).limit(1).execute()
+            # Check if pattern already exists for this user and relationship type
+            result = self.supabase.table('relationship_patterns').select('id, pattern_data').eq(
+                'user_id', user_id
+            ).eq('relationship_type', relationship_type).limit(1).execute()
             
             if result.data:
-                return result.data[0]['id']
+                # Pattern exists - update occurrence count in pattern_data
+                pattern_id = result.data[0]['id']
+                pattern_data = result.data[0].get('pattern_data', {})
+                pattern_data['occurrence_count'] = pattern_data.get('occurrence_count', 0) + 1
+                pattern_data['last_seen'] = datetime.utcnow().isoformat()
+                
+                # Update the pattern
+                self.supabase.table('relationship_patterns').update({
+                    'pattern_data': pattern_data
+                }).eq('id', pattern_id).execute()
+                
+                return pattern_id
             
-            # Create new pattern
-            pattern_data = {
-                'user_id': user_id,
+            # Create new pattern with complete pattern_data JSONB
+            pattern_data_jsonb = {
                 'pattern_signature': pattern_signature,
-                'relationship_type': relationship_type,
                 'key_factors': key_factors,
                 'occurrence_count': 1,
                 'confidence_score': 0.8,
-                'created_at': datetime.utcnow().isoformat()
+                'first_seen': datetime.utcnow().isoformat(),
+                'last_seen': datetime.utcnow().isoformat(),
+                'detection_methods': ['database_join'],
+                'sample_event_ids': []
             }
             
-            insert_result = self.supabase.table('relationship_patterns').insert(pattern_data).execute()
+            pattern_record = {
+                'user_id': user_id,
+                'relationship_type': relationship_type,
+                'pattern_data': pattern_data_jsonb
+            }
+            
+            insert_result = self.supabase.table('relationship_patterns').insert(pattern_record).execute()
             if insert_result.data:
-                logger.info(f"Created new relationship pattern: {pattern_signature}")
+                logger.info(f"✅ Created new relationship pattern: {relationship_type} with signature {pattern_signature}")
                 return insert_result.data[0]['id']
             
             return None
             
         except Exception as e:
-            logger.warning(f"Failed to get/create pattern_id: {e}")
+            logger.warning(f"Failed to get/create pattern_id for {relationship_type}: {e}")
             return None
     
     async def _generate_relationship_embedding(self, text: str) -> Optional[List[float]]:
