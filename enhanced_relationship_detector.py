@@ -204,8 +204,9 @@ class EnhancedRelationshipDetector:
                 except Exception as debug_err:
                     logger.warning(f"Debug logging failed: {debug_err}")
             
+            # ✅ CRITICAL FIX: Return stored_relationships (with enrichment) instead of all_relationships
             return {
-                "relationships": all_relationships,
+                "relationships": stored_relationships if stored_relationships else all_relationships,
                 "total_relationships": len(all_relationships),
                 "cross_document_relationships": len(cross_file_relationships),
                 "within_file_relationships": len(within_file_relationships),
@@ -328,11 +329,13 @@ class EnhancedRelationshipDetector:
     async def _enrich_relationship_with_ai(self, rel: Dict, source_event: Dict, target_event: Dict) -> Dict:
         """
         Enrich a relationship with AI-generated semantic fields using Groq/Llama.
+        Falls back to rule-based enrichment if Groq is unavailable.
         
         Populates: semantic_description, reasoning, temporal_causality, business_logic
         """
         if not GROQ_AVAILABLE or not groq_client:
-            return {}
+            # ✅ FIX: Fallback to rule-based enrichment when Groq unavailable
+            return self._rule_based_enrichment(rel, source_event, target_event)
         
         try:
             # Build context for AI with enhanced business logic classification
@@ -413,7 +416,60 @@ Return ONLY valid JSON, no markdown blocks or explanations."""
             
         except Exception as e:
             logger.warning(f"AI enrichment failed: {e}")
-            return {}
+            # Fallback to rule-based enrichment
+            return self._rule_based_enrichment(rel, source_event, target_event)
+    
+    def _rule_based_enrichment(self, rel: Dict, source_event: Dict, target_event: Dict) -> Dict:
+        """
+        Rule-based enrichment fallback when AI is unavailable or fails.
+        Provides basic semantic fields based on heuristics.
+        """
+        relationship_type = rel.get('relationship_type', 'unknown')
+        source_doc = source_event.get('document_type', 'unknown')
+        target_doc = target_event.get('document_type', 'unknown')
+        source_amount = source_event.get('amount_usd', 0)
+        target_amount = target_event.get('amount_usd', 0)
+        vendor = source_event.get('vendor_standard') or target_event.get('vendor_standard', 'Unknown')
+        
+        # Generate semantic description
+        semantic_description = f"Relationship detected between {source_doc} and {target_doc} for {vendor}. "
+        if abs(source_amount - target_amount) < 1.0:
+            semantic_description += f"Matching amounts of ${source_amount:.2f}."
+        
+        # Generate reasoning
+        key_factors = rel.get('key_factors', [])
+        reasoning = f"Detected based on matching criteria: {', '.join(key_factors) if key_factors else 'pattern analysis'}. "
+        if 'amount_match' in key_factors:
+            reasoning += f"Amounts match within tolerance (${source_amount:.2f} vs ${target_amount:.2f}). "
+        if 'entity_match' in key_factors:
+            reasoning += f"Same vendor/entity ({vendor}). "
+        if 'date_match' in key_factors:
+            reasoning += "Events occurred within temporal proximity. "
+        
+        # Determine temporal causality
+        temporal_causality = "correlation_only"
+        if source_doc == 'invoice' and target_doc == 'bank_transaction':
+            temporal_causality = "source_causes_target"
+        elif source_doc == 'bank_transaction' and target_doc == 'invoice':
+            temporal_causality = "target_causes_source"
+        
+        # Determine business logic
+        business_logic = "standard_payment_flow"
+        if 'invoice' in source_doc.lower() or 'invoice' in target_doc.lower():
+            business_logic = "invoice_payment"
+        elif 'payroll' in source_doc.lower() or 'payroll' in target_doc.lower():
+            business_logic = "payroll_processing"
+        elif 'expense' in source_doc.lower() or 'expense' in target_doc.lower():
+            business_logic = "expense_reimbursement"
+        elif 'revenue' in source_doc.lower():
+            business_logic = "revenue_collection"
+        
+        return {
+            'semantic_description': semantic_description,
+            'reasoning': reasoning,
+            'temporal_causality': temporal_causality,
+            'business_logic': business_logic
+        }
     
     async def _store_relationships(self, relationships: List[Dict], user_id: str) -> List[Dict]:
         """

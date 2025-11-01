@@ -9350,18 +9350,42 @@ class ExcelProcessor:
                     'status': 'deferred_to_background'
                 }
             
-            # CRITICAL FIX #24: Ensure transaction_id exists for relationship storage
-            relationship_transaction_id = transaction_id if transaction_id else str(uuid.uuid4())
+            # ✅ CRITICAL FIX: Relationships already stored WITH enrichment by enhanced_relationship_detector
+            # Only update raw_events.relationships count and populate analytics
+            relationships = relationship_results.get('relationships', [])
             
-            # Store relationship instances atomically
-            if relationship_results.get('relationships'):
-                await self._store_relationship_instances(relationship_results['relationships'], user_id, relationship_transaction_id, supabase)  # FIX #6: Pass transaction_id
-                # Also store cross-platform relationships for analytics
-                await self._store_cross_platform_relationships(relationship_results['relationships'], user_id, relationship_transaction_id, supabase)  # FIX #9: Pass transaction_id
-                # ✅ NEW: Populate advanced analytics tables
-                await self._populate_causal_relationships(relationship_results['relationships'], user_id, relationship_transaction_id, supabase)
+            if relationships:
+                # Update raw_events.relationships count
+                event_ids_to_update = set()
+                for rel in relationships:
+                    if rel.get('source_event_id'):
+                        event_ids_to_update.add(rel['source_event_id'])
+                    if rel.get('target_event_id'):
+                        event_ids_to_update.add(rel['target_event_id'])
+                
+                for event_id in event_ids_to_update:
+                    try:
+                        count_result = supabase.table('relationship_instances').select('id', count='exact').or_(
+                            f"source_event_id.eq.{event_id},target_event_id.eq.{event_id}"
+                        ).execute()
+                        rel_count = count_result.count or 0
+                        supabase.table('raw_events').update({
+                            'relationships': rel_count,
+                            'last_relationship_check': datetime.utcnow().isoformat()
+                        }).eq('id', event_id).execute()
+                    except Exception as update_err:
+                        logger.warning(f"Failed to update relationship count for event {event_id}: {update_err}")
+                
+                # Populate relationship-based analytics
+                relationship_transaction_id = transaction_id if transaction_id else str(uuid.uuid4())
+                await self._store_cross_platform_relationships(relationships, user_id, relationship_transaction_id, supabase)
+                await self._populate_causal_relationships(relationships, user_id, relationship_transaction_id, supabase)
                 await self._populate_predicted_relationships(user_id, relationship_transaction_id, supabase)
-                await self._populate_temporal_patterns(user_id, file_id, supabase)
+            
+            # ✅ CRITICAL: Populate temporal analytics REGARDLESS of relationships (analyzes ALL events)
+            analytics_transaction_id = transaction_id if transaction_id else str(uuid.uuid4())
+            logger.info(f"🔍 Populating temporal analytics for file_id={file_id}, user_id={user_id}")
+            await self._populate_temporal_patterns(user_id, file_id, supabase)
             
             # Add relationship results to insights
             insights['relationship_analysis'] = relationship_results
@@ -10388,24 +10412,34 @@ class ExcelProcessor:
 
     async def _populate_causal_relationships(self, relationships: List[Dict], user_id: str, transaction_id: str, supabase: Client):
         """
-        Populate causal_relationships table from relationships with temporal causality.
+        Populate causal_relationships table from ALL relationships with temporal causality analysis.
         
-        Filters relationships where temporal_causality indicates causation (not just correlation).
+        Includes all relationships with temporal_causality field (not just ones with "cause").
         """
         try:
             causal_rels = []
             for rel in relationships:
                 temporal_causality = rel.get('temporal_causality')
-                # Only include if temporal_causality indicates causation
-                if temporal_causality and 'cause' in temporal_causality.lower():
+                # ✅ FIX: Include ALL relationships with temporal_causality (not just "cause")
+                # This includes: source_causes_target, target_causes_source, bidirectional, correlation_only
+                if temporal_causality:
+                    # Calculate causal strength based on causality type
+                    base_confidence = rel.get('confidence_score', 0.5)
+                    if 'cause' in temporal_causality.lower():
+                        causal_strength = base_confidence  # Full confidence for causal relationships
+                    elif 'bidirectional' in temporal_causality.lower():
+                        causal_strength = base_confidence * 0.8  # High confidence for bidirectional
+                    else:  # correlation_only
+                        causal_strength = base_confidence * 0.5  # Lower confidence for correlation
+                    
                     causal_rels.append({
                         'user_id': user_id,
                         'source_event_id': rel.get('source_event_id'),
                         'target_event_id': rel.get('target_event_id'),
                         'causal_type': rel.get('relationship_type', 'unknown'),
-                        'confidence_score': rel.get('confidence_score', 0.5),
+                        'confidence_score': base_confidence,
                         'detection_method': 'temporal_analysis',
-                        'causal_strength': rel.get('confidence_score', 0.5),  # Use confidence as causal strength
+                        'causal_strength': causal_strength,
                         'time_lag_seconds': None,  # Could be calculated from event timestamps
                         'confounding_factors': [],
                         'evidence': {
