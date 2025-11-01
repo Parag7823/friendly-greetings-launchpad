@@ -69,6 +69,7 @@ export const TabbedFilePreview = ({
   }, [activeFileId]);
 
   const getFileIcon = (filename: string) => {
+    if (!filename) return File;
     const ext = filename.split('.').pop()?.toLowerCase();
     if (ext === 'csv' || ext === 'xlsx' || ext === 'xls') return FileSpreadsheet;
     if (ext === 'txt' || ext === 'md') return FileText;

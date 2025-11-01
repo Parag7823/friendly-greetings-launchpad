@@ -42,13 +42,28 @@ export const useConnections = () => {
       }
 
       const data = await response.json();
-      return data.connections || [];
+      const connections = data.connections || [];
+
+      return connections.map((connection: Connection) => ({
+        ...connection,
+        provider: connection.provider || connection.integration_id,
+        integration_id: mapIntegrationId(connection.integration_id),
+      }));
     },
     enabled: !!user?.id,
     refetchInterval: 30000, // Poll every 30 seconds
     staleTime: 10000, // Consider data fresh for 10 seconds
     retry: 2,
   });
+};
+
+const mapIntegrationId = (integrationId?: string) => {
+  switch (integrationId) {
+    case 'google-mail':
+      return 'gmail';
+    default:
+      return integrationId;
+  }
 };
 
 /**

@@ -20,7 +20,7 @@ import { useAuth } from './AuthProvider';
 import { supabase } from '@/integrations/supabase/client';
 import { config } from '@/config';
 import { useToast } from './ui/use-toast';
-import { motion, AnimatePresence } from 'framer-motion';
+import { AnimatePresence } from 'framer-motion';
 import { useFastAPIProcessor } from './FastAPIProcessor';
 
 interface DataSourcesPanelProps {
@@ -477,23 +477,6 @@ export const DataSourcesPanel = ({ isOpen, onClose, onFilePreview }: DataSources
                   console.log('✅ Connection found! Stopping aggressive poll.', foundConnection);
                   pollingStopped = true;
                   clearInterval(aggressivePoll);
-                  setVerifying(null); // Clear verifying state
-                  
-                  // Show success toast ONCE
-                  const integrationName = INTEGRATIONS.find(i => i.provider === provider)?.name || provider;
-                  toast({
-                    title: 'Connected!',
-                    description: `${integrationName} connected successfully`,
-                    duration: 3000
-                  });
-                  return;
-                } else {
-                  console.log('❌ Connection not found yet, continuing to poll...');
-                }
-                
-                // Stop after max attempts
-                if (pollAttempts >= maxPollAttempts && !pollingStopped) {
-                  console.warn('⚠️ Connection not found after 15 seconds. Webhook may be delayed.');
                   pollingStopped = true;
                   clearInterval(aggressivePoll);
                   setVerifying(null); // Clear verifying state even if not found
@@ -699,27 +682,13 @@ export const DataSourcesPanel = ({ isOpen, onClose, onFilePreview }: DataSources
     return acc;
   }, {} as Record<string, Integration[]>);
 
-  if (!isOpen) return null;
-
   return (
-    <AnimatePresence>
-      <motion.div
-        initial={{ x: '100%' }}
-        animate={{ x: 0 }}
-        exit={{ x: '100%' }}
-        transition={{ type: 'spring', damping: 25, stiffness: 200 }}
-        className="fixed right-0 top-0 h-full w-full md:w-[500px] finley-dynamic-bg border-l border-border shadow-2xl z-50 flex flex-col"
-      >
-        {/* Header */}
-        <div className="flex items-center justify-between p-4 border-b border-border">
-          <div className="flex items-center gap-2">
-            <Plug className="w-5 h-5 text-primary" />
-            <h2 className="text-base font-semibold">Data Sources</h2>
-          </div>
-          <Button variant="ghost" size="sm" onClick={onClose}>
-            <X className="w-4 h-4" />
-          </Button>
-        </div>
+    <div className="h-full w-full finley-dynamic-bg flex flex-col">
+      {/* Header */}
+      <div className="flex items-center gap-2 p-4 border-b border-border">
+        <Plug className="w-5 h-5 text-primary" />
+        <h2 className="text-base font-semibold">Data Sources</h2>
+      </div>
 
         <div className="flex-1 overflow-y-auto">
           <div className="p-4 space-y-6">
@@ -943,124 +912,114 @@ export const DataSourcesPanel = ({ isOpen, onClose, onFilePreview }: DataSources
                         </button>
 
                         {/* Category Content */}
-                        <AnimatePresence>
-                          {isExpanded && (
-                            <motion.div
-                              initial={{ height: 0 }}
-                              animate={{ height: 'auto' }}
-                              exit={{ height: 0 }}
-                              transition={{ duration: 0.2 }}
-                              className="overflow-hidden"
-                            >
-                              <div className="p-3 space-y-2 bg-background">
-                                {integrations.map((integration) => {
-                                  const connection = getConnection(integration.provider);
-                                  const connected = !!connection;
+                        {isExpanded && (
+                          <div className="p-3 space-y-2 bg-background">
+                            {integrations.map((integration) => {
+                              const connection = getConnection(integration.provider);
+                              const connected = !!connection;
 
-                                  return (
-                                    <div
-                                      key={integration.id}
-                                      className={`flex items-center justify-between p-3 border rounded-md transition-all ${
-                                        connected 
-                                          ? 'border-2 border-emerald-500/60 bg-gradient-to-r from-emerald-500/10 via-green-500/5 to-emerald-500/10 shadow-md shadow-emerald-500/20 hover:shadow-emerald-500/30' 
-                                          : 'finley-dynamic-bg hover:bg-muted/20'
-                                      }`}
-                                    >
-                                      <div className="flex items-center gap-3 flex-1 min-w-0">
-                                        <div className="text-muted-foreground">
-                                          {integration.icon}
-                                        </div>
-                                        <div className="flex-1 min-w-0">
-                                          <div className="flex items-center gap-2">
-                                            <p className="text-sm font-medium">{integration.name}</p>
-                                            {connected && (
-                                              <Badge 
-                                                variant="default" 
-                                                className="text-[10px] bg-gradient-to-r from-emerald-500 to-green-600 text-white border-0 shadow-sm"
-                                              >
-                                                <CheckCircle2 className="w-3 h-3 mr-1" />
-                                                Connected
-                                              </Badge>
-                                            )}
-                                          </div>
-                                          <p className="text-xs text-muted-foreground truncate">
-                                            {integration.description}
-                                          </p>
-                                          {connected && connection.last_synced_at && (
-                                            <p className="text-[10px] text-muted-foreground mt-1">
-                                              Last synced: {new Date(connection.last_synced_at).toLocaleString()}
-                                            </p>
-                                          )}
-                                        </div>
-                                      </div>
+                              return (
+                                <div
+                                  key={integration.id}
+                                  className={`flex items-center justify-between p-3 border rounded-md transition-all ${
+                                    connected 
+                                      ? 'border-2 border-emerald-500/60 bg-gradient-to-r from-emerald-500/10 via-green-500/5 to-emerald-500/10 shadow-md shadow-emerald-500/20 hover:shadow-emerald-500/30' 
+                                      : 'finley-dynamic-bg hover:bg-muted/20'
+                                  }`}
+                                >
+                                  <div className="flex items-center gap-3 flex-1 min-w-0">
+                                    <div className="text-muted-foreground">
+                                      {integration.icon}
+                                    </div>
+                                    <div className="flex-1 min-w-0">
                                       <div className="flex items-center gap-2">
-                                        {connected ? (
-                                          <>
-                                            <Button
-                                              size="sm"
-                                              variant="outline"
-                                              onClick={() => handleSync(connection.connection_id, connection.integration_id)}
-                                              disabled={syncing === connection.connection_id}
-                                              className="text-xs"
-                                            >
-                                              {syncing === connection.connection_id ? (
-                                                <>
-                                                  <Loader2 className="w-3 h-3 mr-1 animate-spin" />
-                                                  Syncing
-                                                </>
-                                              ) : (
-                                                <>
-                                                  <RefreshCw className="w-3 h-3 mr-1" />
-                                                  Sync
-                                                </>
-                                              )}
-                                            </Button>
-                                            <Button
-                                              size="sm"
-                                              variant="ghost"
-                                              onClick={() => handleDisconnect(connection.connection_id, integration.name)}
-                                              className="text-xs h-9 w-9 p-0 hover:bg-destructive/10 hover:text-destructive"
-                                              title="Disconnect"
-                                            >
-                                              <X className="w-4 h-4" />
-                                            </Button>
-                                          </>
-                                        ) : verifying === integration.provider ? (
-                                          <Button
-                                            size="sm"
-                                            variant="outline"
-                                            disabled
-                                            className="text-xs h-9 px-4"
+                                        <p className="text-sm font-medium">{integration.name}</p>
+                                        {connected && (
+                                          <Badge 
+                                            variant="default" 
+                                            className="text-[10px] bg-gradient-to-r from-emerald-500 to-green-600 text-white border-0 shadow-sm"
                                           >
-                                            <Loader2 className="w-3 h-3 mr-1.5 animate-spin" />
-                                            Verifying...
-                                          </Button>
-                                        ) : (
-                                          <StarBorder
-                                            as="button"
-                                            onClick={() => handleConnect(integration.provider)}
-                                            disabled={connecting === integration.provider}
-                                            speed="5s"
-                                            className="h-9 px-4 text-xs font-medium disabled:opacity-50 disabled:cursor-not-allowed"
-                                          >
-                                            {connecting === integration.provider ? (
-                                              <div className="flex items-center gap-1.5">
-                                                <Loader2 className="w-3 h-3 animate-spin" />
-                                                Connecting
-                                              </div>
-                                            ) : (
-                                              'Connect'
-                                            )}
-                                          </StarBorder>
+                                            <CheckCircle2 className="w-3 h-3 mr-1" />
+                                            Connected
+                                          </Badge>
                                         )}
                                       </div>
+                                      <p className="text-xs text-muted-foreground truncate">
+                                        {integration.description}
+                                      </p>
+                                      {connected && connection.last_synced_at && (
+                                        <p className="text-[10px] text-muted-foreground mt-1">
+                                          Last synced: {new Date(connection.last_synced_at).toLocaleString()}
+                                        </p>
+                                      )}
                                     </div>
-                                  );
-                                })}
-                              </div>
-                            </motion.div>
-                          )}
-                        </AnimatePresence>
+                                  </div>
+                                  <div className="flex items-center gap-2">
+                                    {connected ? (
+                                      <>
+                                        <Button
+                                          size="sm"
+                                          variant="outline"
+                                          onClick={() => handleSync(connection.connection_id, connection.integration_id)}
+                                          disabled={syncing === connection.connection_id}
+                                          className="text-xs"
+                                        >
+                                          {syncing === connection.connection_id ? (
+                                            <>
+                                              <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+                                              Syncing
+                                            </>
+                                          ) : (
+                                            <>
+                                              <RefreshCw className="w-3 h-3 mr-1" />
+                                              Sync
+                                            </>
+                                          )}
+                                        </Button>
+                                        <Button
+                                          size="sm"
+                                          variant="ghost"
+                                          onClick={() => handleDisconnect(connection.connection_id, integration.name)}
+                                          className="text-xs h-9 w-9 p-0 hover:bg-destructive/10 hover:text-destructive"
+                                          title="Disconnect"
+                                        >
+                                          <X className="w-4 h-4" />
+                                        </Button>
+                                      </>
+                                    ) : verifying === integration.provider ? (
+                                      <Button
+                                        size="sm"
+                                        variant="outline"
+                                        disabled
+                                        className="text-xs h-9 px-4"
+                                      >
+                                        <Loader2 className="w-3 h-3 mr-1.5 animate-spin" />
+                                        Verifying...
+                                      </Button>
+                                    ) : (
+                                      <StarBorder
+                                        as="button"
+                                        onClick={() => handleConnect(integration.provider)}
+                                        disabled={connecting === integration.provider}
+                                        speed="5s"
+                                        className="h-9 px-4 text-xs font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                                      >
+                                        {connecting === integration.provider ? (
+                                          <div className="flex items-center gap-1.5">
+                                            <Loader2 className="w-3 h-3 animate-spin" />
+                                            Connecting
+                                          </div>
+                                        ) : (
+                                          'Connect'
+                                        )}
+                                      </StarBorder>
+                                    )}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
                       </div>
                     );
                   })}
@@ -1069,7 +1028,7 @@ export const DataSourcesPanel = ({ isOpen, onClose, onFilePreview }: DataSources
             </div>
           </div>
         </div>
-      </motion.div>
-    </AnimatePresence>
+      </div>
+    </div>
   );
 };
