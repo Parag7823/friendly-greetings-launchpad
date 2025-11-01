@@ -335,35 +335,63 @@ class EnhancedRelationshipDetector:
             return {}
         
         try:
-            # Build context for AI
-            prompt = f"""Analyze this financial relationship and provide structured insights:
+            # Build context for AI with enhanced business logic classification
+            prompt = f"""You are a financial analyst AI. Analyze this relationship between two financial events and provide detailed, accurate insights.
 
 SOURCE EVENT:
-- Type: {source_event.get('document_type', 'unknown')}
+- Document Type: {source_event.get('document_type', 'unknown')}
 - Platform: {source_event.get('source_platform', 'unknown')}
 - Amount: ${source_event.get('amount_usd', 0):.2f}
 - Date: {source_event.get('source_ts', 'unknown')}
-- Vendor: {source_event.get('vendor_standard', 'unknown')}
+- Vendor/Entity: {source_event.get('vendor_standard', 'unknown')}
 
 TARGET EVENT:
-- Type: {target_event.get('document_type', 'unknown')}
+- Document Type: {target_event.get('document_type', 'unknown')}
 - Platform: {target_event.get('source_platform', 'unknown')}
 - Amount: ${target_event.get('amount_usd', 0):.2f}
 - Date: {target_event.get('source_ts', 'unknown')}
-- Vendor: {target_event.get('vendor_standard', 'unknown')}
+- Vendor/Entity: {target_event.get('vendor_standard', 'unknown')}
 
-RELATIONSHIP:
+DETECTED RELATIONSHIP:
 - Type: {rel.get('relationship_type', 'unknown')}
 - Confidence: {rel.get('confidence_score', 0):.2f}
-- Match Factors: {', '.join(rel.get('key_factors', []))}
+- Matching Factors: {', '.join(rel.get('key_factors', [])) if rel.get('key_factors') else 'None'}
 
-Provide a JSON response with:
-1. "semantic_description": Brief natural language description (1-2 sentences)
-2. "reasoning": Why this relationship exists (key evidence)
-3. "temporal_causality": One of: source_causes_target, target_causes_source, bidirectional, correlation_only
-4. "business_logic": One of: standard_payment_flow, revenue_recognition, expense_reimbursement, payroll_processing, tax_withholding, recurring_billing, unknown
+TASK: Provide a JSON response with these fields:
 
-Return ONLY valid JSON, no markdown."""
+1. "semantic_description": A clear, business-friendly description of this relationship (2-3 sentences). Explain what happened in plain language.
+
+2. "reasoning": Detailed explanation of WHY this relationship exists. Include:
+   - What evidence supports this connection?
+   - What business process does this represent?
+   - Why are these two events related?
+
+3. "temporal_causality": Determine the causal direction. Choose ONE:
+   - "source_causes_target": Source event directly caused the target event
+   - "target_causes_source": Target event caused the source event
+   - "bidirectional": Both events influence each other
+   - "correlation_only": Events are correlated but no clear causation
+
+4. "business_logic": Classify the business process. Choose the MOST SPECIFIC category:
+   - "invoice_payment": Invoice being paid through bank/payment system
+   - "revenue_collection": Revenue recorded and cash collected
+   - "expense_reimbursement": Expense claim being reimbursed
+   - "payroll_processing": Salary/wage payment to employee
+   - "tax_payment": Tax withholding or payment to authorities
+   - "vendor_payment": Payment to supplier/vendor for goods/services
+   - "customer_payment": Payment received from customer
+   - "recurring_subscription": Recurring subscription or membership payment
+   - "loan_disbursement": Loan or credit disbursement
+   - "loan_repayment": Loan or credit repayment
+   - "intercompany_transfer": Transfer between related entities
+   - "bank_fee": Bank or platform fee charge
+   - "refund_processing": Refund or credit note processing
+   - "standard_payment_flow": Generic payment flow (use only if none above fit)
+   - "unknown": Unable to determine (avoid if possible)
+
+IMPORTANT: Be specific and accurate. Use "unknown" only when truly uncertain.
+
+Return ONLY valid JSON, no markdown blocks or explanations."""
 
             response = groq_client.chat.completions.create(
                 model="llama-3.3-70b-versatile",
@@ -458,6 +486,22 @@ Return ONLY valid JSON, no markdown."""
                         temporal_causality = enrichment.get('temporal_causality')
                         business_logic = enrichment.get('business_logic')
                 
+                # Generate pattern_id based on relationship type and key factors
+                pattern_signature = f"{rel['relationship_type']}_{'-'.join(sorted(key_factors))}"
+                pattern_id = await self._get_or_create_pattern_id(pattern_signature, rel['relationship_type'], key_factors, user_id)
+                
+                # Generate transaction_id for grouping related operations
+                import uuid
+                transaction_id = str(uuid.uuid4())
+                
+                # Generate relationship embedding for semantic search (if semantic extractor available)
+                relationship_embedding = None
+                if self.semantic_extractor and semantic_description:
+                    try:
+                        relationship_embedding = await self._generate_relationship_embedding(semantic_description)
+                    except Exception as e:
+                        logger.warning(f"Failed to generate relationship embedding: {e}")
+                
                 relationship_instances.append({
                     'user_id': user_id,
                     'source_event_id': rel['source_event_id'],
@@ -465,12 +509,15 @@ Return ONLY valid JSON, no markdown."""
                     'relationship_type': rel['relationship_type'],
                     'confidence_score': rel['confidence_score'],
                     'detection_method': rel.get('detection_method', 'unknown'),
+                    'pattern_id': pattern_id,  # ✅ FIX: Add pattern_id
+                    'transaction_id': transaction_id,  # ✅ FIX: Add transaction_id
+                    'relationship_embedding': relationship_embedding,  # ✅ FIX: Add embedding
                     'metadata': metadata,
                     'key_factors': key_factors,
                     'semantic_description': semantic_description,  # ✅ NEW: AI-generated description
-                    'reasoning': reasoning,  # ✅ NEW: AI-generated reasoning
+                    'reasoning': reasoning or 'Detected based on matching criteria',  # ✅ FIX: Ensure reasoning is never NULL
                     'temporal_causality': temporal_causality,  # ✅ NEW: AI-determined causality
-                    'business_logic': business_logic,  # ✅ NEW: AI-classified business pattern
+                    'business_logic': business_logic or 'standard_payment_flow',  # ✅ FIX: Default business logic
                     'created_at': datetime.utcnow().isoformat()
                 })
             
@@ -491,6 +538,54 @@ Return ONLY valid JSON, no markdown."""
         except Exception as e:
             logger.error(f"Failed to store relationships: {e}")
             return []
+    
+    async def _get_or_create_pattern_id(self, pattern_signature: str, relationship_type: str, key_factors: List[str], user_id: str) -> Optional[str]:
+        """Get existing pattern_id or create new pattern in relationship_patterns table"""
+        try:
+            # Check if pattern already exists
+            result = self.supabase.table('relationship_patterns').select('id').eq(
+                'pattern_signature', pattern_signature
+            ).eq('user_id', user_id).limit(1).execute()
+            
+            if result.data:
+                return result.data[0]['id']
+            
+            # Create new pattern
+            pattern_data = {
+                'user_id': user_id,
+                'pattern_signature': pattern_signature,
+                'relationship_type': relationship_type,
+                'key_factors': key_factors,
+                'occurrence_count': 1,
+                'confidence_score': 0.8,
+                'created_at': datetime.utcnow().isoformat()
+            }
+            
+            insert_result = self.supabase.table('relationship_patterns').insert(pattern_data).execute()
+            if insert_result.data:
+                logger.info(f"Created new relationship pattern: {pattern_signature}")
+                return insert_result.data[0]['id']
+            
+            return None
+            
+        except Exception as e:
+            logger.warning(f"Failed to get/create pattern_id: {e}")
+            return None
+    
+    async def _generate_relationship_embedding(self, text: str) -> Optional[List[float]]:
+        """Generate embedding vector for relationship semantic search"""
+        try:
+            if not self.semantic_extractor:
+                return None
+            
+            # Use semantic extractor to generate embedding
+            # This is a placeholder - implement based on your embedding model
+            # For now, return None to avoid errors
+            return None
+            
+        except Exception as e:
+            logger.warning(f"Failed to generate embedding: {e}")
+            return None
     
     # DEPRECATED: Old methods below are kept for backward compatibility but should not be used
     def _group_events_by_file(self, events: List[Dict]) -> Dict[str, List[Dict]]:

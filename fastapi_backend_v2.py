@@ -9648,6 +9648,37 @@ class ExcelProcessor:
                         'matched_fields': ['canonical_name']
                     })
                     
+                    # ✅ FIX: Log entity resolution to resolution_log table for analytics (complete schema)
+                    try:
+                        resolution_log_entry = {
+                            'user_id': user_id,
+                            'resolution_id': f"{user_id}_{entity_name}_{datetime.utcnow().timestamp()}",
+                            'entity_name': entity_name,
+                            'entity_type': self._normalize_entity_type(entity_type),
+                            'platform': entity.get('source_platform', 'unknown'),
+                            'resolved_entity_id': normalized_id,
+                            'resolved_name': existing.data[0]['canonical_name'] if existing.data else entity_name,
+                            'resolution_method': 'exact_match' if existing.data else 'new_entity',
+                            'confidence': match_confidence,
+                            'name_similarity': match_confidence,
+                            'identifier_similarity': None,
+                            'phonetic_match': False,
+                            'source_file': filename,
+                            'row_id': entity.get('source_row_id'),
+                            'identifiers': {},
+                            'user_corrected': False,
+                            'processing_time_ms': None,
+                            'cache_hit': False,
+                            'resolved_at': datetime.utcnow().isoformat(),
+                            'metadata': {
+                                'matched_fields': ['canonical_name'],
+                                'match_reason': 'exact_match' if existing.data else 'new_entity'
+                            }
+                        }
+                        supabase.table('resolution_log').insert(resolution_log_entry).execute()
+                    except Exception as log_err:
+                        logger.warning(f"Failed to log entity resolution: {log_err}")
+                    
                 except Exception as e:
                     logger.warning(f"Failed to resolve entity {entity.get('name', 'unknown')}: {e}")
                     continue
