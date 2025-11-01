@@ -26,7 +26,7 @@ import { useFastAPIProcessor } from './FastAPIProcessor';
 interface DataSourcesPanelProps {
   isOpen: boolean;
   onClose: () => void;
-  onFilePreview?: (fileId: string, filename: string) => void;
+  onFilePreview?: (fileId: string, filename: string, fileData: any) => void;
 }
 
 interface Integration {
@@ -807,7 +807,7 @@ export const DataSourcesPanel = ({ isOpen, onClose, onFilePreview }: DataSources
                       <div 
                         key={file.id} 
                         className="flex items-center justify-between p-3 rounded-md border finley-dynamic-bg hover:bg-muted/20 transition-colors group cursor-pointer"
-                        onClick={() => onFilePreview?.(file.id, file.filename || file.id)}
+                        onClick={() => onFilePreview?.(file.id, file.filename || file.id, file)}
                       >
                         <div className="flex-1 min-w-0 space-y-1">
                           <div className="flex items-center gap-2">

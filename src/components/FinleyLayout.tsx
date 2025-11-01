@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Menu } from 'lucide-react';
 import { FinleySidebar } from './FinleySidebar';
-import { ChatInterface } from './ChatInterface';
+import { ThreePanelLayout } from './ThreePanelLayout';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from './AuthProvider';
 import { Button } from './ui/button';
@@ -142,9 +142,9 @@ export const FinleyLayout = () => {
       
       {/* Main Content */}
       <div className="flex-1 flex flex-col min-h-0">
-        {/* Chat Interface */}
+        {/* 3-Panel Layout */}
         <div className="flex-1 min-h-0">
-          <ChatInterface 
+          <ThreePanelLayout 
             currentView={currentView}
             onNavigate={handleNavigate}
           />
