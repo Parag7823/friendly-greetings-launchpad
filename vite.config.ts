@@ -16,24 +16,7 @@ export default defineConfig(({ mode }) => ({
     sourcemap: false,
     rollupOptions: {
       output: {
-        manualChunks: (id) => {
-          // CRITICAL: Load React first - it must be in a separate chunk that loads before everything
-          if (id.includes('node_modules/react/') || id.includes('node_modules/react-dom/')) {
-            return 'react';
-          }
-          // Separate Supabase to avoid circular dependencies
-          if (id.includes('node_modules/@supabase')) {
-            return 'supabase';
-          }
-          // UI libraries that depend on React
-          if (id.includes('node_modules/@radix-ui') || id.includes('node_modules/lucide-react')) {
-            return 'ui';
-          }
-          // Other large dependencies
-          if (id.includes('node_modules')) {
-            return 'vendor';
-          }
-        },
+        manualChunks: undefined,
       },
     },
   },
