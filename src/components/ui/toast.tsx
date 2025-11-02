@@ -5,6 +5,13 @@ import { X } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 
+export type ToastActionElement = React.ReactElement<
+  React.ComponentPropsWithoutRef<typeof ToastPrimitives.Action>
+>
+
+export type ToastProps = React.ComponentPropsWithoutRef<typeof ToastPrimitives.Root> &
+  VariantProps<typeof toastVariants>
+
 const ToastProvider = ToastPrimitives.Provider
 
 const ToastViewport = React.forwardRef<
