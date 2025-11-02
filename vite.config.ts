@@ -17,13 +17,17 @@ export default defineConfig(({ mode }) => ({
     rollupOptions: {
       output: {
         manualChunks: (id) => {
-          // Fix: Separate Supabase into its own chunk to avoid circular dependencies
+          // CRITICAL: Load React first - it must be in a separate chunk that loads before everything
+          if (id.includes('node_modules/react/') || id.includes('node_modules/react-dom/')) {
+            return 'react';
+          }
+          // Separate Supabase to avoid circular dependencies
           if (id.includes('node_modules/@supabase')) {
             return 'supabase';
           }
-          // Separate React and related libraries
-          if (id.includes('node_modules/react') || id.includes('node_modules/react-dom')) {
-            return 'react-vendor';
+          // UI libraries that depend on React
+          if (id.includes('node_modules/@radix-ui') || id.includes('node_modules/lucide-react')) {
+            return 'ui';
           }
           // Other large dependencies
           if (id.includes('node_modules')) {
