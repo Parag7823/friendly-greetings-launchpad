@@ -9792,7 +9792,7 @@ class ExcelProcessor:
                         'source_entity_type': self._normalize_entity_type(entity_type),
                         'source_platform': entity.get('source_platform', 'unknown'),
                         'source_file': filename,
-                        'source_row_id': None,  # FIX: Should be raw_events.id (UUID), not row_index (integer)
+                        'source_row_id': entity.get('source_row_id'),
                         'normalized_entity_id': normalized_id,
                         'match_confidence': match_confidence,
                         'match_reason': 'exact_match' if existing.data else 'new_entity',
@@ -9836,7 +9836,7 @@ class ExcelProcessor:
                             'identifier_similarity': identifier_similarity,  # ✅ FIX: Calculate identifier similarity
                             'phonetic_match': phonetic_match,  # ✅ FIX: Check phonetic match
                             'source_file': filename,
-                            'row_id': None,  # FIX: row_id should reference raw_events.id (UUID), not source_row_id (integer)
+                            'row_id': str(entity.get('source_row_id', '')),  # ✅ FIX: Populate row_id
                             'identifiers': identifiers_dict or {},  # ✅ FIX: Populate identifiers
                             'user_corrected': False,
                             'correction_timestamp': None,  # ✅ FIX: NULL until user corrects
