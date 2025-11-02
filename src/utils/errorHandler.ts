@@ -6,14 +6,21 @@
  * - Backend HTTP exceptions
  * - WebSocket error messages
  */
-
-import { useToast } from '@/hooks/use-toast';
 import { config } from '@/config';
+import type { ReactNode } from 'react';
 
-// Get toast function (will be called from component context)
-let toastFn: ReturnType<typeof useToast>['toast'] | null = null;
+// Define a minimal toast function signature locally to avoid importing React hooks here
+type ToastFn = (args: {
+  title?: ReactNode;
+  description?: ReactNode;
+  variant?: 'default' | 'destructive';
+  duration?: number;
+}) => unknown;
 
-export const setToastFunction = (fn: ReturnType<typeof useToast>['toast']) => {
+// Get toast function (will be set from component context)
+let toastFn: ToastFn | null = null;
+
+export const setToastFunction = (fn: ToastFn) => {
   toastFn = fn;
 };
 
@@ -259,6 +266,23 @@ export class UnifiedErrorHandler {
       details: {
         name: error.name,
         stack: error.stack
+      },
+      retryable: false
+    };
+  }
+
+  /**
+   * Create error context from React error
+   */
+  static fromReactError(error: Error, componentStack: ReactNode, source: ErrorSource = ErrorSource.FRONTEND): ErrorContext {
+    return {
+      message: error.message,
+      severity: ErrorSeverity.HIGH,
+      source,
+      details: {
+        name: error.name,
+        stack: error.stack,
+        componentStack: componentStack
       },
       retryable: false
     };
