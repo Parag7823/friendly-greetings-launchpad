@@ -86,12 +86,11 @@ class IntelligentChatOrchestrator:
     This is the missing link between the chat interface and the backend intelligence.
     """
     
-    def __init__(self, openai_client, supabase_client, cache_client=None):
+    def __init__(self, supabase_client, cache_client=None):
         """
         Initialize the orchestrator with all intelligence engines.
         
         Args:
-            openai_client: DEPRECATED - Now using Groq/Llama internally
             supabase_client: Supabase client for database access
             cache_client: Optional cache client for performance
         """
@@ -101,7 +100,7 @@ class IntelligentChatOrchestrator:
             raise ValueError("GROQ_API_KEY environment variable is required")
         
         self.groq = AsyncGroq(api_key=groq_api_key)
-        self.openai = openai_client  # Keep for backward compatibility with other engines
+        self.openai = None  # Not used - using Groq internally
         self.supabase = supabase_client
         self.cache = cache_client
         
@@ -115,7 +114,7 @@ class IntelligentChatOrchestrator:
         )
         
         self.relationship_detector = EnhancedRelationshipDetector(
-            openai_client=openai_client,
+            openai_client=None,
             supabase_client=supabase_client,
             cache_client=cache_client
         )
