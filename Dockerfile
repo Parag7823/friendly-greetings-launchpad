@@ -67,7 +67,7 @@ RUN echo "Installing pandas with Python $(python --version)" && \
 RUN pip install --no-cache-dir -r backend-requirements.txt
 
 # CRITICAL: Force cache invalidation for Python file copies
-ARG CACHEBUST=20251031-v2
+ARG CACHEBUST=20251102-v15-CONNECTION-TIMEOUT-FIX
 RUN echo "Copying Python files with cache bust: $CACHEBUST"
 
 # Copy all necessary Python files and modules

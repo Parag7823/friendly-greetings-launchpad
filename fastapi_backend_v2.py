@@ -11600,11 +11600,19 @@ async def chat_endpoint(request: dict):
             )
         
         # Pass None for openai_client - orchestrator will use Groq internally
-        orchestrator = IntelligentChatOrchestrator(
-            openai_client=None,  # Now using Groq/Llama instead
-            supabase_client=supabase,
-            cache_client=safe_get_ai_cache()
-        )
+        # Backward compatibility: some deployments may have an older signature without openai_client.
+        try:
+            orchestrator = IntelligentChatOrchestrator(
+                openai_client=None,  # Now using Groq/Llama instead
+                supabase_client=supabase,
+                cache_client=safe_get_ai_cache()
+            )
+        except TypeError:
+            # Fallback for orchestrator versions that do not accept openai_client
+            orchestrator = IntelligentChatOrchestrator(
+                supabase_client=supabase,
+                cache_client=safe_get_ai_cache()
+            )
         
         # Process the question
         response = await orchestrator.process_question(
@@ -11664,8 +11672,15 @@ async def chat_health_check():
         from intelligent_chat_orchestrator import IntelligentChatOrchestrator
         
         try:
+            # Preferred signature (newer)
             orchestrator = IntelligentChatOrchestrator(
                 openai_client=None,
+                supabase_client=supabase,
+                cache_client=safe_get_ai_cache()
+            )
+        except TypeError:
+            # Fallback signature (older)
+            orchestrator = IntelligentChatOrchestrator(
                 supabase_client=supabase,
                 cache_client=safe_get_ai_cache()
             )
