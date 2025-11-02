@@ -50,42 +50,43 @@ export const TabbedFilePreview = ({
     const loadFileContent = async () => {
       setLoadingContent(prev => ({ ...prev, [activeFileId]: true }));
       try {
-        // Fetch file metadata to get storage path
-        const { data: fileData, error: fileError } = await supabase
-          .from('ingestion_jobs')
-          .select('file_path, storage_path')
-          .eq('id', activeFileId)
-          .single();
+        // Fetch raw events from database (already processed data)
+        const { data: events, error } = await supabase
+          .from('raw_events')
+          .select('*')
+          .eq('file_id', activeFileId)
+          .order('source_ts', { ascending: true })
+          .limit(100);
 
-        if (fileError || !fileData?.storage_path) {
-          console.error('Failed to get file path:', fileError);
+        if (error) {
+          console.error('Failed to load events:', error);
           return;
         }
 
-        // Download file from Supabase Storage
-        const { data: fileBlob, error: downloadError } = await supabase.storage
-          .from('uploaded-files')
-          .download(fileData.storage_path);
-
-        if (downloadError || !fileBlob) {
-          console.error('Failed to download file:', downloadError);
+        if (!events || events.length === 0) {
+          console.log('No events found for file:', activeFileId);
           return;
         }
 
-        // Parse CSV content
-        const text = await fileBlob.text();
-        const lines = text.split('\n').filter(line => line.trim());
-        
-        if (lines.length === 0) return;
-
-        // Parse CSV (simple parser - handles basic CSV)
-        const headers = lines[0].split(',').map(h => h.trim());
-        const rows = lines.slice(1, 101).map(line => { // Limit to 100 rows for performance
-          const values = line.split(',').map(v => v.trim());
+        // Convert events to table rows
+        const rows = events.map(event => {
           const row: any = {};
-          headers.forEach((header, index) => {
-            row[header] = values[index] || '';
-          });
+          // Extract key fields for display
+          if (event.source_ts) row['Date'] = new Date(event.source_ts).toLocaleDateString();
+          if (event.vendor_standard) row['Vendor'] = event.vendor_standard;
+          if (event.amount_usd !== null) row['Amount'] = `$${Number(event.amount_usd).toFixed(2)}`;
+          if (event.kind) row['Type'] = event.kind;
+          if (event.source_platform) row['Platform'] = event.source_platform;
+          
+          // Add payload fields
+          if (event.payload) {
+            Object.keys(event.payload).forEach(key => {
+              if (!row[key]) {
+                row[key] = event.payload[key];
+              }
+            });
+          }
+          
           return row;
         });
 
