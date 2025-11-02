@@ -16,11 +16,34 @@ export default defineConfig(({ mode }) => ({
     sourcemap: false,
     rollupOptions: {
       output: {
-        manualChunks: undefined,
+        manualChunks: (id) => {
+          // Fix: Separate Supabase into its own chunk to avoid circular dependencies
+          if (id.includes('node_modules/@supabase')) {
+            return 'supabase';
+          }
+          // Separate React and related libraries
+          if (id.includes('node_modules/react') || id.includes('node_modules/react-dom')) {
+            return 'react-vendor';
+          }
+          // Other large dependencies
+          if (id.includes('node_modules')) {
+            return 'vendor';
+          }
+        },
       },
     },
   },
   publicDir: 'public',
+  optimizeDeps: {
+    include: [
+      '@supabase/supabase-js',
+      '@supabase/postgrest-js',
+      '@supabase/realtime-js',
+      '@supabase/storage-js',
+      '@supabase/functions-js',
+    ],
+    exclude: [],
+  },
   plugins: [
     react(),
     mode === 'development' &&
