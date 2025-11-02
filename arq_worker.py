@@ -275,6 +275,49 @@ async def detect_relationships(ctx, user_id: str, file_id: str = None) -> Dict[s
         # Relationships are already stored by the detector
         logger.info(f"✅ Background relationship detection completed: {relationship_results.get('total_relationships', 0)} relationships found")
         
+        # FIX #4-8: Run advanced analytics AFTER relationship detection
+        analytics_results = {}
+        try:
+            logger.info(f"🔬 Starting advanced analytics for user_id={user_id}")
+            
+            # Import advanced analytics modules
+            from temporal_pattern_learner import TemporalPatternLearner
+            from causal_inference_engine import CausalInferenceEngine
+            
+            # Initialize engines
+            temporal_learner = TemporalPatternLearner(supabase)
+            causal_engine = CausalInferenceEngine(supabase)
+            
+            # 1. Learn temporal patterns
+            pattern_results = await temporal_learner.learn_all_patterns(user_id)
+            analytics_results['temporal_patterns'] = pattern_results.get('total_patterns', 0)
+            
+            # 2. Detect temporal anomalies
+            anomaly_results = await temporal_learner.detect_temporal_anomalies(user_id)
+            analytics_results['temporal_anomalies'] = anomaly_results.get('total_anomalies', 0)
+            
+            # 3. Predict missing relationships
+            prediction_results = await temporal_learner.predict_missing_relationships(user_id)
+            analytics_results['predicted_relationships'] = prediction_results.get('total_predictions', 0)
+            
+            # 4. Analyze causal relationships
+            causal_results = await causal_engine.analyze_all_relationships(user_id)
+            analytics_results['causal_relationships'] = causal_results.get('total_causal', 0)
+            
+            # 5. Perform root cause analysis
+            root_cause_results = await causal_engine.analyze_root_causes(user_id)
+            analytics_results['root_cause_analyses'] = root_cause_results.get('total_root_causes', 0)
+            
+            # 6. Run counterfactual analysis
+            counterfactual_results = await causal_engine.analyze_counterfactuals(user_id)
+            analytics_results['counterfactual_analyses'] = counterfactual_results.get('total_scenarios', 0)
+            
+            logger.info(f"✅ Advanced analytics completed: {analytics_results}")
+            
+        except Exception as analytics_error:
+            logger.error(f"⚠️ Advanced analytics failed (non-critical): {analytics_error}")
+            analytics_results['error'] = str(analytics_error)
+        
         return {
             "status": "success",
             "user_id": user_id,
@@ -283,7 +326,8 @@ async def detect_relationships(ctx, user_id: str, file_id: str = None) -> Dict[s
             "cross_document_relationships": relationship_results.get('cross_document_relationships', 0),
             "within_file_relationships": relationship_results.get('within_file_relationships', 0),
             "method": "database_joins",
-            "complexity": "O(N log N)"
+            "complexity": "O(N log N)",
+            "advanced_analytics": analytics_results
         }
         
     except Exception as e:

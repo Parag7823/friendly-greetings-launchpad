@@ -15125,6 +15125,28 @@ class UniversalWebSocketManager:
         await self._save_state(job_id, base)
         return base
     
+    async def _safe_send_json(self, job_id: str, payload: Dict[str, Any], context: str) -> bool:
+        """Best-effort WebSocket send that tolerates closed connections."""
+        websocket = self.active_connections.get(job_id)
+        if not websocket:
+            return False
+        try:
+            await websocket.send_json(payload)
+            return True
+        except RuntimeError as e:
+            message = str(e).lower()
+            if "close message" in message or "connection is closed" in message:
+                logger.info(f"Skipping {context} for job {job_id}: connection already closed")
+            else:
+                logger.warning(f"Failed to send {context} for job {job_id}: {e}")
+        except WebSocketDisconnect:
+            logger.info(f"Skipping {context} for job {job_id}: websocket disconnected")
+        except Exception as e:
+            logger.warning(f"Failed to send {context} for job {job_id}: {e}")
+
+        await self.disconnect(job_id)
+        return False
+
     async def connect(self, websocket: WebSocket, job_id: str):
         """Accept WebSocket connection and register job"""
         await websocket.accept()
@@ -15190,18 +15212,17 @@ class UniversalWebSocketManager:
             await self._save_state(job_id, current)
 
             # Send over WS if connected
-            if job_id in self.active_connections:
-                update_message = {
-                    "type": "component_update",
-                    "job_id": job_id,
-                    "component": component,
-                    "status": status,
-                    "message": message,
-                    "progress": progress,
-                    "data": data or {},
-                    "timestamp": datetime.utcnow().isoformat()
-                }
-                await self.active_connections[job_id].send_json(update_message)
+            update_message = {
+                "type": "component_update",
+                "job_id": job_id,
+                "component": component,
+                "status": status,
+                "message": message,
+                "progress": progress,
+                "data": data or {},
+                "timestamp": datetime.utcnow().isoformat()
+            }
+            await self._safe_send_json(job_id, update_message, "component update")
             return True
         except Exception as e:
             logger.error(f"Failed to send component update for job {job_id}: {e}")
@@ -15220,14 +15241,10 @@ class UniversalWebSocketManager:
             }
             
             # Send to connected WebSocket if exists
-            if job_id in self.active_connections:
-                ws = self.active_connections[job_id]
-                try:
-                    await ws.send_json(payload)
-                    logger.debug(f"Sent debug update for job {job_id}, stage {stage}")
-                except Exception as ws_err:
-                    logger.warning(f"Failed to send debug update via WebSocket: {ws_err}")
-            
+            sent = await self._safe_send_json(job_id, payload, "debug update")
+            if sent:
+                logger.debug(f"Sent debug update for job {job_id}, stage {stage}")
+
             return True
         except Exception as e:
             logger.error(f"Failed to send debug update for job {job_id}: {e}")
@@ -15248,17 +15265,16 @@ class UniversalWebSocketManager:
             })
 
             # Send over WS if connected
-            if job_id in self.active_connections:
-                update_message = {
-                    "type": "job_update",
-                    "job_id": job_id,
-                    "status": status,
-                    "message": message,
-                    "progress": progress,
-                    "results": results or {},
-                    "timestamp": datetime.utcnow().isoformat()
-                }
-                await self.active_connections[job_id].send_json(update_message)
+            update_message = {
+                "type": "job_update",
+                "job_id": job_id,
+                "status": status,
+                "message": message,
+                "progress": progress,
+                "results": results or {},
+                "timestamp": datetime.utcnow().isoformat()
+            }
+            await self._safe_send_json(job_id, update_message, "overall update")
             return True
         except Exception as e:
             logger.error(f"Failed to send overall update for job {job_id}: {e}")
@@ -15277,15 +15293,14 @@ class UniversalWebSocketManager:
             })
 
             # Send over WS if connected
-            if job_id in self.active_connections:
-                error_message_data = {
-                    "type": "error",
-                    "job_id": job_id,
-                    "error": error_message,
-                    "component": component,
-                    "timestamp": datetime.utcnow().isoformat()
-                }
-                await self.active_connections[job_id].send_json(error_message_data)
+            error_message_data = {
+                "type": "error",
+                "job_id": job_id,
+                "error": error_message,
+                "component": component,
+                "timestamp": datetime.utcnow().isoformat()
+            }
+            await self._safe_send_json(job_id, error_message_data, "error update")
             return True
         except Exception as e:
             logger.error(f"Failed to send error for job {job_id}: {e}")
@@ -15296,20 +15311,11 @@ class UniversalWebSocketManager:
         CRITICAL FIX: Send ping to client to check if connection is alive.
         Part of heartbeat mechanism to detect stale connections.
         """
-        try:
-            if job_id in self.active_connections:
-                websocket = self.active_connections[job_id]
-                await websocket.send_json({
-                    "type": "ping",
-                    "timestamp": datetime.utcnow().isoformat()
-                })
-                return True
-            return False
-        except Exception as e:
-            logger.warning(f"Failed to send ping to job {job_id}: {e}")
-            # Connection is likely dead, remove it
-            await self.disconnect(job_id)
-            return False
+        payload = {
+            "type": "ping",
+            "timestamp": datetime.utcnow().isoformat()
+        }
+        return await self._safe_send_json(job_id, payload, "ping")
     
     async def handle_pong(self, job_id: str):
         """

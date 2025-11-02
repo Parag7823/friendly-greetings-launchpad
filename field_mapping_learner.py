@@ -31,6 +31,7 @@ class FieldMappingRecord:
     target_field: str
     platform: Optional[str]
     document_type: Optional[str]
+    filename_pattern: Optional[str]  # FIX #10: Add filename pattern support
     confidence: float
     extraction_success: bool
     metadata: Dict[str, Any]
@@ -99,6 +100,7 @@ class FieldMappingLearner:
         target_field: str,
         platform: Optional[str] = None,
         document_type: Optional[str] = None,
+        filename_pattern: Optional[str] = None,  # FIX #10: Add filename_pattern parameter
         confidence: float = 0.8,
         extraction_success: bool = True,
         metadata: Optional[Dict[str, Any]] = None
@@ -112,6 +114,7 @@ class FieldMappingLearner:
             target_field: Target field name (e.g., 'amount', 'vendor', 'date')
             platform: Optional platform name
             document_type: Optional document type
+            filename_pattern: Optional filename pattern (e.g., 'invoice_*.csv')
             confidence: Confidence score (0-1)
             extraction_success: Whether the extraction was successful
             metadata: Additional metadata
@@ -125,6 +128,7 @@ class FieldMappingLearner:
             target_field=target_field,
             platform=platform,
             document_type=document_type,
+            filename_pattern=filename_pattern,  # FIX #10: Include filename_pattern
             confidence=confidence,
             extraction_success=extraction_success,
             metadata=metadata or {}
@@ -191,7 +195,8 @@ class FieldMappingLearner:
                 record.source_column.lower(),
                 record.target_field.lower(),
                 record.platform,
-                record.document_type
+                record.document_type,
+                record.filename_pattern  # FIX #10: Include filename_pattern in key
             )
             
             agg = aggregated[key]
@@ -204,7 +209,7 @@ class FieldMappingLearner:
         # Compute final aggregated mappings
         result = {}
         for key, agg in aggregated.items():
-            user_id, source_column, target_field, platform, document_type = key
+            user_id, source_column, target_field, platform, document_type, filename_pattern = key  # FIX #10
             
             # Average confidence weighted by success rate
             avg_confidence = agg['total_confidence'] / agg['total_count']
@@ -224,6 +229,7 @@ class FieldMappingLearner:
                 'target_field': target_field,
                 'platform': platform,
                 'document_type': document_type,
+                'filename_pattern': filename_pattern,  # FIX #10: Include filename_pattern
                 'confidence': final_confidence,
                 'metadata': merged_metadata
             }
