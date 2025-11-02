@@ -350,3 +350,39 @@ class NangoClient:
             return resp.json()
         except Exception:
             return {"_raw": resp.content}
+
+    async def delete_connection(self, connection_id: str, provider_config_key: Optional[str] = None) -> bool:
+        """Delete a Nango connection if it exists.
+
+        Args:
+            connection_id: The Nango connection identifier (usually {user_id}_{integration_id}).
+            provider_config_key: Optional provider config key / integration identifier.
+
+        Returns:
+            True if deletion succeeded or the connection was already gone. False otherwise.
+        """
+        url = f"{self.base_url}/connection/{connection_id}"
+        params: Dict[str, Any] = {}
+        if provider_config_key:
+            params['provider_config_key'] = provider_config_key
+
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                resp = await client.delete(
+                    url,
+                    params=params,
+                    headers=self._headers(provider_config_key, connection_id)
+                )
+
+            if resp.status_code in (200, 202, 204):
+                return True
+
+            if resp.status_code == 404:
+                # Connection already removed – treat as success
+                return True
+
+            resp.raise_for_status()
+            return True
+        except Exception:
+            # Let caller decide how to handle failures; keep surface area small here
+            return False

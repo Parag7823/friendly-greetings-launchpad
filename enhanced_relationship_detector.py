@@ -700,18 +700,28 @@ Return ONLY valid JSON, no markdown blocks or explanations."""
             return None
     
     async def _generate_relationship_embedding(self, text: str) -> Optional[List[float]]:
-        """Generate embedding vector for relationship semantic search"""
+        """
+        FIX #1: Generate embedding vector for relationship semantic search using BGE.
+        This enables similarity-based relationship discovery and duplicate detection.
+        """
         try:
-            if not self.semantic_extractor:
+            if not text:
                 return None
             
-            # Use semantic extractor to generate embedding
-            # This is a placeholder - implement based on your embedding model
-            # For now, return None to avoid errors
-            return None
+            # Import embedding service
+            from embedding_service import get_embedding_service
+            
+            # Get embedding service instance
+            embedding_service = await get_embedding_service()
+            
+            # Generate embedding using BGE model (1024 dimensions)
+            embedding = await embedding_service.embed_text(text)
+            
+            logger.debug(f"✅ Generated relationship embedding (1024 dims) for: {text[:50]}...")
+            return embedding
             
         except Exception as e:
-            logger.warning(f"Failed to generate embedding: {e}")
+            logger.warning(f"Failed to generate relationship embedding: {e}")
             return None
     
     # DEPRECATED: Old methods below are kept for backward compatibility but should not be used

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { FileSpreadsheet, Plug, RefreshCw, CheckCircle2, AlertCircle, ChevronDown, ChevronRight, X, Loader2, Mail, HardDrive, Calculator, CreditCard, Trash2, Plus, Eye, GripVertical } from 'lucide-react';
 import { useConnections, useRefreshConnections } from '@/hooks/useConnections';
 import gmailLogo from "@/assets/logos/gmail.svg";
@@ -185,34 +185,57 @@ export const DataSourcesPanel = ({ isOpen, onClose, onFilePreview }: DataSources
     );
   };
 
+  const getSessionToken = useCallback(async () => {
+    const { data: sessionData } = await supabase.auth.getSession();
+    return sessionData?.session?.access_token;
+  }, []);
+
   const handleConnect = async (provider: string) => {
     if (!user?.id) return;
 
     setConnecting(provider);
     try {
-      const response = await fetch(`${config.apiUrl}/integrations/${provider}/connect`, {
+      const sessionToken = await getSessionToken();
+      if (!sessionToken) {
+        throw new Error('Unable to authenticate request. Please sign in again.');
+      }
+
+      const response = await fetch(`${config.apiUrl}/api/connectors/initiate`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify({ user_id: user.id })
+        body: JSON.stringify({
+          provider,
+          user_id: user.id,
+          session_token: sessionToken
+        })
       });
 
       if (!response.ok) {
-        throw new Error(`Failed to start connection for ${provider}`);
+        let detail: any = undefined;
+        try {
+          detail = await response.json();
+        } catch (err) {
+          detail = undefined;
+        }
+        const message = detail?.detail?.message || detail?.detail || detail?.error || `Failed to start connection for ${provider}`;
+        throw new Error(message);
       }
 
       const data = await response.json();
-      const { auth_url } = data;
+      const connectUrl = data?.connect_session?.connect_url || data?.connect_session?.url;
 
-      if (auth_url) {
-        window.open(auth_url, '_blank', 'width=600,height=800');
+      if (connectUrl) {
+        window.open(connectUrl, '_blank', 'width=600,height=800');
       }
 
       toast({
         title: 'Connecting...',
         description: 'Complete the flow in the newly opened window.'
       });
+
+      setVerifying(provider);
     } catch (error: any) {
       console.error('Connection error:', error);
       toast({
@@ -222,27 +245,40 @@ export const DataSourcesPanel = ({ isOpen, onClose, onFilePreview }: DataSources
       });
     } finally {
       setConnecting(null);
-      refreshConnections();
     }
   };
 
-  const handleDisconnect = async (connectionId: string, integrationName: string) => {
+  const handleDisconnect = async (connectionId: string, integrationName: string, provider: string) => {
     if (!user?.id) return;
 
     try {
-      const response = await fetch(`${config.apiUrl}/integrations/disconnect`, {
+      const sessionToken = await getSessionToken();
+      if (!sessionToken) {
+        throw new Error('Unable to authenticate request. Please sign in again.');
+      }
+
+      const response = await fetch(`${config.apiUrl}/api/connectors/disconnect`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
           user_id: user.id,
-          connection_id: connectionId
+          connection_id: connectionId,
+          provider,
+          session_token: sessionToken
         })
       });
 
       if (!response.ok) {
-        throw new Error('Failed to disconnect');
+        let detail: any = undefined;
+        try {
+          detail = await response.json();
+        } catch (err) {
+          detail = undefined;
+        }
+        const message = detail?.detail?.message || detail?.detail || 'Failed to disconnect';
+        throw new Error(message);
       }
 
       toast({
@@ -260,24 +296,39 @@ export const DataSourcesPanel = ({ isOpen, onClose, onFilePreview }: DataSources
     }
   };
 
-  const handleSync = async (connectionId: string, integrationId: string) => {
+  const handleSync = async (connectionId: string, integrationId: string | undefined, provider: string) => {
     if (!user?.id) return;
 
     setSyncing(connectionId);
     try {
-      const response = await fetch(`${config.apiUrl}/integrations/${integrationId}/sync`, {
+      const sessionToken = await getSessionToken();
+      if (!sessionToken) {
+        throw new Error('Unable to authenticate request. Please sign in again.');
+      }
+
+      const response = await fetch(`${config.apiUrl}/api/connectors/sync`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
           user_id: user.id,
-          connection_id: connectionId
+          connection_id: connectionId,
+          integration_id: integrationId || provider,
+          mode: 'historical',
+          session_token: sessionToken
         })
       });
 
       if (!response.ok) {
-        throw new Error('Failed to start sync');
+        let detail: any = undefined;
+        try {
+          detail = await response.json();
+        } catch (err) {
+          detail = undefined;
+        }
+        const message = detail?.detail?.message || detail?.detail || 'Failed to start sync';
+        throw new Error(message);
       }
 
       toast({
@@ -296,6 +347,53 @@ export const DataSourcesPanel = ({ isOpen, onClose, onFilePreview }: DataSources
       setSyncing(null);
     }
   };
+
+  const verifyConnector = useCallback(async (provider: string) => {
+    if (!user?.id || !provider) return;
+
+    try {
+      const sessionToken = await getSessionToken();
+      if (!sessionToken) {
+        throw new Error('Unable to authenticate request. Please sign in again.');
+      }
+
+      const response = await fetch(`${config.apiUrl}/api/connectors/verify-connection`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          user_id: user.id,
+          provider,
+          session_token: sessionToken
+        })
+      });
+
+      if (!response.ok) {
+        // Verification can fail if the user closes the popup early; log but don't block.
+        let detail: any = undefined;
+        try {
+          detail = await response.json();
+        } catch (err) {
+          detail = undefined;
+        }
+        const message = detail?.detail?.message || detail?.detail || null;
+        if (message) {
+          console.warn('Connector verification warning:', message);
+        }
+      } else {
+        toast({
+          title: 'Connection verified',
+          description: 'Your integration is ready to use.'
+        });
+      }
+    } catch (error) {
+      console.warn('Connector verification error:', error);
+    } finally {
+      setVerifying(null);
+      refreshConnections();
+    }
+  }, [getSessionToken, refreshConnections, toast, user?.id]);
 
   const handleDeleteFile = async (fileId: string, filename: string) => {
     if (!user?.id) return;
@@ -339,16 +437,21 @@ export const DataSourcesPanel = ({ isOpen, onClose, onFilePreview }: DataSources
   // Refresh when window regains focus (user returns from Nango popup)
   useEffect(() => {
     if (!isOpen || !user?.id) return;
-    
+
     const handleFocus = () => {
-      refreshConnections();
+      if (verifying) {
+        verifyConnector(verifying);
+      } else {
+        refreshConnections();
+      }
     };
+
     window.addEventListener('focus', handleFocus);
-    
+
     return () => {
       window.removeEventListener('focus', handleFocus);
     };
-  }, [user?.id, isOpen, refreshConnections]);
+  }, [user?.id, isOpen, refreshConnections, verifyConnector, verifying]);
 
   // Load uploaded files with real-time polling
   useEffect(() => {

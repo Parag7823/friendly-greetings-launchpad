@@ -9572,6 +9572,7 @@ class ExcelProcessor:
                 vendor_raw = event.get('vendor_raw')
                 source_platform = event.get('source_platform', 'unknown')
                 source_filename = event.get('source_filename', 'unknown')
+                row_index = event.get('row_index')  # FIX #9: Track row_index
                 
                 # Build lineage path for provenance tracking
                 lineage_step = {
@@ -9582,7 +9583,8 @@ class ExcelProcessor:
                     'metadata': {
                         'event_id': event.get('id'),
                         'source_platform': source_platform,
-                        'source_file': source_filename
+                        'source_file': source_filename,
+                        'row_index': row_index  # FIX #9: Include row_index
                     }
                 }
                 
@@ -9594,6 +9596,7 @@ class ExcelProcessor:
                             'canonical_name': vendor_standard,
                             'entity_type': 'vendor',
                             'source_platform': source_platform,
+                            'source_row_id': str(row_index) if row_index is not None else None,  # FIX #9: Add source_row_id
                             'identifiers': {
                                 'email': event.get('email'),
                                 'phone': event.get('phone'),
@@ -9629,6 +9632,7 @@ class ExcelProcessor:
                             'canonical_name': value,
                             'entity_type': 'contact',
                             'source_platform': source_platform,
+                            'source_row_id': str(row_index) if row_index is not None else None,  # FIX #9
                             'identifiers': {'email': value},
                             'source_file': source_filename,
                             'aliases': [value],
@@ -9647,6 +9651,7 @@ class ExcelProcessor:
                             'canonical_name': value,
                             'entity_type': 'contact',
                             'source_platform': source_platform,
+                            'source_row_id': str(row_index) if row_index is not None else None,  # FIX #9
                             'identifiers': {'phone': value},
                             'source_file': source_filename,
                             'aliases': [value],
@@ -9680,6 +9685,7 @@ class ExcelProcessor:
                                 'canonical_name': value,
                                 'entity_type': entity_type,
                                 'source_platform': source_platform,
+                                'source_row_id': str(row_index) if row_index is not None else None,  # FIX #9
                                 'identifiers': {},
                                 'source_file': source_filename,
                                 'aliases': [value],
@@ -12439,6 +12445,12 @@ class UpdateFrequencyRequest(BaseModel):
     minutes: int
     session_token: Optional[str] = None
 
+class ConnectorDisconnectRequest(BaseModel):
+    user_id: str
+    connection_id: str
+    provider: Optional[str] = None
+    session_token: Optional[str] = None
+
 async def _require_security(endpoint: str, user_id: str, session_token: Optional[str]):
     try:
         # Optional dev bypass for connector testing
@@ -14166,6 +14178,78 @@ async def update_connection_frequency(req: ConnectorFrequencyUpdate):
     except Exception as e:
         logger.error(f"Frequency update failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.post('/api/connectors/disconnect')
+async def connectors_disconnect(req: ConnectorDisconnectRequest):
+    """Disconnect a user's connector and remove the Nango connection."""
+    await _require_security('connectors-disconnect', req.user_id, req.session_token)
+
+    connection_id = req.connection_id
+
+    try:
+        # Fetch connection row to validate ownership and gather metadata
+        uc_res = supabase.table('user_connections').select(
+            'id, user_id, connector_id, integration_id, provider'
+        ).eq('nango_connection_id', connection_id).limit(1).execute()
+
+        if not uc_res.data:
+            # Nothing to disconnect; treat as success for idempotency
+            return {'status': 'ok', 'connection_id': connection_id}
+
+        conn_row = uc_res.data[0]
+        if conn_row.get('user_id') != req.user_id:
+            raise HTTPException(status_code=403, detail='Connection does not belong to user')
+
+        integration_id = conn_row.get('integration_id')
+        provider = req.provider or conn_row.get('provider')
+
+        # Derive integration id if missing
+        if not integration_id and conn_row.get('connector_id'):
+            try:
+                c_res = supabase.table('connectors').select('integration_id').eq('id', conn_row['connector_id']).limit(1).execute()
+                if c_res.data:
+                    integration_id = c_res.data[0].get('integration_id')
+            except Exception:
+                integration_id = integration_id or provider
+
+        # Attempt to delete connection in Nango first (best effort)
+        nango = NangoClient(base_url=NANGO_BASE_URL)
+        await nango.delete_connection(connection_id, integration_id)
+
+        # Mark connection inactive / remove locally
+        try:
+            transaction_manager = get_transaction_manager()
+            async with transaction_manager.transaction(
+                user_id=req.user_id,
+                operation_type="connector_disconnect"
+            ) as tx:
+                await tx.update(
+                    'user_connections',
+                    {
+                        'status': 'disconnected',
+                        'updated_at': datetime.utcnow().isoformat()
+                    },
+                    {'nango_connection_id': connection_id}
+                )
+
+                await tx.update(
+                    'external_items',
+                    {'status': 'disconnected'},
+                    {'user_connection_id': conn_row['id']}
+                )
+
+        except Exception as e:
+            logger.error(f"Failed to mark user connection disconnected: {e}")
+            raise HTTPException(status_code=500, detail='Failed to update connection state')
+
+        return {'status': 'ok', 'connection_id': connection_id}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Connector disconnect failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.get("/api/connectors/status")
 async def connectors_status(connection_id: str, user_id: str, session_token: Optional[str] = None):
