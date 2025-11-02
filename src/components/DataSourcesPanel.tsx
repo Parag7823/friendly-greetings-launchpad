@@ -238,14 +238,31 @@ export const DataSourcesPanel = ({ isOpen, onClose, onFilePreview }: DataSources
 
       if (connectUrl) {
         window.open(connectUrl, '_blank', 'width=600,height=800');
+        
+        toast({
+          title: 'Connecting...',
+          description: 'Complete the flow in the newly opened window.'
+        });
+
+        setVerifying(provider);
+        
+        // FIX: Add 60-second timeout to clear "Connecting..." state if verification never completes
+        setTimeout(() => {
+          setVerifying((current) => {
+            if (current === provider) {
+              toast({
+                title: 'Connection timeout',
+                description: 'Please try connecting again or check if the popup was blocked.',
+                variant: 'destructive'
+              });
+              return null;
+            }
+            return current;
+          });
+        }, 60000); // 60 seconds
+      } else {
+        throw new Error('No connection URL received from server');
       }
-
-      toast({
-        title: 'Connecting...',
-        description: 'Complete the flow in the newly opened window.'
-      });
-
-      setVerifying(provider);
     } catch (error: any) {
       console.error('Connection error:', error);
       toast({
@@ -253,6 +270,7 @@ export const DataSourcesPanel = ({ isOpen, onClose, onFilePreview }: DataSources
         description: error?.message || 'Unable to start connection.',
         variant: 'destructive'
       });
+      setVerifying(null); // Clear verifying state on error
     } finally {
       setConnecting(null);
     }
@@ -696,7 +714,7 @@ export const DataSourcesPanel = ({ isOpen, onClose, onFilePreview }: DataSources
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
-                              onFilePreview?.(file.id, file.filename || file.id);
+                              onFilePreview?.(file.id, file.filename || file.id, file);
                             }}
                             className="p-1.5 hover:bg-primary/10 rounded transition-colors opacity-0 group-hover:opacity-100"
                             title="Preview file"
@@ -835,7 +853,7 @@ export const DataSourcesPanel = ({ isOpen, onClose, onFilePreview }: DataSources
                                         <Button
                                           size="sm"
                                           variant="outline"
-                                          onClick={() => handleSync(connection.connection_id, connection.integration_id)}
+                                          onClick={() => handleSync(connection.connection_id, connection.integration_id, connection.provider)}
                                           disabled={syncing === connection.connection_id}
                                           className="text-xs"
                                         >
