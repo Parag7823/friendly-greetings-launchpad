@@ -24,9 +24,9 @@ RUN npm run build
 # NUCLEAR CACHE BUST: Changed base image tag to force complete rebuild
 FROM python:3.9-slim
 
-# Force cache invalidation - updated 2025-11-02 for advanced analytics integration
-ARG CACHEBUST=20251102-v13-ANALYTICS-INTEGRATION
-ENV DEPLOYMENT_VERSION="2025-11-02-15:10-ANALYTICS-FIX"
+# Force cache invalidation - updated 2025-11-02 for lazy-load fix
+ARG CACHEBUST=20251102-v14-LAZY-LOAD-FIX
+ENV DEPLOYMENT_VERSION="2025-11-02-16:49-TOASTER-FIX"
 RUN echo "🚨 ABSOLUTE NUCLEAR CACHE BUST: $CACHEBUST - Forcing complete rebuild"
 RUN echo "🚨 DEPLOYMENT VERSION: $DEPLOYMENT_VERSION"
 RUN echo "🚨 TIMESTAMP: $(date +%s)"
