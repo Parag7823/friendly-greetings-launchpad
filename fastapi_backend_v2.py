@@ -11647,6 +11647,60 @@ async def chat_endpoint(request: dict):
         raise HTTPException(status_code=500, detail=f"Sorry, I encountered an error: {error_message}")
 
 
+@app.get("/chat-health")
+async def chat_health_check():
+    """Test chat orchestrator initialization and Groq API connectivity"""
+    try:
+        # Check Groq API key
+        groq_api_key = os.getenv('GROQ_API_KEY')
+        if not groq_api_key:
+            return {
+                "status": "error",
+                "error": "GROQ_API_KEY not found in environment",
+                "available_env_vars": sorted([k for k in os.environ.keys() if 'GROQ' in k.upper()])
+            }
+        
+        # Try to initialize orchestrator
+        from intelligent_chat_orchestrator import IntelligentChatOrchestrator
+        
+        try:
+            orchestrator = IntelligentChatOrchestrator(
+                openai_client=None,
+                supabase_client=supabase,
+                cache_client=safe_get_ai_cache()
+            )
+            
+            # Try a simple test question
+            test_response = await orchestrator.process_question(
+                question="Hello",
+                user_id="health_check_user"
+            )
+            
+            return {
+                "status": "healthy",
+                "groq_api_key_present": True,
+                "orchestrator_initialized": True,
+                "test_question_processed": True,
+                "test_response_type": test_response.question_type.value,
+                "test_confidence": test_response.confidence
+            }
+            
+        except Exception as orch_error:
+            return {
+                "status": "error",
+                "groq_api_key_present": True,
+                "orchestrator_error": str(orch_error),
+                "error_type": type(orch_error).__name__
+            }
+            
+    except Exception as e:
+        return {
+            "status": "error",
+            "error": str(e),
+            "error_type": type(e).__name__
+        }
+
+
 @app.post("/api/detect-fields")
 async def detect_fields_endpoint(request: FieldDetectionRequest):
     """Detect field types using UniversalFieldDetector"""
