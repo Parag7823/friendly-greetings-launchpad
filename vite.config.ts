@@ -13,7 +13,7 @@ export default defineConfig(({ mode }) => ({
   build: {
     outDir: 'dist',
     assetsDir: 'assets',
-    sourcemap: true,
+    sourcemap: false,
     rollupOptions: {
       output: {
         manualChunks: undefined,
@@ -21,16 +21,6 @@ export default defineConfig(({ mode }) => ({
     },
   },
   publicDir: 'public',
-  optimizeDeps: {
-    include: [
-      '@supabase/supabase-js',
-      '@supabase/postgrest-js',
-      '@supabase/realtime-js',
-      '@supabase/storage-js',
-      '@supabase/functions-js',
-    ],
-    exclude: [],
-  },
   plugins: [
     react(),
     mode === 'development' &&

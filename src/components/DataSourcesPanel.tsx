@@ -150,18 +150,6 @@ export const DataSourcesPanel = ({ isOpen, onClose, onFilePreview }: DataSources
   
   const [uploadedFiles, setUploadedFiles] = useState<any[]>([]);
 
-  // IMPORTANT: Declare hooks before any useCallback/useEffect dependency arrays that reference them
-  // This prevents TDZ errors like "Cannot access 'C' before initialization" in production builds
-  // IMPROVEMENT: Use shared hook for connections (prevents duplicate polling)
-  const { data: connections = [], isLoading: loading, refetch: refetchConnections } = useConnections();
-  const refreshConnections = useRefreshConnections();
-  const [syncing, setSyncing] = useState<string | null>(null);
-  const [connecting, setConnecting] = useState<string | null>(null);
-  const [verifying, setVerifying] = useState<string | null>(null); // Track which provider is being verified
-  const [expandedCategories, setExpandedCategories] = useState<Set<string>>(
-    new Set(['accounting', 'data-sources', 'payment'])
-  );
-
   const handlePlusClick = () => {
     fileInputRef.current?.click();
   };
@@ -435,6 +423,15 @@ export const DataSourcesPanel = ({ isOpen, onClose, onFilePreview }: DataSources
     }
   };
   
+  // IMPROVEMENT: Use shared hook for connections (prevents duplicate polling)
+  const { data: connections = [], isLoading: loading, refetch: refetchConnections } = useConnections();
+  const refreshConnections = useRefreshConnections();
+  const [syncing, setSyncing] = useState<string | null>(null);
+  const [connecting, setConnecting] = useState<string | null>(null);
+  const [verifying, setVerifying] = useState<string | null>(null); // Track which provider is being verified
+  const [expandedCategories, setExpandedCategories] = useState<Set<string>>(
+    new Set(['accounting', 'data-sources', 'payment'])
+  );
 
   // IMPROVEMENT: Removed manual connection loading - now handled by useConnections hook
   // Refresh when window regains focus (user returns from Nango popup)
