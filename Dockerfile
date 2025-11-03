@@ -70,8 +70,11 @@ RUN echo "Installing pandas with Python $(python --version)" && \
 RUN pip install --no-cache-dir -r backend-requirements.txt
 
 # CRITICAL: Force cache invalidation for Python file copies
-ARG CACHEBUST=20251102-v15-CONNECTION-TIMEOUT-FIX
+ARG CACHEBUST=20251103-v16-ORCHESTRATOR-SIGNATURE-FIX
 RUN echo "Copying Python files with cache bust: $CACHEBUST"
+
+# Delete any existing __pycache__ directories to force fresh imports
+RUN find /app -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
 
 # Copy all necessary Python files and modules
 COPY fastapi_backend_v2.py .
