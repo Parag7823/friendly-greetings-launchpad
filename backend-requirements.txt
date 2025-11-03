@@ -73,7 +73,7 @@ flashtext==2.7  # Aho-Corasick keyword matching (1000x faster than nested loops)
 easyocr==1.7.1  # 92% OCR accuracy (vs 60% tesseract) + spatial data + confidence
 PyYAML==6.0.1  # External document type config (non-devs can edit)
 sentence-transformers==2.2.2  # Zero-shot classification (1000x cheaper than AI)
-scikit-learn==1.3.2  # TF-IDF vectorizer for smart indicator weighting
+# scikit-learn already specified at line 46 (v1.4.0)
 torch==2.1.0  # Required by sentence-transformers (CPU version)
 
 # UNIVERSAL EXTRACTORS OPTIMIZATIONS (v3.0.0) - 75% CODE REDUCTION
