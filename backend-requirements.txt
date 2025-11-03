@@ -15,7 +15,8 @@ supabase==2.10.0
 httpx>=0.26.0
 requests==2.32.3
 python-multipart==0.0.12
-pydantic==2.10.2
+# Instructor 1.2.3 pins to pydantic 2.7.0 (also satisfies FastAPI, anthropic, groq, pydantic-settings)
+pydantic==2.7.0
 aiohttp==3.11.7
 
 # Enhanced file processing capabilities
