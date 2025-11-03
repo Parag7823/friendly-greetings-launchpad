@@ -114,7 +114,6 @@ class IntelligentChatOrchestrator:
         )
         
         self.relationship_detector = EnhancedRelationshipDetector(
-            openai_client=None,
             supabase_client=supabase_client,
             cache_client=cache_client
         )

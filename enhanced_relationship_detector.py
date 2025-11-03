@@ -117,15 +117,23 @@ except ImportError:
 class EnhancedRelationshipDetector:
     """Enhanced relationship detector that actually finds relationships between events"""
     
-    def __init__(self, anthropic_client: AsyncAnthropic = None, supabase_client: Client = None, cache_client=None):
-        self.anthropic = anthropic_client
+    def __init__(
+        self,
+        anthropic_client: AsyncAnthropic = None,
+        openai_client: Any = None,  # backward-compatible alias used in older code
+        supabase_client: Client = None,
+        cache_client=None,
+    ):
+        # Prefer explicitly provided anthropic_client; else accept legacy openai_client
+        client = anthropic_client or openai_client
+        self.anthropic = client
         self.supabase = supabase_client
         self.cache = cache_client  # Use centralized cache, no local cache
         
         # Initialize semantic relationship extractor for AI-powered analysis
         if SEMANTIC_EXTRACTOR_AVAILABLE:
             self.semantic_extractor = SemanticRelationshipExtractor(
-                openai_client=anthropic_client,
+                openai_client=client,
                 supabase_client=supabase_client,
                 cache_client=cache_client
             )

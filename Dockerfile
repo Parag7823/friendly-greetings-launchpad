@@ -113,6 +113,10 @@ COPY --from=frontend-builder /app/frontend/dist ./dist
 # Make start.sh executable
 RUN chmod +x start.sh
 
+# VERIFICATION: Show IntelligentChatOrchestrator __init__ signature to confirm correct version
+RUN echo "🔍 VERIFYING IntelligentChatOrchestrator signature:" && \
+    grep -A 5 "def __init__" intelligent_chat_orchestrator.py | head -6 || echo "File not found"
+
 EXPOSE 8000
 
 CMD ["bash", "start.sh"]
