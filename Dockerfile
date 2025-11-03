@@ -24,12 +24,15 @@ RUN npm run build
 # NUCLEAR CACHE BUST: Changed base image tag to force complete rebuild
 FROM python:3.9-slim
 
-# Force cache invalidation - updated 2025-11-02 for connection timeout fix
-ARG CACHEBUST=20251102-v15-CONNECTION-TIMEOUT-FIX
-ENV DEPLOYMENT_VERSION="2025-11-02-20:40-CONNECTION-TIMEOUT-FIX"
+# Force cache invalidation - updated 2025-11-03 for orchestrator signature fix
+ARG CACHEBUST=20251103-v16-ORCHESTRATOR-SIGNATURE-FIX
+ENV DEPLOYMENT_VERSION="2025-11-03-09:20-ORCHESTRATOR-SIGNATURE-FIX"
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
 RUN echo "🚨 ABSOLUTE NUCLEAR CACHE BUST: $CACHEBUST - Forcing complete rebuild"
 RUN echo "🚨 DEPLOYMENT VERSION: $DEPLOYMENT_VERSION"
 RUN echo "🚨 TIMESTAMP: $(date +%s)"
+RUN echo "🚨 PYTHON BYTECODE DISABLED: PYTHONDONTWRITEBYTECODE=1"
 # Install system dependencies for python-magic, Tesseract (OCR), Java (Tabula), and basic functionality
 # Added gfortran and build-essential for scipy compilation
 # Added dependencies for PyTorch/sentence-transformers (BGE embeddings)
