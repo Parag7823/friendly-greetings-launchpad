@@ -1,0 +1,81 @@
+# NASA-GRADE Format Patterns Configuration
+# Non-developers can edit this file to add/modify format detection patterns
+# No code changes required!
+
+email:
+  regex: ^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$
+  confidence: 0.95
+  format: email
+  description: Email address format
+
+phone:
+  regex: ^\+?[\d\s\-\(\)]{10,}$
+  confidence: 0.85
+  format: phone
+  description: Phone number format
+
+url:
+  regex: ^https?://[^\s]+$
+  confidence: 0.92
+  format: url
+  description: URL format
+
+decimal:
+  regex: ^\d+\.\d+$
+  confidence: 0.8
+  format: decimal
+  description: Decimal number
+
+integer:
+  regex: ^\d+$
+  confidence: 0.7
+  format: integer
+  description: Integer number
+
+currency_amount:
+  regex: ^\$?[\d,]+\.?\d*$
+  confidence: 0.9
+  format: currency_amount
+  description: Currency amount with optional $ and commas
+
+date_iso:
+  regex: ^\d{4}-\d{2}-\d{2}
+  confidence: 0.95
+  format: date_iso
+  description: ISO date format (YYYY-MM-DD)
+
+date_us:
+  regex: ^\d{1,2}/\d{1,2}/\d{4}$
+  confidence: 0.9
+  format: date_us
+  description: US date format (MM/DD/YYYY)
+
+uuid:
+  regex: ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$
+  confidence: 0.98
+  format: uuid
+  description: UUID format
+
+ssn:
+  regex: ^\d{3}-\d{2}-\d{4}$
+  confidence: 0.95
+  format: ssn
+  description: Social Security Number (XXX-XX-XXXX)
+
+credit_card:
+  regex: ^\d{4}[\s-]?\d{4}[\s-]?\d{4}[\s-]?\d{4}$
+  confidence: 0.95
+  format: credit_card
+  description: Credit card number
+
+zip_code:
+  regex: ^\d{5}(-\d{4})?$
+  confidence: 0.9
+  format: zip_code
+  description: US ZIP code
+
+ip_address:
+  regex: ^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$
+  confidence: 0.92
+  format: ip_address
+  description: IPv4 address

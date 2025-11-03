@@ -1,0 +1,157 @@
+# NASA-GRADE Field Patterns Configuration
+# Non-developers can edit this file to add/modify field detection patterns
+# No code changes required!
+
+financial:
+  amount:
+    patterns:
+      - amount
+      - total
+      - price
+      - cost
+      - fee
+      - charge
+      - value
+      - sum
+      - balance
+      - payment
+      - revenue
+      - expense
+      - income
+      - profit
+      - loss
+      - debit
+      - credit
+    confidence: 0.7
+    
+  currency:
+    patterns:
+      - currency
+      - curr
+      - ccy
+      - usd
+      - eur
+      - gbp
+      - inr
+      - jpy
+      - cad
+      - aud
+      - chf
+      - cny
+      - krw
+      - sgd
+    confidence: 0.6
+    
+  transaction_id:
+    patterns:
+      - transaction.*id
+      - txn.*id
+      - trans.*id
+      - payment.*id
+      - order.*id
+      - invoice.*id
+      - receipt.*id
+      - ref.*id
+    confidence: 0.8
+
+temporal:
+  date:
+    patterns:
+      - date
+      - created
+      - updated
+      - timestamp
+      - time
+      - when
+      - occurred
+      - processed
+      - completed
+    confidence: 0.8
+    
+  period:
+    patterns:
+      - period
+      - month
+      - year
+      - quarter
+      - week
+      - fiscal
+      - billing
+      - reporting
+    confidence: 0.7
+
+identity:
+  customer:
+    patterns:
+      - customer
+      - client
+      - user
+      - buyer
+      - payer
+      - account.*holder
+      - member
+      - subscriber
+    confidence: 0.7
+    
+  vendor:
+    patterns:
+      - vendor
+      - supplier
+      - merchant
+      - seller
+      - payee
+      - recipient
+      - beneficiary
+      - contractor
+    confidence: 0.7
+    
+  id:
+    patterns:
+      - ^id$
+      - identifier
+      - key
+      - code
+      - number
+      - ref
+      - reference
+      - uuid
+      - guid
+    confidence: 0.6
+
+descriptive:
+  description:
+    patterns:
+      - description
+      - desc
+      - details
+      - notes
+      - memo
+      - comment
+      - remarks
+      - narrative
+      - summary
+    confidence: 0.6
+    
+  category:
+    patterns:
+      - category
+      - type
+      - class
+      - group
+      - kind
+      - classification
+      - segment
+      - bucket
+    confidence: 0.6
+    
+  status:
+    patterns:
+      - status
+      - state
+      - condition
+      - stage
+      - phase
+      - progress
+      - outcome
+      - result
+    confidence: 0.6

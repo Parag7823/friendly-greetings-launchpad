@@ -1,0 +1,569 @@
+# NASA-GRADE Document Type Definitions
+# Non-developers can edit this file to add/modify document types
+# No code changes required!
+
+financial:
+  invoice:
+    name: Invoice
+    category: financial
+    indicators:
+      - invoice
+      - bill
+      - invoice number
+      - bill number
+      - invoice date
+      - bill date
+      - amount due
+      - total amount
+      - subtotal
+      - tax amount
+      - invoice to
+      - bill to
+      - from
+      - description
+      - quantity
+      - rate
+      - invoice id
+      - bill id
+      - payment terms
+      - due date
+    field_patterns:
+      - invoice_number
+      - bill_number
+      - invoice_date
+      - due_date
+      - total_amount
+    keywords:
+      - invoice
+      - bill
+      - charge
+      - amount due
+      - payment terms
+    confidence_boost: 0.9
+
+  receipt:
+    name: Receipt
+    category: financial
+    indicators:
+      - receipt
+      - receipt number
+      - transaction id
+      - purchase date
+      - total paid
+      - amount paid
+      - payment method
+      - cash
+      - credit card
+      - debit card
+      - change
+      - subtotal
+      - tax
+      - receipt date
+    field_patterns:
+      - receipt_number
+      - transaction_id
+      - purchase_date
+      - total_paid
+    keywords:
+      - receipt
+      - purchase
+      - paid
+      - transaction
+      - change
+    confidence_boost: 0.9
+
+  bank_statement:
+    name: Bank Statement
+    category: financial
+    indicators:
+      - bank statement
+      - account statement
+      - account number
+      - statement period
+      - opening balance
+      - closing balance
+      - deposit
+      - withdrawal
+      - transfer
+      - balance forward
+      - account summary
+      - transaction history
+      - available balance
+    field_patterns:
+      - account_number
+      - statement_period
+      - opening_balance
+      - closing_balance
+    keywords:
+      - bank
+      - statement
+      - account
+      - balance
+      - deposit
+      - withdrawal
+    confidence_boost: 0.9
+
+  credit_card_statement:
+    name: Credit Card Statement
+    category: financial
+    indicators:
+      - credit card
+      - card statement
+      - credit limit
+      - available credit
+      - minimum payment
+      - payment due date
+      - statement balance
+      - card number
+      - purchase
+      - payment
+      - interest charge
+      - annual fee
+      - cash advance
+    field_patterns:
+      - card_number
+      - credit_limit
+      - available_credit
+      - minimum_payment
+    keywords:
+      - credit card
+      - card
+      - credit limit
+      - minimum payment
+    confidence_boost: 0.9
+
+  payroll:
+    name: Payroll
+    category: financial
+    indicators:
+      - payroll
+      - salary
+      - wage
+      - employee
+      - pay period
+      - gross pay
+      - net pay
+      - deduction
+      - tax withholding
+      - social security
+      - medicare
+      - health insurance
+      - 401k
+      - bonus
+      - overtime
+      - hours worked
+    field_patterns:
+      - employee_id
+      - pay_period
+      - gross_pay
+      - net_pay
+      - deductions
+    keywords:
+      - payroll
+      - salary
+      - employee
+      - pay period
+      - deduction
+    confidence_boost: 0.9
+
+  tax_document:
+    name: Tax Document
+    category: financial
+    indicators:
+      - tax
+      - tax return
+      - "1040"
+      - w-2
+      - "1099"
+      - tax year
+      - filing status
+      - adjusted gross income
+      - taxable income
+      - tax owed
+      - refund
+      - standard deduction
+      - itemized deduction
+      - tax bracket
+    field_patterns:
+      - tax_year
+      - filing_status
+      - adjusted_gross_income
+      - tax_owed
+    keywords:
+      - tax
+      - return
+      - "1040"
+      - w-2
+      - "1099"
+      - refund
+    confidence_boost: 0.9
+
+business:
+  contract:
+    name: Contract
+    category: business
+    indicators:
+      - contract
+      - agreement
+      - terms and conditions
+      - party
+      - effective date
+      - termination date
+      - contract term
+      - liability
+      - indemnification
+      - force majeure
+      - governing law
+      - signature
+      - witness
+    field_patterns:
+      - contract_number
+      - effective_date
+      - termination_date
+      - party_name
+    keywords:
+      - contract
+      - agreement
+      - terms
+      - party
+      - effective date
+    confidence_boost: 0.8
+
+  purchase_order:
+    name: Purchase Order
+    category: business
+    indicators:
+      - purchase order
+      - po number
+      - po date
+      - vendor
+      - supplier
+      - ship to
+      - bill to
+      - item description
+      - quantity
+      - unit price
+      - total price
+      - delivery date
+      - payment terms
+    field_patterns:
+      - po_number
+      - po_date
+      - vendor_name
+      - delivery_date
+    keywords:
+      - purchase order
+      - po number
+      - vendor
+      - supplier
+    confidence_boost: 0.9
+
+  quotation:
+    name: Quotation
+    category: business
+    indicators:
+      - quotation
+      - quote
+      - quote number
+      - quote date
+      - valid until
+      - customer
+      - client
+      - item description
+      - quantity
+      - unit price
+      - total price
+      - terms and conditions
+      - delivery time
+    field_patterns:
+      - quote_number
+      - quote_date
+      - valid_until
+      - customer_name
+    keywords:
+      - quotation
+      - quote
+      - quote number
+      - valid until
+    confidence_boost: 0.9
+
+  proposal:
+    name: Proposal
+    category: business
+    indicators:
+      - proposal
+      - proposal number
+      - proposal date
+      - client
+      - project
+      - scope of work
+      - timeline
+      - budget
+      - deliverables
+      - terms
+      - acceptance
+      - signature
+      - proposal validity
+    field_patterns:
+      - proposal_number
+      - proposal_date
+      - client_name
+      - project_name
+    keywords:
+      - proposal
+      - proposal number
+      - scope of work
+      - deliverables
+    confidence_boost: 0.8
+
+legal:
+  legal_document:
+    name: Legal Document
+    category: legal
+    indicators:
+      - legal
+      - attorney
+      - lawyer
+      - court
+      - case number
+      - filing date
+      - plaintiff
+      - defendant
+      - judge
+      - hearing date
+      - motion
+      - affidavit
+      - deposition
+      - settlement
+      - verdict
+    field_patterns:
+      - case_number
+      - filing_date
+      - plaintiff
+      - defendant
+    keywords:
+      - legal
+      - attorney
+      - court
+      - case number
+      - plaintiff
+    confidence_boost: 0.8
+
+  insurance_document:
+    name: Insurance Document
+    category: legal
+    indicators:
+      - insurance
+      - policy
+      - policy number
+      - coverage
+      - premium
+      - deductible
+      - claim
+      - claim number
+      - adjuster
+      - coverage period
+      - beneficiary
+      - insured
+      - policy holder
+    field_patterns:
+      - policy_number
+      - coverage_period
+      - premium_amount
+      - deductible
+    keywords:
+      - insurance
+      - policy
+      - coverage
+      - premium
+      - claim
+    confidence_boost: 0.9
+
+healthcare:
+  medical_bill:
+    name: Medical Bill
+    category: healthcare
+    indicators:
+      - medical
+      - hospital
+      - doctor
+      - patient
+      - diagnosis
+      - treatment
+      - procedure
+      - medication
+      - prescription
+      - insurance
+      - copay
+      - deductible
+      - medical bill
+      - hospital bill
+      - physician bill
+    field_patterns:
+      - patient_id
+      - diagnosis_code
+      - procedure_code
+      - insurance_id
+    keywords:
+      - medical
+      - hospital
+      - patient
+      - diagnosis
+      - treatment
+    confidence_boost: 0.9
+
+  prescription:
+    name: Prescription
+    category: healthcare
+    indicators:
+      - prescription
+      - medication
+      - drug
+      - dosage
+      - pharmacy
+      - refill
+      - prescribing physician
+      - patient name
+      - prescription number
+      - quantity
+      - directions
+      - side effects
+    field_patterns:
+      - prescription_number
+      - medication_name
+      - dosage
+      - quantity
+    keywords:
+      - prescription
+      - medication
+      - dosage
+      - pharmacy
+      - refill
+    confidence_boost: 0.9
+
+government:
+  government_document:
+    name: Government Document
+    category: government
+    indicators:
+      - government
+      - federal
+      - state
+      - municipal
+      - department
+      - agency
+      - permit
+      - license
+      - registration
+      - certificate
+      - official
+      - public record
+      - filing
+      - application
+    field_patterns:
+      - permit_number
+      - license_number
+      - registration_number
+      - department
+    keywords:
+      - government
+      - permit
+      - license
+      - registration
+      - official
+    confidence_boost: 0.8
+
+  utility_bill:
+    name: Utility Bill
+    category: government
+    indicators:
+      - utility
+      - electric
+      - gas
+      - water
+      - internet
+      - phone
+      - cable
+      - bill
+      - account number
+      - service address
+      - billing period
+      - usage
+      - rate
+      - previous reading
+      - current reading
+    field_patterns:
+      - account_number
+      - service_address
+      - billing_period
+      - usage_amount
+    keywords:
+      - utility
+      - electric
+      - gas
+      - water
+      - bill
+    confidence_boost: 0.9
+
+personal:
+  personal_document:
+    name: Personal Document
+    category: personal
+    indicators:
+      - personal
+      - individual
+      - private
+      - confidential
+      - personal information
+      - id number
+      - social security
+      - date of birth
+      - address
+      - phone
+      - email
+      - emergency contact
+      - next of kin
+    field_patterns:
+      - id_number
+      - date_of_birth
+      - address
+      - phone_number
+    keywords:
+      - personal
+      - individual
+      - private
+      - confidential
+    confidence_boost: 0.7
+
+education:
+  educational_document:
+    name: Educational Document
+    category: education
+    indicators:
+      - education
+      - school
+      - university
+      - college
+      - student
+      - grade
+      - transcript
+      - diploma
+      - degree
+      - course
+      - credit
+      - gpa
+      - enrollment
+      - graduation
+      - academic
+    field_patterns:
+      - student_id
+      - course_code
+      - grade
+      - gpa
+    keywords:
+      - education
+      - school
+      - student
+      - grade
+      - transcript
+    confidence_boost: 0.8
