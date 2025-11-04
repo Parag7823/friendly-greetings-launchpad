@@ -79,17 +79,11 @@ sentence-transformers==2.2.2  # Zero-shot classification (1000x cheaper than AI)
 # scikit-learn already specified at line 46 (v1.4.0)
 torch==2.1.0  # Required by sentence-transformers (CPU version)
 
-# UNIVERSAL EXTRACTORS OPTIMIZATIONS (v3.0.0) - 75% CODE REDUCTION
-# Replaces 400+ lines of custom handlers with GENIUS libraries
-# NOTE: Using base unstructured without [all-docs] to avoid onnxruntime executable stack error on Railway
-unstructured==0.11.0  # Handles text, JSON, CSV, basic PDF (no OCR/inference to avoid ONNX security issues)
-unstructured-inference==0.7.15  # Required by unstructured.partition.ocr for PDF/image processing
-unstructured_pytesseract>=0.3.12,<0.4.0  # Provides OCR bridge required by unstructured.partition.ocr without ONNX
-matplotlib>=3.5.0  # Required by unstructured-inference for visualization
-# Add specific document processing dependencies without ONNX-based inference
-pdfminer.six>=20221105  # PDF text extraction (used by unstructured)
-python-pptx>=0.6.21  # PowerPoint support
-python-docx>=0.8.11  # Word document support
+# UNIVERSAL EXTRACTORS OPTIMIZATIONS (v3.1.0) - ONNX-FREE
+# Direct lightweight parsers (NO unstructured/onnxruntime to avoid Railway executable stack errors)
+pdfminer.six>=20221105  # PDF text extraction (direct, no ONNX)
+python-pptx>=0.6.21  # PowerPoint support (direct)
+python-docx>=0.8.11  # Word document support (direct)
 presidio-analyzer==2.2.353  # PII/field detection (50x faster than custom loops)
 aiocache==0.12.2  # Decorator-based caching (10x simpler than manual cache logic)
 validators==0.22.0  # Format validation (replaces custom regex)
