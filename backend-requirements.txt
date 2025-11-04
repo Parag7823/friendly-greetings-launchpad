@@ -83,6 +83,7 @@ torch==2.1.0  # Required by sentence-transformers (CPU version)
 # Replaces 400+ lines of custom handlers with GENIUS libraries
 # NOTE: Using base unstructured without [all-docs] to avoid onnxruntime executable stack error on Railway
 unstructured==0.11.0  # Handles text, JSON, CSV, basic PDF (no OCR/inference to avoid ONNX security issues)
+unstructured-inference==0.7.15  # Required by unstructured.partition.ocr for PDF/image processing
 unstructured_pytesseract>=0.3.12,<0.4.0  # Provides OCR bridge required by unstructured.partition.ocr without ONNX
 # Add specific document processing dependencies without ONNX-based inference
 pdfminer.six>=20221105  # PDF text extraction (used by unstructured)
