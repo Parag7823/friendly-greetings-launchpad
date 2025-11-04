@@ -572,6 +572,10 @@ class ProductionDuplicateDetectionService:
         except Exception as e:
             logger.error("Content fingerprint calculation failed", error=str(e))
             return ""
+    
+    def _create_result(
+        self,
+        duplicate_result: DuplicateResult,
         start_time: float, 
         cache_key: str
     ) -> DuplicateResult:
