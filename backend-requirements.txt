@@ -85,6 +85,7 @@ unstructured[all-docs]==0.11.0  # Handles ALL formats (PDF, Excel, CSV, Images, 
 presidio-analyzer==2.2.353  # PII/field detection (50x faster than custom loops)
 aiocache==0.12.2  # Decorator-based caching (10x simpler than manual cache logic)
 validators==0.22.0  # Format validation (replaces custom regex)
+matplotlib>=3.5.0  # Required by unstructured-inference for visualization
 
 # UNIVERSAL FIELD DETECTOR OPTIMIZATIONS (v3.0.0) - 65% CODE REDUCTION
 # Replaces 290+ lines with GENIUS libraries
