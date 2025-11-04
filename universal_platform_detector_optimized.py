@@ -163,8 +163,7 @@ class UniversalPlatformDetectorOptimized:
         
         logger.info("NASA-GRADE Platform Detector initialized", 
                    cache_size=self.config.max_cache_size,
-                   platforms_loaded=len(self.platform_database),
-                   keywords_indexed=len(self.keyword_processor))
+                   platforms_loaded=len(self.platform_database))
     
     def _get_default_config(self):
         """OPTIMIZED: Get type-safe configuration with pydantic-settings"""

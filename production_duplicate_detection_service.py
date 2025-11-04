@@ -391,23 +391,11 @@ class ProductionDuplicateDetectionService:
             DuplicateResult with exact duplicate information
         """
         try:
-            # OPTIMIZED: Use SQLAlchemy for type-safe query
-            if self.sql_engine:
-                with self.sql_engine.connect() as conn:
-                    result = conn.execute(text("""
-                        SELECT id, file_name, created_at, file_size, status
-                        FROM raw_records
-                        WHERE user_id = :user_id AND file_hash = :hash
-                        ORDER BY created_at DESC
-                        LIMIT 10
-                    """), {"user_id": file_metadata.user_id, "hash": file_metadata.file_hash})
-                    records = [dict(row._mapping) for row in result]
-            else:
-                # Fallback to Supabase client
-                result = self.supabase.table('raw_records').select(
-                    'id, file_name, created_at, file_size, status'
-                ).eq('user_id', file_metadata.user_id).eq('file_hash', file_metadata.file_hash).limit(10).execute()
-                records = result.data or []
+            # OPTIMIZED: Use Supabase client (SQLAlchemy removed in v4.0)
+            result = self.supabase.table('raw_records').select(
+                'id, file_name, created_at, file_size, status'
+            ).eq('user_id', file_metadata.user_id).eq('file_hash', file_metadata.file_hash).order('created_at', desc=True).limit(10).execute()
+            records = result.data or []
             
             if not records:
                 return DuplicateResult(
