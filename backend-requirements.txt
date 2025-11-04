@@ -83,6 +83,10 @@ torch==2.1.0  # Required by sentence-transformers (CPU version)
 # Replaces 400+ lines of custom handlers with GENIUS libraries
 # NOTE: Using base unstructured without [all-docs] to avoid onnxruntime executable stack error on Railway
 unstructured==0.11.0  # Handles text, JSON, CSV, basic PDF (no OCR/inference to avoid ONNX security issues)
+# Add specific document processing dependencies without ONNX-based inference
+pdfminer.six>=20221105  # PDF text extraction (used by unstructured)
+python-pptx>=0.6.21  # PowerPoint support
+python-docx>=0.8.11  # Word document support
 presidio-analyzer==2.2.353  # PII/field detection (50x faster than custom loops)
 aiocache==0.12.2  # Decorator-based caching (10x simpler than manual cache logic)
 validators==0.22.0  # Format validation (replaces custom regex)
