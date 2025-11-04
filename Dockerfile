@@ -61,12 +61,18 @@ COPY backend-requirements.txt .
 # Verify Python version and upgrade pip
 RUN python --version && echo "Python version check passed" && pip install --upgrade pip wheel setuptools
 
-# Install pandas first with specific strategy to avoid compilation issues
+# Install PyTorch CPU-only wheels first to avoid CUDA bloat (reduces image size by ~3GB)
+RUN pip install --no-cache-dir \
+    --extra-index-url https://download.pytorch.org/whl/cpu \
+    torch==2.1.0+cpu \
+    torchvision==0.16.0+cpu
+
+# Install pandas with specific strategy to avoid compilation issues
 RUN echo "Installing pandas with Python $(python --version)" && \
     pip install --no-cache-dir --only-binary=all pandas==2.0.3 numpy==1.24.4 && \
     echo "Pandas installation completed successfully"
 
-# Install remaining dependencies
+# Install remaining dependencies (torch/torchvision already installed above)
 RUN pip install --no-cache-dir -r backend-requirements.txt
 
 # CRITICAL: Force cache invalidation for Python file copies
