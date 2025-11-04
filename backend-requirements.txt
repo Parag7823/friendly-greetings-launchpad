@@ -50,6 +50,7 @@ scikit-learn==1.4.0
 # FIX #17: For semantic relationship embeddings and similarity search
 sentence-transformers>=2.2.0
 torch>=2.0.0
+transformers<4.40.0  # Pin to version compatible with torch 2.1.0 (avoid pytree API breakage)
 
 # Monitoring and Metrics
 prometheus-client==0.19.0
