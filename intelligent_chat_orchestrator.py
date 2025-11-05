@@ -31,14 +31,6 @@ from temporal_pattern_learner import TemporalPatternLearner
 from enhanced_relationship_detector import EnhancedRelationshipDetector
 from entity_resolver_optimized import EntityResolverOptimized as EntityResolver
 
-# Import Neo4j for fast graph queries
-try:
-    from neo4j_relationship_detector import Neo4jRelationshipDetector
-    NEO4J_AVAILABLE = True
-except ImportError:
-    NEO4J_AVAILABLE = False
-    logger.warning("Neo4j not available - will use PostgreSQL for relationship queries")
-
 logger = logging.getLogger(__name__)
 
 
@@ -122,17 +114,6 @@ class IntelligentChatOrchestrator:
             supabase_client=supabase_client,
             cache_client=cache_client
         )
-        
-        # Initialize Neo4j for fast graph queries (if available)
-        if NEO4J_AVAILABLE:
-            try:
-                self.neo4j = Neo4jRelationshipDetector()
-                logger.info("✅ Neo4j graph database initialized for fast queries")
-            except Exception as e:
-                self.neo4j = None
-                logger.warning(f"⚠️ Neo4j initialization failed: {e} - using PostgreSQL fallback")
-        else:
-            self.neo4j = None
         
         # Conversation context (simple in-memory for now)
         self.conversation_context: Dict[str, List[Dict[str, Any]]] = {}
@@ -344,36 +325,7 @@ Question: """ + question
             # Extract entities/metrics from question using GPT-4
             entities = await self._extract_entities_from_question(question, user_id)
             
-            # NEW: If Neo4j available and question asks for causal chain, use fast path
-            if self.neo4j and entities.get('event_id'):
-                try:
-                    # Use Neo4j for instant multi-hop traversal (100x faster!)
-                    causal_chain = self.neo4j.find_causal_chain(
-                        event_id=entities['event_id'],
-                        max_hops=10,  # Can go deep with Neo4j!
-                        min_confidence=0.7
-                    )
-                    
-                    if causal_chain:
-                        logger.info(f"✅ Neo4j fast path: Found {len(causal_chain)} causal relationships in <50ms")
-                        # Format Neo4j results for response
-                        answer = await self._format_neo4j_causal_chain(question, causal_chain, entities)
-                        
-                        return ChatResponse(
-                            answer=answer,
-                            question_type=QuestionType.CAUSAL,
-                            confidence=0.95,  # Higher confidence with graph traversal
-                            data={'causal_chain': causal_chain, 'source': 'neo4j'},
-                            follow_up_questions=[
-                                "Show me the visual graph",
-                                "What if we fix the root cause?",
-                                "Are there alternative causal paths?"
-                            ]
-                        )
-                except Exception as neo4j_error:
-                    logger.warning(f"Neo4j query failed, falling back to PostgreSQL: {neo4j_error}")
-            
-            # Fallback: Run causal analysis using PostgreSQL
+            # Run causal analysis using Supabase + igraph
             causal_results = await self.causal_engine.analyze_causal_relationships(
                 user_id=user_id
             )
@@ -1485,49 +1437,3 @@ DATA STATUS: {'Rich data available - provide specific, quantified insights!' if 
             }).execute()
         except Exception as e:
             logger.error(f"Failed to store chat message: {e}")
-    
-    async def _format_neo4j_causal_chain(
-        self,
-        question: str,
-        causal_chain: List[Dict[str, Any]],
-        entities: Dict[str, Any]
-    ) -> str:
-        """
-        Format Neo4j causal chain results into human-readable answer.
-        
-        Args:
-            question: Original user question
-            causal_chain: List of causal relationships from Neo4j
-            entities: Extracted entities from question
-        
-        Returns:
-            Human-readable answer explaining the causal chain
-        """
-        if not causal_chain:
-            return "I couldn't find a clear causal chain for this event."
-        
-        # Build narrative from causal chain
-        answer_parts = []
-        answer_parts.append(f"Here's what caused this:\n\n")
-        
-        for i, link in enumerate(causal_chain[:5], 1):  # Show top 5 hops
-            caused_event = link.get('caused_event_id', 'Unknown')
-            doc_type = link.get('document_type', 'transaction')
-            relationship = link.get('relationship', 'caused')
-            causality = link.get('causality', 0.0)
-            hops = link.get('hops', i)
-            
-            if hops == 1:
-                answer_parts.append(f"**Direct cause ({causality:.0%} confidence):**\n")
-            else:
-                answer_parts.append(f"\n**{hops}-hop effect ({causality:.0%} confidence):**\n")
-            
-            answer_parts.append(f"→ {doc_type.title()} ({relationship})\n")
-        
-        if len(causal_chain) > 5:
-            answer_parts.append(f"\n...and {len(causal_chain) - 5} more causal relationships.\n")
-        
-        answer_parts.append(f"\n💡 **Insight:** This shows a {len(causal_chain)}-step causal chain. ")
-        answer_parts.append("Each step was verified using Bradford Hill criteria for causality.")
-        
-        return ''.join(answer_parts)

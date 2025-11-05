@@ -13,7 +13,7 @@ Features:
 - Causal graph construction and traversal
 - Root cause analysis with backward tracing
 - Counterfactual analysis for what-if scenarios
-- Network analysis using NetworkX
+- Network analysis using igraph (13-32x faster than NetworkX)
 - Production-ready with comprehensive error handling
 
 Author: Senior Full-Stack Engineer
@@ -22,7 +22,7 @@ Date: 2025-01-21
 """
 
 import logging
-import networkx as nx
+import igraph as ig  # REFACTORED: 13-32x faster than networkx
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any, Tuple, Set
 from dataclasses import dataclass, asdict
@@ -108,7 +108,7 @@ class CausalInferenceEngine:
         self.config = config or self._get_default_config()
         
         # Causal graph (built on demand)
-        self.causal_graph: Optional[nx.DiGraph] = None
+        self.causal_graph: Optional[ig.Graph] = None
         
         # Metrics
         self.metrics = {
@@ -496,7 +496,7 @@ class CausalInferenceEngine:
             ).eq('user_id', user_id).eq('is_causal', True).execute()
             
             if not result.data:
-                self.causal_graph = nx.DiGraph()
+                self.causal_graph = ig.Graph(directed=True)
                 return
             
             # Fetch relationship details
@@ -505,31 +505,38 @@ class CausalInferenceEngine:
                 'id, source_event_id, target_event_id'
             ).in_('id', rel_ids).execute()
             
-            # Build graph
-            self.causal_graph = nx.DiGraph()
+            # Build graph with igraph
+            self.causal_graph = ig.Graph(directed=True)
+            
+            # Collect unique vertices
+            vertices = set()
+            edges = []
+            edge_attrs = {'relationship_id': [], 'confidence': [], 'causal_score': []}
             
             for rel in relationships.data:
                 source = rel['source_event_id']
                 target = rel['target_event_id']
-                
-                # Find causal data
-                causal_data = next(
-                    (c for c in result.data if c['relationship_id'] == rel['id']),
-                    None
-                )
-                
-                if causal_data:
-                    self.causal_graph.add_edge(
-                        source,
-                        target,
-                        causal_score=causal_data['causal_score']
-                    )
+                vertices.add(source)
+                vertices.add(target)
+                edges.append((source, target))
+                edge_attrs['relationship_id'].append(rel['id'])
+                edge_attrs['confidence'].append(rel.get('confidence_score', 0.0))
+                edge_attrs['causal_score'].append(rel.get('causal_score', 0.0))
             
-            logger.info(f"✅ Causal graph built: {self.causal_graph.number_of_nodes()} nodes, {self.causal_graph.number_of_edges()} edges")
+            # Add vertices
+            vertex_list = list(vertices)
+            self.causal_graph.add_vertices(vertex_list)
+            
+            # Add edges with attributes
+            self.causal_graph.add_edges(edges)
+            for attr_name, attr_values in edge_attrs.items():
+                self.causal_graph.es[attr_name] = attr_values
+            
+            logger.info(f"✅ Causal graph built: {self.causal_graph.vcount()} nodes, {self.causal_graph.ecount()} edges")
             
         except Exception as e:
             logger.error(f"Failed to build causal graph: {e}")
-            self.causal_graph = nx.DiGraph()
+            self.causal_graph = ig.Graph(directed=True)
     
     async def _propagate_counterfactual(
         self,
@@ -547,7 +554,12 @@ class CausalInferenceEngine:
             affected_events = []
             
             # Find all downstream events using BFS
-            descendants = nx.descendants(self.causal_graph, intervention_event_id)
+            try:
+                vertex_idx = self.causal_graph.vs.find(name=intervention_event_id).index
+                descendants_idx = self.causal_graph.subcomponent(vertex_idx, mode='out')
+                descendants = [self.causal_graph.vs[idx]['name'] for idx in descendants_idx if idx != vertex_idx]
+            except ValueError:
+                descendants = []
             
             for event_id in descendants:
                 # Fetch event

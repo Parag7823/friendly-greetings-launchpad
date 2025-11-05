@@ -90,7 +90,6 @@ COPY universal_platform_detector_optimized.py .
 COPY universal_extractors_optimized.py .
 COPY entity_resolver_optimized.py .
 COPY enhanced_relationship_detector.py .
-COPY neo4j_relationship_detector.py .
 COPY semantic_relationship_extractor.py .
 COPY field_mapping_learner.py .
 COPY embedding_service.py .

@@ -52,7 +52,6 @@ import redis.asyncio as aioredis
 from dataclasses import dataclass
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
-from difflib import SequenceMatcher
 from universal_field_detector import UniversalFieldDetector
 from universal_platform_detector_optimized import UniversalPlatformDetectorOptimized as UniversalPlatformDetector
 from universal_document_classifier_optimized import UniversalDocumentClassifierOptimized as UniversalDocumentClassifier
