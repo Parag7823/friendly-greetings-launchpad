@@ -102,8 +102,12 @@ class UniversalExtractorsOptimized:
     
     def __init__(self, openai_client=None, cache_client=None, config=None):
         self.openai = openai_client
-        # GENIUS v4.0: aiocache (consistent with all optimized files)
-        self.cache = Cache(Cache.MEMORY, serializer=JsonSerializer(), ttl=3600)
+        # REFACTORED: Use centralized Redis cache (distributed, scalable, shared across workers)
+        from centralized_cache import safe_get_cache
+        self.cache = cache_client or safe_get_cache()
+        if self.cache is None:
+            # Fallback: Use in-memory cache if centralized not available
+            self.cache = Cache(Cache.MEMORY, serializer=JsonSerializer(), ttl=3600)
         self.config = config or ExtractorConfig()
         
         # GENIUS: Initialize easyocr (92% accuracy vs 60% tesseract)

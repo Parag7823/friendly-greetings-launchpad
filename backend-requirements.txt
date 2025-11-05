@@ -21,13 +21,10 @@ aiohttp==3.11.7
 
 # Enhanced file processing capabilities
 odfpy==1.4.1
-tabula-py==2.9.3
-camelot-py[cv]==0.11.0
-pdfplumber==0.11.4
-pytesseract==0.3.13
-Pillow==10.4.0
-opencv-python-headless==4.10.0.84
-pdf2image==1.17.0
+# REMOVED (FIX #6): tabula-py, camelot-py, pdfplumber, pytesseract, opencv-python-headless, pdf2image
+# Replaced by universal_extractors_optimized.py (NASA-GRADE v3.1.0 - ONNX-FREE)
+# Uses: pdfminer.six (PDF), easyocr (OCR 92% accuracy), python-docx, python-pptx
+Pillow==10.4.0  # Still needed for image processing
 py7zr==0.22.0
 rarfile==4.2
 
@@ -71,7 +68,9 @@ defusedxml==0.7.1  # XML bomb protection (OWASP recommended, v4.0)
 slowapi==0.1.9  # Rate limiting (Redis-backed, async, v4.0)
 tenacity==8.2.3  # Retry decorator with exponential backoff (NASA-GRADE v4.0)
 validator-collection==1.5.0  # Advanced input validation
-flashtext==2.7  # Aho-Corasick keyword matching (1000x faster than nested loops)
+# REMOVED (FIX #7a): flashtext==2.7 (deprecated, replaced by pyahocorasick in v4.0.0)
+# flashtext is NOT async-ready and slower than pyahocorasick
+# See line 105: pyahocorasick==2.1.0 (NASA-GRADE v4.0.0 standard)
 
 # DOCUMENT CLASSIFIER OPTIMIZATIONS (v3.0.0)
 easyocr==1.7.1  # 92% OCR accuracy (vs 60% tesseract) + spatial data + confidence

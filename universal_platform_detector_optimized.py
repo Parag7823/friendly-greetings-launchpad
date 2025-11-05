@@ -130,8 +130,12 @@ class UniversalPlatformDetectorOptimized:
         self.supabase = supabase_client
         self.config = config or self._get_default_config()
         
-        # GENIUS v4.0: aiocache with Redis (10x faster, persistent, visualizable)
-        self.cache = Cache(Cache.MEMORY, serializer=JsonSerializer(), ttl=self.config.cache_ttl)
+        # REFACTORED: Use centralized Redis cache (distributed, scalable, shared across workers)
+        from centralized_cache import safe_get_cache
+        self.cache = cache_client or safe_get_cache()
+        if self.cache is None:
+            # Fallback: Use in-memory cache if centralized not available
+            self.cache = Cache(Cache.MEMORY, serializer=JsonSerializer(), ttl=self.config.cache_ttl)
         
         # Comprehensive platform database
         self.platform_database = self._initialize_platform_database()

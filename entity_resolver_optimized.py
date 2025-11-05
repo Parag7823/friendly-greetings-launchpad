@@ -120,7 +120,7 @@ class EntityResolverOptimized:
     ADDED: Industry-standard battle-tested libraries
     """
     
-    def __init__(self, supabase_client: Client, openai_client=None, config: Optional[ResolutionConfig] = None):
+    def __init__(self, supabase_client: Client, openai_client=None, config: Optional[ResolutionConfig] = None, cache_client=None):
         self.supabase = supabase_client
         self.openai = openai_client
         self.config = config or ResolutionConfig()
@@ -128,13 +128,18 @@ class EntityResolverOptimized:
         # v4.0: Initialize instructor client for AI learning
         self.instructor_client = from_openai(openai_client) if openai_client else None
         
-        # v4.0: aiocache with Redis backend
-        self.cache = Cache(
-            Cache.REDIS,
-            endpoint=os.environ.get("REDIS_URL", "redis://localhost:6379"),
-            serializer=JsonSerializer(),
-            ttl=self.config.cache_ttl
-        )
+        # v4.0: Use centralized Redis cache (shared across all modules)
+        from centralized_cache import safe_get_cache
+        self.cache = cache_client or safe_get_cache()
+        if self.cache is None:
+            # Fallback: Initialize local cache if centralized not available
+            self.cache = Cache(
+                Cache.REDIS,
+                endpoint=os.environ.get("REDIS_URL", "redis://localhost:6379").replace('redis://', '').split(':')[0],
+                port=int(os.environ.get("REDIS_URL", "redis://localhost:6379").replace('redis://', '').split(':')[1].split('/')[0]) if ':' in os.environ.get("REDIS_URL", "redis://localhost:6379") else 6379,
+                serializer=JsonSerializer(),
+                ttl=self.config.cache_ttl
+            )
         
         # v4.0: presidio for PII/identifier detection (30x faster, +40% accuracy)
         self.analyzer = AnalyzerEngine()
