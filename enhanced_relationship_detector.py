@@ -174,9 +174,9 @@ class EnhancedRelationshipDetector:
             self.semantic_extractor = SemanticRelationshipExtractor(
                 openai_client=client,
                 supabase_client=supabase_client,
-                cache_client=cache_client
+                cache_client=None  # v2.0: Using aiocache (Redis) instead
             )
-            logger.info("✅ Semantic relationship extractor initialized")
+            logger.info("✅ Semantic relationship extractor v2.0 initialized (aiocache + instructor)")
         else:
             self.semantic_extractor = None
             logger.warning("⚠️ Semantic relationship extractor not available")

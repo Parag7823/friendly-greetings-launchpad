@@ -109,6 +109,23 @@ pyahocorasick==2.1.0  # Aho-Corasick algorithm (2x faster than flashtext, async-
 spacy==3.7.2  # NER for entity extraction (95% accuracy vs 40% capitalization)
 en-core-web-sm @ https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.7.1/en_core_web_sm-3.7.1-py3-none-any.whl  # spaCy English model
 
+# TEMPORAL PATTERN LEARNER v2.0.0 - PRODUCTION-GRADE REPLACEMENTS
+# Replaces 215 lines of custom FFT/stats with battle-tested libraries
+prophet>=1.1.5  # Meta's forecasting: auto-seasonality, missing data, holidays, forecasting
+pyod>=1.1.0  # 40+ anomaly detection algorithms (IForest, HBOS, KNN, etc.) - zero training
+python-dateutil>=2.8.0  # Robust timestamp parsing (replaces 30 lines of custom regex)
+stumpy>=1.12.0  # Matrix Profile for pattern discovery (state-of-the-art)
+sktime>=0.25.0  # Time series analysis toolkit (AutoML forecasting)
+
+# CAUSAL INFERENCE ENGINE v2.0.0 - MICROSOFT RESEARCH-GRADE
+# Replaces 260 lines of custom Bradford Hill with Pearl's causal framework
+dowhy>=0.11  # Microsoft's causal inference: automatic causal graphs, counterfactuals, identification
+econml>=0.15.0  # Microsoft EconML: heterogeneous treatment effects, causal ML
+
+# SEMANTIC RELATIONSHIP EXTRACTOR v2.0.0 - PRODUCTION-GRADE
+# Replaces 77 lines of custom caching + 50 lines of metrics with industry standards
+aiometer>=0.5.0  # Rate-limited async execution (replaces manual batching + sleep)
+
 # Graph Database: REMOVED Neo4j (Nov 2025)
 # - Replaced by igraph for in-memory analytics (13-32x faster)
 # - Supabase remains single source of truth for relationship storage
