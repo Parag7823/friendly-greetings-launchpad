@@ -3,7 +3,6 @@ from __future__ import annotations
 # Standard library imports
 import os
 import sys
-import logging
 import hashlib
 import uuid
 import time
@@ -46,7 +45,6 @@ import re
 import asyncio
 import io
 from fastapi import File
-from fastapi.concurrency import contextmanager
 from fastapi.responses import StreamingResponse
 from fastapi import UploadFile
 from typing import AsyncGenerator
@@ -364,9 +362,10 @@ try:
     health_checker = obs_system.health_checker
     logger.info("✅ Observability system integrated successfully")
 except Exception as obs_error:
-    # Fallback to basic logging if observability system fails
-    logger = logging.getLogger(__name__)
-    logger.warning(f"⚠️ Observability system not available, using basic logging: {obs_error}")
+    # Fallback to structlog if observability system fails
+    import structlog
+    logger = structlog.get_logger(__name__)
+    logger.warning(f"⚠️ Observability system not available, using structlog: {obs_error}")
     metrics_collector = None
     performance_monitor = None
     health_checker = None
@@ -4877,7 +4876,7 @@ class DataEnrichmentProcessor:
     
     def __init__(self, cache_client=None, config=None, supabase_client=None):
         # Now using Groq/Llama for all AI operations
-        self.cache = cache_client  # Will be initialized with ProductionCache
+        self.cache = cache_client or safe_get_cache()  # Use centralized cache
         self.config = config or self._get_default_config()
         self.supabase = supabase_client  # Store Supabase client for field mapping learning
         
@@ -5604,11 +5603,7 @@ async def _learn_field_mappings_from_extraction(
             return None
         
         try:
-            # Initialize cache if not already done
-            if not self._cache_initialized:
-                self.cache = safe_get_ai_cache()
-                self._cache_initialized = True
-            
+            # Use centralized cache (already initialized in __init__)
             if self.cache and hasattr(self.cache, 'get_cached_classification'):
                 cached_data = await self.cache.get_cached_classification(
                     {'enrichment_id': enrichment_id}, 
@@ -5628,11 +5623,7 @@ async def _learn_field_mappings_from_extraction(
             return
         
         try:
-            # Initialize cache if not already done
-            if not self._cache_initialized:
-                self.cache = safe_get_ai_cache()
-                self._cache_initialized = True
-            
+            # Use centralized cache (already initialized in __init__)
             if self.cache and hasattr(self.cache, 'store_classification'):
                 await self.cache.store_classification(
                     {'enrichment_id': enrichment_id},
@@ -6347,11 +6338,7 @@ async def _learn_field_mappings_from_extraction(
             return
         
         try:
-            # Initialize cache if not already done
-            if not self._cache_initialized:
-                self.cache = None
-                self._cache_initialized = True
-            
+            # Use centralized cache (already initialized in __init__)
             if self.cache:
                 pass
         except Exception as e:
@@ -7136,9 +7123,9 @@ class BatchAIRowClassifier:
     - Complex rows (many fields): 10 rows/batch
     """
     
-    def __init__(self):
+    def __init__(self, cache_client=None):
         # Now using Groq/Llama for all AI operations
-        self.cache = {}  # Simple cache for similar rows
+        self.cache = cache_client or safe_get_cache()  # Use centralized cache
         
         # OPTIMIZATION 2: Dynamic batch sizing parameters
         # CRITICAL FIX: Further reduced to prevent AI response truncation (max_tokens=8000 limit)

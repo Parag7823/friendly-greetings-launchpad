@@ -20,9 +20,9 @@ import json
 from datetime import datetime
 from typing import Dict, Any, List, Optional
 from dataclasses import dataclass, asdict
-import logging
+import structlog
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 
 @dataclass
@@ -54,7 +54,7 @@ class ProvenanceTracker:
     """
     
     def __init__(self):
-        self.logger = logging.getLogger(__name__)
+        self.logger = structlog.get_logger(__name__)
     
     # ========================================================================
     # ROW HASH CALCULATION (Tamper Detection)
