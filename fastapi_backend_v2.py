@@ -5063,6 +5063,18 @@ class DataEnrichmentProcessor:
 
                 return enhanced_payload
 
+            except ValidationError as e:
+                self.metrics['error_count'] += 1
+                logger.error(f"Validation error in enrichment {enrichment_id}: {e}")
+                raise
+            except Exception as e:
+                self.metrics['error_count'] += 1
+                logger.error(f"Enrichment error for {enrichment_id}: {e}")
+                # Return fallback payload with error information
+                return await self._create_fallback_payload(
+                    row_data, platform_info, ai_classification, file_context, str(e)
+                )
+
         except ValidationError as e:
             self.metrics['error_count'] += 1
             logger.error(f"Validation error in enrichment {enrichment_id}: {e}")
