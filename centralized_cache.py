@@ -18,6 +18,7 @@ Usage:
 
 import os
 import logging
+import asyncio
 from typing import Optional, Any
 from aiocache import Cache
 from aiocache.serializers import JsonSerializer
@@ -27,6 +28,14 @@ logger = structlog.get_logger(__name__)
 
 # Global cache instance
 _cache_instance: Optional[Cache] = None
+_health_check_task = None
+_circuit_breaker_open = False
+_failure_count = 0
+_last_failure_time = None
+
+# Circuit breaker configuration
+CIRCUIT_BREAKER_THRESHOLD = 5  # Open circuit after 5 failures
+CIRCUIT_BREAKER_TIMEOUT = 60  # Reset after 60 seconds
 
 class CentralizedCache:
     """
@@ -53,17 +62,38 @@ class CentralizedCache:
         self.redis_url = redis_url or os.environ.get('ARQ_REDIS_URL') or os.environ.get('REDIS_URL', 'redis://localhost:6379')
         self.default_ttl = default_ttl
         
+        # CRITICAL FIX: Robust Redis URL parsing
+        from urllib.parse import urlparse
+        parsed = urlparse(self.redis_url)
+        
+        # Extract components
+        endpoint = parsed.hostname or 'localhost'
+        port = parsed.port or 6379
+        password = parsed.password or os.environ.get('REDIS_PASSWORD')
+        db = int(parsed.path.lstrip('/')) if parsed.path and parsed.path != '/' else 0
+        
+        # Check for TLS
+        use_tls = parsed.scheme in ('rediss', 'redis+tls') or os.environ.get('REDIS_TLS', 'false').lower() == 'true'
+        
         # Initialize aiocache with Redis backend
-        self.cache = Cache(
-            Cache.REDIS,
-            endpoint=self.redis_url.replace('redis://', '').split(':')[0],
-            port=int(self.redis_url.replace('redis://', '').split(':')[1].split('/')[0]) if ':' in self.redis_url else 6379,
-            serializer=JsonSerializer(),
-            namespace="finely_ai",  # Namespace all keys
-            timeout=5,  # Connection timeout
-            pool_min_size=10,
-            pool_max_size=100
-        )
+        cache_config = {
+            'endpoint': endpoint,
+            'port': port,
+            'db': db,
+            'serializer': JsonSerializer(),
+            'namespace': "finely_ai",
+            'timeout': 5,
+            'pool_min_size': int(os.environ.get('REDIS_POOL_MIN', '10')),
+            'pool_max_size': int(os.environ.get('REDIS_POOL_MAX', '100'))
+        }
+        
+        if password:
+            cache_config['password'] = password
+        
+        if use_tls:
+            cache_config['ssl'] = True
+        
+        self.cache = Cache(Cache.REDIS, **cache_config)
         
         # Metrics
         self.metrics = {
@@ -86,6 +116,19 @@ class CentralizedCache:
         Returns:
             Cached value or None if not found
         """
+        global _circuit_breaker_open, _failure_count, _last_failure_time
+        
+        # Check circuit breaker
+        if _circuit_breaker_open:
+            import time
+            if time.time() - _last_failure_time > CIRCUIT_BREAKER_TIMEOUT:
+                _circuit_breaker_open = False
+                _failure_count = 0
+                logger.info("circuit_breaker_closed")
+            else:
+                logger.warning("circuit_breaker_open", key=key)
+                return None
+        
         try:
             value = await self.cache.get(key)
             if value is not None:
@@ -94,10 +137,22 @@ class CentralizedCache:
             else:
                 self.metrics['misses'] += 1
                 logger.debug("cache_miss", key=key)
+            
+            # Reset failure count on success
+            _failure_count = 0
             return value
         except Exception as e:
             self.metrics['errors'] += 1
-            logger.error("cache_get_error", key=key, error=str(e))
+            _failure_count += 1
+            
+            if _failure_count >= CIRCUIT_BREAKER_THRESHOLD:
+                import time
+                _circuit_breaker_open = True
+                _last_failure_time = time.time()
+                logger.error("circuit_breaker_opened", failures=_failure_count, error=str(e))
+            else:
+                logger.error("cache_get_error", key=key, error=str(e), failures=_failure_count)
+            
             return None
     
     async def set(self, key: str, value: Any, ttl: Optional[int] = None) -> bool:
@@ -236,3 +291,134 @@ def safe_get_cache() -> Optional[CentralizedCache]:
         CentralizedCache instance or None if not initialized
     """
     return _cache_instance
+
+
+async def health_check() -> dict:
+    """
+    Check Redis cache health.
+    
+    Returns:
+        dict with health status
+    """
+    global _circuit_breaker_open, _failure_count
+    
+    cache = safe_get_cache()
+    if cache is None:
+        return {
+            'status': 'unavailable',
+            'initialized': False,
+            'circuit_breaker_open': False,
+            'error': 'Cache not initialized'
+        }
+    
+    try:
+        # Try to set and get a test value
+        test_key = 'health_check_test'
+        await cache.set(test_key, 'ok', ttl=10)
+        result = await cache.get(test_key)
+        await cache.delete(test_key)
+        
+        if result == 'ok':
+            return {
+                'status': 'healthy',
+                'initialized': True,
+                'circuit_breaker_open': _circuit_breaker_open,
+                'failure_count': _failure_count,
+                'metrics': cache.get_metrics()
+            }
+        else:
+            return {
+                'status': 'degraded',
+                'initialized': True,
+                'circuit_breaker_open': _circuit_breaker_open,
+                'failure_count': _failure_count,
+                'error': 'Test value mismatch'
+            }
+    except Exception as e:
+        return {
+            'status': 'unhealthy',
+            'initialized': True,
+            'circuit_breaker_open': _circuit_breaker_open,
+            'failure_count': _failure_count,
+            'error': str(e)
+        }
+
+
+async def validate_redis_connection(redis_url: str) -> bool:
+    """
+    Validate Redis connection before initializing cache.
+    
+    Args:
+        redis_url: Redis connection URL
+        
+    Returns:
+        True if connection successful, False otherwise
+    """
+    try:
+        import redis.asyncio as redis
+        
+        # Parse Redis URL
+        client = redis.from_url(redis_url, decode_responses=True)
+        
+        # Test connection with ping
+        await client.ping()
+        await client.close()
+        
+        logger.info("redis_connection_validated", url=redis_url)
+        return True
+    except Exception as e:
+        logger.error("redis_connection_failed", url=redis_url, error=str(e))
+        return False
+
+
+def require_redis_cache() -> bool:
+    """
+    Check if Redis cache is required in production.
+    
+    Returns:
+        True if Redis is required (production mode)
+    """
+    env = os.environ.get('ENVIRONMENT', 'development').lower()
+    require_redis = os.environ.get('REQUIRE_REDIS_CACHE', 'true').lower() == 'true'
+    
+    return env == 'production' or require_redis
+
+
+async def start_health_check_monitor(interval: int = 60):
+    """
+    Start background health check monitor.
+    
+    Args:
+        interval: Health check interval in seconds
+    """
+    global _health_check_task
+    
+    async def _monitor():
+        while True:
+            try:
+                health = await health_check()
+                if health['status'] != 'healthy':
+                    logger.warning("cache_health_degraded", health=health)
+                await asyncio.sleep(interval)
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error("health_check_monitor_error", error=str(e))
+                await asyncio.sleep(interval)
+    
+    _health_check_task = asyncio.create_task(_monitor())
+    logger.info("health_check_monitor_started", interval=interval)
+
+
+async def stop_health_check_monitor():
+    """Stop background health check monitor."""
+    global _health_check_task
+    
+    if _health_check_task:
+        _health_check_task.cancel()
+        try:
+            await _health_check_task
+        except asyncio.CancelledError:
+            pass
+        _health_check_task = None
+        logger.info("health_check_monitor_stopped")

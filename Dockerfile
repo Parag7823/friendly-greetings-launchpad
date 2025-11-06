@@ -108,6 +108,8 @@ COPY nango_client.py .
 COPY arq_worker.py .
 COPY provenance_tracker.py .
 COPY debug_logger.py .
+COPY inference_service.py .
+COPY persistent_lsh_service.py .
 COPY start.sh .
  
 # Copy built frontend from frontend stage

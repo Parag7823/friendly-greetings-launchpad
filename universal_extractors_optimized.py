@@ -102,21 +102,20 @@ class UniversalExtractorsOptimized:
     
     def __init__(self, openai_client=None, cache_client=None, config=None):
         self.openai = openai_client
-        # REFACTORED: Use centralized Redis cache (distributed, scalable, shared across workers)
+        # CRITICAL FIX: Use centralized Redis cache - FAIL FAST if unavailable
         from centralized_cache import safe_get_cache
         self.cache = cache_client or safe_get_cache()
         if self.cache is None:
-            # Fallback: Use in-memory cache if centralized not available
-            self.cache = Cache(Cache.MEMORY, serializer=JsonSerializer(), ttl=3600)
+            raise RuntimeError(
+                "Centralized Redis cache not initialized. "
+                "Call initialize_cache() at startup or set REDIS_URL environment variable. "
+                "MEMORY cache fallback removed to prevent cache divergence across workers."
+            )
         self.config = config or ExtractorConfig()
         
-        # GENIUS: Initialize easyocr (92% accuracy vs 60% tesseract)
-        try:
-            self.ocr_reader = easyocr.Reader(self.config.ocr_languages, gpu=True)
-            logger.info("easyocr initialized", languages=self.config.ocr_languages, gpu=True)
-        except Exception as e:
-            logger.warning("easyocr initialization failed, OCR disabled", error=str(e))
-            self.ocr_reader = None
+        # CRITICAL FIX: Lazy-load OCR via inference service
+        # This prevents 200MB-1GB memory per worker and GPU contention
+        self.ocr_reader = None  # Lazy-loaded via OCRService
         
         # GENIUS: Initialize presidio for PII/field detection (50x faster)
         try:
@@ -441,13 +440,14 @@ class UniversalExtractorsOptimized:
             return {'text': '', 'format': 'txt', 'error': str(e)}
     
     async def _extract_image(self, file_content: bytes) -> Dict[str, Any]:
-        """Extract text from image using easyocr"""
+        """Extract text from image using easyocr (async, non-blocking)"""
         try:
-            if not self.ocr_reader:
-                return {'text': '', 'format': 'image', 'error': 'OCR not enabled'}
+            # CRITICAL FIX: Use async OCR service (non-blocking)
+            from inference_service import OCRService
+            ocr_results = await OCRService.read_text(file_content)
             
-            # easyocr can read bytes directly
-            ocr_results = self.ocr_reader.readtext(file_content)
+            if not ocr_results:
+                return {'text': '', 'format': 'image', 'error': 'OCR returned no results'}
             
             text = ' '.join([text for (bbox, text, conf) in ocr_results])
             

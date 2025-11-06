@@ -153,14 +153,26 @@ class ProductionDuplicateDetectionService:
         self.supabase = supabase
         self.redis_client = redis_client
         
-        # GENIUS v4.0: aiocache with Redis (10x faster, persistent, visualizable)
-        # Replaces cachetools TTLCache (in-memory only, lost on restart)
-        self.cache = Cache(Cache.REDIS if redis_client else Cache.MEMORY, 
-                          serializer=JsonSerializer(),
-                          ttl=config.cache_ttl)
+        # CRITICAL FIX: Use centralized Redis cache - FAIL FAST if unavailable
+        from centralized_cache import safe_get_cache
+        self.cache = safe_get_cache()
+        if self.cache is None:
+            raise RuntimeError(
+                "Centralized Redis cache not initialized. "
+                "Call initialize_cache() at startup or set REDIS_URL environment variable. "
+                "MEMORY cache fallback removed to prevent cache divergence across workers."
+            )
         
-        # OPTIMIZED: datasketch MinHashLSH for near-duplicate detection
+        # CRITICAL FIX: Use persistent LSH service instead of in-memory LSH
+        # Old: In-memory LSH lost on restart, grows unbounded
+        # New: Redis-backed LSH with per-user sharding, persistent, scalable
+        from persistent_lsh_service import get_lsh_service
+        self.lsh_service = get_lsh_service()
+        
+        # Keep in-memory LSH for backward compatibility (will be deprecated)
         self.lsh = MinHashLSH(threshold=config.minhash_threshold, num_perm=config.minhash_num_perm)
+        logger.warning("in_memory_lsh_deprecated", 
+                      message="Using persistent LSH service. In-memory LSH will be removed.")
         
         # REMOVED: sqlalchemy (redundant - supabase client is sufficient)
         # v3.0 had both sqlalchemy + supabase (double DB client)
@@ -449,19 +461,22 @@ class ProductionDuplicateDetectionService:
             DuplicateResult with near-duplicate information
         """
         try:
-            # OPTIMIZED: Create MinHash for current file (1 line!)
-            current_minhash = MinHash(num_perm=config.minhash_num_perm)
+            # CRITICAL FIX: Use persistent LSH service (per-user sharding)
             text = file_content.decode('utf-8', errors='ignore').lower()
-            for word in text.split():
-                current_minhash.update(word.encode('utf-8'))
             
-            # OPTIMIZED: Query LSH index for similar files
-            file_id = f"{file_metadata.user_id}:{file_metadata.file_hash}"
-            similar_ids = self.lsh.query(current_minhash)
+            # Query persistent LSH for similar files
+            similar_hashes = await self.lsh_service.query(
+                user_id=file_metadata.user_id,
+                content=text
+            )
             
-            if not similar_ids:
-                # Insert current file into LSH for future queries
-                self.lsh.insert(file_id, current_minhash)
+            if not similar_hashes:
+                # Insert current file into persistent LSH
+                await self.lsh_service.insert(
+                    user_id=file_metadata.user_id,
+                    file_hash=file_metadata.file_hash,
+                    content=text
+                )
                 return DuplicateResult(
                     is_duplicate=False,
                     duplicate_type=DuplicateType.NONE,
@@ -469,18 +484,17 @@ class ProductionDuplicateDetectionService:
                     duplicate_files=[],
                     recommendation=DuplicateAction.REPLACE,
                     message="No near-duplicates found",
-                    confidence=1.0,  # PRESERVED: Confidence scoring
+                    confidence=1.0,
                     processing_time_ms=0
                 )
             
             # Get file details for best match
-            best_match_id = similar_ids[0]
-            user_id, file_hash = best_match_id.split(':')
+            best_match_hash = similar_hashes[0]
             
             # Fetch file details
             result = self.supabase.table('raw_records').select(
                 'id, file_name, created_at'
-            ).eq('user_id', user_id).eq('file_hash', file_hash).limit(1).execute()
+            ).eq('user_id', file_metadata.user_id).eq('file_hash', best_match_hash).limit(1).execute()
             
             if result.data:
                 match = result.data[0]
@@ -506,8 +520,12 @@ class ProductionDuplicateDetectionService:
                     processing_time_ms=0
                 )
             
-            # Insert current file into LSH
-            self.lsh.insert(file_id, current_minhash)
+            # Insert current file into persistent LSH
+            await self.lsh_service.insert(
+                user_id=file_metadata.user_id,
+                file_hash=file_metadata.file_hash,
+                content=text
+            )
             
             return DuplicateResult(
                 is_duplicate=False,

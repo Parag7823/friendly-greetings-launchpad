@@ -134,39 +134,30 @@ class UniversalDocumentClassifierOptimized:
         self.supabase = supabase_client
         self.config = config or self._get_default_config()
         
-        # REFACTORED: Use centralized Redis cache (distributed, scalable, shared across workers)
+        # CRITICAL FIX: Use centralized Redis cache - FAIL FAST if unavailable
         from centralized_cache import safe_get_cache
         self.cache = cache_client or safe_get_cache()
         if self.cache is None:
-            # Fallback: Use in-memory cache if centralized not available
-            self.cache = Cache(Cache.MEMORY, serializer=JsonSerializer(), ttl=self.config.cache_ttl)
+            raise RuntimeError(
+                "Centralized Redis cache not initialized. "
+                "Call initialize_cache() at startup or set REDIS_URL environment variable. "
+                "MEMORY cache fallback removed to prevent cache divergence across workers."
+            )
         
         # Comprehensive document type database
         self.document_database = self._initialize_document_database()
         
-        # GENIUS v4.0: Build pyahocorasick automaton (2x faster than flashtext, async-ready)
-        self.automaton = ahocorasick.Automaton()
-        for doc_type_id, doc_info in self.document_database.items():
-            for keyword in doc_info['keywords']:
-                # Add keyword with doc_type_id as value (case-insensitive)
-                self.automaton.add_word(keyword.lower(), (doc_type_id, keyword))
-            for indicator in doc_info['indicators']:
-                self.automaton.add_word(indicator.lower(), (doc_type_id, indicator))
-        self.automaton.make_automaton()  # Finalize the automaton
-        
-        # OPTIMIZED: Initialize easyocr reader (92% accuracy vs 60% tesseract)
-        self.ocr_reader = None
-        self.ocr_available = self._initialize_ocr()
-        
-        # OPTIMIZED: Initialize sentence-transformers for zero-shot batch classification
-        self.sentence_model = None
-        self.row_type_embeddings = None
-        self._initialize_sentence_model()
-        
-        # OPTIMIZED: Initialize TF-IDF vectorizer for smart indicator weighting
-        self.tfidf_vectorizer = None
-        self.doc_type_vectors = None
-        self._initialize_tfidf()
+        # CRITICAL FIX: Lazy-load heavy models via inference service
+        # Automaton, OCR, SentenceTransformer, TF-IDF now loaded on-demand
+        # This prevents 350MB+ memory per worker and 5-30s cold starts
+        self.automaton = None  # Lazy-loaded via AutomatonService
+        self.ocr_reader = None  # Lazy-loaded via OCRService
+        self.ocr_available = False  # Will be set when OCR is used
+        self.sentence_model = None  # Lazy-loaded via SentenceModelService
+        self.row_type_embeddings = None  # Lazy-loaded
+        self.tfidf_vectorizer = None  # Lazy-loaded via TFIDFService
+        self.doc_type_vectors = None  # Lazy-loaded
+        self.doc_types_list = None  # Lazy-loaded
         
         # Performance tracking
         self.metrics = {
@@ -775,9 +766,14 @@ class UniversalDocumentClassifierOptimized:
             except UnidentifiedImageError:
                 return None
 
-            # Perform OCR with easyocr (92% accuracy + spatial data + confidence)
-            ocr_results = easyocr.Reader(['en']).readtext(file_content)
+            # CRITICAL FIX: Use async OCR service (non-blocking)
+            from inference_service import OCRService
+            ocr_results = await OCRService.read_text(file_content)
             # Returns: [([[x1,y1], [x2,y2], [x3,y3], [x4,y4]], 'Invoice', 0.95), ...]
+            
+            if not ocr_results:
+                logger.warning("ocr_no_results", file_size=len(file_content))
+                return None
             
             # Extract text and spatial information
             extracted_text = ' '.join([text for (bbox, text, conf) in ocr_results if conf > 0.5])
@@ -854,6 +850,11 @@ class UniversalDocumentClassifierOptimized:
             
             combined_text = " ".join(text_parts).lower()  # Case-insensitive
             
+            # CRITICAL FIX: Lazy-load automaton from inference service
+            if self.automaton is None:
+                from inference_service import AutomatonService
+                self.automaton = await AutomatonService.get_document_automaton()
+            
             # GENIUS v4.0: Use pyahocorasick automaton (2x faster, async-ready)
             # Single pass through text - O(n) with Aho-Corasick algorithm
             found_matches = []
@@ -867,6 +868,11 @@ class UniversalDocumentClassifierOptimized:
             doc_type_matches = {}
             for doc_type_id in found_matches:
                 doc_type_matches[doc_type_id] = doc_type_matches.get(doc_type_id, 0) + 1
+            
+            # CRITICAL FIX: Lazy-load TF-IDF from inference service
+            if self.tfidf_vectorizer is None:
+                from inference_service import TFIDFService
+                self.tfidf_vectorizer, self.doc_type_vectors = await TFIDFService.get_vectorizer()
             
             # OPTIMIZED: Use TF-IDF for smart indicator weighting
             if self.tfidf_vectorizer and self.doc_type_vectors is not None:

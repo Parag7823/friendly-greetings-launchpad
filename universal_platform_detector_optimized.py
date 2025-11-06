@@ -130,23 +130,22 @@ class UniversalPlatformDetectorOptimized:
         self.supabase = supabase_client
         self.config = config or self._get_default_config()
         
-        # REFACTORED: Use centralized Redis cache (distributed, scalable, shared across workers)
+        # CRITICAL FIX: Use centralized Redis cache - FAIL FAST if unavailable
         from centralized_cache import safe_get_cache
         self.cache = cache_client or safe_get_cache()
         if self.cache is None:
-            # Fallback: Use in-memory cache if centralized not available
-            self.cache = Cache(Cache.MEMORY, serializer=JsonSerializer(), ttl=self.config.cache_ttl)
+            raise RuntimeError(
+                "Centralized Redis cache not initialized. "
+                "Call initialize_cache() at startup or set REDIS_URL environment variable. "
+                "MEMORY cache fallback removed to prevent cache divergence across workers."
+            )
         
         # Comprehensive platform database
         self.platform_database = self._initialize_platform_database()
         
-        # GENIUS v4.0: Build pyahocorasick automaton (2x faster than flashtext, async-ready)
-        self.automaton = ahocorasick.Automaton()
-        for platform_id, platform_info in self.platform_database.items():
-            for indicator in platform_info['indicators']:
-                # Add keyword with platform_id as value (case-insensitive)
-                self.automaton.add_word(indicator.lower(), (platform_id, indicator))
-        self.automaton.make_automaton()  # Finalize the automaton
+        # CRITICAL FIX: Lazy-load automaton via inference service
+        # This prevents 20MB+ memory per worker and initialization latency
+        self.automaton = None  # Lazy-loaded via AutomatonService
         
         # Performance tracking
         self.metrics = {
@@ -666,6 +665,11 @@ class UniversalPlatformDetectorOptimized:
                     pass
             
             combined_text = " ".join(text_parts).lower()  # Case-insensitive
+            
+            # CRITICAL FIX: Lazy-load automaton from inference service
+            if self.automaton is None:
+                from inference_service import AutomatonService
+                self.automaton = await AutomatonService.get_platform_automaton()
             
             # GENIUS v4.0: Use pyahocorasick automaton (2x faster, async-ready)
             # Single pass through text - O(n) with Aho-Corasick algorithm

@@ -128,17 +128,14 @@ class EntityResolverOptimized:
         # v4.0: Initialize instructor client for AI learning
         self.instructor_client = from_openai(openai_client) if openai_client else None
         
-        # v4.0: Use centralized Redis cache (shared across all modules)
+        # CRITICAL FIX: Use centralized Redis cache - FAIL FAST if unavailable
         from centralized_cache import safe_get_cache
         self.cache = cache_client or safe_get_cache()
         if self.cache is None:
-            # Fallback: Initialize local cache if centralized not available
-            self.cache = Cache(
-                Cache.REDIS,
-                endpoint=os.environ.get("REDIS_URL", "redis://localhost:6379").replace('redis://', '').split(':')[0],
-                port=int(os.environ.get("REDIS_URL", "redis://localhost:6379").replace('redis://', '').split(':')[1].split('/')[0]) if ':' in os.environ.get("REDIS_URL", "redis://localhost:6379") else 6379,
-                serializer=JsonSerializer(),
-                ttl=self.config.cache_ttl
+            raise RuntimeError(
+                "Centralized Redis cache not initialized. "
+                "Call initialize_cache() at startup or set REDIS_URL environment variable. "
+                "Local Redis fallback removed to prevent cache divergence across workers."
             )
         
         # v4.0: presidio for PII/identifier detection (30x faster, +40% accuracy)
