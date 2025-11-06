@@ -45,6 +45,11 @@ import json
 import re
 import asyncio
 import io
+from fastapi import File
+from fastapi.concurrency import contextmanager
+from fastapi.responses import StreamingResponse
+from fastapi import UploadFile
+from typing import AsyncGenerator
 import random
 from datetime import datetime, timedelta, timezone
 from typing import Dict, Any, List, Optional, Tuple
@@ -60,6 +65,7 @@ from universal_extractors_optimized import UniversalExtractorsOptimized as Unive
 from entity_resolver_optimized import EntityResolverOptimized as EntityResolver
 from enhanced_relationship_detector import EnhancedRelationshipDetector
 from debug_logger import get_debug_logger
+from streaming_source import StreamedFile
 
 # Lazy import for field_mapping_learner to avoid circular dependencies
 try:
@@ -4893,7 +4899,7 @@ class DataEnrichmentProcessor:
         # Initialize components with error handling
         try:
             self.vendor_standardizer = VendorStandardizer(cache_client=safe_get_ai_cache())
-            self.platform_id_extractor = PlatformIDExtractor()
+            # REMOVED: self.platform_id_extractor - using UniversalPlatformDetectorOptimized instead
             self.universal_extractors = UniversalExtractors(cache_client=safe_get_ai_cache())
             # FIX #1: Don't initialize platform detector here - will be passed from Phase 3
             # self.universal_platform_detector = UniversalPlatformDetector(openai_client, cache_client=safe_get_ai_cache())
@@ -5016,13 +5022,13 @@ class DataEnrichmentProcessor:
                 }
                 logger.debug(f"✅ Reusing platform info from Phase 3: {classification_results['platform']}")
 
-                # 5. Vendor standardization with confidence scoring
-                vendor_results = await self._standardize_vendor_with_validation(
-                    extraction_results, classification_results
+                # 5. Vendor resolution using EntityResolverOptimized (consolidated)
+                vendor_results = await self._resolve_vendor_entity(
+                    extraction_results, classification_results, user_id, self.supabase
                 )
 
-                # 6. Platform ID extraction with validation
-                platform_id_results = await self._extract_platform_ids_with_validation(
+                # 6. Platform ID extraction using UniversalPlatformDetectorOptimized (consolidated)
+                platform_id_results = await self._extract_platform_ids_universal(
                     validated_data, classification_results
                 )
 
@@ -5172,15 +5178,15 @@ class DataEnrichmentProcessor:
                 min_confidence=0.5,
                 supabase=self.supabase
             )
-            
+
             if mappings:
                 logger.debug(f"Retrieved {len(mappings)} learned field mappings for user {user_id}")
-            
+
             return mappings
-            
-    except Exception as e:
-        logger.warning(f"Failed to get field mappings: {e}")
-        return {}
+
+        except Exception as e:
+            logger.warning(f"Failed to get field mappings: {e}")
+            return {}
     
 async def _learn_field_mappings_from_extraction(
     self,
@@ -5298,9 +5304,8 @@ async def _learn_field_mappings_from_extraction(
                         supabase=self.supabase
                     )
                     break
-            return row_data.get('currency', 'USD')
-        except:
-            return 'USD'
+    except Exception as e:
+        logger.warning(f"Failed to learn field mappings from extraction: {e}")
     
     async def _learn_field_mappings_from_extraction(
         self,
@@ -5767,8 +5772,9 @@ async def _learn_field_mappings_from_extraction(
     #    NASA-grade classifier which uses AI, OCR, TF-IDF, and comprehensive document patterns
     # The platform_info passed to enrich_row_data already contains both platform and document_type
     
-    async def _standardize_vendor_with_validation(self, extraction_results: Dict, classification_results: Dict) -> Dict[str, Any]:
-        """Standardize vendor name with validation"""
+    async def _resolve_vendor_entity(self, extraction_results: Dict, classification_results: Dict, 
+                                     user_id: str, supabase: Client) -> Dict[str, Any]:
+        """Resolve vendor using EntityResolverOptimized (consolidated - no duplication)"""
         try:
             vendor_name = extraction_results.get('vendor_name', '')
             
@@ -5777,37 +5783,78 @@ async def _learn_field_mappings_from_extraction(
                     'vendor_raw': '',
                     'vendor_standard': '',
                     'vendor_confidence': 0.0,
+                    'vendor_canonical_id': '',
+                    'vendor_alternatives': [],
                     'vendor_cleaning_method': 'none'
                 }
             
-            # Use VendorStandardizer
-            standardized = await self.vendor_standardizer.standardize_vendor(vendor_name)
+            # Use EntityResolverOptimized for vendor resolution
+            entity_resolver = EntityResolver(supabase_client=supabase, cache_client=safe_get_ai_cache())
             
-            return {
-                'vendor_raw': vendor_name,
-                'vendor_standard': standardized.get('standardized_name', vendor_name),
-                'vendor_confidence': standardized.get('confidence', 0.7),
-                'vendor_cleaning_method': standardized.get('method', 'rule_based')
-            }
+            # Resolve vendor as entity
+            resolution_results = await entity_resolver.resolve_entities_batch(
+                entities=[vendor_name],
+                platform=classification_results.get('platform', 'unknown'),
+                user_id=user_id,
+                source_file='enrichment'
+            )
+            
+            if resolution_results and len(resolution_results) > 0:
+                vendor_result = resolution_results[0]
+                return {
+                    'vendor_raw': vendor_name,
+                    'vendor_standard': vendor_result.get('canonical_name', vendor_name),
+                    'vendor_confidence': vendor_result.get('confidence', 0.7),
+                    'vendor_canonical_id': vendor_result.get('canonical_id', ''),
+                    'vendor_alternatives': vendor_result.get('alternatives', []),
+                    'vendor_cleaning_method': 'entity_resolver_optimized'
+                }
+            else:
+                return {
+                    'vendor_raw': vendor_name,
+                    'vendor_standard': vendor_name,
+                    'vendor_confidence': 0.5,
+                    'vendor_canonical_id': '',
+                    'vendor_alternatives': [],
+                    'vendor_cleaning_method': 'fallback'
+                }
         except Exception as e:
-            logger.error(f"Vendor standardization failed: {e}")
+            logger.error(f"Vendor entity resolution failed: {e}")
             vendor_name = extraction_results.get('vendor_name', '')
             return {
                 'vendor_raw': vendor_name,
                 'vendor_standard': vendor_name,
                 'vendor_confidence': 0.5,
-                'vendor_cleaning_method': 'fallback'
+                'vendor_canonical_id': '',
+                'vendor_alternatives': [],
+                'vendor_cleaning_method': 'error_fallback'
             }
     
-    async def _extract_platform_ids_with_validation(self, validated_data: Dict, classification_results: Dict) -> Dict[str, Any]:
-        """Extract platform-specific IDs with validation"""
+    async def _extract_platform_ids_universal(self, validated_data: Dict, classification_results: Dict) -> Dict[str, Any]:
+        """Extract platform-specific IDs using UniversalPlatformDetectorOptimized (consolidated)"""
         try:
             row_data = validated_data.get('row_data', {})
             platform = classification_results.get('platform', 'unknown')
-            column_names = validated_data.get('column_names', [])
             
-            # Use PlatformIDExtractor
-            platform_ids = await self.platform_id_extractor.extract_platform_ids(row_data, platform, column_names)
+            # Use UniversalPlatformDetectorOptimized's platform_patterns
+            # This is the canonical source for platform patterns
+            platform_detector = UniversalPlatformDetector(anthropic_client=None, cache_client=safe_get_ai_cache())
+            
+            # Extract IDs using the detector's patterns
+            platform_ids = {}
+            if hasattr(platform_detector, 'platform_patterns'):
+                patterns = platform_detector.platform_patterns.get(platform.lower(), {})
+                
+                for id_type, pattern_info in patterns.items():
+                    pattern = pattern_info.get('pattern', '') if isinstance(pattern_info, dict) else pattern_info
+                    if pattern:
+                        import re
+                        for col_name, col_value in row_data.items():
+                            if col_value and isinstance(col_value, str):
+                                match = re.search(pattern, col_value, re.IGNORECASE)
+                                if match:
+                                    platform_ids[id_type] = col_value
+                                    break
             
             return {
                 'platform_ids': platform_ids,
@@ -6151,20 +6198,8 @@ async def _learn_field_mappings_from_extraction(
             enhanced['validation_flags'] = validation_flags
             enhanced['is_valid'] = len(validation_flags['validation_errors']) == 0
             
-            # FIX #4: Add canonical entity IDs (MEDIUM PRIORITY)
-            vendor_standard = enhanced.get('vendor_standard', '')
-            if vendor_standard:
-                # Generate canonical ID from standardized vendor name
-                vendor_canonical_id = f"vendor_{hashlib.md5(vendor_standard.lower().encode()).hexdigest()[:12]}"
-                enhanced['vendor_canonical_id'] = vendor_canonical_id
-                enhanced['vendor_verified'] = False  # Manual verification flag
-                
-                # Add alternatives for fuzzy matching
-                vendor_raw = enhanced.get('vendor_raw', '')
-                alternatives = []
-                if vendor_raw and vendor_raw != vendor_standard:
-                    alternatives.append(vendor_raw)
-                enhanced['vendor_alternatives'] = alternatives
+            # Canonical ID and alternatives now come from EntityResolverOptimized
+            # No duplicate generation needed - they're already in vendor_results from _resolve_vendor_entity
             
             # FIX #5: Use confidence scores for flagging (LOW PRIORITY)
             confidence_score = enhanced.get('ai_confidence', 0.5)
@@ -7974,7 +8009,7 @@ class ExcelProcessor:
         except Exception as e:
             logger.error(f"Error in streaming XLSX processing: {e}")
             # Fallback to pandas
-            fallback_sheets = pd.read_excel(io.BytesIO(file_content), sheet_name=None)
+            fallback_sheets = pd.read_excel(streamed_file.path, sheet_name=None)
             return {
                 'sheets': fallback_sheets if isinstance(fallback_sheets, dict) else {'Sheet1': fallback_sheets},
                 'summary': {
@@ -8097,7 +8132,7 @@ class ExcelProcessor:
                 'entities': {'employees': [], 'vendors': [], 'customers': [], 'projects': []}
             }
     
-    async def detect_file_type(self, file_content: bytes, filename: str) -> str:
+    async def detect_file_type(self, streamed_file: StreamedFile, filename: str) -> str:
         """Detect file type using magic numbers and filetype library"""
         try:
             # Check file extension first
@@ -8109,7 +8144,7 @@ class ExcelProcessor:
                 return 'xls'
             
             # Try filetype library
-            file_type = filetype.guess(file_content)
+            file_type = filetype.guess(streamed_file.path)
             if file_type:
                 if file_type.extension == 'csv':
                     return 'csv'
@@ -8119,7 +8154,7 @@ class ExcelProcessor:
             # Fallback to python-magic (guarded for environments where libmagic is unavailable)
             mime_type = ''
             try:
-                mime_type = magic.from_buffer(file_content, mime=True)
+                mime_type = magic.from_file(streamed_file.path, mime=True)
             except Exception:
                 mime_type = ''
             if 'csv' in mime_type or 'text/plain' in mime_type:
@@ -8132,26 +8167,26 @@ class ExcelProcessor:
             logger.error(f"File type detection failed: {e}")
             return 'unknown'
     
-    async def read_file(self, file_content: bytes, filename: str) -> Dict[str, pd.DataFrame]:
+    async def read_file(self, streamed_file: StreamedFile) -> Dict[str, pd.DataFrame]:
         """Read file using UniversalExtractorsOptimized (NASA-GRADE) and return dictionary of sheets"""
         try:
             # REFACTORED: Use UniversalExtractorsOptimized for all file reading
             # This provides consistent extraction across PDF, DOCX, PPTX, CSV, JSON, TXT, and images
-            extraction_result = await self.universal_extractors.extract_universal(
-                file_content=file_content,
-                filename=filename,
-                extract_tables=True,
-                extract_text=True
+            extraction_result = await self.universal_extractors.extract_data_universal(
+                streamed_file=streamed_file,
+                filename=streamed_file.filename,
+                user_id="system"
             )
             
             # Convert extraction result to pandas DataFrames
             sheets = {}
             
             # Check if we have structured data (tables)
-            if extraction_result.get('tables'):
-                for i, table_data in enumerate(extraction_result['tables']):
+            extracted_tables = extraction_result.get('extracted_data', {}).get('tables')
+            if extracted_tables:
+                for i, table_data in enumerate(extracted_tables):
                     sheet_name = table_data.get('sheet_name', f'Sheet{i+1}')
-                    
+
                     # Convert table data to DataFrame
                     if isinstance(table_data.get('data'), list) and table_data['data']:
                         try:
@@ -8162,59 +8197,59 @@ class ExcelProcessor:
                             logger.warning(f"Failed to convert table {i} to DataFrame: {table_e}")
             
             # If no tables found, try to parse text as CSV-like data
-            if not sheets and extraction_result.get('text'):
+            extracted_text = extraction_result.get('extracted_data', {}).get('text')
+            if not sheets and extracted_text:
                 try:
-                    text_content = extraction_result['text']
                     # Try to parse as CSV
                     from io import StringIO
-                    df = pd.read_csv(StringIO(text_content))
+                    df = pd.read_csv(StringIO(extracted_text))
                     if not df.empty:
                         sheets['Sheet1'] = df
-                        logger.info(f"Parsed text content as CSV for {filename}")
+                        logger.info(f"Parsed text content as CSV for {streamed_file.filename}")
                 except Exception as text_parse_e:
                     logger.warning(f"Could not parse text as CSV: {text_parse_e}")
-            
+
             # Fallback: If UniversalExtractors didn't work, use pandas directly for Excel/CSV
             if not sheets:
-                logger.warning(f"UniversalExtractors returned no data, falling back to pandas for {filename}")
-                file_stream = io.BytesIO(file_content)
-                
-                if filename.lower().endswith('.csv'):
-                    df = pd.read_csv(file_stream)
+                logger.warning(f"UniversalExtractors returned no data, falling back to pandas for {streamed_file.filename}")
+
+                if streamed_file.filename.lower().endswith('.csv'):
+                    df = pd.read_csv(streamed_file.path)
                     if not df.empty:
                         sheets = {'Sheet1': df}
-                elif filename.lower().endswith(('.xlsx', '.xls')):
+                elif streamed_file.filename.lower().endswith(('.xlsx', '.xls')):
                     try:
-                        excel_data = pd.read_excel(file_stream, sheet_name=None, engine='openpyxl')
+                        excel_data = pd.read_excel(streamed_file.path, sheet_name=None, engine='openpyxl')
                         sheets = {k: v for k, v in excel_data.items() if not v.empty}
                     except:
                         # Try xlrd for older .xls files
-                        file_stream.seek(0)
-                        excel_data = pd.read_excel(file_stream, sheet_name=None, engine='xlrd')
+                        excel_data = pd.read_excel(streamed_file.path, sheet_name=None, engine='xlrd')
                         sheets = {k: v for k, v in excel_data.items() if not v.empty}
-            
+
             if not sheets:
-                raise HTTPException(status_code=400, detail=f"Could not extract any data from {filename}")
-            
-            logger.info(f"Successfully read {len(sheets)} sheet(s) from {filename} using UniversalExtractors")
+                raise HTTPException(status_code=400, detail=f"Could not extract any data from {streamed_file.filename}")
+
+            logger.info(f"Successfully read {len(sheets)} sheet(s) from {streamed_file.filename} using UniversalExtractors")
             return sheets
-                
+
         except HTTPException:
             raise
         except Exception as e:
-            logger.error(f"Error reading file {filename}: {e}")
-            raise HTTPException(status_code=400, detail=f"Error reading file {filename}: {str(e)}")
-    
-    async def process_file(self, job_id: str, file_content: bytes, filename: str,
+            logger.error(f"Error reading file {streamed_file.filename}: {e}")
+            raise HTTPException(status_code=400, detail=f"Error reading file {streamed_file.filename}: {str(e)}")
+
+    async def process_file(self, job_id: str, streamed_file: StreamedFile,
                           user_id: str, supabase: Client,
                           duplicate_decision: Optional[str] = None,
                           existing_file_id: Optional[str] = None,
-                          original_file_hash: Optional[str] = None) -> Dict[str, Any]:
+                          original_file_hash: Optional[str] = None,
+                          streamed_file_hash: Optional[str] = None,
+                          streamed_file_size: Optional[int] = None) -> Dict[str, Any]:
         """Optimized processing pipeline with duplicate detection and batch AI classification"""
 
         # BUG #11 FIX: Remove pointless if/else - always use production service
         duplicate_service = ProductionDuplicateDetectionService(supabase)
-        
+
         # Create processing transaction for rollback capability
         transaction_id = str(uuid.uuid4())
         transaction_data = {
@@ -8225,8 +8260,8 @@ class ExcelProcessor:
             'started_at': datetime.utcnow().isoformat(),
             'metadata': {
                 'job_id': job_id,
-                'filename': filename,
-                'file_size': len(file_content)
+                'filename': streamed_file.filename,
+                'file_size': streamed_file_size or streamed_file.size
             }
         }
         
@@ -8250,7 +8285,7 @@ class ExcelProcessor:
                 'acquired_at': datetime.utcnow().isoformat(),
                 'expires_at': (datetime.utcnow() + timedelta(hours=1)).isoformat(),
                 'metadata': {
-                    'filename': filename,
+                    'filename': streamed_file.filename,
                     'transaction_id': transaction_id
                 }
             }
@@ -8273,7 +8308,7 @@ class ExcelProcessor:
             
             # For duplicate detection, we still need to read the file structure
             # but we'll use streaming for actual processing
-            sheets = await self.read_file(file_content, filename)
+            sheets = await self.read_file(streamed_file)
             
         except Exception as e:
             # Handle error with recovery system
@@ -8285,7 +8320,7 @@ class ExcelProcessor:
                 transaction_id=None,
                 operation_type="file_reading",
                 error_message=str(e),
-                error_details={"filename": filename, "file_size": len(file_content)},
+                error_details={"filename": streamed_file.filename, "file_size": streamed_file_size or streamed_file.size},
                 severity=ErrorSeverity.HIGH,
                 occurred_at=datetime.utcnow()
             )
@@ -8299,8 +8334,11 @@ class ExcelProcessor:
             })
             raise HTTPException(status_code=400, detail=f"Failed to read file: {str(e)}")
 
-        # ACCURACY FIX #9: Calculate file hash once and reuse
-        file_hash = hashlib.sha256(file_content).hexdigest()
+        # ACCURACY FIX #11: Calculate file hash once and reuse
+        if streamed_file_hash:
+            file_hash = streamed_file_hash
+        else:
+            file_hash = streamed_file.sha256
         file_hash_for_check = original_file_hash or file_hash
         
         # Step 2: Duplicate Detection (Exact and Near) using Production Service
@@ -8357,14 +8395,14 @@ class ExcelProcessor:
                 file_metadata = FileMetadata(
                     user_id=user_id,
                     file_hash=file_hash_for_check,
-                    filename=filename,
-                    file_size=len(file_content),
+                    filename=streamed_file.filename,
+                    file_size=streamed_file_size or streamed_file.size,
                     content_type='application/octet-stream',
                     upload_timestamp=datetime.utcnow()
                 )
 
                 dup_result = await duplicate_service.detect_duplicates(
-                    file_content, file_metadata, enable_near_duplicate=True
+                    streamed_file, file_metadata, enable_near_duplicate=True
                 )
 
                 dup_type_val = getattr(getattr(dup_result, 'duplicate_type', None), 'value', None)
@@ -8445,7 +8483,7 @@ class ExcelProcessor:
                     content_fingerprint_data = {
                         'columns': [list(df.columns) for df in sheets.values()],
                         'row_counts': [len(df) for df in sheets.values()],
-                        'dtypes': [df.dtypes.to_dict() for df in sheets.values()],
+                        'dtypes': [df.dtypes.astype(str).to_dict() for df in sheets.values()],
                         'sample_hashes': [
                             hashlib.md5(df.head(10).to_json().encode()).hexdigest() 
                             for df in sheets.values()
@@ -8459,7 +8497,7 @@ class ExcelProcessor:
                     content_fingerprint = file_hash  # Fallback to file hash
 
                 content_duplicate_analysis = await duplicate_service.check_content_duplicate(
-                    user_id, content_fingerprint, filename
+                    user_id, content_fingerprint, streamed_file.filename
                 )
                 if content_duplicate_analysis.get('is_content_duplicate', False):
                     await manager.send_update(job_id, {
@@ -8518,7 +8556,7 @@ class ExcelProcessor:
                     transaction_id=None,
                     operation_type="duplicate_detection",
                     error_message=str(e),
-                    error_details={"filename": filename},
+                    error_details={"filename": streamed_file.filename},
                     severity=ErrorSeverity.MEDIUM,
                     occurred_at=datetime.utcnow()
                 )
@@ -8554,7 +8592,7 @@ class ExcelProcessor:
         ai_cache = safe_get_ai_cache()
         platform_cache_key = {
             'columns': list(first_sheet.columns),
-            'filename': filename
+            'filename': streamed_file.filename
         }
         cached_platform = await ai_cache.get_cached_classification(platform_cache_key, "platform_detection")
         if cached_platform:
@@ -8563,7 +8601,7 @@ class ExcelProcessor:
             # Call the correct async method with Dict payload
             platform_info = await self.universal_platform_detector.detect_platform_universal(
                 payload_for_detection, 
-                filename=filename,
+                filename=streamed_file.filename,
                 user_id=user_id
             )
             try:
@@ -8586,7 +8624,7 @@ class ExcelProcessor:
         # Universal document classification (AI + pattern + OCR)
         doc_cache_key = {
             'columns': list(first_sheet.columns),
-            'filename': filename,
+            'filename': streamed_file.filename,
             'user_id': user_id,
             'sample_hash': hashlib.sha256(first_sheet.head(10).to_json().encode()).hexdigest() if not first_sheet.empty else None
         }
@@ -8603,8 +8641,8 @@ class ExcelProcessor:
             try:
                 doc_analysis = await self.universal_document_classifier.classify_document_universal(
                     payload_for_detection,
-                    filename=filename,
-                    file_content=file_content,
+                    filename=streamed_file.filename,
+                    file_content=streamed_file.path,
                     user_id=user_id
                 )
                 if not doc_analysis or doc_analysis.get('document_type') in (None, '', 'unknown'):
@@ -8619,7 +8657,7 @@ class ExcelProcessor:
                 except Exception as cache_store_err:
                     logger.warning(f"Document classification cache store failed: {cache_store_err}")
             except Exception as doc_err:
-                logger.error(f"Document classification failed for {filename}: {doc_err}")
+                logger.error(f"Document classification failed for {streamed_file.filename}: {doc_err}")
                 doc_analysis = {
                     'document_type': 'financial_data',
                     'confidence': 0.3,
@@ -8715,8 +8753,8 @@ class ExcelProcessor:
             # Store in raw_records using transaction
             raw_record_data = {
                 'user_id': user_id,
-                'file_name': filename,
-                'file_size': len(file_content),
+                'file_name': streamed_file.filename,
+                'file_size': streamed_file_size or streamed_file.size,
                 'file_hash': file_hash,
                 'source': 'file_upload',
                 'content': {
@@ -8783,7 +8821,7 @@ class ExcelProcessor:
         errors = []
         
         file_context = {
-            'filename': filename,
+            'filename': streamed_file.filename,
             'user_id': user_id,
             'file_id': file_id,
             'job_id': job_id
@@ -8810,7 +8848,7 @@ class ExcelProcessor:
             for sheet_name, sheet_df in sheets.items():
                 # Process file using streaming to prevent memory exhaustion
                 async for chunk_info in streaming_processor.process_file_streaming(
-                    file_content, filename, progress_callback=lambda step, msg, prog: manager.send_update(job_id, {
+                    streamed_file, progress_callback=lambda step, msg, prog: manager.send_update(job_id, {
                         "step": step,
                         "message": msg,
                         "progress": 40 + int(prog * 0.4)  # Progress from 40% to 80%
@@ -11879,12 +11917,16 @@ async def process_excel_universal_endpoint(
     try:
         # Critical: Check database health before processing
         check_database_health()
+        
+        # Create StreamedFile from uploaded bytes
+        streamed_file = StreamedFile.from_bytes(file_content, filename)
+        
         # Initialize components
         excel_processor = ExcelProcessor()
         field_detector = UniversalFieldDetector()
         platform_detector = UniversalPlatformDetector(anthropic_client=None, cache_client=safe_get_ai_cache())
         document_classifier = UniversalDocumentClassifier(cache_client=safe_get_ai_cache())
-        data_extractor = UniversalExtractors(cache_client=safe_get_ai_cache())
+        data_extractor = UniversalExtractorsOptimized(cache_client=safe_get_ai_cache())
         
         # Initialize Supabase client
         supabase_url = os.environ.get("SUPABASE_URL")
@@ -11918,9 +11960,9 @@ async def process_excel_universal_endpoint(
             user_id=user_id
         )
         
-        # Step 4: Extract data
+        # Step 4: Extract data using StreamedFile
         extraction_result = await data_extractor.extract_data_universal(
-            file_content=file_content,
+            streamed_file=streamed_file,
             filename=filename,
             user_id=user_id
         )
@@ -12278,6 +12320,7 @@ async def start_pdf_processing_job(user_id: str, job_id: str, storage_path: str,
         # - pdfminer.six for text extraction (direct, no ONNX)
         # - easyocr for OCR (92% accuracy vs 60% pytesseract)
         # Example:
+        #   from streaming_source import StreamedFile
         #   from universal_extractors_optimized import UniversalExtractorsOptimized
         #   extractor = UniversalExtractorsOptimized()
         #   result = await extractor.extract_data_universal(file_bytes, filename, user_id)
@@ -15098,6 +15141,10 @@ async def process_with_websocket_endpoint(
     try:
         # Critical: Check database health before processing
         check_database_health()
+        
+        # Create StreamedFile from uploaded bytes
+        streamed_file = StreamedFile.from_bytes(file_content, filename)
+        
         # Send initial update
         await websocket_manager.send_overall_update(
             job_id=job_id,
@@ -15111,7 +15158,7 @@ async def process_with_websocket_endpoint(
         field_detector = UniversalFieldDetector()
         platform_detector = UniversalPlatformDetector(anthropic_client=None, cache_client=safe_get_ai_cache())
         document_classifier = UniversalDocumentClassifier(cache_client=safe_get_ai_cache())
-        data_extractor = UniversalExtractors(cache_client=safe_get_ai_cache())
+        data_extractor = UniversalExtractorsOptimized(cache_client=safe_get_ai_cache())
         
         results = {}
         
@@ -15200,7 +15247,7 @@ async def process_with_websocket_endpoint(
         )
         
         extraction_result = await data_extractor.extract_data_universal(
-            file_content=file_content,
+            streamed_file=streamed_file,
             filename=filename,
             user_id=user_id
         )

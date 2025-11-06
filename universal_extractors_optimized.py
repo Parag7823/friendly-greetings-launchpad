@@ -167,15 +167,38 @@ class UniversalExtractorsOptimized:
     # MAIN EXTRACTION METHOD (ONNX-FREE: Direct parsers)
     # ========================================================================
     
-    async def extract_data_universal(self, file_content: bytes, filename: str, 
-                                   user_id: str, file_context: Dict = None) -> Dict[str, Any]:
+    async def extract_data_universal(self, file_content=None, filename: str = None, 
+                                   user_id: str = None, file_context: Dict = None, 
+                                   streamed_file=None) -> Dict[str, Any]:
         """
         ONNX-FREE: Extract data from ANY format using direct lightweight parsers
         NO unstructured/onnxruntime dependency - fixes Railway executable stack errors
         Supports: PDF, DOCX, PPTX, CSV, JSON, TXT, Images (via easyocr)
+        
+        Args:
+            file_content: (deprecated) Raw bytes - use streamed_file instead
+            filename: Filename for extraction
+            user_id: User ID for caching
+            file_context: Additional context
+            streamed_file: StreamedFile object (preferred)
         """
         start_time = time.time()
-        extraction_id = self._generate_extraction_id(file_content, filename, user_id)
+        
+        # Handle StreamedFile or fallback to bytes
+        if streamed_file is not None:
+            from streaming_source import StreamedFile
+            if not isinstance(streamed_file, StreamedFile):
+                raise TypeError("streamed_file must be a StreamedFile instance")
+            filename = filename or streamed_file.filename
+            user_id = user_id or "system"
+            # Generate extraction_id from file path hash for consistency
+            path_hash = hashlib.md5(streamed_file.path.encode()).hexdigest()[:8]
+            extraction_id = f"extract_{path_hash}_{hashlib.md5(filename.encode()).hexdigest()[:6]}_{user_id[:8]}"
+        elif file_content is not None:
+            # Legacy bytes path
+            extraction_id = self._generate_extraction_id(file_content, filename, user_id)
+        else:
+            raise ValueError("Either streamed_file or file_content must be provided")
         
         try:
             # 1. Check cache (aiocache - consistent with all optimized files)
@@ -190,7 +213,10 @@ class UniversalExtractorsOptimized:
             
             # 2. ONNX-FREE: Use direct lightweight parsers based on file extension
             file_ext = Path(filename).suffix.lower()
-            extracted_data = await self._extract_by_format(file_content, file_ext, filename)
+            if streamed_file is not None:
+                extracted_data = await self._extract_by_format_from_path(streamed_file.path, file_ext, filename)
+            else:
+                extracted_data = await self._extract_by_format(file_content, file_ext, filename)
             
             # 3. Add OCR results to extracted_data if it was an image
             # (OCR is already done in _extract_by_format for images)
@@ -215,6 +241,7 @@ class UniversalExtractorsOptimized:
             confidence_score = self._calculate_confidence(extracted_data)
             
             # 6. Build final result
+            file_size = streamed_file.size if streamed_file else len(file_content)
             final_result = {
                 'extraction_id': extraction_id,
                 'filename': filename,
@@ -223,7 +250,7 @@ class UniversalExtractorsOptimized:
                 'extraction_method': 'direct_parsers+easyocr+presidio',
                 'processing_time': time.time() - start_time,
                 'metadata': {
-                    'file_size_bytes': len(file_content),
+                    'file_size_bytes': file_size,
                     'user_id': user_id,
                     'timestamp': datetime.utcnow().isoformat(),
                     'version': '3.1.0'
@@ -257,6 +284,46 @@ class UniversalExtractorsOptimized:
     # ========================================================================
     # FORMAT-SPECIFIC EXTRACTION (ONNX-FREE: Direct parsers)
     # ========================================================================
+    
+    async def _extract_by_format_from_path(self, file_path: str, file_ext: str, filename: str) -> Dict[str, Any]:
+        """Extract data using direct lightweight parsers from file path"""
+        
+        # PDF extraction using pdfminer.six
+        if file_ext == '.pdf':
+            return await self._extract_pdf_from_path(file_path)
+        
+        # DOCX extraction using python-docx
+        elif file_ext in ['.docx', '.doc']:
+            return await self._extract_docx_from_path(file_path)
+        
+        # PPTX extraction using python-pptx
+        elif file_ext in ['.pptx', '.ppt']:
+            return await self._extract_pptx_from_path(file_path)
+        
+        # CSV extraction using csv module
+        elif file_ext == '.csv':
+            return await self._extract_csv_from_path(file_path)
+        
+        # JSON extraction using json module
+        elif file_ext == '.json':
+            return await self._extract_json_from_path(file_path)
+        
+        # TXT extraction (plain text)
+        elif file_ext in ['.txt', '.text']:
+            return await self._extract_txt_from_path(file_path)
+        
+        # Image extraction using easyocr
+        elif file_ext in ['.png', '.jpg', '.jpeg', '.bmp', '.tiff', '.gif']:
+            return await self._extract_image_from_path(file_path)
+        
+        # Unsupported format - return basic info
+        else:
+            logger.warning(f"Unsupported file format: {file_ext}")
+            return {
+                'text': '',
+                'format': file_ext,
+                'error': f'Unsupported format: {file_ext}'
+            }
     
     async def _extract_by_format(self, file_content: bytes, file_ext: str, filename: str) -> Dict[str, Any]:
         """Extract data using direct lightweight parsers based on file extension"""
@@ -443,6 +510,162 @@ class UniversalExtractorsOptimized:
         """Extract text from image using easyocr (async, non-blocking)"""
         try:
             # CRITICAL FIX: Use async OCR service (non-blocking)
+            from inference_service import OCRService
+            ocr_results = await OCRService.read_text(file_content)
+            
+            if not ocr_results:
+                return {'text': '', 'format': 'image', 'error': 'OCR returned no results'}
+            
+            text = ' '.join([text for (bbox, text, conf) in ocr_results])
+            
+            self.metrics['ocr_operations'] += 1
+            
+            return {
+                'text': text,
+                'format': 'image',
+                'ocr': {
+                    'words': [{'text': text, 'confidence': conf, 'bbox': bbox} 
+                             for (bbox, text, conf) in ocr_results],
+                    'avg_confidence': sum([conf for (_, _, conf) in ocr_results]) / len(ocr_results) if ocr_results else 0.0,
+                    'word_count': len(ocr_results)
+                }
+            }
+        except Exception as e:
+            logger.error(f"Image OCR failed: {e}")
+            return {'text': '', 'format': 'image', 'error': str(e)}
+    
+    # ========================================================================
+    # PATH-BASED EXTRACTION METHODS (Memory-efficient, no temp file writes)
+    # ========================================================================
+    
+    async def _extract_pdf_from_path(self, file_path: str) -> Dict[str, Any]:
+        """Extract text from PDF using pdfminer.six directly from path"""
+        try:
+            text = extract_pdf_text(file_path)
+            return {
+                'text': text,
+                'format': 'pdf',
+                'page_count': text.count('\f') + 1,
+                'char_count': len(text)
+            }
+        except Exception as e:
+            logger.error(f"PDF extraction failed: {e}")
+            return {'text': '', 'format': 'pdf', 'error': str(e)}
+    
+    async def _extract_docx_from_path(self, file_path: str) -> Dict[str, Any]:
+        """Extract text from DOCX using python-docx directly from path"""
+        try:
+            doc = DocxDocument(file_path)
+            paragraphs = [para.text for para in doc.paragraphs if para.text.strip()]
+            text = '\n'.join(paragraphs)
+            
+            tables = []
+            for table in doc.tables:
+                table_data = []
+                for row in table.rows:
+                    row_data = [cell.text for cell in row.cells]
+                    table_data.append(row_data)
+                tables.append(table_data)
+            
+            return {
+                'text': text,
+                'format': 'docx',
+                'paragraph_count': len(paragraphs),
+                'table_count': len(tables),
+                'tables': tables if tables else None
+            }
+        except Exception as e:
+            logger.error(f"DOCX extraction failed: {e}")
+            return {'text': '', 'format': 'docx', 'error': str(e)}
+    
+    async def _extract_pptx_from_path(self, file_path: str) -> Dict[str, Any]:
+        """Extract text from PPTX using python-pptx directly from path"""
+        try:
+            prs = Presentation(file_path)
+            slides_text = []
+            for slide in prs.slides:
+                slide_text = []
+                for shape in slide.shapes:
+                    if hasattr(shape, 'text') and shape.text.strip():
+                        slide_text.append(shape.text)
+                slides_text.append('\n'.join(slide_text))
+            
+            text = '\n\n'.join(slides_text)
+            return {
+                'text': text,
+                'format': 'pptx',
+                'slide_count': len(prs.slides),
+                'slides': slides_text
+            }
+        except Exception as e:
+            logger.error(f"PPTX extraction failed: {e}")
+            return {'text': '', 'format': 'pptx', 'error': str(e)}
+    
+    async def _extract_csv_from_path(self, file_path: str) -> Dict[str, Any]:
+        """Extract data from CSV directly from path"""
+        try:
+            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                text = f.read()
+                lines = text.splitlines()
+                reader = csv.reader(lines)
+                rows = list(reader)
+            
+            headers = rows[0] if rows else []
+            data_rows = rows[1:] if len(rows) > 1 else []
+            
+            return {
+                'text': text,
+                'format': 'csv',
+                'row_count': len(rows),
+                'column_count': len(headers),
+                'headers': headers,
+                'data': data_rows[:100]
+            }
+        except Exception as e:
+            logger.error(f"CSV extraction failed: {e}")
+            return {'text': '', 'format': 'csv', 'error': str(e)}
+    
+    async def _extract_json_from_path(self, file_path: str) -> Dict[str, Any]:
+        """Extract data from JSON directly from path"""
+        try:
+            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                text = f.read()
+                data = json_lib.loads(text)
+            
+            return {
+                'text': text,
+                'format': 'json',
+                'data': data,
+                'keys': list(data.keys()) if isinstance(data, dict) else None,
+                'item_count': len(data) if isinstance(data, (list, dict)) else None
+            }
+        except Exception as e:
+            logger.error(f"JSON extraction failed: {e}")
+            return {'text': '', 'format': 'json', 'error': str(e)}
+    
+    async def _extract_txt_from_path(self, file_path: str) -> Dict[str, Any]:
+        """Extract text from plain text file directly from path"""
+        try:
+            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                text = f.read()
+                lines = text.splitlines()
+            
+            return {
+                'text': text,
+                'format': 'txt',
+                'line_count': len(lines),
+                'char_count': len(text)
+            }
+        except Exception as e:
+            logger.error(f"TXT extraction failed: {e}")
+            return {'text': '', 'format': 'txt', 'error': str(e)}
+    
+    async def _extract_image_from_path(self, file_path: str) -> Dict[str, Any]:
+        """Extract text from image using easyocr directly from path"""
+        try:
+            with open(file_path, 'rb') as f:
+                file_content = f.read()
+            
             from inference_service import OCRService
             ocr_results = await OCRService.read_text(file_content)
             

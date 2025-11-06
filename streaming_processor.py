@@ -290,24 +290,48 @@ class StreamingFileProcessor:
         self.csv_processor = StreamingCSVProcessor(self.config)
         self.memory_monitor = MemoryMonitor(self.config.memory_limit_mb)
     
-    async def process_file_streaming(self, file_content: bytes, filename: str,
-                                   progress_callback: Optional[Callable] = None) -> AsyncGenerator[Dict[str, Any], None]:
+    async def process_file_streaming(self, file_content=None, filename: str = None,
+                                   progress_callback: Optional[Callable] = None,
+                                   streamed_file=None) -> AsyncGenerator[Dict[str, Any], None]:
         """
         Process file in streaming mode to prevent memory exhaustion.
+        
+        Args:
+            file_content: (deprecated) Raw bytes - use streamed_file instead
+            filename: Filename for processing
+            progress_callback: Optional progress callback
+            streamed_file: StreamedFile object (preferred)
         
         Returns:
             AsyncGenerator yielding processed chunks with metadata
         """
+        # Handle StreamedFile or fallback to bytes
+        if streamed_file is not None:
+            from streaming_source import StreamedFile
+            if not isinstance(streamed_file, StreamedFile):
+                raise TypeError("streamed_file must be a StreamedFile instance")
+            
+            filename = filename or streamed_file.filename
+            temp_path = streamed_file.path
+            file_size_gb = streamed_file.size / (1024 * 1024 * 1024)
+            cleanup_temp = False
+        elif file_content is not None:
+            # Legacy bytes path - create temp file
+            file_size_gb = len(file_content) / (1024 * 1024 * 1024)
+            if file_size_gb > self.config.max_file_size_gb:
+                raise ValueError(f"File size {file_size_gb:.2f}GB exceeds limit of {self.config.max_file_size_gb}GB")
+            
+            temp_dir = self.config.temp_dir or tempfile.gettempdir()
+            with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(filename)[1], dir=temp_dir) as temp_file:
+                temp_file.write(file_content)
+                temp_path = temp_file.name
+            cleanup_temp = True
+        else:
+            raise ValueError("Either streamed_file or file_content must be provided")
+        
         # Check file size
-        file_size_gb = len(file_content) / (1024 * 1024 * 1024)
         if file_size_gb > self.config.max_file_size_gb:
             raise ValueError(f"File size {file_size_gb:.2f}GB exceeds limit of {self.config.max_file_size_gb}GB")
-        
-        # Create temporary file
-        temp_dir = self.config.temp_dir or tempfile.gettempdir()
-        with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(filename)[1], dir=temp_dir) as temp_file:
-            temp_file.write(file_content)
-            temp_path = temp_file.name
         
         try:
             file_extension = os.path.splitext(filename)[1].lower()
@@ -340,11 +364,12 @@ class StreamingFileProcessor:
                 raise ValueError(f"Unsupported file format: {file_extension}")
         
         finally:
-            # Cleanup temporary file
-            try:
-                os.unlink(temp_path)
-            except OSError:
-                pass
+            # Cleanup temporary file only if we created it
+            if cleanup_temp:
+                try:
+                    os.unlink(temp_path)
+                except OSError:
+                    pass
             
             # Force garbage collection
             self.memory_monitor.force_garbage_collection()

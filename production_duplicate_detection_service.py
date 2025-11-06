@@ -238,11 +238,12 @@ class ProductionDuplicateDetectionService:
     
     async def detect_duplicates(
         self, 
-        file_content: bytes, 
-        file_metadata: FileMetadata,
+        file_content: bytes = None, 
+        file_metadata: FileMetadata = None,
         enable_near_duplicate: bool = True,
         enable_content_duplicate: bool = True,
-        sheets_data: Optional[Dict[str, Any]] = None
+        sheets_data: Optional[Dict[str, Any]] = None,
+        streamed_file = None
     ) -> DuplicateResult:
         """
         Main entry point for duplicate detection.
@@ -254,11 +255,12 @@ class ProductionDuplicateDetectionService:
         - Phase 4: Delta analysis (intelligent merging)
         
         Args:
-            file_content: Raw file content as bytes
+            file_content: (deprecated) Raw file content as bytes - use streamed_file instead
             file_metadata: File metadata including user_id, hash, etc.
             enable_near_duplicate: Whether to perform near-duplicate detection
             enable_content_duplicate: Whether to perform content-level duplicate detection
             sheets_data: Optional parsed sheets data for content duplicate detection
+            streamed_file: StreamedFile object (preferred)
             
         Returns:
             DuplicateResult with comprehensive duplicate information
@@ -266,8 +268,18 @@ class ProductionDuplicateDetectionService:
         start_time = time.time()
         
         try:
-            # Validate inputs and security
-            await self._validate_inputs(file_content, file_metadata)
+            # Handle StreamedFile or fallback to bytes
+            if streamed_file is not None:
+                from streaming_source import StreamedFile
+                if not isinstance(streamed_file, StreamedFile):
+                    raise TypeError("streamed_file must be a StreamedFile instance")
+                # Use streamed file for validation
+                await self._validate_inputs_from_path(streamed_file, file_metadata)
+            elif file_content is not None:
+                # Legacy bytes path
+                await self._validate_inputs(file_content, file_metadata)
+            else:
+                raise ValueError("Either streamed_file or file_content must be provided")
             
             # Check cache first
             cache_key = self._generate_cache_key(file_metadata)
@@ -289,7 +301,10 @@ class ProductionDuplicateDetectionService:
             
             # Phase 2: Near-duplicate detection (if enabled)
             if enable_near_duplicate:
-                near_result = await self._detect_near_duplicates(file_content, file_metadata)
+                if streamed_file is not None:
+                    near_result = await self._detect_near_duplicates_from_path(streamed_file, file_metadata)
+                else:
+                    near_result = await self._detect_near_duplicates(file_content, file_metadata)
                 if near_result.is_duplicate:
                     self.metrics['near_duplicates_found'] += 1
                     result = self._create_result(near_result, start_time, cache_key)
@@ -297,10 +312,13 @@ class ProductionDuplicateDetectionService:
                     return result
             
             # Phase 3: Content-level duplicate detection (row-level fingerprinting)
-            if enable_content_duplicate and file_content:
+            if enable_content_duplicate and (file_content or streamed_file):
                 try:
                     # Calculate content fingerprint
-                    content_fingerprint = await self._calculate_content_fingerprint(file_content)
+                    if streamed_file is not None:
+                        content_fingerprint = await self._calculate_content_fingerprint_from_path(streamed_file)
+                    else:
+                        content_fingerprint = await self._calculate_content_fingerprint(file_content)
                     
                     # Check for content duplicates
                     content_result = await self.check_content_duplicate(
@@ -373,6 +391,32 @@ class ProductionDuplicateDetectionService:
                 processing_time_ms=int((time.time() - start_time) * 1000),
                 error=str(e)
             )
+    
+    async def _validate_inputs_from_path(self, streamed_file, file_metadata: FileMetadata) -> None:
+        """
+        OPTIMIZED: Fast input validation from StreamedFile
+        
+        Args:
+            streamed_file: StreamedFile object
+            file_metadata: File metadata
+            
+        Raises:
+            ValueError: If inputs are invalid
+        """
+        from streaming_source import StreamedFile
+        if not isinstance(streamed_file, StreamedFile):
+            raise TypeError("streamed_file must be a StreamedFile instance")
+        
+        # Quick size check
+        if streamed_file.size > self.config.max_file_size_bytes:
+            raise ValueError(f"File size {streamed_file.size} exceeds maximum {self.config.max_file_size_bytes}")
+        
+        # Validate metadata
+        if not file_metadata or not file_metadata.user_id:
+            raise ValueError("File metadata with user_id is required")
+        
+        if not file_metadata.file_hash:
+            raise ValueError("File hash is required in metadata")
     
     async def _validate_inputs(self, file_content: bytes, file_metadata: FileMetadata) -> None:
         """
@@ -553,6 +597,132 @@ class ProductionDuplicateDetectionService:
     # - _calculate_content_similarity → datasketch LSH
     # - _calculate_fingerprint_similarity → datasketch
     # - _calculate_date_similarity → Not needed
+    
+    async def _detect_near_duplicates_from_path(self, streamed_file, file_metadata: FileMetadata) -> DuplicateResult:
+        """
+        OPTIMIZED: Near-duplicate detection using persistent LSH service from file path
+        
+        Args:
+            streamed_file: StreamedFile object
+            file_metadata: File metadata
+            
+        Returns:
+            DuplicateResult with near-duplicate information
+        """
+        try:
+            from streaming_source import StreamedFile
+            if not isinstance(streamed_file, StreamedFile):
+                raise TypeError("streamed_file must be a StreamedFile instance")
+            
+            # Read text from file in chunks to avoid memory issues
+            text = streamed_file.read_text(errors='ignore').lower()
+            
+            # Query persistent LSH for similar files
+            similar_hashes = await self.lsh_service.query(
+                user_id=file_metadata.user_id,
+                content=text
+            )
+            
+            if not similar_hashes:
+                # Insert current file into persistent LSH
+                await self.lsh_service.insert(
+                    user_id=file_metadata.user_id,
+                    file_hash=file_metadata.file_hash,
+                    content=text
+                )
+                return DuplicateResult(
+                    is_duplicate=False,
+                    duplicate_type=DuplicateType.NONE,
+                    similarity_score=0.0,
+                    duplicate_files=[],
+                    recommendation=DuplicateAction.REPLACE,
+                    message="No near-duplicates found",
+                    confidence=1.0,
+                    processing_time_ms=0
+                )
+            
+            # Get file details for best match
+            best_match_hash = similar_hashes[0]
+            
+            # Fetch file details
+            result = self.supabase.table('raw_records').select(
+                'id, file_name, created_at'
+            ).eq('user_id', file_metadata.user_id).eq('file_hash', best_match_hash).limit(1).execute()
+            
+            if result.data:
+                match = result.data[0]
+                # OPTIMIZED: Use rapidfuzz for filename similarity
+                filename_score = fuzz.token_set_ratio(file_metadata.filename, match['file_name']) / 100.0
+                
+                # Combined confidence score
+                confidence = (0.7 + filename_score * 0.3)
+                
+                return DuplicateResult(
+                    is_duplicate=True,
+                    duplicate_type=DuplicateType.NEAR,
+                    similarity_score=confidence,
+                    duplicate_files=[{
+                        'id': match['id'],
+                        'filename': match['file_name'],
+                        'uploaded_at': match['created_at'],
+                        'similarity_score': confidence
+                    }],
+                    recommendation=DuplicateAction.MERGE,
+                    message=f"Near-duplicate: '{match['file_name']}' ({confidence:.1%} similar)",
+                    confidence=confidence,
+                    processing_time_ms=0
+                )
+            
+            # Insert current file into persistent LSH
+            await self.lsh_service.insert(
+                user_id=file_metadata.user_id,
+                file_hash=file_metadata.file_hash,
+                content=text
+            )
+            
+            return DuplicateResult(
+                is_duplicate=False,
+                duplicate_type=DuplicateType.NONE,
+                similarity_score=0.0,
+                duplicate_files=[],
+                recommendation=DuplicateAction.REPLACE,
+                message="No near-duplicates found",
+                confidence=1.0,
+                processing_time_ms=0
+            )
+            
+        except Exception as e:
+            logger.error("Near-duplicate detection failed", error=str(e))
+            raise
+    
+    async def _calculate_content_fingerprint_from_path(self, streamed_file) -> str:
+        """
+        OPTIMIZED: Content fingerprint from file path using MinHash
+        
+        Args:
+            streamed_file: StreamedFile object
+            
+        Returns:
+            Content fingerprint string
+        """
+        try:
+            from streaming_source import StreamedFile
+            if not isinstance(streamed_file, StreamedFile):
+                raise TypeError("streamed_file must be a StreamedFile instance")
+            
+            # OPTIMIZED: Use polars for vectorized row hashing
+            # For non-tabular data, use MinHash
+            minhash = MinHash(num_perm=config.minhash_num_perm)
+            text = streamed_file.read_text(errors='ignore')
+            for word in text.split():
+                minhash.update(word.encode('utf-8'))
+            
+            # Return hash of MinHash signature
+            return hashlib.sha256(str(minhash.hashvalues).encode()).hexdigest()
+            
+        except Exception as e:
+            logger.error("Content fingerprint calculation failed", error=str(e))
+            return ""
     
     async def _calculate_content_fingerprint(self, file_content: bytes) -> str:
         """
