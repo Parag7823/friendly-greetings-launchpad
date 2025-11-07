@@ -86,61 +86,9 @@ export class FastAPIProcessor {
     return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
   }
 
-  private async checkForDuplicates(userId: string, fileHash: string, fileName: string, sessionToken?: string): Promise<{
-    is_duplicate: boolean;
-    duplicate_files?: any[];
-    latest_duplicate?: any;
-    recommendation?: string;
-    message?: string;
-    error?: string;
-  }> {
-    try {
-      // FIX #1: Add JWT token to API request headers
-      const headers: Record<string, string> = {
-        'Content-Type': 'application/json',
-      };
-      
-      if (sessionToken) {
-        headers['Authorization'] = `Bearer ${sessionToken}`;
-      }
-      
-      // SECURITY FIX: Use backend API instead of direct Supabase query to respect RLS
-      const response = await fetch(`${this.apiUrl}/check-duplicate`, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({
-          user_id: userId,
-          file_hash: fileHash,
-          file_name: fileName,
-          session_token: sessionToken
-        })
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
-        // MISMATCH FIX #3: Use unified error handler
-        UnifiedErrorHandler.handle({
-          message: errorData.error || 'Duplicate check failed',
-          severity: ErrorSeverity.MEDIUM,
-          source: ErrorSource.BACKEND,
-          code: response.status.toString()
-        });
-        return { is_duplicate: false, error: errorData.error || 'Duplicate check failed' };
-      }
-
-      const result = await response.json();
-      return result;
-    } catch (error) {
-      // MISMATCH FIX #3: Use unified error handler
-      UnifiedErrorHandler.handle({
-        message: error instanceof Error ? error.message : 'Duplicate check failed',
-        severity: ErrorSeverity.MEDIUM,
-        source: ErrorSource.NETWORK,
-        retryable: true
-      });
-      return { is_duplicate: false, error: error instanceof Error ? error.message : 'Unknown error' };
-    }
-  }
+  // CRITICAL FIX: Removed checkForDuplicates method
+  // Duplicate detection is now handled exclusively by backend /process-excel endpoint
+  // This eliminates redundant API calls and ensures single source of truth
 
   // FIX #8: Move isCleanedUp outside to prevent multiple cleanup calls
   private wsCleanupFlags = new Map<string, boolean>();
@@ -353,23 +301,10 @@ export class FastAPIProcessor {
         throw new Error('User session required');
       }
       
-      // MISMATCH FIX #2: Pass session token consistently to duplicate check
-      this.updateProgress('duplicate_check', 'Checking for duplicates...', 10);
-      const duplicateCheck = await this.checkForDuplicates(user.id, fileHash, file.name, session.access_token);
+      // CRITICAL FIX: Remove redundant frontend duplicate check
+      // Backend /process-excel endpoint handles duplicate detection comprehensively
+      // This eliminates double API call and ensures single source of truth
       
-      if (duplicateCheck.is_duplicate) {
-        // Handle duplicate detection
-        this.updateProgress('duplicate_detected', 'Duplicate file detected!', 15);
-        
-        // For now, we'll proceed with a warning, but in a real implementation,
-        // this would show a modal to the user
-        console.warn('Duplicate file detected:', duplicateCheck);
-        
-        // You can throw an error here to stop processing, or show a modal
-        // For now, let's continue with a warning
-        this.updateProgress('duplicate_warning', 'Duplicate detected - proceeding with warning...', 20);
-      }
-
       const fileName = `${user.id}/${Date.now()}-${file.name}`;
       const { data: uploadData, error: uploadError } = await supabase.storage
         .from('finely-upload')
@@ -379,7 +314,7 @@ export class FastAPIProcessor {
         throw new Error(`Upload failed: ${uploadError.message}`);
       }
 
-      this.updateProgress('processing', 'Initializing advanced AI analysis...', 20);
+      this.updateProgress('processing', 'Initializing advanced AI analysis...', 10);
 
       // Create processing job in database
       const { data: jobResult, error: jobError } = await supabase

@@ -29,13 +29,12 @@ logger = structlog.get_logger(__name__)
 # Global cache instance
 _cache_instance: Optional[Cache] = None
 _health_check_task = None
-_circuit_breaker_open = False
-_failure_count = 0
-_last_failure_time = None
 
-# Circuit breaker configuration
+# CRITICAL FIX: Circuit breaker configuration - state now stored in Redis
 CIRCUIT_BREAKER_THRESHOLD = 5  # Open circuit after 5 failures
 CIRCUIT_BREAKER_TIMEOUT = 60  # Reset after 60 seconds
+CIRCUIT_BREAKER_KEY = "cache:circuit_breaker"
+CIRCUIT_BREAKER_FAILURE_KEY = "cache:circuit_breaker:failures"
 
 class CentralizedCache:
     """
@@ -116,18 +115,15 @@ class CentralizedCache:
         Returns:
             Cached value or None if not found
         """
-        global _circuit_breaker_open, _failure_count, _last_failure_time
-        
-        # Check circuit breaker
-        if _circuit_breaker_open:
-            import time
-            if time.time() - _last_failure_time > CIRCUIT_BREAKER_TIMEOUT:
-                _circuit_breaker_open = False
-                _failure_count = 0
-                logger.info("circuit_breaker_closed")
-            else:
+        # CRITICAL FIX: Check Redis-based circuit breaker (global across all workers)
+        try:
+            breaker_open = await self.cache.get(CIRCUIT_BREAKER_KEY)
+            if breaker_open:
                 logger.warning("circuit_breaker_open", key=key)
                 return None
+        except Exception:
+            # If we can't check breaker state, proceed cautiously
+            pass
         
         try:
             value = await self.cache.get(key)
@@ -138,20 +134,30 @@ class CentralizedCache:
                 self.metrics['misses'] += 1
                 logger.debug("cache_miss", key=key)
             
-            # Reset failure count on success
-            _failure_count = 0
+            # CRITICAL FIX: Reset failure count in Redis on success
+            try:
+                await self.cache.delete(CIRCUIT_BREAKER_FAILURE_KEY)
+            except Exception:
+                pass
+            
             return value
         except Exception as e:
             self.metrics['errors'] += 1
-            _failure_count += 1
             
-            if _failure_count >= CIRCUIT_BREAKER_THRESHOLD:
-                import time
-                _circuit_breaker_open = True
-                _last_failure_time = time.time()
-                logger.error("circuit_breaker_opened", failures=_failure_count, error=str(e))
-            else:
-                logger.error("cache_get_error", key=key, error=str(e), failures=_failure_count)
+            # CRITICAL FIX: Increment failure count in Redis
+            try:
+                failure_count = await self.cache.get(CIRCUIT_BREAKER_FAILURE_KEY) or 0
+                failure_count += 1
+                await self.cache.set(CIRCUIT_BREAKER_FAILURE_KEY, failure_count, ttl=CIRCUIT_BREAKER_TIMEOUT)
+                
+                if failure_count >= CIRCUIT_BREAKER_THRESHOLD:
+                    # Open circuit breaker globally in Redis
+                    await self.cache.set(CIRCUIT_BREAKER_KEY, True, ttl=CIRCUIT_BREAKER_TIMEOUT)
+                    logger.error("circuit_breaker_opened", failures=failure_count, error=str(e))
+                else:
+                    logger.error("cache_get_error", key=key, error=str(e), failures=failure_count)
+            except Exception as breaker_error:
+                logger.error("circuit_breaker_update_failed", error=str(breaker_error))
             
             return None
     
@@ -343,8 +349,6 @@ async def health_check() -> dict:
     Returns:
         dict with health status
     """
-    global _circuit_breaker_open, _failure_count
-    
     cache = safe_get_cache()
     if cache is None:
         return {
@@ -355,6 +359,10 @@ async def health_check() -> dict:
         }
     
     try:
+        # CRITICAL FIX: Read circuit breaker state from Redis
+        breaker_open = await cache.cache.get(CIRCUIT_BREAKER_KEY) or False
+        failure_count = await cache.cache.get(CIRCUIT_BREAKER_FAILURE_KEY) or 0
+        
         # Try to set and get a test value
         test_key = 'health_check_test'
         await cache.set(test_key, 'ok', ttl=10)
@@ -365,24 +373,32 @@ async def health_check() -> dict:
             return {
                 'status': 'healthy',
                 'initialized': True,
-                'circuit_breaker_open': _circuit_breaker_open,
-                'failure_count': _failure_count,
+                'circuit_breaker_open': breaker_open,
+                'failure_count': failure_count,
                 'metrics': cache.get_metrics()
             }
         else:
             return {
                 'status': 'degraded',
                 'initialized': True,
-                'circuit_breaker_open': _circuit_breaker_open,
-                'failure_count': _failure_count,
+                'circuit_breaker_open': breaker_open,
+                'failure_count': failure_count,
                 'error': 'Test value mismatch'
             }
     except Exception as e:
+        # Try to read breaker state even on error
+        try:
+            breaker_open = await cache.cache.get(CIRCUIT_BREAKER_KEY) or False
+            failure_count = await cache.cache.get(CIRCUIT_BREAKER_FAILURE_KEY) or 0
+        except:
+            breaker_open = False
+            failure_count = 0
+        
         return {
             'status': 'unhealthy',
             'initialized': True,
-            'circuit_breaker_open': _circuit_breaker_open,
-            'failure_count': _failure_count,
+            'circuit_breaker_open': breaker_open,
+            'failure_count': failure_count,
             'error': str(e)
         }
 

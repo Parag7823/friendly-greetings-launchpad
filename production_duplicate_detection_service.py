@@ -1184,13 +1184,90 @@ class ProductionDuplicateDetectionService:
 
     async def _prepare_delta_payload(self, user_id: str, existing_file_id: str, new_record_id: str) -> Dict[str, Any]:
         """
-        Compile payload for delta merge by comparing existing and new events.
-        BUG #18 FIX: Added validation to prevent silent failures.
+        CRITICAL FIX: Use pre-computed row hashes from raw_records instead of re-fetching all events.
+        This eliminates the inefficient pattern of fetching all raw_events just to compute hashes.
+        The sheets_row_hashes are already computed during file processing and stored in raw_records.content.
         """
-        # BUG #18 FIX: Validate inputs first
+        # Validate inputs first
         if not existing_file_id or not new_record_id:
             raise ValueError(f"Invalid file IDs: existing={existing_file_id}, new={new_record_id}")
         
+        # CRITICAL FIX: Fetch pre-computed row hashes from raw_records instead of all events
+        existing_record_resp = (
+            self.supabase
+            .table('raw_records')
+            .select('content')
+            .eq('id', existing_file_id)
+            .single()
+            .execute()
+        )
+        
+        if not existing_record_resp.data:
+            raise ValueError(f"Existing file record not found: {existing_file_id}")
+        
+        existing_content = existing_record_resp.data.get('content', {})
+        existing_row_hashes = existing_content.get('sheets_row_hashes', {})
+        
+        # Build hash set from pre-computed hashes (all sheets combined)
+        existing_hashes_set = set()
+        for sheet_hashes in existing_row_hashes.values():
+            existing_hashes_set.update(sheet_hashes)
+        
+        logger.info(f"Loaded {len(existing_hashes_set)} pre-computed row hashes for delta merge")
+        
+        # Fetch new file's row hashes
+        new_record_resp = (
+            self.supabase
+            .table('raw_records')
+            .select('content')
+            .eq('id', new_record_id)
+            .single()
+            .execute()
+        )
+        
+        if not new_record_resp.data:
+            raise ValueError(f"New file record not found: {new_record_id}")
+        
+        new_content = new_record_resp.data.get('content', {})
+        new_row_hashes = new_content.get('sheets_row_hashes', {})
+        
+        # CRITICAL FIX: If row hashes not available, fall back to event-based comparison
+        if not existing_row_hashes or not new_row_hashes:
+            logger.warning("Row hashes not available in raw_records, falling back to event-based comparison")
+            return await self._prepare_delta_payload_fallback(user_id, existing_file_id, new_record_id)
+        
+        # Fetch only new events (we need full event data to insert)
+        new_events_resp = (
+            self.supabase
+            .table('raw_events')
+            .select('*')
+            .eq('user_id', user_id)
+            .eq('file_id', new_record_id)
+            .execute()
+        )
+        new_events = new_events_resp.data or []
+        
+        # Filter new events by comparing row hashes
+        new_rows = []
+        for event in new_events:
+            event_hash = self._hash_event_payload(event.get('payload', {}))
+            if event_hash not in existing_hashes_set:
+                event_copy = {**event}
+                event_copy['file_id'] = existing_file_id
+                event_copy.pop('id', None)
+                new_rows.append(event_copy)
+        
+        return {
+            'new_events': new_rows,
+            'existing_event_count': len(existing_hashes_set),
+            'event_id_mapping': {}  # Not needed for hash-based comparison
+        }
+    
+    async def _prepare_delta_payload_fallback(self, user_id: str, existing_file_id: str, new_record_id: str) -> Dict[str, Any]:
+        """
+        Fallback method using event-based comparison when row hashes are not available.
+        This is the old inefficient method kept for backward compatibility.
+        """
         existing_events_resp = (
             self.supabase
             .table('raw_events')
@@ -1200,17 +1277,15 @@ class ProductionDuplicateDetectionService:
             .execute()
         )
         
-        # BUG #18 FIX: Validate that query succeeded and returned data
         if existing_events_resp.error:
             raise ValueError(f"Failed to fetch existing events: {existing_events_resp.error}")
         
         existing_events = existing_events_resp.data or []
         
-        # BUG #18 FIX: Validate that existing file has events
         if not existing_events:
-            raise ValueError(f"No existing events found for file_id={existing_file_id}. Cannot perform delta merge on empty file.")
+            raise ValueError(f"No existing events found for file_id={existing_file_id}")
         
-        logger.info(f"Found {len(existing_events)} existing events for delta merge")
+        logger.info(f"Found {len(existing_events)} existing events for delta merge (fallback mode)")
         
         existing_hashes = {
             self._hash_event_payload(event['payload']): event['id']

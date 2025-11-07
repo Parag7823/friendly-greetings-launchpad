@@ -65,100 +65,8 @@ from entity_resolver_optimized import EntityResolverOptimized as EntityResolver
 from enhanced_relationship_detector import EnhancedRelationshipDetector
 from debug_logger import get_debug_logger
 
-# CRITICAL FIX: streaming_source module fallback for production deployment
-try:
-    from streaming_source import StreamedFile  # type: ignore[attr-defined]
-except (ModuleNotFoundError, ImportError):  # pragma: no cover - runtime fallback for Railway/Prod images
-    import types
-    from pathlib import Path
-    from typing import Generator, Optional as _Optional
-
-    streaming_source = types.ModuleType("streaming_source")
-
-    @dataclass
-    class StreamedFile:  # type: ignore[override]
-        path: str
-        filename: _Optional[str] = None
-        _size: _Optional[int] = None
-        _sha256: _Optional[str] = None
-        _cleanup: bool = False
-
-        def __post_init__(self) -> None:
-            self.path = str(self.path)
-            if not self.filename:
-                self.filename = Path(self.path).name
-
-        @property
-        def size(self) -> int:
-            if self._size is None:
-                self._size = os.path.getsize(self.path)
-            return self._size
-
-        @property
-        def sha256(self) -> str:
-            if self._sha256 is None:
-                self._sha256 = self.compute_sha256()
-            return self._sha256
-
-        def iter_bytes(self, chunk_size: int = 8 * 1024 * 1024) -> Generator[bytes, None, None]:
-            with open(self.path, "rb") as handle:
-                while True:
-                    chunk = handle.read(chunk_size)
-                    if not chunk:
-                        break
-                    yield chunk
-
-        def read_bytes(self) -> bytes:
-            with open(self.path, "rb") as handle:
-                return handle.read()
-
-        def read_text(self, encoding: str = "utf-8", errors: str = "strict") -> str:
-            with open(self.path, "r", encoding=encoding, errors=errors) as handle:
-                return handle.read()
-
-        def compute_sha256(self) -> str:
-            hasher = hashlib.sha256()
-            for chunk in self.iter_bytes():
-                hasher.update(chunk)
-            digest = hasher.hexdigest()
-            self._sha256 = digest
-            return digest
-
-        def open(self, mode: str = "rb"):
-            return open(self.path, mode)
-
-        def cleanup(self) -> None:
-            if self._cleanup and os.path.exists(self.path):
-                try:
-                    os.unlink(self.path)
-                except OSError:
-                    pass
-
-        def __enter__(self) -> "StreamedFile":
-            return self
-
-        def __exit__(self, exc_type, exc, tb) -> None:
-            self.cleanup()
-
-        @classmethod
-        def from_bytes(
-            cls,
-            data: bytes,
-            filename: str,
-            suffix: _Optional[str] = None,
-            temp_dir: _Optional[str] = None,
-        ) -> "StreamedFile":
-            suffix = suffix or Path(filename).suffix
-            temp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix, dir=temp_dir)
-            try:
-                temp.write(data)
-                temp.flush()
-            finally:
-                temp.close()
-            return cls(path=temp.name, filename=filename, _size=len(data), _cleanup=True)
-
-    streaming_source.StreamedFile = StreamedFile
-    sys.modules["streaming_source"] = streaming_source
+# CRITICAL FIX: Remove inline fallback class - fail hard if import fails
+from streaming_source import StreamedFile
 
 # Lazy import for field_mapping_learner to avoid circular dependencies
 try:
@@ -269,138 +177,8 @@ async def get_arq_pool():
         return _arq_pool
 
 # REMOVED: from anthropic import Anthropic (now using Groq/Llama exclusively)
-try:
-    # Prefer external module if available
-    from nango_client import NangoClient
-except Exception:
-    # Fallback inline definition to avoid Render import issues
-    import httpx
-
-    class NangoClient:
-        """Thin async client for calling Nango's hosted API in dev/prod.
-
-        Uses the Proxy to hit underlying provider APIs (Gmail here) and the Connect Session API
-        to generate session tokens for the hosted auth UI.
-        """
-
-        def __init__(self, base_url: Optional[str] = None, secret_key: Optional[str] = None):
-            self.base_url = base_url or os.environ.get("NANGO_BASE_URL", "https://api.nango.dev")
-            self.secret_key = secret_key or os.environ.get("NANGO_SECRET_KEY")
-            if not self.secret_key:
-                raise ValueError("NANGO_SECRET_KEY env var not set")
-
-        def _headers(self, provider_config_key: Optional[str] = None, connection_id: Optional[str] = None) -> Dict[str, str]:
-            headers = {
-                "Authorization": f"Bearer {self.secret_key}",
-            }
-            if provider_config_key:
-                headers["Provider-Config-Key"] = provider_config_key
-            if connection_id:
-                headers["Connection-Id"] = connection_id
-            return headers
-
-        async def create_connect_session(self, end_user: Dict[str, Any], allowed_integrations: list[str]) -> Dict[str, Any]:
-            """Create a Nango Connect session token to authorize a connection via hosted UI.
-
-            API: POST /connect/sessions
-            Docs: https://docs.nango.dev/reference/api/connect/sessions/create
-            """
-            url = f"{self.base_url}/connect/sessions"
-            payload = {
-                "end_user": end_user,
-                "allowed_integrations": allowed_integrations,
-            }
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                resp = await client.post(url, json=payload, headers=self._headers())
-                resp.raise_for_status()
-                return resp.json()
-
-        # ------------------------- Gmail via Proxy -------------------------
-        async def get_gmail_profile(self, provider_config_key: str, connection_id: str) -> Dict[str, Any]:
-            url = f"{self.base_url}/proxy/gmail/v1/users/me/profile"
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                resp = await client.get(url, headers=self._headers(provider_config_key, connection_id))
-                resp.raise_for_status()
-                return resp.json()
-
-        async def list_gmail_messages(self, provider_config_key: str, connection_id: str, q: str,
-                                      page_token: Optional[str] = None, max_results: int = 100) -> Dict[str, Any]:
-            """List Gmail messages matching query. Uses Gmail REST via Nango Proxy.
-
-            q examples: 'has:attachment newer_than:365d'
-            """
-            url = f"{self.base_url}/proxy/gmail/v1/users/me/messages"
-            params = {"q": q, "maxResults": max_results}
-            if page_token:
-                params["pageToken"] = page_token
-            async with httpx.AsyncClient(timeout=60.0) as client:
-                resp = await client.get(url, params=params, headers=self._headers(provider_config_key, connection_id))
-                resp.raise_for_status()
-                return resp.json()
-
-        async def get_gmail_message(self, provider_config_key: str, connection_id: str, message_id: str) -> Dict[str, Any]:
-            """Get full Gmail message to locate attachment parts."""
-            url = f"{self.base_url}/proxy/gmail/v1/users/me/messages/{message_id}"
-            params = {"format": "full"}
-            async with httpx.AsyncClient(timeout=60.0) as client:
-                resp = await client.get(url, params=params, headers=self._headers(provider_config_key, connection_id))
-                resp.raise_for_status()
-                return resp.json()
-
-        async def get_gmail_attachment(self, provider_config_key: str, connection_id: str,
-                                       message_id: str, attachment_id: str) -> bytes:
-            """Fetch a Gmail attachment as bytes (base64 decode)."""
-            url = f"{self.base_url}/proxy/gmail/v1/users/me/messages/{message_id}/attachments/{attachment_id}"
-            async with httpx.AsyncClient(timeout=120.0) as client:
-                resp = await client.get(url, headers=self._headers(provider_config_key, connection_id))
-                resp.raise_for_status()
-                data = resp.json()
-                b64 = data.get("data")
-                if not b64:
-                    return b""
-                b64 = b64.replace("-", "+").replace("_", "/")
-                try:
-                    return base64.b64decode(b64)
-                except Exception:
-                    return base64.urlsafe_b64decode(b64)
-
-            # ------------------------- Generic Proxy Helpers -------------------------
-            async def proxy_get(self, provider: str, path: str, params: Optional[Dict[str, Any]] = None,
-                                 connection_id: Optional[str] = None, provider_config_key: Optional[str] = None,
-                                 headers: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
-                url = f"{self.base_url}/proxy/{provider}/{path.lstrip('/')}"
-                merged_headers = self._headers(provider_config_key, connection_id)
-                if headers:
-                    merged_headers.update(headers)
-                async with httpx.AsyncClient(timeout=60.0) as client:
-                    resp = await client.get(url, params=params or {}, headers=merged_headers)
-                    resp.raise_for_status()
-                    return resp.json()
-
-            async def proxy_get_bytes(self, provider: str, path: str, params: Optional[Dict[str, Any]] = None,
-                                       connection_id: Optional[str] = None, provider_config_key: Optional[str] = None) -> bytes:
-                """GET via Nango Proxy and return raw bytes (for media endpoints like Drive alt=media)."""
-                url = f"{self.base_url}/proxy/{provider}/{path.lstrip('/')}"
-                async with httpx.AsyncClient(timeout=120.0) as client:
-                    resp = await client.get(url, params=params or {}, headers=self._headers(provider_config_key, connection_id))
-                    resp.raise_for_status()
-                    return resp.content
-
-            async def proxy_post(self, provider: str, path: str, json_body: Optional[Dict[str, Any]] = None,
-                                  connection_id: Optional[str] = None, provider_config_key: Optional[str] = None,
-                                  headers: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
-                url = f"{self.base_url}/proxy/{provider}/{path.lstrip('/')}"
-                merged_headers = self._headers(provider_config_key, connection_id)
-                if headers:
-                    merged_headers.update(headers)
-                async with httpx.AsyncClient(timeout=90.0) as client:
-                    resp = await client.post(url, json=json_body or {}, headers=merged_headers)
-                    resp.raise_for_status()
-                    # Dropbox download returns bytes; guard for JSON parse errors
-                    try:
-                        return resp.json()
-                    except Exception:
-                        return {"_raw": resp.content}
+# CRITICAL FIX: Remove inline fallback class - fail hard if import fails
+from nango_client import NangoClient
 
 # Import critical fixes systems
 from transaction_manager import initialize_transaction_manager, get_transaction_manager
@@ -978,6 +756,18 @@ async def lifespan(app: FastAPI):
     await start_health_check_monitor(interval=60)
     logger.info("✅ Cache health monitor started")
     
+    # CRITICAL FIX: Initialize Redis client for WebSocket manager (Pub/Sub support)
+    try:
+        redis_client = await aioredis.from_url(
+            redis_url,
+            encoding="utf-8",
+            decode_responses=True
+        )
+        websocket_manager.set_redis(redis_client)
+        logger.info("✅ WebSocket manager initialized with Redis Pub/Sub")
+    except Exception as e:
+        logger.warning(f"Failed to initialize Redis for WebSocket manager: {e}")
+    
     # CRITICAL FIX: Warm up inference services (optional, async)
     try:
         from inference_service import warmup
@@ -1046,6 +836,23 @@ async def lifespan(app: FastAPI):
         except asyncio.CancelledError:
             pass
         logger.info("✅ WebSocket cleanup task stopped")
+    
+    # CRITICAL FIX: Cleanup Redis Pub/Sub for WebSocket manager
+    try:
+        if websocket_manager.pubsub_task:
+            websocket_manager.pubsub_task.cancel()
+            try:
+                await websocket_manager.pubsub_task
+            except asyncio.CancelledError:
+                pass
+        if websocket_manager.pubsub:
+            await websocket_manager.pubsub.unsubscribe()
+            await websocket_manager.pubsub.close()
+        if websocket_manager.redis:
+            await websocket_manager.redis.close()
+        logger.info("✅ WebSocket Redis Pub/Sub cleaned up")
+    except Exception as e:
+        logger.warning(f"WebSocket Pub/Sub cleanup failed: {e}")
     
     try:
         from observability_system import get_observability_system
@@ -8249,6 +8056,74 @@ class ExcelProcessor:
             logger.error(f"File type detection failed: {e}")
             return 'unknown'
     
+    async def _get_sheet_metadata(self, streamed_file: StreamedFile) -> Dict[str, Dict[str, Any]]:
+        """
+        CRITICAL FIX: Get lightweight sheet metadata WITHOUT loading full data into memory.
+        Returns: {sheet_name: {columns: [...], row_count: int, dtypes: {...}, sample_hash: str}}
+        This prevents OOM on large files while still enabling duplicate detection.
+        """
+        try:
+            metadata = {}
+            
+            if streamed_file.filename.lower().endswith('.csv'):
+                # For CSV: read only first 100 rows for metadata
+                df_sample = pd.read_csv(streamed_file.path, nrows=100)
+                # Get actual row count without loading full file
+                with open(streamed_file.path, 'r', encoding='utf-8', errors='ignore') as f:
+                    row_count = sum(1 for _ in f) - 1  # Subtract header
+                
+                metadata['Sheet1'] = {
+                    'columns': list(df_sample.columns),
+                    'row_count': row_count,
+                    'dtypes': df_sample.dtypes.astype(str).to_dict(),
+                    'sample_hash': hashlib.md5(df_sample.head(10).to_json().encode()).hexdigest()
+                }
+                
+            elif streamed_file.filename.lower().endswith(('.xlsx', '.xls')):
+                # For Excel: use openpyxl to read metadata only
+                import openpyxl
+                wb = openpyxl.load_workbook(streamed_file.path, read_only=True, data_only=True)
+                
+                for sheet_name in wb.sheetnames:
+                    ws = wb[sheet_name]
+                    # Get dimensions without loading all data
+                    max_row = ws.max_row
+                    max_col = ws.max_column
+                    
+                    # Read only header row
+                    header = [cell.value for cell in ws[1]]
+                    
+                    # Read first 10 rows for sample hash
+                    sample_rows = []
+                    for i, row in enumerate(ws.iter_rows(min_row=2, max_row=min(11, max_row), values_only=True)):
+                        if i >= 10:
+                            break
+                        sample_rows.append(row)
+                    
+                    sample_hash = hashlib.md5(str(sample_rows).encode()).hexdigest()
+                    
+                    metadata[sheet_name] = {
+                        'columns': header,
+                        'row_count': max_row - 1,  # Subtract header
+                        'dtypes': {},  # Excel doesn't have explicit dtypes without loading data
+                        'sample_hash': sample_hash
+                    }
+                
+                wb.close()
+            
+            else:
+                # For other formats, fall back to reading small sample
+                logger.warning(f"Unknown file format for metadata extraction: {streamed_file.filename}")
+                return {}
+            
+            logger.info(f"Extracted metadata for {len(metadata)} sheets from {streamed_file.filename} without loading full data")
+            return metadata
+            
+        except Exception as e:
+            logger.error(f"Failed to extract sheet metadata: {e}")
+            # Fallback: return empty metadata, streaming will still work
+            return {}
+    
     async def read_file(self, streamed_file: StreamedFile) -> Dict[str, pd.DataFrame]:
         """Read file using UniversalExtractorsOptimized (NASA-GRADE) and return dictionary of sheets"""
         try:
@@ -8378,7 +8253,8 @@ class ExcelProcessor:
             logger.warning(f"Failed to acquire processing lock (may already exist): {e}")
             # Continue processing even if lock fails - it's for optimization, not critical
 
-        # Step 1: Initialize streaming processor for memory-efficient processing
+        # CRITICAL FIX: Initialize streaming processor for memory-efficient processing
+        # Get sheet metadata ONLY (names, columns, row counts) without loading full data
         await manager.send_update(job_id, {
             "step": "initializing_streaming",
             "message": format_progress_message(ProcessingStage.SENSE, "Getting ready to read your file"),
@@ -8388,9 +8264,9 @@ class ExcelProcessor:
         try:
             streaming_processor = get_streaming_processor()
             
-            # For duplicate detection, we still need to read the file structure
-            # but we'll use streaming for actual processing
-            sheets = await self.read_file(streamed_file)
+            # CRITICAL FIX: Get lightweight sheet metadata for duplicate detection
+            # This reads only headers and counts, NOT full data (prevents OOM)
+            sheets_metadata = await self._get_sheet_metadata(streamed_file)
             
         except Exception as e:
             # Handle error with recovery system
@@ -8400,7 +8276,7 @@ class ExcelProcessor:
                 user_id=user_id,
                 job_id=job_id,
                 transaction_id=None,
-                operation_type="file_reading",
+                operation_type="streaming_init",
                 error_message=str(e),
                 error_details={"filename": streamed_file.filename, "file_size": streamed_file_size or streamed_file.size},
                 severity=ErrorSeverity.HIGH,
@@ -8411,10 +8287,10 @@ class ExcelProcessor:
             
             await manager.send_update(job_id, {
                 "step": "error",
-                "message": f"Error reading file: {str(e)}",
+                "message": f"Error initializing streaming: {str(e)}",
                 "progress": 0
             })
-            raise HTTPException(status_code=400, detail=f"Failed to read file: {str(e)}")
+            raise HTTPException(status_code=400, detail=f"Failed to initialize streaming: {str(e)}")
 
         # ACCURACY FIX #11: Calculate file hash once and reuse
         if streamed_file_hash:
@@ -8559,17 +8435,14 @@ class ExcelProcessor:
                         "existing_file_id": (dup_result.duplicate_files or [{}])[0].get('id') if getattr(dup_result, 'duplicate_files', None) else None
                     }
 
-                # ACCURACY FIX #10: Optimized content fingerprint (faster, less memory)
+                # CRITICAL FIX: Use lightweight metadata instead of full sheets data
                 try:
-                    # Use column structure + row counts + sample data instead of full CSV
+                    # Use metadata (columns, row counts, sample hashes) - no full data loaded
                     content_fingerprint_data = {
-                        'columns': [list(df.columns) for df in sheets.values()],
-                        'row_counts': [len(df) for df in sheets.values()],
-                        'dtypes': [df.dtypes.astype(str).to_dict() for df in sheets.values()],
-                        'sample_hashes': [
-                            hashlib.md5(df.head(10).to_json().encode()).hexdigest() 
-                            for df in sheets.values()
-                        ]
+                        'columns': [meta['columns'] for meta in sheets_metadata.values()],
+                        'row_counts': [meta['row_count'] for meta in sheets_metadata.values()],
+                        'dtypes': [meta['dtypes'] for meta in sheets_metadata.values()],
+                        'sample_hashes': [meta['sample_hash'] for meta in sheets_metadata.values()]
                     }
                     content_fingerprint = hashlib.sha256(
                         json.dumps(content_fingerprint_data, sort_keys=True, default=str).encode()
@@ -8645,8 +8518,8 @@ class ExcelProcessor:
                 await error_recovery.handle_processing_error(error_context)
                 logger.warning(f"Duplicate detection failed, continuing with processing: {e}")
 
-        # CRITICAL FIX #2: Validate sheets are not empty
-        if not sheets or all(df.empty for df in sheets.values()):
+        # CRITICAL FIX: Validate metadata exists (sheets_metadata replaces sheets)
+        if not sheets_metadata or all(meta['row_count'] == 0 for meta in sheets_metadata.values()):
             await manager.send_update(job_id, {
                 "step": "error",
                 "message": "I couldn't find any data in this file",
@@ -8661,19 +8534,20 @@ class ExcelProcessor:
             "progress": 20
         })
         
-        # Use first sheet for detection
-        first_sheet = list(sheets.values())[0]
+        # CRITICAL FIX: Use metadata for detection instead of loading full sheet
+        # Platform detection only needs column names, not full data
+        first_sheet_meta = list(sheets_metadata.values())[0]
         
-        # Convert DataFrame to payload dict for platform detection
+        # Convert metadata to payload dict for platform detection
         payload_for_detection = {
-            'columns': list(first_sheet.columns),
-            'sample_data': first_sheet.head(10).to_dict('records') if not first_sheet.empty else []
+            'columns': first_sheet_meta['columns'],
+            'sample_data': []  # Platform detection works with columns only
         }
         
         # Fast pattern-based platform detection first (with AI cache)
         ai_cache = safe_get_ai_cache()
         platform_cache_key = {
-            'columns': list(first_sheet.columns),
+            'columns': first_sheet_meta['columns'],
             'filename': streamed_file.filename
         }
         cached_platform = await ai_cache.get_cached_classification(platform_cache_key, "platform_detection")
@@ -8790,14 +8664,13 @@ class ExcelProcessor:
             # ACCURACY FIX #9: Reuse file_hash calculated earlier (no recalculation)
             # file_hash already calculated at line 6570
             
-            # ACCURACY FIX #10: Optimized content fingerprint for storage metadata
-            # Use lightweight structure-based fingerprint instead of full data dump
+            # CRITICAL FIX: Use lightweight metadata for storage fingerprint
             try:
                 storage_fingerprint_data = {
-                    'sheet_names': list(sheets.keys()),
-                    'columns': {name: list(df.columns) for name, df in sheets.items()},
-                    'row_counts': {name: len(df) for name, df in sheets.items()},
-                    'column_types': {name: df.dtypes.astype(str).to_dict() for name, df in sheets.items()}
+                    'sheet_names': list(sheets_metadata.keys()),
+                    'columns': {name: meta['columns'] for name, meta in sheets_metadata.items()},
+                    'row_counts': {name: meta['row_count'] for name, meta in sheets_metadata.items()},
+                    'column_types': {name: meta['dtypes'] for name, meta in sheets_metadata.items()}
                 }
                 content_fingerprint = hashlib.sha256(
                     json.dumps(storage_fingerprint_data, sort_keys=True).encode()
@@ -8806,22 +8679,10 @@ class ExcelProcessor:
                 logger.warning(f"Failed to calculate storage content fingerprint: {e}")
                 content_fingerprint = file_hash  # Fallback to file hash
             
-            # Compute per-sheet row hashes for delta analysis (lightweight representation)
+            # CRITICAL FIX: Row hashes will be computed during streaming processing
+            # Initialize empty dict here, will be populated during streaming loop
             sheets_row_hashes = {}
-            try:
-                for sheet_name, df in sheets.items():
-                    try:
-                        # FIX #6: Vectorized row hashing (100x faster than iterrows)
-                        hashes = []
-                        for row_tuple in df.itertuples(index=False, name=None):
-                            row_str = "|".join([str(val) for val in row_tuple if pd.notna(val)])
-                            hashes.append(hashlib.md5(row_str.encode('utf-8')).hexdigest())
-                        sheets_row_hashes[sheet_name] = hashes
-                    except Exception:
-                        # Best-effort; skip problematic sheets
-                        continue
-            except Exception:
-                sheets_row_hashes = {}
+            logger.info("Row hashes will be computed during streaming processing")
             
             # Attempt to resolve originating external_item_id via file hash
             external_item_id = None
@@ -8887,20 +8748,21 @@ class ExcelProcessor:
                 }, {'id': job_id})
         
         # Step 5: Process each sheet with optimized batch processing
-        # NOTE: We already have sheets loaded in memory from duplicate detection
-        # For true streaming, we would need to refactor duplicate detection to work with storage paths
-        # Current approach: Use sheets already in memory (acceptable for files < 500MB)
-        total_rows_count = sum(len(sheet) for sheet in sheets.values())
+        # CRITICAL FIX: Use metadata for row counts (no full data loaded)
+        total_rows_count = sum(meta['row_count'] for meta in sheets_metadata.values())
         await manager.send_update(job_id, {
             "step": "streaming",
             "message": format_progress_message(ProcessingStage.UNDERSTAND, "Reading through your data", f"{total_rows_count:,} rows to go through"),
             "progress": 40
         })
         
-        total_rows = sum(len(sheet) for sheet in sheets.values())
+        total_rows = total_rows_count
         processed_rows = 0
         events_created = 0
         errors = []
+        
+        # CRITICAL FIX: Collect row hashes during streaming for delta analysis
+        sheets_row_hashes = {}
         
         file_context = {
             'filename': streamed_file.filename,
@@ -8909,8 +8771,8 @@ class ExcelProcessor:
             'job_id': job_id
         }
         
-        # Process sheets directly (already in memory from duplicate detection)
-        # TODO: Refactor to stream from storage for files > 500MB
+        # CRITICAL FIX: True streaming - no sheets loaded in memory
+        # File will be read chunk-by-chunk during streaming processing
         
         # ✅ CRITICAL FIX #23: Validate file_id exists before processing rows
         if not file_id:
@@ -8918,7 +8780,7 @@ class ExcelProcessor:
             logger.error(error_msg)
             raise ValueError(error_msg)
         
-        logger.info(f"🔄 Starting row processing transaction for {len(sheets)} sheets, {total_rows} total rows with file_id={file_id}")
+        logger.info(f"🔄 Starting row processing transaction for {len(sheets_metadata)} sheets, {total_rows} total rows with file_id={file_id}")
         async with transaction_manager.transaction(
             transaction_id=None,
             user_id=user_id,
@@ -8926,19 +8788,19 @@ class ExcelProcessor:
         ) as tx:
             logger.info(f"✅ Transaction context entered successfully")
             
-            # Process each sheet
-            for sheet_name, sheet_df in sheets.items():
-                # Process file using streaming to prevent memory exhaustion
-                async for chunk_info in streaming_processor.process_file_streaming(
-                    streamed_file, progress_callback=lambda step, msg, prog: manager.send_update(job_id, {
-                        "step": step,
-                        "message": msg,
-                        "progress": 40 + int(prog * 0.4)  # Progress from 40% to 80%
-                    })
-                ):
-                    chunk_data = chunk_info['chunk_data']
-                    sheet_name = chunk_info['sheet_name']
-                    memory_usage = chunk_info['memory_usage_mb']
+            # CRITICAL FIX: Process file using streaming to prevent memory exhaustion
+            # Stream processes ALL sheets automatically - no need to iterate over sheets dict
+            async for chunk_info in streaming_processor.process_file_streaming(
+                streamed_file, progress_callback=lambda step, msg, prog: manager.send_update(job_id, {
+                    "step": step,
+                    "message": msg,
+                    "progress": 40 + int(prog * 0.4)  # Progress from 40% to 80%
+                })
+            ):
+                chunk_data = chunk_info['chunk_data']
+                sheet_name = chunk_info['sheet_name']
+                memory_usage = chunk_info['memory_usage_mb']
+                
                 if memory_usage > 400:  # 400MB threshold
                     logger.warning(f"High memory usage detected: {memory_usage:.1f}MB")
                 
@@ -9113,6 +8975,15 @@ class ExcelProcessor:
                                 'accuracy_version': cleaned_enriched_payload.get('accuracy_version')
                                 }
                                 
+                                # CRITICAL FIX: Compute row hash for delta analysis
+                                row_str = "|".join([str(val) for val in row.values() if pd.notna(val)])
+                                row_hash = hashlib.md5(row_str.encode('utf-8')).hexdigest()
+                                
+                                # Store hash by sheet name
+                                if sheet_name not in sheets_row_hashes:
+                                    sheets_row_hashes[sheet_name] = []
+                                sheets_row_hashes[sheet_name].append(row_hash)
+                                
                                 events_batch.append(event_data)
                                 processed_rows += 1
                                 
@@ -9232,7 +9103,7 @@ class ExcelProcessor:
                     'status': 'completed',
                     'classification_status': 'completed',
                     'content': {
-                        'sheets': list(sheets.keys()),
+                        'sheets': list(sheets_metadata.keys()),
                         'platform_detection': platform_info,
                         'document_analysis': doc_analysis,
                         'file_hash': file_hash,
@@ -11455,35 +11326,73 @@ async def check_rate_limit(user_id: str, max_requests: int = 100, window_seconds
         rate_limit_store[user_id].append(current_time)
         return True, "OK"
 
-# FIX ISSUE #13: Concurrent upload limit per user to prevent abuse
-concurrent_uploads = defaultdict(int)  # user_id -> count of active uploads
-concurrent_uploads_lock = asyncio.Lock()
+# CRITICAL FIX: Distributed rate limiter using Redis for multi-worker support
 MAX_CONCURRENT_UPLOADS_PER_USER = 10  # Allow max 10 concurrent uploads per user (increased for batch uploads)
 
 async def acquire_upload_slot(user_id: str) -> Tuple[bool, str]:
     """
-    Check if user can start a new upload (within concurrent limit).
-    Returns (is_allowed, message)
+    CRITICAL FIX: Distributed rate limiter using Redis INCR/EXPIRE.
+    Works across all workers in multi-worker deployment.
     """
-    async with concurrent_uploads_lock:
-        current_count = concurrent_uploads[user_id]
-        if current_count >= MAX_CONCURRENT_UPLOADS_PER_USER:
-            return False, f"Too many concurrent uploads. Please wait for some uploads to complete. ({current_count}/{MAX_CONCURRENT_UPLOADS_PER_USER} active)"
+    try:
+        # Get Redis client from centralized cache
+        from centralized_cache import get_cache
+        cache = get_cache()
         
-        concurrent_uploads[user_id] += 1
-        logger.info(f"User {user_id} started upload. Active uploads: {concurrent_uploads[user_id]}/{MAX_CONCURRENT_UPLOADS_PER_USER}")
+        if cache and cache.cache:
+            # Use Redis for distributed rate limiting
+            redis_key = f"upload_slots:{user_id}"
+            
+            # Get current count
+            current_count_str = await cache.cache.get(redis_key)
+            current_count = int(current_count_str) if current_count_str else 0
+            
+            if current_count >= MAX_CONCURRENT_UPLOADS_PER_USER:
+                return False, f"Too many concurrent uploads. Please wait for some uploads to complete. ({current_count}/{MAX_CONCURRENT_UPLOADS_PER_USER} active)"
+            
+            # Increment counter atomically
+            new_count = await cache.cache.incr(redis_key)
+            
+            # Set expiry on first increment (TTL: 1 hour for safety)
+            if new_count == 1:
+                await cache.cache.expire(redis_key, 3600)
+            
+            logger.info(f"User {user_id} started upload. Active uploads: {new_count}/{MAX_CONCURRENT_UPLOADS_PER_USER} (distributed)")
+            return True, "OK"
+        else:
+            # Fallback to allowing upload if Redis unavailable (fail open)
+            logger.warning(f"Redis unavailable for rate limiting, allowing upload for user {user_id}")
+            return True, "OK"
+            
+    except Exception as e:
+        logger.error(f"Rate limiter error for user {user_id}: {e}")
+        # Fail open - allow upload on error
         return True, "OK"
 
 async def release_upload_slot(user_id: str):
-    """Release upload slot when processing completes or fails"""
-    async with concurrent_uploads_lock:
-        if concurrent_uploads[user_id] > 0:
-            concurrent_uploads[user_id] -= 1
-            logger.info(f"User {user_id} completed upload. Active uploads: {concurrent_uploads[user_id]}/{MAX_CONCURRENT_UPLOADS_PER_USER}")
+    """
+    CRITICAL FIX: Release distributed upload slot using Redis DECR.
+    Works across all workers in multi-worker deployment.
+    """
+    try:
+        from centralized_cache import get_cache
+        cache = get_cache()
+        
+        if cache and cache.cache:
+            redis_key = f"upload_slots:{user_id}"
             
-            # Clean up if no active uploads
-            if concurrent_uploads[user_id] == 0:
-                del concurrent_uploads[user_id]
+            # Decrement counter atomically
+            new_count = await cache.cache.decr(redis_key)
+            
+            # Clean up if count reaches 0
+            if new_count <= 0:
+                await cache.cache.delete(redis_key)
+                logger.info(f"User {user_id} completed all uploads. Slot released (distributed)")
+            else:
+                logger.info(f"User {user_id} completed upload. Active uploads: {new_count}/{MAX_CONCURRENT_UPLOADS_PER_USER} (distributed)")
+                
+    except Exception as e:
+        logger.error(f"Failed to release upload slot for user {user_id}: {e}")
 
 @app.post("/check-duplicate")
 async def check_duplicate_endpoint(request: dict):
@@ -11960,7 +11869,36 @@ async def process_excel_endpoint(request: Request):
             finally:
                 await _cleanup_temp_file()
 
-        # Process file inline (direct processing, no ARQ)
+        # CRITICAL FIX: Enqueue to ARQ instead of inline processing
+        # This offloads heavy CPU work from web workers to dedicated ARQ workers
+        if _queue_backend() == 'arq':
+            try:
+                pool = await get_arq_pool()
+                await pool.enqueue_job(
+                    'process_spreadsheet',
+                    user_id=user_id,
+                    filename=filename,
+                    storage_path=storage_path,
+                    job_id=job_id
+                )
+                logger.info(f"✅ Job {job_id} enqueued to ARQ for background processing")
+                metrics_collector.increment_counter("file_processing_requests")
+                
+                # Update job status to queued
+                await websocket_manager.send_overall_update(
+                    job_id=job_id,
+                    status="queued",
+                    message="📋 Job queued for processing...",
+                    progress=5
+                )
+                
+                return {"status": "accepted", "job_id": job_id, "queued": True}
+            except Exception as arq_error:
+                logger.error(f"Failed to enqueue job {job_id} to ARQ: {arq_error}")
+                # Fallback to inline processing if ARQ fails
+                logger.warning(f"Falling back to inline processing for job {job_id}")
+        
+        # Fallback: Process file inline (for sync mode or ARQ failure)
         logger.info(f"🔄 Processing file inline: {job_id}")
         
         # FIX ISSUE #13: Wrap async task to ensure upload slot is released
@@ -11974,7 +11912,7 @@ async def process_excel_endpoint(request: Request):
         
         asyncio.create_task(_run_with_cleanup())
         metrics_collector.increment_counter("file_processing_requests")
-        return {"status": "accepted", "job_id": job_id}
+        return {"status": "accepted", "job_id": job_id, "queued": False}
     except HTTPException as he:
         # Release upload slot on HTTP exceptions (e.g., 429, 401)
         if user_id:
@@ -14700,7 +14638,10 @@ async def run_scheduled_syncs(request: Request, provider: Optional[str] = None, 
 # ============================================================================
 
 async def _authorize_websocket_connection(websocket: WebSocket, job_id: str):
-    """Bind job_id to user_id; authorize before accepting the socket."""
+    """
+    CRITICAL SECURITY FIX: Verify job exists in database and belongs to user.
+    This prevents race condition where attacker can claim future job_id.
+    """
     try:
         # Dev bypass
         if os.environ.get("CONNECTORS_DEV_TRUST") == "1" or os.environ.get("SECURITY_DEV_TRUST") == "1":
@@ -14712,25 +14653,29 @@ async def _authorize_websocket_connection(websocket: WebSocket, job_id: str):
             raise HTTPException(status_code=401, detail='Missing user credentials for WebSocket')
         await _require_security('websocket', user_id, token)
         
-        # FIX #1: Check job ownership if known, but allow if job has no owner yet
+        # CRITICAL SECURITY FIX: Job MUST exist in database before WebSocket connection
+        # This prevents attackers from claiming future job_ids
         try:
-            owner_state = await websocket_manager.get_job_status(job_id)
-            owner = (owner_state or {}).get('user_id')
+            job_record = supabase.table('ingestion_jobs').select('user_id, status').eq('id', job_id).single().execute()
             
-            # Only reject if owner exists AND doesn't match user_id
-            if owner and owner != user_id:
-                logger.warning(f"WebSocket 403: Job {job_id} owner {owner} != user {user_id}")
+            if not job_record.data:
+                logger.warning(f"WebSocket 404: Job {job_id} does not exist in database")
+                raise HTTPException(status_code=404, detail='Job not found. Create job before connecting WebSocket.')
+            
+            job_owner = job_record.data.get('user_id')
+            
+            # Verify job belongs to connecting user
+            if job_owner != user_id:
+                logger.warning(f"WebSocket 403: Job {job_id} owner {job_owner} != connecting user {user_id}")
                 raise HTTPException(status_code=403, detail='Forbidden: job does not belong to user')
             
-            # If no owner yet, set it to current user
-            if not owner:
-                logger.info(f"Setting job {job_id} owner to {user_id}")
-                await websocket_manager.merge_job_state(job_id, {'user_id': user_id})
+            logger.info(f"✅ WebSocket authorized: job {job_id} belongs to user {user_id}")
+            
         except HTTPException:
             raise
         except Exception as e:
-            logger.warning(f"Job ownership check failed (non-fatal): {e}")
-            # Continue anyway - don't block connection if ownership check fails
+            logger.error(f"Job ownership verification failed: {e}")
+            raise HTTPException(status_code=500, detail='Failed to verify job ownership')
             
     except HTTPException as he:
         # Close without accepting
@@ -14803,13 +14748,23 @@ class UniversalWebSocketManager:
         # Backward-compat in-memory cache; authoritative state is Redis when configured
         self.job_status: Dict[str, Dict[str, Any]] = {}
         self.redis = None
+        self.pubsub = None  # Redis Pub/Sub for multi-worker broadcasting
+        self.pubsub_task = None  # Background task listening to Redis channels
         # CRITICAL FIX: Track last pong time for each connection
         self.last_pong_time: Dict[str, float] = {}
         self.heartbeat_interval = 30  # Send ping every 30 seconds
         self.heartbeat_timeout = 60  # Consider dead if no pong for 60 seconds
 
     def set_redis(self, redis_client):
+        """Set Redis client and initialize Pub/Sub for multi-worker support"""
         self.redis = redis_client
+        # Initialize Pub/Sub for broadcasting across workers
+        if redis_client:
+            self.pubsub = redis_client.pubsub()
+            # Start background task to listen for messages
+            import asyncio
+            self.pubsub_task = asyncio.create_task(self._pubsub_listener())
+            logger.info("✅ Redis Pub/Sub initialized for WebSocket broadcasting")
 
     def _key(self, job_id: str) -> str:
         return f"finley:job:{job_id}"
@@ -14867,12 +14822,74 @@ class UniversalWebSocketManager:
         await self.disconnect(job_id)
         return False
 
+    async def _pubsub_listener(self):
+        """
+        CRITICAL FIX: Background task that listens to Redis Pub/Sub channels.
+        This enables multi-worker WebSocket broadcasting.
+        """
+        if not self.pubsub:
+            return
+        
+        try:
+            # Subscribe to all job channels (pattern matching)
+            await self.pubsub.psubscribe("ws:job:*")
+            logger.info("✅ WebSocket Pub/Sub listener started")
+            
+            async for message in self.pubsub.listen():
+                if message['type'] == 'pmessage':
+                    try:
+                        # Extract job_id from channel name: ws:job:{job_id}
+                        channel = message['channel'].decode() if isinstance(message['channel'], bytes) else message['channel']
+                        job_id = channel.split(':')[-1]
+                        
+                        # Decode message payload
+                        payload_str = message['data'].decode() if isinstance(message['data'], bytes) else message['data']
+                        import json as _json
+                        payload = _json.loads(payload_str)
+                        
+                        # If this worker has the WebSocket connection, send the message
+                        if job_id in self.active_connections:
+                            await self._safe_send_json(job_id, payload, "pubsub message")
+                            
+                    except Exception as e:
+                        logger.error(f"Error processing pubsub message: {e}")
+                        
+        except Exception as e:
+            logger.error(f"Pub/Sub listener error: {e}")
+    
+    async def _broadcast_via_pubsub(self, job_id: str, payload: Dict[str, Any]):
+        """
+        CRITICAL FIX: Broadcast message to all workers via Redis Pub/Sub.
+        The worker with the active WebSocket connection will forward it to the client.
+        """
+        if not self.redis:
+            # Fallback to direct send if Redis not available
+            return await self._safe_send_json(job_id, payload, "direct message")
+        
+        try:
+            import json as _json
+            channel = f"ws:job:{job_id}"
+            await self.redis.publish(channel, _json.dumps(payload))
+            return True
+        except Exception as e:
+            logger.error(f"Failed to broadcast via pubsub for job {job_id}: {e}")
+            # Fallback to direct send
+            return await self._safe_send_json(job_id, payload, "fallback message")
+
     async def connect(self, websocket: WebSocket, job_id: str):
         """Accept WebSocket connection and register job"""
         await websocket.accept()
         self.active_connections[job_id] = websocket
         # CRITICAL FIX: Initialize heartbeat tracking
         self.last_pong_time[job_id] = time.time()
+        
+        # Subscribe to this job's channel for Pub/Sub messages
+        if self.pubsub:
+            try:
+                await self.pubsub.subscribe(f"ws:job:{job_id}")
+            except Exception as e:
+                logger.warning(f"Failed to subscribe to pubsub channel for job {job_id}: {e}")
+        
         base = await self._get_state(job_id) or {}
         await self.merge_job_state(job_id, {
             **base,
@@ -14931,7 +14948,7 @@ class UniversalWebSocketManager:
                 current["progress"] = total_progress // len(components)
             await self._save_state(job_id, current)
 
-            # Send over WS if connected
+            # CRITICAL FIX: Broadcast via Redis Pub/Sub for multi-worker support
             update_message = {
                 "type": "component_update",
                 "job_id": job_id,
@@ -14942,7 +14959,7 @@ class UniversalWebSocketManager:
                 "data": data or {},
                 "timestamp": datetime.utcnow().isoformat()
             }
-            await self._safe_send_json(job_id, update_message, "component update")
+            await self._broadcast_via_pubsub(job_id, update_message)
             return True
         except Exception as e:
             logger.error(f"Failed to send component update for job {job_id}: {e}")
@@ -14960,11 +14977,8 @@ class UniversalWebSocketManager:
                 "timestamp": datetime.utcnow().isoformat()
             }
             
-            # Send to connected WebSocket if exists
-            sent = await self._safe_send_json(job_id, payload, "debug update")
-            if sent:
-                logger.debug(f"Sent debug update for job {job_id}, stage {stage}")
-
+            # CRITICAL FIX: Broadcast via Redis Pub/Sub for multi-worker support
+            await self._broadcast_via_pubsub(job_id, payload)
             return True
         except Exception as e:
             logger.error(f"Failed to send debug update for job {job_id}: {e}")
@@ -14984,7 +14998,7 @@ class UniversalWebSocketManager:
                 "results": results or base.get("results", {})
             })
 
-            # Send over WS if connected
+            # CRITICAL FIX: Broadcast via Redis Pub/Sub for multi-worker support
             update_message = {
                 "type": "job_update",
                 "job_id": job_id,
@@ -14994,7 +15008,7 @@ class UniversalWebSocketManager:
                 "results": results or {},
                 "timestamp": datetime.utcnow().isoformat()
             }
-            await self._safe_send_json(job_id, update_message, "overall update")
+            await self._broadcast_via_pubsub(job_id, update_message)
             return True
         except Exception as e:
             logger.error(f"Failed to send overall update for job {job_id}: {e}")
@@ -15012,7 +15026,7 @@ class UniversalWebSocketManager:
                 "updated_at": datetime.utcnow().isoformat()
             })
 
-            # Send over WS if connected
+            # CRITICAL FIX: Broadcast via Redis Pub/Sub for multi-worker support
             error_message_data = {
                 "type": "error",
                 "job_id": job_id,
@@ -15020,7 +15034,7 @@ class UniversalWebSocketManager:
                 "component": component,
                 "timestamp": datetime.utcnow().isoformat()
             }
-            await self._safe_send_json(job_id, error_message_data, "error update")
+            await self._broadcast_via_pubsub(job_id, error_message_data)
             return True
         except Exception as e:
             logger.error(f"Failed to send error for job {job_id}: {e}")

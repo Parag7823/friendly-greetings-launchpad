@@ -164,14 +164,17 @@ ON public.error_logs (job_id, transaction_id, occurred_at DESC);
 -- OPTIMIZED FUNCTIONS FOR COMMON QUERIES
 -- ============================================================================
 
--- Function to get user events with optimized pagination
+-- CRITICAL FIX: Function to get user events with window function for efficient pagination
+-- Uses COUNT(*) OVER() to get total count in single query, eliminating N+1 problem
 CREATE OR REPLACE FUNCTION get_user_events_optimized(
     p_user_id UUID,
     p_limit INTEGER DEFAULT 100,
     p_offset INTEGER DEFAULT 0,
     p_kind TEXT DEFAULT NULL,
     p_source_platform TEXT DEFAULT NULL,
-    p_status TEXT DEFAULT NULL
+    p_status TEXT DEFAULT NULL,
+    p_file_id UUID DEFAULT NULL,
+    p_job_id UUID DEFAULT NULL
 )
 RETURNS TABLE (
     id UUID,
@@ -183,7 +186,8 @@ RETURNS TABLE (
     status TEXT,
     confidence_score NUMERIC,
     created_at TIMESTAMP WITH TIME ZONE,
-    processed_at TIMESTAMP WITH TIME ZONE
+    processed_at TIMESTAMP WITH TIME ZONE,
+    total_count BIGINT
 ) AS $$
 BEGIN
     RETURN QUERY
@@ -197,12 +201,15 @@ BEGIN
         re.status,
         re.confidence_score,
         re.created_at,
-        re.processed_at
+        re.processed_at,
+        COUNT(*) OVER() as total_count
     FROM public.raw_events re
     WHERE re.user_id = p_user_id
         AND (p_kind IS NULL OR re.kind = p_kind)
         AND (p_source_platform IS NULL OR re.source_platform = p_source_platform)
         AND (p_status IS NULL OR re.status = p_status)
+        AND (p_file_id IS NULL OR re.file_id = p_file_id)
+        AND (p_job_id IS NULL OR re.job_id = p_job_id)
     ORDER BY re.created_at DESC
     LIMIT p_limit
     OFFSET p_offset;

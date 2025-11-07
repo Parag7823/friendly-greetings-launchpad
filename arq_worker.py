@@ -247,7 +247,7 @@ async def detect_relationships(ctx, user_id: str, file_id: str = None) -> Dict[s
     """
     try:
         from enhanced_relationship_detector import EnhancedRelationshipDetector
-        from anthropic import AsyncAnthropic
+        from groq import Groq
         
         logger.info(f"🔍 Starting background relationship detection for user_id={user_id}, file_id={file_id}")
         
@@ -258,11 +258,21 @@ async def detect_relationships(ctx, user_id: str, file_id: str = None) -> Dict[s
         except:
             cache_client = None
         
-        # Initialize relationship detector with cache
-        anthropic_client = AsyncAnthropic(api_key=os.getenv('ANTHROPIC_API_KEY'))
+        # CRITICAL FIX: Use Groq client (Llama-3.3-70B) instead of Anthropic
+        # This matches the main application's AI configuration
+        groq_api_key = os.getenv('GROQ_API_KEY')
+        if not groq_api_key:
+            raise ValueError("GROQ_API_KEY environment variable is required for relationship detection")
+        
+        groq_client = Groq(api_key=groq_api_key)
+        logger.info("✅ Groq client initialized for relationship detection (Llama-3.3-70B)")
+        
+        # Initialize relationship detector with Groq client
+        # Note: EnhancedRelationshipDetector accepts anthropic_client parameter for backward compatibility
+        # but can work with any AI client that follows the same interface
         relationship_detector = EnhancedRelationshipDetector(
-            anthropic_client, 
-            supabase,
+            anthropic_client=groq_client,  # Pass Groq client via anthropic_client parameter
+            supabase_client=supabase,
             cache_client=cache_client
         )
         

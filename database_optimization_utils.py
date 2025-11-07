@@ -83,76 +83,36 @@ class OptimizedDatabaseQueries:
         CRITICAL FIX: Optimized pagination using window function COUNT(*) OVER().
         This eliminates the separate COUNT query, improving performance by 50%+.
         
-        Instead of 2 queries:
-        1. SELECT ... LIMIT/OFFSET
-        2. SELECT COUNT(*)
-        
-        We use 1 query with window function:
-        SELECT ..., COUNT(*) OVER() as total_count LIMIT/OFFSET
+        Uses PostgreSQL RPC function with window function to get total count
+        in single query instead of separate SELECT COUNT(*).
         """
         try:
-            # Build WHERE clause conditions
-            conditions = [f"user_id=eq.{user_id}"]
-            if kind:
-                conditions.append(f"kind=eq.{kind}")
-            if source_platform:
-                conditions.append(f"source_platform=eq.{source_platform}")
-            if status:
-                conditions.append(f"status=eq.{status}")
-            if file_id:
-                conditions.append(f"file_id=eq.{file_id}")
-            if job_id:
-                conditions.append(f"job_id=eq.{job_id}")
+            # CRITICAL FIX: Use RPC function with window function
+            result = self.supabase.rpc(
+                'get_user_events_optimized',
+                {
+                    'p_user_id': user_id,
+                    'p_limit': limit,
+                    'p_offset': offset,
+                    'p_kind': kind,
+                    'p_source_platform': source_platform,
+                    'p_status': status,
+                    'p_file_id': file_id,
+                    'p_job_id': job_id
+                }
+            ).execute()
             
-            where_clause = " AND ".join(conditions)
+            data = result.data or []
             
-            # CRITICAL FIX: Use PostgreSQL window function for efficient pagination
-            # This calculates total count in the same pass as fetching data
-            sql_query = f"""
-            SELECT 
-                id, kind, source_platform, payload, row_index, source_filename,
-                status, confidence_score, created_at, processed_at,
-                COUNT(*) OVER() as total_count
-            FROM raw_events
-            WHERE {where_clause}
-            ORDER BY created_at DESC
-            LIMIT {limit} OFFSET {offset}
-            """
+            # Extract total_count from first row (window function returns same count for all rows)
+            total_count = data[0]['total_count'] if data else 0
             
-            # Execute via RPC or direct query
-            # Note: Supabase Python client doesn't directly support window functions in select()
-            # We need to use rpc() with a custom function or raw SQL
-            
-            # Fallback to standard approach but with count='exact' optimization
-            query = self.supabase.table('raw_events').select(
-                'id, kind, source_platform, payload, row_index, source_filename, '
-                'status, confidence_score, created_at, processed_at',
-                count='exact'  # Get count in same request
-            ).eq('user_id', user_id)
-            
-            # Apply filters
-            if kind:
-                query = query.eq('kind', kind)
-            if source_platform:
-                query = query.eq('source_platform', source_platform)
-            if status:
-                query = query.eq('status', status)
-            if file_id:
-                query = query.eq('file_id', file_id)
-            if job_id:
-                query = query.eq('job_id', job_id)
-            
-            # Apply pagination and ordering
-            query = query.order('created_at', desc=True).range(offset, offset + limit - 1)
-            
-            # Execute query - count is included in response
-            result = query.execute()
-            
-            # Extract total count from response (Supabase returns it in headers)
-            total_count = result.count if hasattr(result, 'count') else len(result.data)
+            # Remove total_count from each row to match QueryResult schema
+            for row in data:
+                row.pop('total_count', None)
             
             return QueryResult(
-                data=result.data or [],
+                data=data,
                 count=total_count,
                 has_more=offset + limit < total_count,
                 next_offset=offset + limit if offset + limit < total_count else None
