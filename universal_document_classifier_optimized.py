@@ -190,47 +190,54 @@ class UniversalDocumentClassifierOptimized:
         """OPTIMIZED: Get type-safe configuration with pydantic-settings"""
         return DocumentClassifierConfig()
     
-    def _initialize_ocr(self) -> bool:
-        """OPTIMIZED: Initialize easyocr (92% accuracy vs 60% tesseract) with spatial intelligence"""
-        try:
-            # Initialize easyocr reader (supports 80+ languages, GPU acceleration)
-            self.ocr_reader = easyocr.Reader(['en'], gpu=False)  # Set gpu=True if available
-            logger.info("easyocr initialized", accuracy="92%", features="spatial+confidence")
-            return True
-        except Exception as e:
-            logger.warning("easyocr not available", error=str(e))
-            return False
+    def _initialize_ocr(self):
+        """
+        CRITICAL FIX: Use inference_service for lazy OCR loading.
+        Old: Direct easyocr.Reader initialization = slow cold start, high memory
+        New: Lazy loading via inference_service = on-demand, shared across workers
+        """
+        # REMOVED: Direct easyocr initialization
+        # self.ocr_reader = easyocr.Reader(['en'], gpu=False)
+        
+        # OCR will be loaded lazily via inference_service when needed
+        self.ocr_reader = None  # Lazy-loaded via OCRService
+        self.ocr_available = True  # Assume available, will be checked on first use
+        
+        logger.info("ocr_deferred_to_inference_service", 
+                   lazy_loading=True,
+                   accuracy="92%")
+        return True
     
     def _initialize_sentence_model(self):
-        """OPTIMIZED: Initialize sentence-transformers for zero-shot batch classification (1000x cheaper)"""
-        try:
-            # Load lightweight model (350MB, runs on CPU/GPU)
-            self.sentence_model = SentenceTransformer('all-MiniLM-L6-v2')
-            
-            # Define row types with natural language descriptions
-            self.row_types = {
-                'revenue_income': 'payment received from client, sales revenue, income, money coming in',
-                'operating_expense': 'business expense, vendor payment, cost, money going out',
-                'payroll_expense': 'employee salary, wages, payroll, staff payment',
-                'tax_payment': 'tax payment, IRS, government tax, tax withholding',
-                'loan_payment': 'loan payment, debt payment, financing payment',
-                'investment': 'investment, stock purchase, bond, mutual fund',
-                'transfer': 'transfer between accounts, internal transfer'
-            }
-            
-            # Encode descriptions once (0.1 seconds)
-            self.row_type_embeddings = {
-                row_type: self.sentence_model.encode(description)
-                for row_type, description in self.row_types.items()
-            }
-            
-            logger.info("sentence-transformers initialized", 
-                       model="all-MiniLM-L6-v2",
-                       row_types=len(self.row_types),
-                       cost="$0 (offline)")
-        except Exception as e:
-            logger.warning("sentence-transformers not available", error=str(e))
-            self.sentence_model = None
+        """
+        CRITICAL FIX: Use inference_service for lazy model loading.
+        Old: Direct SentenceTransformer loading = 350MB per worker + 5-30s cold start
+        New: Lazy loading via inference_service = shared model, on-demand loading
+        """
+        # REMOVED: Direct SentenceTransformer loading
+        # self.sentence_model = SentenceTransformer('all-MiniLM-L6-v2')
+        
+        # Model will be loaded lazily via inference_service when needed
+        self.sentence_model = None  # Lazy-loaded via SentenceModelService
+        
+        # Define row types with natural language descriptions
+        self.row_types = {
+            'revenue_income': 'payment received from client, sales revenue, income, money coming in',
+            'operating_expense': 'business expense, vendor payment, cost, money going out',
+            'payroll_expense': 'employee salary, wages, payroll, staff payment',
+            'tax_payment': 'tax payment, IRS, government tax, tax withholding',
+            'loan_payment': 'loan payment, debt payment, financing payment',
+            'investment': 'investment, stock purchase, bond, mutual fund',
+            'transfer': 'transfer between accounts, internal transfer'
+        }
+        
+        # Embeddings will be computed lazily via inference_service
+        self.row_type_embeddings = None  # Lazy-loaded
+        
+        logger.info("sentence_model_deferred_to_inference_service", 
+                   model="all-MiniLM-L6-v2",
+                   row_types=len(self.row_types),
+                   lazy_loading=True)
     
     def _initialize_tfidf(self):
         """OPTIMIZED: Initialize TF-IDF vectorizer for smart indicator weighting"""
@@ -753,7 +760,7 @@ class UniversalDocumentClassifierOptimized:
             import easyocr
 
             # Only attempt OCR when the uploaded file is an image
-            if not file_content or not self.ocr_reader:
+            if not file_content:
                 return None
 
             file_info = filetype.guess(file_content)
@@ -1099,8 +1106,19 @@ class UniversalDocumentClassifierOptimized:
             return []
         
         try:
-            # OPTIMIZED: Use sentence-transformers for zero-shot classification
-            if self.sentence_model and self.row_type_embeddings:
+            # CRITICAL FIX: Use inference_service for lazy model loading
+            from inference_service import SentenceModelService
+            
+            # Lazy-load row type embeddings if not already loaded
+            if self.row_type_embeddings is None:
+                logger.info("lazy_loading_row_type_embeddings")
+                self.row_type_embeddings = {}
+                for row_type, description in self.row_types.items():
+                    embedding = await SentenceModelService.encode(description)
+                    self.row_type_embeddings[row_type] = embedding
+            
+            # OPTIMIZED: Use sentence-transformers for zero-shot classification via inference_service
+            if self.row_type_embeddings:
                 classifications = []
                 
                 # Encode all rows at once (vectorized, 100x faster)
@@ -1108,7 +1126,7 @@ class UniversalDocumentClassifierOptimized:
                     ' '.join([f"{k}:{v}" for k, v in row.items() if v is not None and str(v).strip()])
                     for row in rows
                 ]
-                row_embeddings = self.sentence_model.encode(row_texts)
+                row_embeddings = await SentenceModelService.encode_batch(row_texts)
                 
                 # Compare with row type embeddings
                 for idx, row_embedding in enumerate(row_embeddings):

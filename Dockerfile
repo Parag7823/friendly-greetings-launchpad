@@ -24,9 +24,9 @@ RUN npm run build
 # NUCLEAR CACHE BUST: Changed base image tag to force complete rebuild
 FROM python:3.9-slim
 
-# Force cache invalidation - updated 2025-11-05 for NASA-GRADE refactoring
-ARG CACHEBUST=20251105-v17-NASA-GRADE-REFACTOR
-ENV DEPLOYMENT_VERSION="2025-11-05-20:50-NASA-GRADE-REFACTOR"
+# Force cache invalidation - updated 2025-11-07 for streaming_source fix
+ARG CACHEBUST=20251107-v18-STREAMING-SOURCE-FIX
+ENV DEPLOYMENT_VERSION="2025-11-07-12:45-STREAMING-SOURCE-FIX"
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 RUN echo "🚨 ABSOLUTE NUCLEAR CACHE BUST: $CACHEBUST - Forcing complete rebuild"
@@ -75,7 +75,7 @@ RUN echo "Installing pandas with Python $(python --version)" && \
 RUN pip install --no-cache-dir -r backend-requirements.txt
 
 # CRITICAL: Force cache invalidation for Python file copies
-ARG CACHEBUST=20251105-v17-NASA-GRADE-REFACTOR
+ARG CACHEBUST=20251107-v18-STREAMING-SOURCE-FIX
 RUN echo "Copying Python files with cache bust: $CACHEBUST"
 
 # Delete any existing __pycache__ directories to force fresh imports
@@ -110,6 +110,7 @@ COPY provenance_tracker.py .
 COPY debug_logger.py .
 COPY inference_service.py .
 COPY persistent_lsh_service.py .
+COPY streaming_source.py .
 COPY start.sh .
  
 # Copy built frontend from frontend stage

@@ -253,7 +253,10 @@ class CentralizedCache:
 
 def initialize_cache(redis_url: Optional[str] = None, default_ttl: int = 3600) -> CentralizedCache:
     """
-    Initialize global cache instance.
+    Initialize global cache instance and configure aiocache global config.
+    
+    CRITICAL FIX: This ensures @cached decorators use the same Redis backend
+    as the centralized cache, preventing cache divergence across workers.
     
     Args:
         redis_url: Redis connection URL (defaults to env var)
@@ -264,7 +267,47 @@ def initialize_cache(redis_url: Optional[str] = None, default_ttl: int = 3600) -
     """
     global _cache_instance
     _cache_instance = CentralizedCache(redis_url=redis_url, default_ttl=default_ttl)
-    logger.info("global_cache_initialized", redis_url=redis_url or "from_env", default_ttl=default_ttl)
+    
+    # CRITICAL FIX: Configure aiocache global config to use same Redis backend
+    # This ensures @cached decorators point to centralized Redis, not separate cache
+    from aiocache import caches
+    from urllib.parse import urlparse
+    
+    parsed = urlparse(_cache_instance.redis_url)
+    endpoint = parsed.hostname or 'localhost'
+    port = parsed.port or 6379
+    password = parsed.password or os.environ.get('REDIS_PASSWORD')
+    db = int(parsed.path.lstrip('/')) if parsed.path and parsed.path != '/' else 0
+    use_tls = parsed.scheme in ('rediss', 'redis+tls') or os.environ.get('REDIS_TLS', 'false').lower() == 'true'
+    
+    aiocache_config = {
+        'default': {
+            'cache': "aiocache.RedisCache",
+            'endpoint': endpoint,
+            'port': port,
+            'db': db,
+            'serializer': {
+                'class': "aiocache.serializers.JsonSerializer"
+            },
+            'namespace': "finely_ai",
+            'timeout': 5,
+            'pool_min_size': int(os.environ.get('REDIS_POOL_MIN', '10')),
+            'pool_max_size': int(os.environ.get('REDIS_POOL_MAX', '100'))
+        }
+    }
+    
+    if password:
+        aiocache_config['default']['password'] = password
+    
+    if use_tls:
+        aiocache_config['default']['ssl'] = True
+    
+    caches.set_config(aiocache_config)
+    
+    logger.info("global_cache_initialized", 
+               redis_url=redis_url or "from_env", 
+               default_ttl=default_ttl,
+               aiocache_configured=True)
     return _cache_instance
 
 

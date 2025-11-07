@@ -64,9 +64,10 @@ from entity_resolver_optimized import EntityResolverOptimized as EntityResolver
 from enhanced_relationship_detector import EnhancedRelationshipDetector
 from debug_logger import get_debug_logger
 
+# CRITICAL FIX: streaming_source module fallback for production deployment
 try:
     from streaming_source import StreamedFile  # type: ignore[attr-defined]
-except ModuleNotFoundError:  # pragma: no cover - runtime fallback for Railway/Prod images
+except (ModuleNotFoundError, ImportError):  # pragma: no cover - runtime fallback for Railway/Prod images
     import types
     from pathlib import Path
     from typing import Generator, Optional as _Optional

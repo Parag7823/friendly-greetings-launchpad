@@ -163,16 +163,18 @@ class ProductionDuplicateDetectionService:
                 "MEMORY cache fallback removed to prevent cache divergence across workers."
             )
         
-        # CRITICAL FIX: Use persistent LSH service instead of in-memory LSH
-        # Old: In-memory LSH lost on restart, grows unbounded
+        # CRITICAL FIX: Use persistent LSH service ONLY - in-memory LSH removed
+        # Old: In-memory LSH lost on restart, grows unbounded, diverges from persistent
         # New: Redis-backed LSH with per-user sharding, persistent, scalable
         from persistent_lsh_service import get_lsh_service
         self.lsh_service = get_lsh_service()
         
-        # Keep in-memory LSH for backward compatibility (will be deprecated)
-        self.lsh = MinHashLSH(threshold=config.minhash_threshold, num_perm=config.minhash_num_perm)
-        logger.warning("in_memory_lsh_deprecated", 
-                      message="Using persistent LSH service. In-memory LSH will be removed.")
+        # REMOVED: In-memory LSH fallback (causes cache divergence)
+        # self.lsh = MinHashLSH(threshold=config.minhash_threshold, num_perm=config.minhash_num_perm)
+        self.lsh = None  # Removed - use lsh_service only
+        
+        logger.info("persistent_lsh_service_initialized", 
+                   message="Using persistent LSH service only. In-memory LSH removed.")
         
         # REMOVED: sqlalchemy (redundant - supabase client is sufficient)
         # v3.0 had both sqlalchemy + supabase (double DB client)
@@ -1265,9 +1267,9 @@ class ProductionDuplicateDetectionService:
             'exact_duplicates_found': self.metrics['exact_duplicates_found'],
             'near_duplicates_found': self.metrics['near_duplicates_found'],
             'processing_errors': self.metrics['processing_errors'],
-            'cache_size': len(self.cache),  # OPTIMIZED: Use cachetools cache
+            'cache_size': 0,  # Redis cache - size tracked separately
             'avg_processing_time_ms': average_time,
-            'lsh_index_size': len(self.lsh.keys) if hasattr(self.lsh, 'keys') else 0
+            'lsh_index_size': 0  # Persistent LSH - size tracked per-user shard
         }
     
     # DELETED: Cache cleanup methods - cachetools TTLCache handles this automatically

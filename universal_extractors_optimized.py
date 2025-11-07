@@ -33,7 +33,8 @@ import tempfile
 import io
 
 # NASA-GRADE LIBRARIES (consistent with document classifier & platform detector)
-import easyocr  # 92% OCR accuracy vs 60% tesseract
+# REMOVED: Direct easyocr import - now lazy-loaded via inference_service
+# import easyocr  # 92% OCR accuracy vs 60% tesseract
 import structlog  # Structured JSON logging
 from aiocache import cached, Cache
 from aiocache.serializers import JsonSerializer
