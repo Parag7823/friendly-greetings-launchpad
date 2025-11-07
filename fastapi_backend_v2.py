@@ -63,7 +63,100 @@ from universal_extractors_optimized import UniversalExtractorsOptimized as Unive
 from entity_resolver_optimized import EntityResolverOptimized as EntityResolver
 from enhanced_relationship_detector import EnhancedRelationshipDetector
 from debug_logger import get_debug_logger
-from streaming_source import StreamedFile
+
+try:
+    from streaming_source import StreamedFile  # type: ignore[attr-defined]
+except ModuleNotFoundError:  # pragma: no cover - runtime fallback for Railway/Prod images
+    import types
+    from pathlib import Path
+    from typing import Generator, Optional as _Optional
+
+    streaming_source = types.ModuleType("streaming_source")
+
+    @dataclass
+    class StreamedFile:  # type: ignore[override]
+        path: str
+        filename: _Optional[str] = None
+        _size: _Optional[int] = None
+        _sha256: _Optional[str] = None
+        _cleanup: bool = False
+
+        def __post_init__(self) -> None:
+            self.path = str(self.path)
+            if not self.filename:
+                self.filename = Path(self.path).name
+
+        @property
+        def size(self) -> int:
+            if self._size is None:
+                self._size = os.path.getsize(self.path)
+            return self._size
+
+        @property
+        def sha256(self) -> str:
+            if self._sha256 is None:
+                self._sha256 = self.compute_sha256()
+            return self._sha256
+
+        def iter_bytes(self, chunk_size: int = 8 * 1024 * 1024) -> Generator[bytes, None, None]:
+            with open(self.path, "rb") as handle:
+                while True:
+                    chunk = handle.read(chunk_size)
+                    if not chunk:
+                        break
+                    yield chunk
+
+        def read_bytes(self) -> bytes:
+            with open(self.path, "rb") as handle:
+                return handle.read()
+
+        def read_text(self, encoding: str = "utf-8", errors: str = "strict") -> str:
+            with open(self.path, "r", encoding=encoding, errors=errors) as handle:
+                return handle.read()
+
+        def compute_sha256(self) -> str:
+            hasher = hashlib.sha256()
+            for chunk in self.iter_bytes():
+                hasher.update(chunk)
+            digest = hasher.hexdigest()
+            self._sha256 = digest
+            return digest
+
+        def open(self, mode: str = "rb"):
+            return open(self.path, mode)
+
+        def cleanup(self) -> None:
+            if self._cleanup and os.path.exists(self.path):
+                try:
+                    os.unlink(self.path)
+                except OSError:
+                    pass
+
+        def __enter__(self) -> "StreamedFile":
+            return self
+
+        def __exit__(self, exc_type, exc, tb) -> None:
+            self.cleanup()
+
+        @classmethod
+        def from_bytes(
+            cls,
+            data: bytes,
+            filename: str,
+            suffix: _Optional[str] = None,
+            temp_dir: _Optional[str] = None,
+        ) -> "StreamedFile":
+            suffix = suffix or Path(filename).suffix
+            temp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix, dir=temp_dir)
+            try:
+                temp.write(data)
+                temp.flush()
+            finally:
+                temp.close()
+            return cls(path=temp.name, filename=filename, _size=len(data), _cleanup=True)
+
+    streaming_source.StreamedFile = StreamedFile
+    sys.modules["streaming_source"] = streaming_source
 
 # Lazy import for field_mapping_learner to avoid circular dependencies
 try:
