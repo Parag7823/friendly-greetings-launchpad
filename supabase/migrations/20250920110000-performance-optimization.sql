@@ -60,6 +60,10 @@ WHERE status = 'failed';
 -- RAW_RECORDS TABLE OPTIMIZATIONS
 -- ============================================================================
 
+-- Add is_duplicate column if it doesn't exist
+ALTER TABLE public.raw_records 
+ADD COLUMN IF NOT EXISTS is_duplicate BOOLEAN DEFAULT false;
+
 -- Index for duplicate detection queries
 CREATE INDEX IF NOT EXISTS idx_raw_records_user_duplicate 
 ON public.raw_records (user_id, is_duplicate, created_at DESC);
@@ -113,14 +117,20 @@ ON public.chat_messages (user_id, chat_id, created_at DESC);
 -- FILE_VERSIONS TABLE OPTIMIZATIONS
 -- ============================================================================
 
--- Index for version queries
-CREATE INDEX IF NOT EXISTS idx_file_versions_user_group 
-ON public.file_versions (user_id, version_group_id, version_number DESC);
+-- Only create indexes if table exists (table created in 20250816000000-add-duplicate-detection-system.sql)
+DO $$ 
+BEGIN
+    IF EXISTS (SELECT FROM pg_tables WHERE schemaname = 'public' AND tablename = 'file_versions') THEN
+        -- Index for version queries
+        CREATE INDEX IF NOT EXISTS idx_file_versions_user_group 
+        ON public.file_versions (user_id, version_group_id, version_number DESC);
 
--- Index for active version queries
-CREATE INDEX IF NOT EXISTS idx_file_versions_active 
-ON public.file_versions (user_id, is_active_version, created_at DESC) 
-WHERE is_active_version = true;
+        -- Index for active version queries
+        CREATE INDEX IF NOT EXISTS idx_file_versions_active 
+        ON public.file_versions (user_id, is_active_version, created_at DESC) 
+        WHERE is_active_version = true;
+    END IF;
+END $$;
 
 -- ============================================================================
 -- PROCESSING_TRANSACTIONS TABLE OPTIMIZATIONS
@@ -393,23 +403,55 @@ GRANT SELECT ON user_dashboard_metrics TO authenticated;
 
 COMMENT ON INDEX idx_raw_events_user_platform_timestamp IS 'Optimizes user queries with platform and timestamp filtering';
 COMMENT ON INDEX idx_raw_events_payload_gin IS 'Enables fast JSONB queries on payload data';
-COMMENT ON FUNCTION get_user_events_optimized IS 'Optimized function for paginated user events queries';
+COMMENT ON FUNCTION public.get_user_events_optimized(
+    UUID,
+    INTEGER,
+    INTEGER,
+    TEXT,
+    TEXT,
+    TEXT,
+    UUID,
+    UUID
+) IS 'Optimized function for paginated user events queries';
 COMMENT ON MATERIALIZED VIEW user_dashboard_metrics IS 'Pre-computed dashboard metrics for better performance';
 
 -- ============================================================================
 -- PERFORMANCE VALIDATION
 -- ============================================================================
 
--- Analyze tables to update statistics
-ANALYZE public.raw_events;
-ANALYZE public.raw_records;
-ANALYZE public.ingestion_jobs;
-ANALYZE public.normalized_entities;
-ANALYZE public.chat_messages;
-ANALYZE public.file_versions;
-ANALYZE public.processing_transactions;
-ANALYZE public.processing_locks;
-ANALYZE public.error_logs;
+-- Analyze tables to update statistics (only if they exist)
+DO $$
+BEGIN
+    -- Core tables (always exist)
+    ANALYZE public.raw_events;
+    ANALYZE public.raw_records;
+    ANALYZE public.ingestion_jobs;
+    
+    -- Optional tables (may not exist in all environments)
+    IF EXISTS (SELECT FROM pg_tables WHERE schemaname = 'public' AND tablename = 'normalized_entities') THEN
+        ANALYZE public.normalized_entities;
+    END IF;
+    
+    IF EXISTS (SELECT FROM pg_tables WHERE schemaname = 'public' AND tablename = 'chat_messages') THEN
+        ANALYZE public.chat_messages;
+    END IF;
+    
+    IF EXISTS (SELECT FROM pg_tables WHERE schemaname = 'public' AND tablename = 'file_versions') THEN
+        ANALYZE public.file_versions;
+    END IF;
+    
+    IF EXISTS (SELECT FROM pg_tables WHERE schemaname = 'public' AND tablename = 'processing_transactions') THEN
+        ANALYZE public.processing_transactions;
+    END IF;
+    
+    IF EXISTS (SELECT FROM pg_tables WHERE schemaname = 'public' AND tablename = 'processing_locks') THEN
+        ANALYZE public.processing_locks;
+    END IF;
+    
+    IF EXISTS (SELECT FROM pg_tables WHERE schemaname = 'public' AND tablename = 'error_logs') THEN
+        ANALYZE public.error_logs;
+    END IF;
+END $$;
 
 -- Log completion
 DO $$
