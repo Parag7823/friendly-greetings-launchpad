@@ -125,12 +125,12 @@ class EnhancedRelationshipDetector:
             self.nlp = None
             logger.warning("⚠️ spaCy model not found, run: python -m spacy download en_core_web_sm")
         
-        try:
-            self.semantic_model = SentenceTransformer('all-MiniLM-L6-v2')  # 80MB, fast
-            logger.info("✅ Sentence-Transformers model loaded (semantic similarity)")
-        except:
-            self.semantic_model = None
-            logger.warning("⚠️ Sentence-Transformers model not available")
+        # CRITICAL FIX: Use shared BGE embedding service instead of loading separate model
+        # Old: Loaded all-MiniLM-L6-v2 (384 dims) separately
+        # New: Use BGE large model (1024 dims) via embedding_service singleton
+        # This eliminates 400MB+ memory waste and ensures consistent embeddings
+        self.semantic_model = None  # Will use embedding_service instead
+        logger.info("✅ Using shared BGE embedding service (BAAI/bge-large-en-v1.5)")
         
         # igraph for in-memory graph analysis
         self.graph = ig.Graph(directed=True)
@@ -921,34 +921,41 @@ Return ONLY valid JSON, no markdown blocks or explanations."""
         except:
             return 0.0
     
-    def _calculate_context_score(self, source_payload: Dict, target_payload: Dict) -> float:
-        """REFACTORED: Calculate semantic similarity using Sentence-Transformers (90% accuracy vs 60%)"""
+    async def _calculate_context_score(self, source_payload: Dict, target_payload: Dict) -> float:
+        """CRITICAL FIX: Calculate semantic similarity using shared BGE embedding service"""
         try:
-            if not self.semantic_model:
-                # Fallback to word overlap if model not loaded
-                source_text = str(source_payload).lower()
-                target_text = str(target_payload).lower()
-                source_words = set(source_text.split())
-                target_words = set(target_text.split())
-                if not source_words or not target_words:
-                    return 0.0
-                common_words = source_words & target_words
-                total_words = source_words | target_words
-                return len(common_words) / len(total_words)
-            
-            # Semantic similarity with Sentence-Transformers
+            # Fallback to word overlap if embedding service unavailable
             source_text = str(source_payload)[:500]  # Limit to 500 chars for speed
             target_text = str(target_payload)[:500]
             
             if not source_text.strip() or not target_text.strip():
                 return 0.0
             
-            # Generate embeddings and calculate cosine similarity
-            embeddings = self.semantic_model.encode([source_text, target_text], convert_to_tensor=True)
-            similarity = util.cos_sim(embeddings[0], embeddings[1]).item()
-            
-            # Convert from [-1, 1] to [0, 1]
-            return max(0.0, similarity)
+            try:
+                # CRITICAL FIX: Use shared BGE embedding service
+                from embedding_service import get_embedding_service
+                embedding_service = await get_embedding_service()
+                
+                # Generate embeddings using BGE model (1024 dims)
+                source_emb = await embedding_service.embed_text(source_text)
+                target_emb = await embedding_service.embed_text(target_text)
+                
+                # Calculate cosine similarity
+                similarity = embedding_service.similarity(source_emb, target_emb)
+                
+                # Ensure [0, 1] range
+                return max(0.0, min(1.0, similarity))
+                
+            except Exception as embed_error:
+                logger.warning(f"BGE embedding failed, using word overlap fallback: {embed_error}")
+                # Fallback to word overlap
+                source_words = set(source_text.lower().split())
+                target_words = set(target_text.lower().split())
+                if not source_words or not target_words:
+                    return 0.0
+                common_words = source_words & target_words
+                total_words = source_words | target_words
+                return len(common_words) / len(total_words)
             
         except Exception as e:
             logger.warning(f"Semantic similarity failed: {e}")
@@ -1124,8 +1131,8 @@ Return ONLY valid JSON, no markdown blocks or explanations."""
         except:
             return []
     
-    def _remove_duplicate_relationships(self, relationships: List[Dict]) -> List[Dict]:
-        """REFACTORED: Remove exact AND semantic duplicates using embeddings
+    async def _remove_duplicate_relationships(self, relationships: List[Dict]) -> List[Dict]:
+        """CRITICAL FIX: Remove exact AND semantic duplicates using shared BGE embeddings
         
         Two-stage deduplication:
         1. Exact duplicates (same source + target + type) - O(N) with set
@@ -1152,19 +1159,23 @@ Return ONLY valid JSON, no markdown blocks or explanations."""
         
         logger.info(f"After exact dedup: {len(relationships)} → {len(exact_unique)} relationships")
         
-        # STAGE 2: Remove semantic duplicates (slower, but accurate)
-        if not self.semantic_model or len(exact_unique) < 2:
+        # STAGE 2: Remove semantic duplicates using BGE embeddings
+        if len(exact_unique) < 2:
             return exact_unique
         
         try:
+            # CRITICAL FIX: Use shared BGE embedding service
+            from embedding_service import get_embedding_service
+            embedding_service = await get_embedding_service()
+            
             # Generate embeddings for relationship descriptions
             descriptions = []
             for rel in exact_unique:
                 desc = f"{rel.get('relationship_type', '')} {rel.get('semantic_description', '')}"
                 descriptions.append(desc)
             
-            # Encode all descriptions at once (batch processing)
-            embeddings = self.semantic_model.encode(descriptions, convert_to_tensor=True)
+            # Batch encode all descriptions using BGE (1024 dims)
+            embeddings = await embedding_service.embed_batch(descriptions)
             
             # Find semantic duplicates using cosine similarity
             semantic_unique = []
@@ -1182,7 +1193,7 @@ Return ONLY valid JSON, no markdown blocks or explanations."""
                         continue
                     
                     # Calculate cosine similarity
-                    similarity = util.cos_sim(embeddings[i], embeddings[j]).item()
+                    similarity = embedding_service.similarity(embeddings[i], embeddings[j])
                     
                     # If very similar (>0.85), mark as duplicate
                     if similarity > 0.85:

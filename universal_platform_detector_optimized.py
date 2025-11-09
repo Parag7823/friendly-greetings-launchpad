@@ -125,8 +125,8 @@ class UniversalPlatformDetectorOptimized:
     - Real-time platform updates
     """
     
-    def __init__(self, anthropic_client=None, cache_client=None, supabase_client=None, config=None):
-        self.anthropic = anthropic_client
+    def __init__(self, groq_client=None, cache_client=None, supabase_client=None, config=None):
+        self.groq_client = groq_client
         self.supabase = supabase_client
         self.config = config or self._get_default_config()
         
@@ -474,7 +474,7 @@ class UniversalPlatformDetectorOptimized:
             
             # 2. AI-powered detection (primary method)
             ai_result = None
-            if self.config.enable_ai_detection and self.anthropic:
+            if self.config.enable_ai_detection and self.groq_client:
                 ai_result = await self._detect_platform_with_ai(payload, filename)
                 if ai_result and ai_result['confidence'] >= 0.8:
                     self.metrics['ai_detections'] += 1
@@ -787,10 +787,14 @@ class UniversalPlatformDetectorOptimized:
     async def _safe_groq_call_with_instructor(self, prompt: str, temperature: float, max_tokens: int) -> Dict[str, Any]:
         """GENIUS v4.0: instructor for structured AI output (40% more reliable, zero JSON hallucinations)"""
         try:
-            # Initialize instructor-patched Groq client
+            # CRITICAL FIX: Use injected groq_client instead of creating new one
             if not hasattr(self, '_groq_instructor'):
-                groq_client = AsyncGroq(api_key=os.getenv('GROQ_API_KEY'))
-                self._groq_instructor = instructor.patch(groq_client)
+                if self.groq_client:
+                    self._groq_instructor = instructor.patch(self.groq_client)
+                else:
+                    # Fallback: create new client if none provided
+                    groq_client = AsyncGroq(api_key=os.getenv('GROQ_API_KEY'))
+                    self._groq_instructor = instructor.patch(groq_client)
             
             # GENIUS v4.0: instructor guarantees valid pydantic output (no JSON parsing errors!)
             result = await self._groq_instructor.chat.completions.create(

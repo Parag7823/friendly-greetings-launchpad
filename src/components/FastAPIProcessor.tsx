@@ -230,8 +230,10 @@ export class FastAPIProcessor {
   }
 
   private async pollForResults(jobId: string, initialResponse: any): Promise<any> {
-    // FIX ISSUE #15: Reduce timeout from 5 minutes to 2 minutes for better UX
-    const maxAttempts = 80; // 2 minutes max (1.5 seconds * 80 = 120 seconds)
+    // CRITICAL FIX: Match ARQ worker timeout (15 minutes) to prevent premature failures
+    // ARQ worker function_timeout = 900 seconds (15 minutes)
+    // Frontend must wait at least as long to avoid showing errors while backend is still processing
+    const maxAttempts = 600; // 15 minutes max (1.5 seconds * 600 = 900 seconds)
     let attempts = 0;
     
     while (attempts < maxAttempts) {

@@ -1,5 +1,5 @@
 import os
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 from arq import Retry
 
 # ARQ imports
@@ -176,21 +176,25 @@ async def razorpay_sync(ctx, req: Dict[str, Any]) -> Dict[str, Any]:
         raise Retry(defer=delay)
 
 
-async def process_spreadsheet(ctx, user_id: str, filename: str, storage_path: str, job_id: str) -> Dict[str, Any]:
-    """FIX #5: Wrap ARQ spreadsheet processing in transaction for consistency with Phase 1-11"""
+async def process_spreadsheet(ctx, user_id: str, filename: str, storage_path: str, job_id: str, 
+                             duplicate_decision: Optional[str] = None, existing_file_id: Optional[str] = None) -> Dict[str, Any]:
+    """
+    CRITICAL FIX: Removed nested transaction wrapper.
+    ExcelProcessor.process_file manages transaction internally (fastapi_backend_v2.py@8676-8680).
+    Nested transactions cause deadlocks.
+    """
     try:
-        from transaction_manager import get_transaction_manager
-        transaction_manager = get_transaction_manager()
-        
-        # Wrap entire processing in transaction for atomic operations
-        async with transaction_manager.transaction(
-            user_id=user_id,
-            operation_type="arq_spreadsheet_processing"
-        ) as tx:
-            # Reuse the web process' processing logic, including WebSocket updates
-            await start_processing_job(user_id, job_id, storage_path, filename)
-            logger.info(f"✅ ARQ spreadsheet processing completed for job {job_id}")
-            return {"status": "completed", "job_id": job_id}
+        # Transaction managed inside start_processing_job -> ExcelProcessor.process_file
+        await start_processing_job(
+            user_id=user_id, 
+            job_id=job_id, 
+            storage_path=storage_path, 
+            filename=filename,
+            duplicate_decision=duplicate_decision,
+            existing_file_id=existing_file_id
+        )
+        logger.info(f"✅ ARQ spreadsheet processing completed for job {job_id}")
+        return {"status": "completed", "job_id": job_id}
             
     except Exception as e:
         logger.error(f"❌ ARQ spreadsheet processing failed for job {job_id}: {e}")
@@ -232,6 +236,51 @@ async def process_pdf(ctx, user_id: str, filename: str, storage_path: str, job_i
         }, e, max_retries=3, base_delay=60)
         if delay is None:
             return {"status": "failed", "job_id": job_id, "error": str(e)}
+        raise Retry(defer=delay)
+
+
+async def learn_field_mapping_batch(ctx, mappings: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """
+    CRITICAL FIX: Persistent field mapping learning via ARQ.
+    Replaces in-process asyncio.Queue to prevent data loss on restart.
+    
+    Args:
+        ctx: ARQ context
+        mappings: List of field mapping records to persist
+    """
+    try:
+        from field_mapping_learner import FieldMappingLearner
+        
+        logger.info(f"🧠 Processing {len(mappings)} field mapping records via ARQ")
+        
+        learner = FieldMappingLearner(supabase=supabase)
+        success_count = 0
+        failed_count = 0
+        
+        for mapping in mappings:
+            try:
+                success = await learner._write_mapping_with_retry(mapping)
+                if success:
+                    success_count += 1
+                else:
+                    failed_count += 1
+            except Exception as e:
+                logger.error(f"Failed to write field mapping: {e}")
+                failed_count += 1
+        
+        logger.info(f"✅ Field mapping batch completed: {success_count} success, {failed_count} failed")
+        return {
+            "status": "success",
+            "total": len(mappings),
+            "success_count": success_count,
+            "failed_count": failed_count
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Field mapping batch processing failed: {e}")
+        delay = await _retry_or_dlq(ctx, 'field_mapping_learning', {'batch_size': len(mappings)}, e, max_retries=3, base_delay=30)
+        if delay is None:
+            return {"status": "failed", "error": str(e)}
         raise Retry(defer=delay)
 
 
@@ -373,7 +422,8 @@ class WorkerSettings:
         razorpay_sync,
         process_spreadsheet,
         process_pdf,
-        detect_relationships,  # New background task for relationship detection
+        learn_field_mapping_batch,  # CRITICAL FIX: Persistent field mapping learning
+        detect_relationships,  # Background task for relationship detection
     ]
 
     # Keep results in Redis only briefly; we don't depend on ARQ results downstream

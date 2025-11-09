@@ -3,7 +3,6 @@ Production-Grade Duplicate Detection Service - NASA v4.0.0
 =============================================================
 
 GENIUS UPGRADES (v3.0 → v4.0):
-- REMOVED: polars (dead code - imported but never used)
 - REMOVED: sqlalchemy (redundant - supabase only)
 - REMOVED: cachetools (replaced with aiocache + Redis)
 - ADDED: aiocache + Redis (10x faster, persistent, visualizable)
@@ -13,7 +12,7 @@ GENIUS UPGRADES (v3.0 → v4.0):
 
 Libraries Used:
 - datasketch: MinHash LSH (1M files in 0.01s)
-- polars: Delta analysis via hash joins (50x faster than deepdiff)
+- polars: Delta analysis via hash joins (50x faster than deepdiff) ✅ ACTIVELY USED
 - rapidfuzz: Advanced string similarity
 - aiocache: Redis-backed async cache (persistent, visualizable)
 - structlog: Structured logging
@@ -1231,10 +1230,15 @@ class ProductionDuplicateDetectionService:
         new_content = new_record_resp.data.get('content', {})
         new_row_hashes = new_content.get('sheets_row_hashes', {})
         
-        # CRITICAL FIX: If row hashes not available, fall back to event-based comparison
+        # CRITICAL FIX: Row hashes MUST be available - fail fast if missing
         if not existing_row_hashes or not new_row_hashes:
-            logger.warning("Row hashes not available in raw_records, falling back to event-based comparison")
-            return await self._prepare_delta_payload_fallback(user_id, existing_file_id, new_record_id)
+            error_msg = (
+                f"Row hashes missing in raw_records (existing: {bool(existing_row_hashes)}, "
+                f"new: {bool(new_row_hashes)}). This indicates ExcelProcessor.process_file "
+                f"failed to populate sheets_row_hashes. Cannot perform delta merge."
+            )
+            logger.error(error_msg)
+            raise ValueError(error_msg)
         
         # Fetch only new events (we need full event data to insert)
         new_events_resp = (
@@ -1263,63 +1267,11 @@ class ProductionDuplicateDetectionService:
             'event_id_mapping': {}  # Not needed for hash-based comparison
         }
     
-    async def _prepare_delta_payload_fallback(self, user_id: str, existing_file_id: str, new_record_id: str) -> Dict[str, Any]:
-        """
-        Fallback method using event-based comparison when row hashes are not available.
-        This is the old inefficient method kept for backward compatibility.
-        """
-        existing_events_resp = (
-            self.supabase
-            .table('raw_events')
-            .select('id, payload, row_index, sheet_name')
-            .eq('user_id', user_id)
-            .eq('file_id', existing_file_id)
-            .execute()
-        )
-        
-        if existing_events_resp.error:
-            raise ValueError(f"Failed to fetch existing events: {existing_events_resp.error}")
-        
-        existing_events = existing_events_resp.data or []
-        
-        if not existing_events:
-            raise ValueError(f"No existing events found for file_id={existing_file_id}")
-        
-        logger.info(f"Found {len(existing_events)} existing events for delta merge (fallback mode)")
-        
-        existing_hashes = {
-            self._hash_event_payload(event['payload']): event['id']
-            for event in existing_events
-        }
-
-        new_events_resp = (
-            self.supabase
-            .table('raw_events')
-            .select('*')
-            .eq('user_id', user_id)
-            .eq('file_id', new_record_id)
-            .execute()
-        )
-        new_events = new_events_resp.data or []
-
-        new_rows = []
-        event_id_mapping = {}
-        for event in new_events:
-            event_hash = self._hash_event_payload(event.get('payload', {}))
-            if event_hash not in existing_hashes:
-                event_copy = {**event}
-                event_copy['file_id'] = existing_file_id
-                event_copy.pop('id', None)
-                new_rows.append(event_copy)
-            else:
-                event_id_mapping[event.get('id')] = existing_hashes[event_hash]
-
-        return {
-            'new_events': new_rows,
-            'existing_event_count': len(existing_events),
-            'event_id_mapping': event_id_mapping
-        }
-
+    # DEAD CODE REMOVED: _prepare_delta_payload_fallback method
+    # This inefficient fallback fetched ALL events from both files into memory,
+    # causing OOM crashes on large files (2M+ rows). The sheets_row_hashes approach
+    # is now mandatory and guaranteed by ExcelProcessor.process_file.
+    
     def _hash_event_payload(self, payload: Dict[str, Any]) -> str:
         try:
             normalized = json.dumps(payload, sort_keys=True, default=str)

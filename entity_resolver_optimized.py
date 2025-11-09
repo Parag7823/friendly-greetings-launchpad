@@ -45,7 +45,7 @@ from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_excep
 import structlog
 from pydantic import BaseModel, Field, validator
 from supabase import Client
-from instructor import from_openai  # v4.0: AI learning for ambiguous matches
+import instructor  # v4.0: AI learning for ambiguous matches
 
 # Configure structlog for JSON logging
 structlog.configure(
@@ -120,13 +120,13 @@ class EntityResolverOptimized:
     ADDED: Industry-standard battle-tested libraries
     """
     
-    def __init__(self, supabase_client: Client, openai_client=None, config: Optional[ResolutionConfig] = None, cache_client=None):
+    def __init__(self, supabase_client: Client, groq_client=None, config: Optional[ResolutionConfig] = None, cache_client=None):
         self.supabase = supabase_client
-        self.openai = openai_client
+        self.groq_client = groq_client
         self.config = config or ResolutionConfig()
         
-        # v4.0: Initialize instructor client for AI learning
-        self.instructor_client = from_openai(openai_client) if openai_client else None
+        # v4.0: Initialize instructor client for AI learning with Groq
+        self.instructor_client = instructor.patch(groq_client) if groq_client else None
         
         # CRITICAL FIX: Use centralized Redis cache - FAIL FAST if unavailable
         from centralized_cache import safe_get_cache
@@ -348,7 +348,7 @@ class EntityResolverOptimized:
                 logger.info("ai_resolution_triggered", entity_name=entity_name, candidate=match['canonical_name'], similarity=sim)
                 
                 decision = await self.instructor_client.chat.completions.create(
-                    model="gpt-4o-mini",
+                    model="llama-3.3-70b-versatile",
                     response_model=AIEntityDecision,
                     messages=[
                         {

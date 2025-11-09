@@ -57,41 +57,20 @@ class FieldMappingLearner:
         self.flush_interval = flush_interval
         self.max_retries = max_retries
         
-        # Async queue for batching
-        self._queue: asyncio.Queue = asyncio.Queue()
-        self._flush_task: Optional[asyncio.Task] = None
-        self._running = False
+        # CRITICAL FIX: Removed in-memory queue to prevent data loss
+        # Old: asyncio.Queue + background flush loop = data loss on restart
+        # New: Direct ARQ enqueue = persistent, no data loss
+        # self._queue: asyncio.Queue = asyncio.Queue()  # REMOVED
+        # self._flush_task: Optional[asyncio.Task] = None  # REMOVED
+        # self._running = False  # REMOVED
         
         # Metrics
         self._total_learned = 0
         self._total_failed = 0
         
-    async def start(self):
-        """Start the background flush loop"""
-        if self._running:
-            return
-            
-        self._running = True
-        self._flush_task = asyncio.create_task(self._flush_loop())
-        logger.info("Field mapping learner started")
-        
-    async def stop(self):
-        """Stop the background flush loop and flush remaining items"""
-        if not self._running:
-            return
-            
-        self._running = False
-        
-        if self._flush_task:
-            self._flush_task.cancel()
-            try:
-                await self._flush_task
-            except asyncio.CancelledError:
-                pass
-                
-        # Flush remaining items
-        await self._flush_batch()
-        logger.info(f"Field mapping learner stopped. Learned: {self._total_learned}, Failed: {self._total_failed}")
+    # DEAD CODE REMOVED: start() and stop() methods
+    # These managed the background flush loop which is no longer needed
+    # since we enqueue directly to ARQ without buffering
         
     async def learn_mapping(
         self,
@@ -122,60 +101,46 @@ class FieldMappingLearner:
         if not user_id or not source_column or not target_field:
             return
             
-        record = FieldMappingRecord(
-            user_id=user_id,
-            source_column=source_column,
-            target_field=target_field,
-            platform=platform,
-            document_type=document_type,
-            filename_pattern=filename_pattern,  # FIX #10: Include filename_pattern
-            confidence=confidence,
-            extraction_success=extraction_success,
-            metadata=metadata or {}
-        )
-        
-        await self._queue.put(record)
-        
-    async def _flush_loop(self):
-        """Background loop to flush batches periodically"""
-        while self._running:
-            try:
-                await asyncio.sleep(self.flush_interval)
-                await self._flush_batch()
-            except asyncio.CancelledError:
-                break
-            except Exception as e:
-                logger.error(f"Error in field mapping flush loop: {e}")
-                
-    async def _flush_batch(self):
-        """Flush accumulated records to the database"""
-        if self._queue.empty():
-            return
+        # CRITICAL FIX: Enqueue directly to ARQ without in-memory buffering
+        # This eliminates data loss risk from process restarts
+        try:
+            from fastapi_backend_v2 import get_arq_pool
+            pool = await get_arq_pool()
             
-        # Collect batch
-        batch: List[FieldMappingRecord] = []
-        while not self._queue.empty() and len(batch) < self.batch_size:
-            try:
-                record = self._queue.get_nowait()
-                batch.append(record)
-            except asyncio.QueueEmpty:
-                break
-                
-        if not batch:
-            return
+            # Create mapping dict for ARQ
+            mapping_data = {
+                'user_id': user_id,
+                'source_column': source_column,
+                'target_field': target_field,
+                'platform': platform,
+                'document_type': document_type,
+                'filename_pattern': filename_pattern,
+                'confidence': confidence,
+                'extraction_success': extraction_success,
+                'metadata': metadata or {},
+                'observed_at': datetime.utcnow().isoformat()
+            }
             
-        # Deduplicate and aggregate by (user_id, source_column, target_field, platform, document_type)
-        aggregated = self._aggregate_mappings(batch)
+            # Enqueue single mapping to ARQ (worker will batch multiple jobs)
+            await pool.enqueue_job('learn_field_mapping_batch', mappings=[mapping_data])
+            self._total_learned += 1
+            logger.debug(f"✅ Enqueued field mapping to ARQ: {source_column} → {target_field}")
+            
+        except Exception as e:
+            logger.error(f"Failed to enqueue field mapping to ARQ: {e}")
+            self._total_failed += 1
+            # Fallback: Write directly to DB if ARQ unavailable
+            try:
+                if self.supabase:
+                    await self._write_mapping_with_retry(mapping_data)
+            except Exception as fallback_error:
+                logger.error(f"Fallback DB write also failed: {fallback_error}")
         
-        # Write to database with retry
-        for mapping_key, mapping_data in aggregated.items():
-            success = await self._write_mapping_with_retry(mapping_data)
-            if success:
-                self._total_learned += 1
-            else:
-                self._total_failed += 1
-                
-    def _aggregate_mappings(self, batch: List[FieldMappingRecord]) -> Dict[tuple, Dict]:
+    # DEAD CODE REMOVED: _flush_loop(), _flush_batch(), _aggregate_mappings()
+    # These methods managed batching in memory before sending to ARQ
+    # Now we enqueue directly to ARQ in learn_mapping(), eliminating data loss risk
+    
+    def _aggregate_mappings_UNUSED(self, batch: List[FieldMappingRecord]) -> Dict[tuple, Dict]:
         """
         Aggregate multiple observations of the same mapping.
         

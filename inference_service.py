@@ -25,7 +25,7 @@ import structlog
 logger = structlog.get_logger(__name__)
 
 # Global instances (lazy-loaded)
-_sentence_model = None
+# REMOVED: _sentence_model - Use embedding_service.py (BGE model) instead for consistency
 _ocr_reader = None
 _tfidf_vectorizer = None
 _doc_type_vectors = None
@@ -44,65 +44,10 @@ def get_executor() -> ThreadPoolExecutor:
     return _executor
 
 
-class SentenceModelService:
-    """Lazy-loading SentenceTransformer service"""
-    
-    @staticmethod
-    async def get_model():
-        """Get or load SentenceTransformer model (lazy)"""
-        global _sentence_model
-        
-        if _sentence_model is not None:
-            return _sentence_model
-        
-        # Check Redis cache first
-        from centralized_cache import safe_get_cache
-        cache = safe_get_cache()
-        if cache:
-            cached_model = await cache.get('inference:sentence_model')
-            if cached_model:
-                logger.info("sentence_model_loaded_from_cache")
-                _sentence_model = cached_model
-                return _sentence_model
-        
-        # Load model in thread pool (blocking operation)
-        logger.info("loading_sentence_model", model="all-MiniLM-L6-v2", size="350MB")
-        
-        def _load_model():
-            from sentence_transformers import SentenceTransformer
-            return SentenceTransformer('all-MiniLM-L6-v2')
-        
-        loop = asyncio.get_event_loop()
-        _sentence_model = await loop.run_in_executor(get_executor(), _load_model)
-        
-        # Cache model in Redis
-        if cache:
-            await cache.set('inference:sentence_model', _sentence_model, ttl=86400)  # 24 hours
-        
-        logger.info("sentence_model_loaded", model="all-MiniLM-L6-v2")
-        return _sentence_model
-    
-    @staticmethod
-    async def encode(text: str) -> List[float]:
-        """Encode text to embedding vector"""
-        model = await SentenceModelService.get_model()
-        
-        def _encode():
-            return model.encode(text).tolist()
-        
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(get_executor(), _encode)
-    
-    @staticmethod
-    async def encode_batch(texts: List[str]) -> List[List[float]]:
-        """Encode batch of texts (more efficient)"""
-        model = await SentenceModelService.get_model()
-        
-        def _encode_batch():
-            return model.encode(texts).tolist()
-        
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(get_executor(), _encode_batch)
+# DEAD CODE REMOVED: SentenceModelService class
+# This loaded all-MiniLM-L6-v2 (384 dims) which conflicted with BGE model (1024 dims)
+# in embedding_service.py. All embedding operations now use the shared BGE model
+# via get_embedding_service() for consistency and to eliminate 400MB+ memory waste.
 
 
 class OCRService:

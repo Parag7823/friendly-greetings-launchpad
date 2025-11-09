@@ -9,6 +9,9 @@ import uuid
 import time
 import mmap
 
+# CRITICAL FIX: Import optimized database queries
+from database_optimization_utils import OptimizedDatabaseQueries
+
 # FIX #11: Sentry error tracking integration
 try:
     import sentry_sdk
@@ -995,11 +998,13 @@ try:
     structured_logger = StructuredLogger("finley_backend")
     metrics_collector = MetricsCollector()
     
+    # CRITICAL FIX: Initialize optimized database queries
+    optimized_db = OptimizedDatabaseQueries(supabase)
+    logger.info("✅ Optimized database queries initialized")
+    
     logger.info("✅ Observability and security systems initialized")
     
-    # Initialize optimized database client - THE GOLDMINE!
-    optimized_db = create_optimized_db_client()
-    logger.info("✅ Optimized database client initialized - 10x performance boost activated!")
+    # REMOVED: Duplicate optimized_db initialization (already initialized above with OptimizedDatabaseQueries)
     
     # REFACTORED: Initialize centralized Redis cache (replaces ai_cache_system.py)
     # This provides distributed caching across all workers and instances for true scalability
@@ -1198,2992 +1203,13 @@ try:
 except Exception as e:
     logger.error(f"❌ Configuration validation failed: {e}")
     raise
-# DEAD CODE REMOVED: EnhancedFileProcessor class (lines 1204-4173)
-# This class was never instantiated or used in the codebase.
-# All file processing is handled by ExcelProcessor which uses:
-# - UniversalExtractorsOptimized for advanced formats
-# - StreamingProcessor for memory-efficient processing
-# - Production-grade duplicate detection and entity resolution
-# Keeping this dead code would increase maintenance burden with no benefit.
 
-class VendorStandardizer:
-    """Enhanced file processor with 100X capabilities for advanced file formats"""
-    
-    def __init__(self):
-        self.supported_formats = {
-            # Spreadsheet formats
-            'excel': ['.xlsx', '.xls', '.xlsm', '.xlsb'],
-            'csv': ['.csv', '.tsv', '.txt'],
-            'ods': ['.ods'],
-            
-            # Document formats with tables
-            'pdf': ['.pdf'],
-            
-            # Archive formats
-            'zip': ['.zip', '.7z', '.rar'],
-            
-            # Image formats
-            'image': ['.png', '.jpg', '.jpeg', '.bmp', '.tiff', '.gif']
-        }
-        
-        # OCR is now handled by UniversalExtractorsOptimized
-        
-        # Streaming configuration
-        self.streaming_threshold_mb = 10
-        self.excel_chunk_size = 1000
-        self.csv_chunk_size = 10000
-        
-    async def process_file_enhanced(self, file_content: bytes, filename: str, 
-                                  progress_callback=None) -> Dict[str, pd.DataFrame]:
-        """Enhanced file processing with support for multiple formats"""
-        try:
-            if progress_callback:
-                await progress_callback("detecting", "🔍 Detecting advanced file format and structure...", 5)
-            
-            # Detect file format
-            file_format = self._detect_file_format(filename, file_content)
-            logger.info(f"Enhanced processor detected format: {file_format} for {filename}")
-            
-            if progress_callback:
-                await progress_callback("processing", f"📊 Processing {file_format} file with advanced capabilities...", 15)
-            
-            # Route to appropriate processor
-            if file_format == 'excel':
-                return await self._process_excel_enhanced(file_content, filename, progress_callback)
-            elif file_format == 'csv':
-                return await self._process_csv_enhanced(file_content, filename, progress_callback)
-            elif file_format == 'ods':
-                return await self._process_ods(file_content, filename, progress_callback)
-            elif file_format == 'pdf' or file_format == 'image':
-                # CRITICAL FIX: Use streaming processor instead of loading full file
-                if progress_callback:
-                    await progress_callback("processing", f"📄 Processing {file_format} with streaming...", 30)
-                # Use universal_extractors directly for streaming extraction
-                return await self.universal_extractors.extract_data_universal(
-                    streamed_file=file_content,
-                    filename=filename,
-                    user_id="system"
-                )
-            elif file_format == 'archive':
-                return await self._process_archive(file_content, filename, progress_callback)
-            else:
-                # Fallback to basic processing
-                logger.warning(f"Unsupported format {file_format}, falling back to basic processing")
-                return await self._fallback_processing(file_content, filename, progress_callback)
-                
-        except Exception as e:
-            logger.error(f"Enhanced file processing failed for {filename}: {e}")
-            # Fallback to basic processing
-            return await self._fallback_processing(file_content, filename, progress_callback)
-    
-    def _detect_file_format(self, filename: str, file_content: bytes) -> str:
-        """Enhanced file format detection"""
-        filename_lower = filename.lower()
-        
-        # Check file extension first
-        for format_type, extensions in self.supported_formats.items():
-            if any(filename_lower.endswith(ext) for ext in extensions):
-                return format_type
-        
-        # Check for archive formats
-        if filename_lower.endswith(('.zip', '.7z', '.rar')):
-            return 'archive'
-        
-        # Use magic number detection if available
-        if ADVANCED_FEATURES_AVAILABLE:
-            try:
-                file_type = filetype.guess(file_content)
-                if file_type:
-                    if file_type.extension in ['pdf']:
-                        return 'pdf'
-                    elif file_type.extension in ['png', 'jpg', 'jpeg', 'bmp', 'tiff', 'gif']:
-                        return 'image'
-            except Exception:
-                pass
-        
-        # Default to excel for unknown formats
-        return 'excel'
-    
-    async def _process_excel_enhanced(self, file_content: bytes, filename: str, progress_callback=None) -> Dict[str, pd.DataFrame]:
-        """Enhanced Excel processing with repair capabilities"""
-        try:
-            if progress_callback:
-                await progress_callback("processing", "🔧 Processing Excel file with enhanced capabilities...", 20)
-            
-            # Check file size for streaming approach
-            file_size_mb = len(file_content) / (1024 * 1024)
-            use_streaming = file_size_mb > 10  # 10MB threshold
-            
-            if use_streaming:
-                if progress_callback:
-                    await progress_callback("streaming", f"📊 Large file detected ({file_size_mb:.1f}MB), using streaming...", 25)
-                return await self._process_excel_streaming(file_content, filename, progress_callback)
-            
-            # Try standard processing for small files
-            try:
-                with tempfile.NamedTemporaryFile(suffix='.xlsx', delete=False) as temp_file:
-                    temp_file.write(file_content)
-                    temp_path = temp_file.name
-                
-                try:
-                    excel_file = pd.ExcelFile(temp_path)
-                    sheets = {}
-                    
-                    for sheet_name in excel_file.sheet_names:
-                        df = pd.read_excel(temp_path, sheet_name=sheet_name)
-                        if not df.empty:
-                            sheets[sheet_name] = df
-                    
-                    if sheets:
-                        return sheets
-                except Exception as e:
-                    logger.error(f"Excel processing error: {e}")
-                    return {}
-                finally:
-                    # Ensure cleanup
-                    if os.path.exists(temp_path):
-                        try:
-                            os.unlink(temp_path)
-                        except Exception as e:
-                            logger.warning(f"Failed to clean up temp file {temp_path}: {e}")
-                    
-            except Exception as e:
-                logger.warning(f"Standard Excel processing failed: {e}")
-            
-            # Try repair if available
-            if ADVANCED_FEATURES_AVAILABLE:
-                try:
-                    if progress_callback:
-                        await progress_callback("repairing", "🔧 Attempting to repair corrupted Excel file...", 20)
-                    
-                    # Use xlwings for repair
-                    with tempfile.NamedTemporaryFile(suffix='.xlsx', delete=False) as temp_file:
-                        temp_file.write(file_content)
-                        temp_file.flush()
-                        
-                        app = xw.App(visible=False)
-                        try:
-                            wb = app.books.open(temp_file.name)
-                            # Extract data from repaired workbook
-                            sheets = {}
-                            for sheet in wb.sheets:
-                                data = sheet.used_range.value
-                                if data:
-                                    df = pd.DataFrame(data[1:], columns=data[0])
-                                    if not df.empty:
-                                        sheets[sheet.name] = df
-                            
-                            wb.close()
-                            return sheets
-                            
-                        finally:
-                            app.quit()
-                            os.unlink(temp_file.name)
-                            
-                except Exception as repair_error:
-                    logger.error(f"Excel repair failed: {repair_error}")
-            
-            # Final fallback
-            raise Exception("All Excel processing methods failed")
-            
-        except Exception as e:
-            logger.error(f"Enhanced Excel processing failed: {e}")
-            raise
+# DEAD CODE REMOVED: First VendorStandardizer class (file processor variant, ~3000 lines)
+# - Had __init__(self) with no cache_client parameter
+# - Was shadowed by second VendorStandardizer definition
+# - Never instantiated (line 4818 uses cache_client= which only second class accepts)
+# - Removed to eliminate code duplication and reduce maintenance burden
 
-async def _zohomail_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> Dict[str, Any]:
-    """Zoho Mail ingestion: fetch messages with attachments and persist attachments as external_items."""
-    provider_key = NANGO_ZOHO_MAIL_INTEGRATION_ID
-    connection_id = req.connection_id
-    user_id = req.user_id
-    stats = {'records_fetched': 0, 'actions_used': 0, 'attachments_saved': 0, 'queued_jobs': 0, 'skipped': 0}
-
-    # Ensure connector exists
-    conn_row = supabase.table('connectors').select('id').eq('provider', provider_key).limit(1).execute()
-    connector_id = conn_row.data[0]['id'] if conn_row.data else None
-    if not connector_id:
-        try:
-            res = supabase.table('connectors').insert({
-                'provider': provider_key,
-                'integration_id': provider_key,
-                'auth_type': 'OAUTH2',
-                'scopes': json.dumps([]),
-                'endpoints_needed': json.dumps([]),
-                'enabled': True
-            }).execute()
-            connector_id = (res.data[0]['id'] if res and res.data else None)
-        except Exception as e:
-            logger.warning(f"Zoho connectors upsert failed: {e}")
-
-    # Ensure user_connection exists
-    try:
-        supabase.table('user_connections').insert({
-            'user_id': user_id,
-            'connector_id': connector_id,
-            'nango_connection_id': connection_id,
-            'status': 'active',
-            'sync_mode': 'pull'
-        }).execute()
-    except Exception:
-        pass
-    uc_row = supabase.table('user_connections').select('id, metadata').eq('nango_connection_id', connection_id).limit(1).execute()
-    user_connection_id = uc_row.data[0]['id'] if uc_row.data else None
-    uc_meta = (uc_row.data[0].get('metadata') if uc_row.data else {}) or {}
-    if isinstance(uc_meta, str):
-        try:
-            uc_meta = json.loads(uc_meta)
-        except Exception:
-            uc_meta = {}
-
-    # Start sync run (transaction)
-    sync_run_id = str(uuid.uuid4())
-    try:
-        transaction_manager = get_transaction_manager()
-        async with transaction_manager.transaction(
-            user_id=user_id,
-            operation_type="connector_sync_start"
-        ) as tx:
-            await tx.insert('sync_runs', {
-                'id': sync_run_id,
-                'user_id': user_id,
-                'user_connection_id': user_connection_id,
-                'type': req.mode,
-                'status': 'running',
-                'started_at': datetime.utcnow().isoformat(),
-                'stats': json.dumps(stats)
-            })
-    except Exception:
-        pass
-
-    try:
-        # Resolve Zoho accountId
-        account_id = uc_meta.get('accountId')
-        if not account_id:
-            accounts = await nango.proxy_get('zoho-mail', 'api/accounts', connection_id=connection_id, provider_config_key=provider_key)
-            stats['actions_used'] += 1
-            account_id = None
-            if isinstance(accounts, dict):
-                if isinstance(accounts.get('accounts'), list) and accounts['accounts']:
-                    account_id = accounts['accounts'][0].get('accountId') or accounts['accounts'][0].get('id')
-                elif isinstance(accounts.get('data'), dict):
-                    accs = accounts['data'].get('accounts')
-                    if isinstance(accs, list) and accs:
-                        account_id = accs[0].get('accountId') or accs[0].get('id')
-            elif isinstance(accounts, list) and accounts:
-                account_id = accounts[0].get('accountId') or accounts[0].get('id')
-            if not account_id:
-                raise HTTPException(status_code=400, detail='Zoho Mail accountId not found; set via /api/connectors/metadata')
-            # FIX #2: Persist discovered accountId with transaction protection
-            try:
-                transaction_manager = get_transaction_manager()
-                async with transaction_manager.transaction(
-                    user_id=user_id,
-                    operation_type="connector_metadata_update"
-                ) as tx:
-                    await tx.update('user_connections', {
-                        'metadata': {**uc_meta, 'accountId': account_id}
-                    }, {'nango_connection_id': connection_id})
-                    logger.info(f"✅ Updated Zoho Mail metadata: accountId={account_id}")
-            except Exception as e:
-                logger.error(f"❌ Failed to update Zoho Mail metadata: {e}")
-                raise HTTPException(status_code=500, detail=f"Failed to persist accountId: {e}")
-
-        # Page messages with attachments
-        max_total = max(1, min(req.max_results or 100, 500))
-        fetched = 0
-        while fetched < max_total:
-            params = {'hasAttachment': 'true', 'limit': min(100, max_total - fetched), 'from': (fetched + 1)}
-            msgs = await nango.proxy_get('zoho-mail', f'api/accounts/{account_id}/messages', params=params, connection_id=connection_id, provider_config_key=provider_key)
-            stats['actions_used'] += 1
-            items = []
-            if isinstance(msgs, dict):
-                items = msgs.get('messages') or msgs.get('data') or []
-            elif isinstance(msgs, list):
-                items = msgs
-            if not items:
-                break
-            for m in items:
-                mid = m.get('messageId') or m.get('id') or m.get('entityId')
-                if not mid:
-                    stats['skipped'] += 1
-                    continue
-                # Fetch detail for attachments
-                try:
-                    detail = await nango.proxy_get('zoho-mail', f'api/accounts/{account_id}/messages/{mid}', connection_id=connection_id, provider_config_key=provider_key)
-                    stats['actions_used'] += 1
-                except Exception:
-                    detail = m
-                attachments = detail.get('attachments') or []
-                batch_items: List[Dict[str, Any]] = []
-                for att in attachments:
-                    part_id = att.get('partId') or att.get('id') or att.get('contentId')
-                    fname = att.get('fileName') or att.get('name') or 'attachment'
-                    if not part_id:
-                        stats['skipped'] += 1
-                        continue
-                    content = b''
-                    # Try common content endpoints
-                    try:
-                        content = await nango.proxy_get_bytes('zoho-mail', f'api/accounts/{account_id}/messages/{mid}/attachments/{part_id}/content', connection_id=connection_id, provider_config_key=provider_key)
-                        stats['actions_used'] += 1
-                    except Exception:
-                        try:
-                            content = await nango.proxy_get_bytes('zoho-mail', f'api/accounts/{account_id}/messages/{mid}/content', params={'partId': part_id}, connection_id=connection_id, provider_config_key=provider_key)
-                            stats['actions_used'] += 1
-                        except Exception:
-                            content = b''
-                    if not content:
-                        stats['skipped'] += 1
-                        continue
-
-                    storage_path, file_hash = await _store_external_item_attachment(user_id, 'zoho-mail', str(mid), fname, content)
-                    stats['attachments_saved'] += 1
-                    metadata = {
-                        'subject': detail.get('subject') or m.get('subject'),
-                        'from': detail.get('from') or m.get('fromAddress') or m.get('from'),
-                        'to': detail.get('to') or m.get('toAddress') or m.get('to'),
-                        'size': att.get('size'),
-                        'message_id': mid,
-                        'correlation_id': req.correlation_id,
-                    }
-                    item = {
-                        'user_id': user_id,
-                        'user_connection_id': user_connection_id,
-                        'provider_id': f"{mid}:{part_id}",
-                        'kind': 'file',
-                        'source_ts': None,
-                        'hash': file_hash,
-                        'storage_path': storage_path,
-                        'metadata': metadata,
-                        'status': 'stored'
-                    }
-                    batch_items.append(item)
-
-                # FIX #3: Batch insert FIRST, then enqueue with external_item_id
-                if batch_items:
-                    inserted_items = []
-                    try:
-                        transaction_manager = get_transaction_manager()
-                        async with transaction_manager.transaction(
-                            user_id=user_id,
-                            operation_type="connector_sync_batch"
-                        ) as tx:
-                            try:
-                                # Batch insert for better performance
-                                inserted_items = await tx.insert_batch('external_items', batch_items)
-                                stats['records_fetched'] += len(inserted_items)
-                            except Exception as insert_err:
-                                # Fallback to individual inserts if batch fails (e.g., duplicates)
-                                if 'duplicate key' in str(insert_err).lower() or 'unique' in str(insert_err).lower():
-                                    for item in batch_items:
-                                        try:
-                                            result = await tx.insert('external_items', item)
-                                            if result:
-                                                inserted_items.append(result)
-                                            stats['records_fetched'] += 1
-                                        except Exception:
-                                            pass
-                                else:
-                                    logger.error(f"Zoho batch insert failed: {insert_err}")
-                    except Exception as batch_err:
-                        logger.error(f"Zoho batch insert transaction failed: {batch_err}")
-                    
-                    # Now enqueue processing with external_item_id
-                    for idx, inserted_item in enumerate(inserted_items):
-                        try:
-                            external_item_id = inserted_item.get('id')
-                            fname = inserted_item.get('metadata', {}).get('filename', '')
-                            storage_path = inserted_item.get('storage_path', '')
-                            
-                            lower = (fname or '').lower()
-                            if lower.endswith('.pdf'):
-                                await _enqueue_pdf_processing(user_id, fname, storage_path, external_item_id)
-                            else:
-                                await _enqueue_file_processing(user_id, fname, storage_path, external_item_id)
-                            stats['queued_jobs'] += 1
-                        except Exception as e:
-                            logger.warning(f"Zoho enqueue failed: {e}")
-                fetched += 1
-                if fetched >= max_total:
-                    break
-            if fetched >= max_total:
-                break
-        # Complete Zoho sync in transaction
-        try:
-            transaction_manager = get_transaction_manager()
-            async with transaction_manager.transaction(
-                user_id=user_id,
-                operation_type="connector_sync_completion"
-            ) as tx:
-                await tx.update('sync_runs', {
-                    'status': 'succeeded',
-                    'finished_at': datetime.utcnow().isoformat(),
-                    'stats': json.dumps(stats)
-                }, {'id': sync_run_id})
-                await tx.update('user_connections', {
-                    'last_synced_at': datetime.utcnow().isoformat()
-                }, {'nango_connection_id': connection_id})
-        except Exception as completion_err:
-            logger.error(f"Failed to update Zoho sync completion status: {completion_err}")
-        try:
-            JOBS_PROCESSED.labels(provider=provider_key, status='succeeded').inc()
-        except Exception:
-            pass
-        return {'status': 'succeeded', 'sync_run_id': sync_run_id, 'stats': stats}
-    except HTTPException:
-        supabase.table('sync_runs').update({'status': 'failed', 'finished_at': datetime.utcnow().isoformat(), 'stats': json.dumps(stats)}).eq('id', sync_run_id).execute()
-        JOBS_PROCESSED.labels(provider=provider_key, status='failed').inc()
-        raise
-    except Exception as e:
-        logger.error(f"Zoho Mail sync failed: {e}")
-        
-        # Error recovery
-        try:
-            recovery_system = get_error_recovery_system()
-            error_context = ErrorContext(
-                error_id=str(uuid.uuid4()),
-                user_id=user_id,
-                job_id=sync_run_id,
-                transaction_id=None,
-                operation_type='zohomail_sync',
-                error_message=str(e),
-                error_details={'sync_run_id': sync_run_id, 'connection_id': connection_id, 'provider': provider_key, 'correlation_id': req.correlation_id},
-                severity=ErrorSeverity.HIGH,
-                occurred_at=datetime.utcnow()
-            )
-            await recovery_system.handle_processing_error(error_context)
-        except Exception as recovery_error:
-            logger.error(f"Error recovery failed: {recovery_error}")
-        
-        supabase.table('sync_runs').update({'status': 'failed', 'finished_at': datetime.utcnow().isoformat(), 'error': str(e), 'stats': json.dumps(stats)}).eq('id', sync_run_id).execute()
-        JOBS_PROCESSED.labels(provider=provider_key, status='failed').inc()
-        raise HTTPException(status_code=500, detail='Zoho Mail sync failed')
-
-async def _quickbooks_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> Dict[str, Any]:
-    """
-    QuickBooks ingestion: fetch Invoices, Bills, and Payments via QBO Query API.
-    
-    ✅ UNIFIED PIPELINE: This function now uses the main ExcelProcessor pipeline to ensure:
-    - Multi-phased duplicate detection
-    - Advanced data enrichment
-    - Standardized entity resolution
-    - Consistent data semantics across all data sources
-    
-    Data flow: API → CSV format → ExcelProcessor → raw_events (with full enrichment)
-    """
-    provider_key = NANGO_QUICKBOOKS_INTEGRATION_ID
-    connection_id = req.connection_id
-    user_id = req.user_id
-    stats = {'records_fetched': 0, 'actions_used': 0, 'attachments_saved': 0, 'queued_jobs': 0, 'skipped': 0}
-
-    # Ensure connector and user_connection
-    conn_row = supabase.table('connectors').select('id').eq('provider', provider_key).limit(1).execute()
-    connector_id = conn_row.data[0]['id'] if conn_row.data else None
-    if not connector_id:
-        try:
-            res = supabase.table('connectors').insert({
-                'provider': provider_key,
-                'integration_id': provider_key,
-                'auth_type': 'OAUTH2',
-                'scopes': json.dumps([]),
-                'endpoints_needed': json.dumps([]),
-                'enabled': True
-            }).execute()
-            connector_id = (res.data[0]['id'] if res and res.data else None)
-        except Exception as e:
-            logger.warning(f"QuickBooks connectors upsert failed: {e}")
-    try:
-        supabase.table('user_connections').insert({
-            'user_id': user_id,
-            'connector_id': connector_id,
-            'nango_connection_id': connection_id,
-            'status': 'active',
-            'sync_mode': 'pull'
-        }).execute()
-    except Exception:
-        pass
-    uc_row = supabase.table('user_connections').select('id, metadata').eq('nango_connection_id', connection_id).limit(1).execute()
-    user_connection_id = uc_row.data[0]['id'] if uc_row.data else None
-    uc_meta = (uc_row.data[0].get('metadata') if uc_row.data else {}) or {}
-    if isinstance(uc_meta, str):
-        try:
-            uc_meta = json.loads(uc_meta)
-        except Exception:
-            uc_meta = {}
-
-    # Start sync run (transaction)
-    sync_run_id = str(uuid.uuid4())
-    try:
-        transaction_manager = get_transaction_manager()
-        async with transaction_manager.transaction(
-            user_id=user_id,
-            operation_type="connector_sync_start"
-        ) as tx:
-            await tx.insert('sync_runs', {
-                'id': sync_run_id,
-                'user_id': user_id,
-                'user_connection_id': user_connection_id,
-                'type': req.mode,
-                'status': 'running',
-                'started_at': datetime.utcnow().isoformat(),
-                'stats': json.dumps(stats)
-            })
-    except Exception:
-        pass
-
-    try:
-        # Discover realmId
-        realm_id = uc_meta.get('realmId') or uc_meta.get('realm_id')
-        if not realm_id:
-            raise HTTPException(status_code=400, detail='QuickBooks realmId not set; provide via /api/connectors/metadata')
-
-        limit = max(1, min(req.max_results or 100, 500))
-
-        async def _normalize_new_items_qbo():
-            try:
-                res = supabase.table('external_items').select(
-                    'id, provider_id, kind, metadata, source_ts'
-                ).eq('user_connection_id', user_connection_id).eq('status', 'fetched').limit(1000).execute()
-                items = res.data or []
-                # Filter by correlation id when present
-                if req.correlation_id:
-                    filtered = []
-                    for it in items:
-                        meta = it.get('metadata') or {}
-                        if isinstance(meta, str):
-                            try:
-                                meta = json.loads(meta)
-                            except Exception:
-                                meta = {}
-                        if meta.get('correlation_id') == req.correlation_id:
-                            it['metadata'] = meta
-                            filtered.append(it)
-                    items = filtered
-                if not items:
-                    return {'normalized_events': 0}
-                events_batch = []
-                row_idx = 0
-                def _qbo_build_events(batch_items):
-                    nonlocal row_idx
-                    out = []
-                    for it in batch_items:
-                        meta = it.get('metadata') or {}
-                        if isinstance(meta, str):
-                            try:
-                                meta = json.loads(meta)
-                            except Exception:
-                                meta = {}
-                        txn_type = meta.get('TxnType') or 'Txn'
-                        kind = 'txn'
-                        lt = str(txn_type).lower()
-                        if lt == 'invoice':
-                            kind = 'invoice'
-                        elif lt == 'bill':
-                            kind = 'bill'
-                        elif lt == 'payment':
-                            kind = 'payment'
-                        payload = {
-                            'txn_id': it.get('provider_id'),
-                            'txn_type': txn_type,
-                            'doc_number': meta.get('DocNumber'),
-                            'txn_date': meta.get('TxnDate'),
-                            'total_amount': meta.get('TotalAmt'),
-                            'name': meta.get('Name')
-                        }
-                        
-                        # ✅ PROVENANCE: Generate provenance for QuickBooks data
-                        source_filename = f"quickbooks:{it.get('provider_id')}"
-                        row_hash = calculate_row_hash(source_filename, row_idx, payload)
-                        lineage_path = create_lineage_path(initial_step="api_sync")
-                        lineage_path = append_lineage_step(
-                            lineage_path,
-                            step="api_fetch",
-                            operation="quickbooks_api",
-                            metadata={'provider_id': it.get('provider_id'), 'txn_type': txn_type}
-                        )
-                        
-                        event = {
-                            'user_id': user_id,
-                            'file_id': None,
-                            'job_id': None,
-                            'provider': 'quickbooks',
-                            'kind': kind,
-                            'source_platform': 'QuickBooks',
-                            'payload': payload,
-                            'row_index': row_idx,
-                            'sheet_name': None,
-                            'source_filename': source_filename,
-                            'uploader': user_id,
-                            'ingest_ts': (it.get('source_ts') or datetime.utcnow().isoformat()),
-                            'status': 'processed',
-                            'confidence_score': 0.95,
-                            'classification_metadata': {
-                                'category': 'financial_data',
-                                'subcategory': kind,
-                                'provider_id': it.get('provider_id')
-                            },
-                            'entities': {},
-                            'relationships': {},
-                            # ✅ PROVENANCE FIELDS
-                            'row_hash': row_hash,
-                            'lineage_path': lineage_path,
-                            'created_by': 'system:quickbooks_sync'
-                        }
-                        out.append(event)
-                        row_idx += 1
-                    return out
-                events_batch = batch_optimizer.batch_process_events(items, _qbo_build_events)
-                transaction_manager = get_transaction_manager()
-                norm_tx_id = None
-                async with transaction_manager.transaction(
-                    user_id=user_id,
-                    operation_type="accounting_normalization"
-                ) as tx:
-                    if events_batch:
-                        await tx.insert_batch('raw_events', events_batch)
-                    # capture tx id for downstream entity pipeline
-                    norm_tx_id = tx.transaction_id
-                    # Mark external_items as normalized with timestamp
-                    for it in items:
-                        meta = it.get('metadata') or {}
-                        if isinstance(meta, str):
-                            try:
-                                meta = json.loads(meta)
-                            except Exception:
-                                meta = {}
-                        meta['normalized_at'] = datetime.utcnow().isoformat()
-                        await tx.update('external_items', {'status': 'normalized', 'metadata': meta}, {'id': it['id']})
-                # Run NASA-GRADE entity resolution pipeline for records inserted in this normalization transaction
-                try:
-                    if norm_tx_id:
-                        excel_processor = ExcelProcessor()
-                        result = await excel_processor.run_entity_resolution_pipeline(
-                            user_id=user_id,
-                            supabase=supabase,
-                            transaction_id=norm_tx_id,
-                            filename='quickbooks:sync'
-                        )
-                        ENTITY_PIPELINE_RUNS.labels(provider='quickbooks', status='ok').inc()
-                        structured_logger.info("NASA-GRADE entity resolution complete", {
-                            "provider": "quickbooks",
-                            "transaction_id": norm_tx_id,
-                            "entities_found": result.get('entities_found', 0),
-                            "matches_created": result.get('matches_created', 0)
-                        })
-                except Exception as ep_err:
-                    ENTITY_PIPELINE_RUNS.labels(provider='quickbooks', status='error').inc()
-                    logger.warning(f"QBO connector entity resolution failed for tx {norm_tx_id}: {ep_err}")
-                return {'normalized_events': len(events_batch)}
-            except Exception as e:
-                logger.error(f"QuickBooks normalization failed: {e}")
-                return {'normalized_events': 0}
-
-        async def qbo_query(sql: str) -> Dict[str, Any]:
-            params = {"query": sql}
-            page = await nango.proxy_get('quickbooks', f'v3/company/{realm_id}/query', params=params, connection_id=connection_id, provider_config_key=provider_key)
-            stats['actions_used'] += 1
-            return page
-
-        # Fetch Invoices
-        inv_sql = f"SELECT Id, TxnDate, TotalAmt, DocNumber, CustomerRef FROM Invoice ORDER BY TxnDate DESC STARTPOSITION 1 MAXRESULTS {limit}"
-        inv_page = await qbo_query(inv_sql)
-        invoices = (inv_page.get('QueryResponse') or {}).get('Invoice') or []
-        batch_items: List[Dict[str, Any]] = []
-        for inv in invoices:
-            pid = inv.get('Id')
-            if not pid:
-                stats['skipped'] += 1
-                continue
-            # Try to capture customer name when available
-            cust_ref = inv.get('CustomerRef') or {}
-            cust_name = (cust_ref.get('name') or cust_ref.get('Name') or cust_ref.get('value')) if isinstance(cust_ref, dict) else None
-            meta = {
-                'TxnType': 'Invoice',
-                'DocNumber': inv.get('DocNumber'),
-                'TxnDate': inv.get('TxnDate'),
-                'TotalAmt': inv.get('TotalAmt'),
-                'Name': cust_name,
-                'correlation_id': req.correlation_id,
-            }
-            item = {
-                'user_id': user_id,
-                'user_connection_id': user_connection_id,
-                'provider_id': f"Invoice:{pid}",
-                'kind': 'txn',
-                'source_ts': inv.get('TxnDate'),
-                'hash': None,
-                'storage_path': None,
-                'metadata': meta,
-                'status': 'fetched'
-            }
-            batch_items.append(item)
-        if batch_items:
-            try:
-                transaction_manager = get_transaction_manager()
-                async with transaction_manager.transaction(
-                    user_id=user_id,
-                    operation_type="connector_sync_batch"
-                ) as tx:
-                    try:
-                        await tx.insert_batch('external_items', batch_items)
-                        stats['records_fetched'] += len(batch_items)
-                    except Exception as insert_err:
-                        if 'duplicate key' in str(insert_err).lower() or 'unique' in str(insert_err).lower():
-                            for item in batch_items:
-                                try:
-                                    await tx.insert('external_items', item)
-                                    stats['records_fetched'] += 1
-                                except Exception:
-                                    stats['skipped'] += 1
-                        else:
-                            logger.error(f"QuickBooks invoice batch insert failed: {insert_err}")
-                            stats['skipped'] += len(batch_items)
-            except Exception as batch_err:
-                logger.error(f"QuickBooks invoice batch transaction failed: {batch_err}")
-
-        # Fetch Bills
-        bill_sql = f"SELECT Id, TxnDate, TotalAmt, DocNumber, VendorRef FROM Bill ORDER BY TxnDate DESC STARTPOSITION 1 MAXRESULTS {limit}"
-        bill_page = await qbo_query(bill_sql)
-        bills = (bill_page.get('QueryResponse') or {}).get('Bill') or []
-        batch_items = []
-        for bill in bills:
-            pid = bill.get('Id')
-            if not pid:
-                stats['skipped'] += 1
-                continue
-            vend_ref = bill.get('VendorRef') or {}
-            vend_name = (vend_ref.get('name') or vend_ref.get('Name') or vend_ref.get('value')) if isinstance(vend_ref, dict) else None
-            meta = {
-                'TxnType': 'Bill',
-                'DocNumber': bill.get('DocNumber'),
-                'TxnDate': bill.get('TxnDate'),
-                'TotalAmt': bill.get('TotalAmt'),
-                'Name': vend_name,
-                'correlation_id': req.correlation_id,
-            }
-            item = {
-                'user_id': user_id,
-                'user_connection_id': user_connection_id,
-                'provider_id': f"Bill:{pid}",
-                'kind': 'txn',
-                'source_ts': bill.get('TxnDate'),
-                'hash': None,
-                'storage_path': None,
-                'metadata': meta,
-                'status': 'fetched'
-            }
-            batch_items.append(item)
-        if batch_items:
-            try:
-                transaction_manager = get_transaction_manager()
-                async with transaction_manager.transaction(
-                    user_id=user_id,
-                    operation_type="connector_sync_batch"
-                ) as tx:
-                    try:
-                        await tx.insert_batch('external_items', batch_items)
-                        stats['records_fetched'] += len(batch_items)
-                    except Exception as insert_err:
-                        if 'duplicate key' in str(insert_err).lower() or 'unique' in str(insert_err).lower():
-                            for item in batch_items:
-                                try:
-                                    await tx.insert('external_items', item)
-                                    stats['records_fetched'] += 1
-                                except Exception:
-                                    stats['skipped'] += 1
-                        else:
-                            logger.error(f"QuickBooks bill batch insert failed: {insert_err}")
-                            stats['skipped'] += len(batch_items)
-            except Exception as batch_err:
-                logger.error(f"QuickBooks bill batch transaction failed: {batch_err}")
-
-        # Fetch Payments
-        pay_sql = f"SELECT Id, TxnDate, TotalAmt, CustomerRef FROM Payment ORDER BY TxnDate DESC STARTPOSITION 1 MAXRESULTS {limit}"
-        pay_page = await qbo_query(pay_sql)
-        payments = (pay_page.get('QueryResponse') or {}).get('Payment') or []
-        batch_items = []
-        for pay in payments:
-            pid = pay.get('Id')
-            if not pid:
-                stats['skipped'] += 1
-                continue
-            pay_ref = pay.get('CustomerRef') or pay.get('EntityRef') or {}
-            pay_name = (pay_ref.get('name') or pay_ref.get('Name') or pay_ref.get('value')) if isinstance(pay_ref, dict) else None
-            meta = {
-                'TxnType': 'Payment',
-                'TxnDate': pay.get('TxnDate'),
-                'TotalAmt': pay.get('TotalAmt'),
-                'Name': pay_name,
-                'correlation_id': req.correlation_id,
-            }
-            item = {
-                'user_id': user_id,
-                'user_connection_id': user_connection_id,
-                'provider_id': f"Payment:{pid}",
-                'kind': 'txn',
-                'source_ts': pay.get('TxnDate'),
-                'hash': None,
-                'storage_path': None,
-                'metadata': meta,
-                'status': 'fetched'
-            }
-            batch_items.append(item)
-        if batch_items:
-            try:
-                transaction_manager = get_transaction_manager()
-                async with transaction_manager.transaction(
-                    user_id=user_id,
-                    operation_type="connector_sync_batch"
-                ) as tx:
-                    try:
-                        await tx.insert_batch('external_items', batch_items)
-                        stats['records_fetched'] += len(batch_items)
-                    except Exception as insert_err:
-                        if 'duplicate key' in str(insert_err).lower() or 'unique' in str(insert_err).lower():
-                            for item in batch_items:
-                                try:
-                                    await tx.insert('external_items', item)
-                                    stats['records_fetched'] += 1
-                                except Exception:
-                                    stats['skipped'] += 1
-                        else:
-                            logger.error(f"QuickBooks payment batch insert failed: {insert_err}")
-                            stats['skipped'] += len(batch_items)
-            except Exception as batch_err:
-                logger.error(f"QuickBooks payment batch transaction failed: {batch_err}")
-        
-        # UNIFIED PIPELINE: Process all fetched data through main ExcelProcessor
-        try:
-            _t0 = time.time()
-            
-            # Collect all QuickBooks data for unified processing
-            all_qbo_data = []
-            
-            # Fetch all external_items for this sync
-            ext_items_res = supabase.table('external_items').select(
-                'id, provider_id, kind, metadata, source_ts'
-            ).eq('user_connection_id', user_connection_id).eq('status', 'fetched').limit(1000).execute()
-            
-            items = ext_items_res.data or []
-            
-            # Filter by correlation_id if present
-            if req.correlation_id:
-                items = [it for it in items 
-                        if (it.get('metadata') or {}).get('correlation_id') == req.correlation_id]
-            
-            if items:
-                # Convert external_items to standardized format for CSV
-                for it in items:
-                    meta = it.get('metadata') or {}
-                    if isinstance(meta, str):
-                        try:
-                            meta = json.loads(meta)
-                        except Exception:
-                            meta = {}
-                    
-                    # Create standardized record
-                    record = {
-                        'transaction_id': it.get('provider_id'),
-                        'transaction_type': meta.get('TxnType', 'Transaction'),
-                        'document_number': meta.get('DocNumber', ''),
-                        'transaction_date': meta.get('TxnDate', ''),
-                        'total_amount': meta.get('TotalAmt', 0),
-                        'entity_name': meta.get('Name', ''),
-                        'source': 'QuickBooks',
-                        'source_timestamp': it.get('source_ts', datetime.utcnow().isoformat())
-                    }
-                    all_qbo_data.append(record)
-                
-                # Process through unified pipeline
-                logger.info(f" Processing {len(all_qbo_data)} QuickBooks records through unified pipeline...")
-                pipeline_result = await _process_api_data_through_pipeline(
-                    user_id=user_id,
-                    data=all_qbo_data,
-                    source_platform='QuickBooks',
-                    sync_run_id=sync_run_id,
-                    user_connection_id=user_connection_id
-                )
-                
-                stats['normalized_events'] = pipeline_result.get('processed_rows', 0)
-                stats['pipeline_job_id'] = pipeline_result.get('job_id')
-                
-                # Mark external_items as processed (bulk update)
-                if items:
-                    item_ids = [it['id'] for it in items]
-                    try:
-                        supabase.table('external_items').update({'status': 'processed'}).in_('id', item_ids).execute()
-                    except Exception as e:
-                        logger.warning(f"QuickBooks bulk status update failed: {e}")
-                        for it in items:
-                            try:
-                                supabase.table('external_items').update({'status': 'processed'}).eq('id', it['id']).execute()
-                            except Exception:
-                                pass
-                
-                NORMALIZATION_EVENTS.labels(provider='quickbooks').inc(stats['normalized_events'])
-                NORMALIZATION_DURATION.labels(provider='quickbooks').observe(max(0.0, time.time() - _t0))
-                structured_logger.info("Unified pipeline processing complete", {
-                    "provider": "quickbooks",
-                    "processed_rows": stats['normalized_events'],
-                    "job_id": stats.get('pipeline_job_id')
-                })
-            else:
-                logger.info("No QuickBooks items to process")
-                stats['normalized_events'] = 0
-                
-        except Exception as e:
-            logger.error(f"QuickBooks unified pipeline processing failed: {e}")
-            stats['normalized_events'] = 0
-
-        # Complete QuickBooks sync in transaction
-        try:
-            transaction_manager = get_transaction_manager()
-            async with transaction_manager.transaction(
-                user_id=user_id,
-                operation_type="connector_sync_completion"
-            ) as tx:
-                await tx.update('sync_runs', {
-                    'status': 'succeeded',
-                    'finished_at': datetime.utcnow().isoformat(),
-                    'stats': json.dumps(stats)
-                }, {'id': sync_run_id})
-                await tx.update('user_connections', {
-                    'last_synced_at': datetime.utcnow().isoformat()
-                }, {'nango_connection_id': connection_id})
-        except Exception as completion_err:
-            logger.error(f"Failed to update QuickBooks sync completion status: {completion_err}")
-        try:
-            JOBS_PROCESSED.labels(provider=provider_key, status='succeeded').inc()
-        except Exception:
-            pass
-        return {'status': 'succeeded', 'sync_run_id': sync_run_id, 'stats': stats}
-    except HTTPException:
-        supabase.table('sync_runs').update({'status': 'failed', 'finished_at': datetime.utcnow().isoformat(), 'stats': json.dumps(stats)}).eq('id', sync_run_id).execute()
-        JOBS_PROCESSED.labels(provider=provider_key, status='failed').inc()
-        raise
-    except Exception as e:
-        logger.error(f"QuickBooks sync failed: {e}")
-        
-        # Error recovery
-        try:
-            recovery_system = get_error_recovery_system()
-            error_context = ErrorContext(
-                error_id=str(uuid.uuid4()),
-                user_id=user_id,
-                job_id=sync_run_id,
-                transaction_id=None,
-                operation_type='quickbooks_sync',
-                error_message=str(e),
-                error_details={'sync_run_id': sync_run_id, 'connection_id': connection_id, 'provider': provider_key, 'correlation_id': req.correlation_id},
-                severity=ErrorSeverity.HIGH,
-                occurred_at=datetime.utcnow()
-            )
-            await recovery_system.handle_processing_error(error_context)
-        except Exception as recovery_error:
-            logger.error(f"Error recovery failed: {recovery_error}")
-        
-        supabase.table('sync_runs').update({'status': 'failed', 'finished_at': datetime.utcnow().isoformat(), 'error': str(e), 'stats': json.dumps(stats)}).eq('id', sync_run_id).execute()
-        JOBS_PROCESSED.labels(provider=provider_key, status='failed').inc()
-        raise HTTPException(status_code=500, detail='QuickBooks sync failed')
-
-async def _xero_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> Dict[str, Any]:
-    """
-    Xero ingestion: fetch Invoices, Contacts, Payments and persist as external_items.
-    Requires tenantId header; we discover via `connections` when missing and persist to metadata.
-    
-    UNIFIED PIPELINE: This function now uses the main ExcelProcessor pipeline to ensure:
-    - Multi-phased duplicate detection
-    - Advanced data enrichment
-    - Standardized entity resolution
-    - Consistent data semantics across all data sources
-    
-    Data flow: API → CSV format → ExcelProcessor → raw_events (with full enrichment)
-    """
-    provider_key = NANGO_XERO_INTEGRATION_ID
-    connection_id = req.connection_id
-    user_id = req.user_id
-    stats = {'records_fetched': 0, 'actions_used': 0, 'attachments_saved': 0, 'queued_jobs': 0, 'skipped': 0}
-
-    # Ensure connector and user_connection
-    conn_row = supabase.table('connectors').select('id').eq('provider', provider_key).limit(1).execute()
-    connector_id = conn_row.data[0]['id'] if conn_row.data else None
-    if not connector_id:
-        try:
-            res = supabase.table('connectors').insert({
-                'provider': provider_key,
-                'integration_id': provider_key,
-                'auth_type': 'OAUTH2',
-                'scopes': json.dumps([]),
-                'endpoints_needed': json.dumps([]),
-                'enabled': True
-            }).execute()
-            connector_id = (res.data[0]['id'] if res and res.data else None)
-        except Exception as e:
-            logger.warning(f"Xero connectors upsert failed: {e}")
-    try:
-        supabase.table('user_connections').insert({
-            'user_id': user_id,
-            'connector_id': connector_id,
-            'nango_connection_id': connection_id,
-            'status': 'active',
-            'sync_mode': 'pull'
-        }).execute()
-    except Exception:
-        pass
-    uc_row = supabase.table('user_connections').select('id, metadata').eq('nango_connection_id', connection_id).limit(1).execute()
-    user_connection_id = uc_row.data[0]['id'] if uc_row.data else None
-    uc_meta = (uc_row.data[0].get('metadata') if uc_row.data else {}) or {}
-    if isinstance(uc_meta, str):
-        try:
-            uc_meta = json.loads(uc_meta)
-        except Exception:
-            uc_meta = {}
-
-    # Start sync run (transaction)
-    sync_run_id = str(uuid.uuid4())
-    try:
-        transaction_manager = get_transaction_manager()
-        async with transaction_manager.transaction(
-            user_id=user_id,
-            operation_type="connector_sync_start"
-        ) as tx:
-            await tx.insert('sync_runs', {
-                'id': sync_run_id,
-                'user_id': user_id,
-                'user_connection_id': user_connection_id,
-                'type': req.mode,
-                'status': 'running',
-                'started_at': datetime.utcnow().isoformat(),
-                'stats': json.dumps(stats)
-            })
-    except Exception:
-        pass
-
-    try:
-        # Resolve tenantId
-        tenant_id = uc_meta.get('tenantId') or uc_meta.get('tenant_id')
-        if not tenant_id:
-            cons = await nango.proxy_get('xero', 'connections', connection_id=connection_id, provider_config_key=provider_key)
-            stats['actions_used'] += 1
-            if isinstance(cons, list) and cons:
-                tenant_id = cons[0].get('tenantId') or cons[0].get('tenant_id')
-            elif isinstance(cons, dict):
-                arr = cons.get('data') or cons.get('connections') or []
-                if isinstance(arr, list) and arr:
-                    tenant_id = arr[0].get('tenantId') or arr[0].get('tenant_id')
-        if not tenant_id:
-            raise HTTPException(status_code=400, detail='Xero tenantId not set; provide via /api/connectors/metadata')
-        # FIX #2: Persist discovered tenantId with transaction protection
-        if 'tenantId' not in uc_meta:
-            try:
-                transaction_manager = get_transaction_manager()
-                async with transaction_manager.transaction(
-                    user_id=user_id,
-                    operation_type="connector_metadata_update"
-                ) as tx:
-                    await tx.update('user_connections', {
-                        'metadata': {**uc_meta, 'tenantId': tenant_id}
-                    }, {'nango_connection_id': connection_id})
-                    logger.info(f" Updated Xero metadata: tenantId={tenant_id}")
-            except Exception as e:
-                logger.error(f" Failed to update Xero metadata: {e}")
-                raise HTTPException(status_code=500, detail=f"Failed to persist tenantId: {e}")
-
-        headers = {"xero-tenant-id": tenant_id}
-        limit = max(1, min(req.max_results or 100, 500))
-
-        async def _normalize_new_items_xero():
-            try:
-                res = supabase.table('external_items').select(
-                    'id, provider_id, kind, metadata, source_ts'
-                ).eq('user_connection_id', user_connection_id).eq('status', 'fetched').limit(1000).execute()
-                items = res.data or []
-                # Filter by correlation id when present
-                if req.correlation_id:
-                    filtered = []
-                    for it in items:
-                        meta = it.get('metadata') or {}
-                        if isinstance(meta, str):
-                            try:
-                                meta = json.loads(meta)
-                            except Exception:
-                                meta = {}
-                        if meta.get('correlation_id') == req.correlation_id:
-                            it['metadata'] = meta
-                            filtered.append(it)
-                    items = filtered
-                if not items:
-                    return {'normalized_events': 0}
-                events_batch = []
-                row_idx = 0
-                def _xero_build_events(batch_items):
-                    nonlocal row_idx
-                    out = []
-                    for it in batch_items:
-                        meta = it.get('metadata') or {}
-                        if isinstance(meta, str):
-                            try:
-                                meta = json.loads(meta)
-                            except Exception:
-                                meta = {}
-                        txn_type = meta.get('TxnType') or meta.get('type') or 'Txn'
-                        lt = str(txn_type).lower()
-                        if lt == 'invoice':
-                            kind = 'invoice'
-                        elif lt == 'payment':
-                            kind = 'payment'
-                        elif lt == 'contact':
-                            kind = 'contact'
-                        else:
-                            kind = 'txn'
-                        payload = {
-                            'txn_id': it.get('provider_id'),
-                            'txn_type': txn_type,
-                            'doc_number': meta.get('InvoiceNumber') or meta.get('DocNumber'),
-                            'txn_date': meta.get('Date') or meta.get('UpdatedDateUTC'),
-                            'total_amount': meta.get('Total') or meta.get('Amount'),
-                            'name': meta.get('Name'),
-                            'email': meta.get('EmailAddress')
-                        }
-                        
-                        # PROVENANCE: Generate provenance for Xero data
-                        source_filename = f"xero:{it.get('provider_id')}"
-                        row_hash = calculate_row_hash(source_filename, row_idx, payload)
-                        lineage_path = create_lineage_path(initial_step="api_sync")
-                        lineage_path = append_lineage_step(
-                            lineage_path,
-                            step="api_fetch",
-                            operation="xero_api",
-                            metadata={'provider_id': it.get('provider_id'), 'txn_type': txn_type}
-                        )
-                        
-                        event = {
-                            'user_id': user_id,
-                            'file_id': None,
-                            'job_id': None,
-                            'provider': 'xero',
-                            'kind': kind,
-                            'source_platform': 'Xero',
-                            'payload': payload,
-                            'row_index': row_idx,
-                            'sheet_name': None,
-                            'source_filename': source_filename,
-                            'uploader': user_id,
-                            'ingest_ts': (it.get('source_ts') or datetime.utcnow().isoformat()),
-                            'status': 'processed',
-                            'confidence_score': 0.95,
-                            'classification_metadata': {
-                                'category': 'financial_data',
-                                'subcategory': kind,
-                                'provider_id': it.get('provider_id')
-                            },
-                            # PROVENANCE FIELDS
-                            'row_hash': row_hash,
-                            'lineage_path': lineage_path,
-                            'created_by': 'system:xero_sync',
-                            'entities': {},
-                            'relationships': {}
-                        }
-                        out.append(event)
-                        row_idx += 1
-                    return out
-                events_batch = batch_optimizer.batch_process_events(items, _xero_build_events)
-                transaction_manager = get_transaction_manager()
-                norm_tx_id = None
-                async with transaction_manager.transaction(
-                    user_id=user_id,
-                    operation_type="accounting_normalization"
-                ) as tx:
-                    if events_batch:
-                        await tx.insert_batch('raw_events', events_batch)
-                    # capture tx id for downstream entity pipeline
-                    norm_tx_id = tx.transaction_id
-                    # Mark external_items as normalized with timestamp
-                    for it in items:
-                        meta = it.get('metadata') or {}
-                        if isinstance(meta, str):
-                            try:
-                                meta = json.loads(meta)
-                            except Exception:
-                                meta = {}
-                        meta['normalized_at'] = datetime.utcnow().isoformat()
-                        await tx.update('external_items', {'status': 'normalized', 'metadata': meta}, {'id': it['id']})
-                # Run NASA-GRADE entity resolution pipeline for records inserted in this normalization transaction
-                try:
-                    if norm_tx_id:
-                        excel_processor = ExcelProcessor()
-                        result = await excel_processor.run_entity_resolution_pipeline(
-                            user_id=user_id,
-                            supabase=supabase,
-                            transaction_id=norm_tx_id,
-                            filename='xero:sync'
-                        )
-                        ENTITY_PIPELINE_RUNS.labels(provider='xero', status='ok').inc()
-                        structured_logger.info("NASA-GRADE entity resolution complete", {
-                            "provider": "xero",
-                            "transaction_id": norm_tx_id,
-                            "entities_found": result.get('entities_found', 0),
-                            "matches_created": result.get('matches_created', 0)
-                        })
-                except Exception as ep_err:
-                    ENTITY_PIPELINE_RUNS.labels(provider='xero', status='error').inc()
-                    logger.warning(f"Xero connector entity resolution failed for tx {norm_tx_id}: {ep_err}")
-                return {'normalized_events': len(events_batch)}
-            except Exception as e:
-                logger.error(f"Xero normalization failed: {e}")
-                return {'normalized_events': 0}
-
-        async def xero_get(path: str, params: Dict[str, Any] | None = None) -> Dict[str, Any]:
-            page = await nango.proxy_get('xero', path, params=params or {}, connection_id=connection_id, provider_config_key=provider_key, headers=headers)
-            stats['actions_used'] += 1
-            return page
-
-        # Invoices
-        fetched = 0
-        page_no = 1
-        while fetched < limit:
-            inv_page = await xero_get('api.xro/2.0/Invoices', params={'page': page_no, 'order': 'Date DESC'})
-            invoices = inv_page.get('Invoices') or inv_page.get('data') or []
-            if not invoices:
-                break
-            batch_items: List[Dict[str, Any]] = []
-            for inv in invoices:
-                pid = inv.get('InvoiceID') or inv.get('InvoiceId') or inv.get('ID')
-                if not pid:
-                    stats['skipped'] += 1
-                    continue
-                meta = {
-                    'TxnType': 'Invoice',
-                    'InvoiceNumber': inv.get('InvoiceNumber'),
-                    'Date': inv.get('Date'),
-                    'Total': inv.get('Total'),
-                    'Status': inv.get('Status'),
-                    'correlation_id': req.correlation_id,
-                }
-                item = {
-                    'user_id': user_id,
-                    'user_connection_id': user_connection_id,
-                    'provider_id': f"Invoice:{pid}",
-                    'kind': 'txn',
-                    'source_ts': inv.get('Date'),
-                    'hash': None,
-                    'storage_path': None,
-                    'metadata': meta,
-                    'status': 'fetched'
-                }
-                batch_items.append(item)
-                fetched += 1
-                if fetched >= limit:
-                    break
-            if batch_items:
-                try:
-                    transaction_manager = get_transaction_manager()
-                    async with transaction_manager.transaction(
-                        user_id=user_id,
-                        operation_type="connector_sync_batch"
-                    ) as tx:
-                        try:
-                            await tx.insert_batch('external_items', batch_items)
-                            stats['records_fetched'] += len(batch_items)
-                        except Exception as insert_err:
-                            if 'duplicate key' in str(insert_err).lower() or 'unique' in str(insert_err).lower():
-                                for item in batch_items:
-                                    try:
-                                        await tx.insert('external_items', item)
-                                        stats['records_fetched'] += 1
-                                    except Exception:
-                                        stats['skipped'] += 1
-                            else:
-                                logger.error(f"Xero invoice batch insert failed: {insert_err}")
-                                stats['skipped'] += len(batch_items)
-                except Exception as batch_err:
-                    logger.error(f"Xero invoice batch transaction failed: {batch_err}")
-            if fetched >= limit:
-                break
-            page_no += 1
-
-        # Contacts (optional but useful for normalization)
-        fetched_c = 0
-        page_c = 1
-        while fetched_c < limit:
-            con_page = await xero_get('api.xro/2.0/Contacts', params={'page': page_c, 'order': 'UpdatedDateUTC DESC'})
-            contacts = con_page.get('Contacts') or con_page.get('data') or []
-            if not contacts:
-                break
-            batch_items = []
-            for c in contacts:
-                pid = c.get('ContactID') or c.get('ID')
-                if not pid:
-                    stats['skipped'] += 1
-                    continue
-                meta = {
-                    'TxnType': 'Contact',
-                    'Name': c.get('Name'),
-                    'EmailAddress': c.get('EmailAddress'),
-                    'UpdatedDateUTC': c.get('UpdatedDateUTC'),
-                    'correlation_id': req.correlation_id,
-                }
-                item = {
-                    'user_id': user_id,
-                    'user_connection_id': user_connection_id,
-                    'provider_id': f"Contact:{pid}",
-                    'kind': 'entity',
-                    'source_ts': c.get('UpdatedDateUTC'),
-                    'hash': None,
-                    'storage_path': None,
-                    'metadata': meta,
-                    'status': 'fetched'
-                }
-                batch_items.append(item)
-                fetched_c += 1
-                if fetched_c >= limit:
-                    break
-            if batch_items:
-                try:
-                    transaction_manager = get_transaction_manager()
-                    async with transaction_manager.transaction(
-                        user_id=user_id,
-                        operation_type="connector_sync_batch"
-                    ) as tx:
-                        try:
-                            await tx.insert_batch('external_items', batch_items)
-                            stats['records_fetched'] += len(batch_items)
-                        except Exception as insert_err:
-                            if 'duplicate key' in str(insert_err).lower() or 'unique' in str(insert_err).lower():
-                                for item in batch_items:
-                                    try:
-                                        await tx.insert('external_items', item)
-                                        stats['records_fetched'] += 1
-                                    except Exception:
-                                        stats['skipped'] += 1
-                            else:
-                                logger.error(f"Xero contact batch insert failed: {insert_err}")
-                                stats['skipped'] += len(batch_items)
-                except Exception as batch_err:
-                    logger.error(f"Xero contact batch transaction failed: {batch_err}")
-            if fetched_c >= limit:
-                break
-            page_c += 1
-
-        # Payments
-        fetched_p = 0
-        page_p = 1
-        while fetched_p < limit:
-            pay_page = await xero_get('api.xro/2.0/Payments', params={'page': page_p, 'order': 'Date DESC'})
-            payments = pay_page.get('Payments') or pay_page.get('data') or []
-            if not payments:
-                break
-            batch_items = []
-            for p in payments:
-                pid = p.get('PaymentID') or p.get('ID')
-                if not pid:
-                    stats['skipped'] += 1
-                    continue
-                meta = {
-                    'TxnType': 'Payment',
-                    'Date': p.get('Date'),
-                    'Total': p.get('Amount'),
-                    'Status': p.get('Status'),
-                    'correlation_id': req.correlation_id,
-                }
-                item = {
-                    'user_id': user_id,
-                    'user_connection_id': user_connection_id,
-                    'provider_id': f"Payment:{pid}",
-                    'kind': 'txn',
-                    'source_ts': p.get('Date'),
-                    'hash': None,
-                    'storage_path': None,
-                    'metadata': meta,
-                    'status': 'fetched'
-                }
-                batch_items.append(item)
-                fetched_p += 1
-                if fetched_p >= limit:
-                    break
-            if batch_items:
-                try:
-                    transaction_manager = get_transaction_manager()
-                    async with transaction_manager.transaction(
-                        user_id=user_id,
-                        operation_type="connector_sync_batch"
-                    ) as tx:
-                        try:
-                            await tx.insert_batch('external_items', batch_items)
-                            stats['records_fetched'] += len(batch_items)
-                        except Exception as insert_err:
-                            if 'duplicate key' in str(insert_err).lower() or 'unique' in str(insert_err).lower():
-                                for item in batch_items:
-                                    try:
-                                        await tx.insert('external_items', item)
-                                        stats['records_fetched'] += 1
-                                    except Exception:
-                                        stats['skipped'] += 1
-                            else:
-                                logger.error(f"Xero payment batch insert failed: {insert_err}")
-                                stats['skipped'] += len(batch_items)
-                except Exception as batch_err:
-                    logger.error(f"Xero payment batch transaction failed: {batch_err}")
-            if fetched_p >= limit:
-                break
-            page_p += 1
-
-        # UNIFIED PIPELINE: Process all fetched data through main ExcelProcessor
-        try:
-            _t0x = time.time()
-            
-            # Collect all Xero data for unified processing
-            all_xero_data = []
-            
-            # Fetch all external_items for this sync
-            ext_items_res = supabase.table('external_items').select(
-                'id, provider_id, kind, metadata, source_ts'
-            ).eq('user_connection_id', user_connection_id).eq('status', 'fetched').limit(1000).execute()
-            
-            items = ext_items_res.data or []
-            
-            # Filter by correlation_id if present
-            if req.correlation_id:
-                items = [it for it in items 
-                        if (it.get('metadata') or {}).get('correlation_id') == req.correlation_id]
-            
-            if items:
-                # Convert external_items to standardized format for CSV
-                for it in items:
-                    meta = it.get('metadata') or {}
-                    if isinstance(meta, str):
-                        try:
-                            meta = json.loads(meta)
-                        except Exception:
-                            meta = {}
-                    
-                    # Create standardized record
-                    record = {
-                        'transaction_id': it.get('provider_id'),
-                        'transaction_type': meta.get('TxnType') or meta.get('type', 'Transaction'),
-                        'document_number': meta.get('InvoiceNumber') or meta.get('DocNumber', ''),
-                        'transaction_date': meta.get('Date') or meta.get('UpdatedDateUTC', ''),
-                        'total_amount': meta.get('Total') or meta.get('Amount', 0),
-                        'entity_name': meta.get('Name', ''),
-                        'email': meta.get('EmailAddress', ''),
-                        'source': 'Xero',
-                        'source_timestamp': it.get('source_ts', datetime.utcnow().isoformat())
-                    }
-                    all_xero_data.append(record)
-                
-                # Process through unified pipeline
-                logger.info(f"🔄 Processing {len(all_xero_data)} Xero records through unified pipeline...")
-                pipeline_result = await _process_api_data_through_pipeline(
-                    user_id=user_id,
-                    data=all_xero_data,
-                    source_platform='Xero',
-                    sync_run_id=sync_run_id,
-                    user_connection_id=user_connection_id
-                )
-                
-                stats['normalized_events'] = pipeline_result.get('processed_rows', 0)
-                stats['pipeline_job_id'] = pipeline_result.get('job_id')
-                
-                # Mark external_items as processed (bulk update)
-                if items:
-                    item_ids = [it['id'] for it in items]
-                    try:
-                        supabase.table('external_items').update({'status': 'processed'}).in_('id', item_ids).execute()
-                    except Exception as e:
-                        logger.warning(f"Xero bulk status update failed: {e}")
-                        for it in items:
-                            try:
-                                supabase.table('external_items').update({'status': 'processed'}).eq('id', it['id']).execute()
-                            except Exception:
-                                pass
-                
-                NORMALIZATION_EVENTS.labels(provider='xero').inc(stats['normalized_events'])
-                NORMALIZATION_DURATION.labels(provider='xero').observe(max(0.0, time.time() - _t0x))
-                structured_logger.info("Unified pipeline processing complete", {
-                    "provider": "xero",
-                    "processed_rows": stats['normalized_events'],
-                    "job_id": stats.get('pipeline_job_id')
-                })
-            else:
-                logger.info("No Xero items to process")
-                stats['normalized_events'] = 0
-                
-        except Exception as e:
-            logger.error(f"Xero unified pipeline processing failed: {e}")
-            stats['normalized_events'] = 0
-
-        # Complete Xero sync in transaction
-        try:
-            transaction_manager = get_transaction_manager()
-            async with transaction_manager.transaction(
-                user_id=user_id,
-                operation_type="connector_sync_completion"
-            ) as tx:
-                await tx.update('sync_runs', {
-                    'status': 'succeeded',
-                    'finished_at': datetime.utcnow().isoformat(),
-                    'stats': json.dumps(stats)
-                }, {'id': sync_run_id})
-                await tx.update('user_connections', {
-                    'last_synced_at': datetime.utcnow().isoformat()
-                }, {'nango_connection_id': connection_id})
-        except Exception as completion_err:
-            logger.error(f"Failed to update Xero sync completion status: {completion_err}")
-        try:
-            JOBS_PROCESSED.labels(provider=provider_key, status='succeeded').inc()
-        except Exception:
-            pass
-        return {'status': 'succeeded', 'sync_run_id': sync_run_id, 'stats': stats}
-    except HTTPException:
-        supabase.table('sync_runs').update({'status': 'failed', 'finished_at': datetime.utcnow().isoformat(), 'stats': json.dumps(stats)}).eq('id', sync_run_id).execute()
-        JOBS_PROCESSED.labels(provider=provider_key, status='failed').inc()
-        raise
-    except Exception as e:
-        logger.error(f"Xero sync failed: {e}")
-        
-        # Error recovery
-        try:
-            recovery_system = get_error_recovery_system()
-            error_context = ErrorContext(
-                error_id=str(uuid.uuid4()),
-                user_id=user_id,
-                job_id=sync_run_id,
-                transaction_id=None,
-                operation_type='xero_sync',
-                error_message=str(e),
-                error_details={'sync_run_id': sync_run_id, 'connection_id': connection_id, 'provider': provider_key, 'correlation_id': req.correlation_id},
-                severity=ErrorSeverity.HIGH,
-                occurred_at=datetime.utcnow()
-            )
-            await recovery_system.handle_processing_error(error_context)
-        except Exception as recovery_error:
-            logger.error(f"Error recovery failed: {recovery_error}")
-        
-        supabase.table('sync_runs').update({'status': 'failed', 'finished_at': datetime.utcnow().isoformat(), 'error': str(e), 'stats': json.dumps(stats)}).eq('id', sync_run_id).execute()
-        JOBS_PROCESSED.labels(provider=provider_key, status='failed').inc()
-        raise HTTPException(status_code=500, detail='Xero sync failed')
-
-async def _zoho_books_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> Dict[str, Any]:
-    """
-    Zoho Books ingestion: fetch Invoices, Bills, and Contacts via Zoho Books API.
-    
-    ✅ UNIFIED PIPELINE: Uses the main ExcelProcessor pipeline for:
-    - Multi-phased duplicate detection
-    - Advanced data enrichment
-    - Standardized entity resolution
-    - Consistent data semantics across all data sources
-    
-    Data flow: API → CSV format → ExcelProcessor → raw_events (with full enrichment)
-    """
-    provider_key = NANGO_ZOHO_BOOKS_INTEGRATION_ID
-    connection_id = req.connection_id
-    user_id = req.user_id
-    stats = {'records_fetched': 0, 'actions_used': 0, 'attachments_saved': 0, 'queued_jobs': 0, 'skipped': 0}
-
-    # Ensure connector and user_connection
-    conn_row = supabase.table('connectors').select('id').eq('provider', provider_key).limit(1).execute()
-    connector_id = conn_row.data[0]['id'] if conn_row.data else None
-    if not connector_id:
-        try:
-            res = supabase.table('connectors').insert({
-                'provider': provider_key,
-                'integration_id': provider_key,
-                'auth_type': 'OAUTH2',
-                'scopes': json.dumps([]),
-                'endpoints_needed': json.dumps([]),
-                'enabled': True
-            }).execute()
-            connector_id = (res.data[0]['id'] if res and res.data else None)
-        except Exception as e:
-            logger.warning(f"Zoho Books connectors upsert failed: {e}")
-    try:
-        supabase.table('user_connections').insert({
-            'user_id': user_id,
-            'connector_id': connector_id,
-            'nango_connection_id': connection_id,
-            'status': 'active',
-            'sync_mode': 'pull'
-        }).execute()
-    except Exception:
-        pass
-    uc_row = supabase.table('user_connections').select('id, metadata').eq('nango_connection_id', connection_id).limit(1).execute()
-    user_connection_id = uc_row.data[0]['id'] if uc_row.data else None
-    uc_meta = (uc_row.data[0].get('metadata') if uc_row.data else {}) or {}
-    if isinstance(uc_meta, str):
-        try:
-            uc_meta = json.loads(uc_meta)
-        except Exception:
-            uc_meta = {}
-
-    # Start sync run
-    sync_run_id = str(uuid.uuid4())
-    try:
-        transaction_manager = get_transaction_manager()
-        async with transaction_manager.transaction(
-            user_id=user_id,
-            operation_type="connector_sync_start"
-        ) as tx:
-            await tx.insert('sync_runs', {
-                'id': sync_run_id,
-                'user_id': user_id,
-                'user_connection_id': user_connection_id,
-                'type': req.mode,
-                'status': 'running',
-                'started_at': datetime.utcnow().isoformat(),
-                'stats': json.dumps(stats)
-            })
-    except Exception:
-        pass
-
-    try:
-        # Resolve organization_id (similar to Xero's tenantId)
-        organization_id = uc_meta.get('organization_id') or uc_meta.get('organizationId')
-        if not organization_id:
-            # Try to discover organization from Zoho Books API
-            orgs = await nango.proxy_get('zoho-books', 'organizations', connection_id=connection_id, provider_config_key=provider_key)
-            stats['actions_used'] += 1
-            if isinstance(orgs, dict):
-                org_list = orgs.get('organizations') or []
-                if org_list and isinstance(org_list, list):
-                    organization_id = org_list[0].get('organization_id')
-        
-        if not organization_id:
-            raise HTTPException(status_code=400, detail='Zoho Books organization_id not set; provide via /api/connectors/metadata')
-        
-        # Persist discovered organization_id
-        if 'organization_id' not in uc_meta:
-            try:
-                transaction_manager = get_transaction_manager()
-                async with transaction_manager.transaction(
-                    user_id=user_id,
-                    operation_type="connector_metadata_update"
-                ) as tx:
-                    await tx.update('user_connections', {
-                        'metadata': {**uc_meta, 'organization_id': organization_id}
-                    }, {'nango_connection_id': connection_id})
-                    logger.info(f"✅ Updated Zoho Books metadata: organization_id={organization_id}")
-            except Exception as e:
-                logger.error(f"❌ Failed to update Zoho Books metadata: {e}")
-                raise HTTPException(status_code=500, detail=f"Failed to persist organization_id: {e}")
-
-        limit = max(1, min(req.max_results or 100, 500))
-
-        async def zoho_books_get(path: str, params: Dict[str, Any] | None = None) -> Dict[str, Any]:
-            params = params or {}
-            params['organization_id'] = organization_id
-            page = await nango.proxy_get('zoho-books', path, params=params, connection_id=connection_id, provider_config_key=provider_key)
-            stats['actions_used'] += 1
-            return page
-
-        # Fetch Invoices
-        fetched = 0
-        page_no = 1
-        while fetched < limit:
-            inv_page = await zoho_books_get('invoices', params={'page': page_no, 'per_page': 100})
-            invoices = inv_page.get('invoices') or []
-            if not invoices:
-                break
-            batch_items: List[Dict[str, Any]] = []
-            for inv in invoices:
-                pid = inv.get('invoice_id')
-                if not pid:
-                    stats['skipped'] += 1
-                    continue
-                meta = {
-                    'TxnType': 'Invoice',
-                    'InvoiceNumber': inv.get('invoice_number'),
-                    'Date': inv.get('date'),
-                    'Total': inv.get('total'),
-                    'Status': inv.get('status'),
-                    'CustomerName': inv.get('customer_name'),
-                    'correlation_id': req.correlation_id,
-                }
-                item = {
-                    'user_id': user_id,
-                    'user_connection_id': user_connection_id,
-                    'provider_id': f"Invoice:{pid}",
-                    'kind': 'txn',
-                    'source_ts': inv.get('date'),
-                    'hash': None,
-                    'storage_path': None,
-                    'metadata': meta,
-                    'status': 'fetched'
-                }
-                batch_items.append(item)
-                fetched += 1
-                if fetched >= limit:
-                    break
-            if batch_items:
-                try:
-                    transaction_manager = get_transaction_manager()
-                    async with transaction_manager.transaction(
-                        user_id=user_id,
-                        operation_type="connector_sync_batch"
-                    ) as tx:
-                        for item in batch_items:
-                            try:
-                                await tx.insert('external_items', item)
-                                stats['records_fetched'] += 1
-                            except Exception as insert_err:
-                                if 'duplicate key' in str(insert_err).lower() or 'unique' in str(insert_err).lower():
-                                    stats['skipped'] += 1
-                                else:
-                                    logger.error(f"Zoho Books invoice insert failed: {insert_err}")
-                                    stats['skipped'] += 1
-                except Exception as batch_err:
-                    logger.error(f"Zoho Books invoice batch transaction failed: {batch_err}")
-            if fetched >= limit:
-                break
-            page_no += 1
-
-        # Fetch Bills
-        fetched_b = 0
-        page_b = 1
-        while fetched_b < limit:
-            bill_page = await zoho_books_get('bills', params={'page': page_b, 'per_page': 100})
-            bills = bill_page.get('bills') or []
-            if not bills:
-                break
-            batch_items = []
-            for bill in bills:
-                pid = bill.get('bill_id')
-                if not pid:
-                    stats['skipped'] += 1
-                    continue
-                meta = {
-                    'TxnType': 'Bill',
-                    'BillNumber': bill.get('bill_number'),
-                    'Date': bill.get('date'),
-                    'Total': bill.get('total'),
-                    'Status': bill.get('status'),
-                    'VendorName': bill.get('vendor_name'),
-                    'correlation_id': req.correlation_id,
-                }
-                item = {
-                    'user_id': user_id,
-                    'user_connection_id': user_connection_id,
-                    'provider_id': f"Bill:{pid}",
-                    'kind': 'txn',
-                    'source_ts': bill.get('date'),
-                    'hash': None,
-                    'storage_path': None,
-                    'metadata': meta,
-                    'status': 'fetched'
-                }
-                batch_items.append(item)
-                fetched_b += 1
-                if fetched_b >= limit:
-                    break
-            if batch_items:
-                try:
-                    transaction_manager = get_transaction_manager()
-                    async with transaction_manager.transaction(
-                        user_id=user_id,
-                        operation_type="connector_sync_batch"
-                    ) as tx:
-                        for item in batch_items:
-                            try:
-                                await tx.insert('external_items', item)
-                                stats['records_fetched'] += 1
-                            except Exception as insert_err:
-                                if 'duplicate key' in str(insert_err).lower() or 'unique' in str(insert_err).lower():
-                                    stats['skipped'] += 1
-                                else:
-                                    logger.error(f"Zoho Books bill insert failed: {insert_err}")
-                                    stats['skipped'] += 1
-                except Exception as batch_err:
-                    logger.error(f"Zoho Books bill batch transaction failed: {batch_err}")
-            if fetched_b >= limit:
-                break
-            page_b += 1
-
-        # Process through unified pipeline
-        try:
-            _t0z = time.time()
-            
-            all_zoho_data = []
-            
-            # Fetch all external_items for this sync
-            ext_items_res = supabase.table('external_items').select(
-                'id, provider_id, kind, metadata, source_ts'
-            ).eq('user_connection_id', user_connection_id).eq('status', 'fetched').limit(1000).execute()
-            
-            items = ext_items_res.data or []
-            
-            # Filter by correlation_id if present
-            if req.correlation_id:
-                items = [it for it in items 
-                        if (it.get('metadata') or {}).get('correlation_id') == req.correlation_id]
-            
-            if items:
-                # Convert external_items to standardized format
-                for it in items:
-                    meta = it.get('metadata') or {}
-                    if isinstance(meta, str):
-                        try:
-                            meta = json.loads(meta)
-                        except Exception:
-                            meta = {}
-                    
-                    record = {
-                        'transaction_id': it.get('provider_id'),
-                        'transaction_type': meta.get('TxnType', 'Transaction'),
-                        'document_number': meta.get('InvoiceNumber') or meta.get('BillNumber', ''),
-                        'transaction_date': meta.get('Date', ''),
-                        'total_amount': meta.get('Total', 0),
-                        'entity_name': meta.get('CustomerName') or meta.get('VendorName', ''),
-                        'email': meta.get('Email', ''),
-                        'source': 'Zoho Books',
-                        'source_timestamp': it.get('source_ts', datetime.utcnow().isoformat())
-                    }
-                    all_zoho_data.append(record)
-                
-                # Process through unified pipeline
-                logger.info(f"🔄 Processing {len(all_zoho_data)} Zoho Books records through unified pipeline...")
-                pipeline_result = await _process_api_data_through_pipeline(
-                    user_id=user_id,
-                    data=all_zoho_data,
-                    source_platform='Zoho Books',
-                    sync_run_id=sync_run_id,
-                    user_connection_id=user_connection_id
-                )
-                
-                stats['normalized_events'] = pipeline_result.get('processed_rows', 0)
-                stats['pipeline_job_id'] = pipeline_result.get('job_id')
-                
-                # Mark external_items as processed (bulk update)
-                if items:
-                    item_ids = [it['id'] for it in items]
-                    try:
-                        supabase.table('external_items').update({'status': 'processed'}).in_('id', item_ids).execute()
-                    except Exception as e:
-                        logger.warning(f"Zoho Books bulk status update failed: {e}")
-                        for it in items:
-                            try:
-                                supabase.table('external_items').update({'status': 'processed'}).eq('id', it['id']).execute()
-                            except Exception:
-                                pass
-                
-                NORMALIZATION_EVENTS.labels(provider='zoho-books').inc(stats['normalized_events'])
-                NORMALIZATION_DURATION.labels(provider='zoho-books').observe(max(0.0, time.time() - _t0z))
-                structured_logger.info("Unified pipeline processing complete", {
-                    "provider": "zoho-books",
-                    "processed_rows": stats['normalized_events'],
-                    "job_id": stats.get('pipeline_job_id')
-                })
-            else:
-                logger.info("No Zoho Books items to process")
-                stats['normalized_events'] = 0
-                
-        except Exception as e:
-            logger.error(f"Zoho Books unified pipeline processing failed: {e}")
-            stats['normalized_events'] = 0
-
-        # Complete sync
-        try:
-            transaction_manager = get_transaction_manager()
-            async with transaction_manager.transaction(
-                user_id=user_id,
-                operation_type="connector_sync_completion"
-            ) as tx:
-                await tx.update('sync_runs', {
-                    'status': 'succeeded',
-                    'finished_at': datetime.utcnow().isoformat(),
-                    'stats': json.dumps(stats)
-                }, {'id': sync_run_id})
-                await tx.update('user_connections', {
-                    'last_synced_at': datetime.utcnow().isoformat()
-                }, {'nango_connection_id': connection_id})
-        except Exception as completion_err:
-            logger.error(f"Failed to update Zoho Books sync completion status: {completion_err}")
-        try:
-            JOBS_PROCESSED.labels(provider=provider_key, status='succeeded').inc()
-        except Exception:
-            pass
-        return {'status': 'succeeded', 'sync_run_id': sync_run_id, 'stats': stats}
-    except HTTPException:
-        supabase.table('sync_runs').update({'status': 'failed', 'finished_at': datetime.utcnow().isoformat(), 'stats': json.dumps(stats)}).eq('id', sync_run_id).execute()
-        JOBS_PROCESSED.labels(provider=provider_key, status='failed').inc()
-        raise
-    except Exception as e:
-        logger.error(f"Zoho Books sync failed: {e}")
-        
-        # Error recovery
-        try:
-            recovery_system = get_error_recovery_system()
-            error_context = ErrorContext(
-                error_id=str(uuid.uuid4()),
-                user_id=user_id,
-                job_id=sync_run_id,
-                transaction_id=None,
-                operation_type='zoho_books_sync',
-                error_message=str(e),
-                error_details={'sync_run_id': sync_run_id, 'connection_id': connection_id, 'provider': provider_key, 'correlation_id': req.correlation_id},
-                severity=ErrorSeverity.HIGH,
-                occurred_at=datetime.utcnow()
-            )
-            await recovery_system.handle_processing_error(error_context)
-        except Exception as recovery_error:
-            logger.error(f"Error recovery failed: {recovery_error}")
-        
-        supabase.table('sync_runs').update({'status': 'failed', 'finished_at': datetime.utcnow().isoformat(), 'error': str(e), 'stats': json.dumps(stats)}).eq('id', sync_run_id).execute()
-        JOBS_PROCESSED.labels(provider=provider_key, status='failed').inc()
-        raise HTTPException(status_code=500, detail='Zoho Books sync failed')
-
-async def _stripe_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> Dict[str, Any]:
-    """
-    Stripe ingestion: fetch Charges, Invoices, Customers, and PaymentIntents via Stripe API.
-    
-    ✅ UNIFIED PIPELINE: Uses the main ExcelProcessor pipeline for:
-    - Multi-phased duplicate detection
-    - Advanced data enrichment
-    - Standardized entity resolution
-    - Consistent data semantics across all data sources
-    
-    Data flow: API → CSV format → ExcelProcessor → raw_events (with full enrichment)
-    """
-    provider_key = NANGO_STRIPE_INTEGRATION_ID
-    connection_id = req.connection_id
-    user_id = req.user_id
-    stats = {'records_fetched': 0, 'actions_used': 0, 'attachments_saved': 0, 'queued_jobs': 0, 'skipped': 0}
-
-    # Ensure connector and user_connection
-    conn_row = supabase.table('connectors').select('id').eq('provider', provider_key).limit(1).execute()
-    connector_id = conn_row.data[0]['id'] if conn_row.data else None
-    if not connector_id:
-        try:
-            res = supabase.table('connectors').insert({
-                'provider': provider_key,
-                'integration_id': provider_key,
-                'auth_type': 'OAUTH2',
-                'scopes': json.dumps([]),
-                'endpoints_needed': json.dumps([]),
-                'enabled': True
-            }).execute()
-            connector_id = (res.data[0]['id'] if res and res.data else None)
-        except Exception as e:
-            logger.warning(f"Stripe connectors upsert failed: {e}")
-    try:
-        supabase.table('user_connections').insert({
-            'user_id': user_id,
-            'connector_id': connector_id,
-            'nango_connection_id': connection_id,
-            'status': 'active',
-            'sync_mode': 'pull'
-        }).execute()
-    except Exception:
-        pass
-    uc_row = supabase.table('user_connections').select('id, metadata').eq('nango_connection_id', connection_id).limit(1).execute()
-    user_connection_id = uc_row.data[0]['id'] if uc_row.data else None
-    uc_meta = (uc_row.data[0].get('metadata') if uc_row.data else {}) or {}
-    if isinstance(uc_meta, str):
-        try:
-            uc_meta = json.loads(uc_meta)
-        except Exception:
-            uc_meta = {}
-
-    # Start sync run
-    sync_run_id = str(uuid.uuid4())
-    try:
-        transaction_manager = get_transaction_manager()
-        async with transaction_manager.transaction(
-            user_id=user_id,
-            operation_type="connector_sync_start"
-        ) as tx:
-            await tx.insert('sync_runs', {
-                'id': sync_run_id,
-                'user_id': user_id,
-                'user_connection_id': user_connection_id,
-                'type': req.mode,
-                'status': 'running',
-                'started_at': datetime.utcnow().isoformat(),
-                'stats': json.dumps(stats)
-            })
-    except Exception:
-        pass
-
-    try:
-        limit = max(1, min(req.max_results or 100, 500))
-
-        async def stripe_get(path: str, params: Dict[str, Any] | None = None) -> Dict[str, Any]:
-            page = await nango.proxy_get('stripe', path, params=params or {}, connection_id=connection_id, provider_config_key=provider_key)
-            stats['actions_used'] += 1
-            return page
-
-        # Fetch Charges
-        fetched = 0
-        starting_after = None
-        while fetched < limit:
-            params = {'limit': 100}
-            if starting_after:
-                params['starting_after'] = starting_after
-            charge_page = await stripe_get('v1/charges', params=params)
-            charges = charge_page.get('data') or []
-            if not charges:
-                break
-            batch_items: List[Dict[str, Any]] = []
-            for charge in charges:
-                pid = charge.get('id')
-                if not pid:
-                    stats['skipped'] += 1
-                    continue
-                meta = {
-                    'TxnType': 'Charge',
-                    'Amount': charge.get('amount'),
-                    'Currency': charge.get('currency'),
-                    'Status': charge.get('status'),
-                    'Created': charge.get('created'),
-                    'CustomerEmail': charge.get('billing_details', {}).get('email'),
-                    'correlation_id': req.correlation_id,
-                }
-                item = {
-                    'user_id': user_id,
-                    'user_connection_id': user_connection_id,
-                    'provider_id': f"Charge:{pid}",
-                    'kind': 'txn',
-                    'source_ts': datetime.utcfromtimestamp(charge.get('created', 0)).isoformat() if charge.get('created') else None,
-                    'hash': None,
-                    'storage_path': None,
-                    'metadata': meta,
-                    'status': 'fetched'
-                }
-                batch_items.append(item)
-                fetched += 1
-                starting_after = pid
-                if fetched >= limit:
-                    break
-            if batch_items:
-                try:
-                    transaction_manager = get_transaction_manager()
-                    async with transaction_manager.transaction(
-                        user_id=user_id,
-                        operation_type="connector_sync_batch"
-                    ) as tx:
-                        for item in batch_items:
-                            try:
-                                await tx.insert('external_items', item)
-                                stats['records_fetched'] += 1
-                            except Exception as insert_err:
-                                if 'duplicate key' in str(insert_err).lower() or 'unique' in str(insert_err).lower():
-                                    stats['skipped'] += 1
-                                else:
-                                    logger.error(f"Stripe charge insert failed: {insert_err}")
-                                    stats['skipped'] += 1
-                except Exception as batch_err:
-                    logger.error(f"Stripe charge batch transaction failed: {batch_err}")
-            if not charge_page.get('has_more'):
-                break
-
-        # Process through unified pipeline
-        try:
-            _t0s = time.time()
-            
-            all_stripe_data = []
-            
-            # Fetch all external_items for this sync
-            ext_items_res = supabase.table('external_items').select(
-                'id, provider_id, kind, metadata, source_ts'
-            ).eq('user_connection_id', user_connection_id).eq('status', 'fetched').limit(1000).execute()
-            
-            items = ext_items_res.data or []
-            
-            # Filter by correlation_id if present
-            if req.correlation_id:
-                items = [it for it in items 
-                        if (it.get('metadata') or {}).get('correlation_id') == req.correlation_id]
-            
-            if items:
-                # Convert external_items to standardized format
-                for it in items:
-                    meta = it.get('metadata') or {}
-                    if isinstance(meta, str):
-                        try:
-                            meta = json.loads(meta)
-                        except Exception:
-                            meta = {}
-                    
-                    record = {
-                        'transaction_id': it.get('provider_id'),
-                        'transaction_type': meta.get('TxnType', 'Transaction'),
-                        'document_number': meta.get('InvoiceNumber', ''),
-                        'transaction_date': it.get('source_ts', ''),
-                        'total_amount': meta.get('Amount', 0),
-                        'currency': meta.get('Currency', 'USD'),
-                        'entity_name': meta.get('CustomerEmail', ''),
-                        'source': 'Stripe',
-                        'source_timestamp': it.get('source_ts', datetime.utcnow().isoformat())
-                    }
-                    all_stripe_data.append(record)
-                
-                # Process through unified pipeline
-                logger.info(f"🔄 Processing {len(all_stripe_data)} Stripe records through unified pipeline...")
-                pipeline_result = await _process_api_data_through_pipeline(
-                    user_id=user_id,
-                    data=all_stripe_data,
-                    source_platform='Stripe',
-                    sync_run_id=sync_run_id,
-                    user_connection_id=user_connection_id
-                )
-                
-                stats['normalized_events'] = pipeline_result.get('processed_rows', 0)
-                stats['pipeline_job_id'] = pipeline_result.get('job_id')
-                
-                # Mark external_items as processed (bulk update)
-                if items:
-                    item_ids = [it['id'] for it in items]
-                    try:
-                        supabase.table('external_items').update({'status': 'processed'}).in_('id', item_ids).execute()
-                    except Exception as e:
-                        logger.warning(f"Stripe bulk status update failed: {e}")
-                        for it in items:
-                            try:
-                                supabase.table('external_items').update({'status': 'processed'}).eq('id', it['id']).execute()
-                            except Exception:
-                                pass
-                
-                NORMALIZATION_EVENTS.labels(provider='stripe').inc(stats['normalized_events'])
-                NORMALIZATION_DURATION.labels(provider='stripe').observe(max(0.0, time.time() - _t0s))
-                structured_logger.info("Unified pipeline processing complete", {
-                    "provider": "stripe",
-                    "processed_rows": stats['normalized_events'],
-                    "job_id": stats.get('pipeline_job_id')
-                })
-            else:
-                logger.info("No Stripe items to process")
-                stats['normalized_events'] = 0
-                
-        except Exception as e:
-            logger.error(f"Stripe unified pipeline processing failed: {e}")
-            stats['normalized_events'] = 0
-
-        # Complete sync
-        try:
-            transaction_manager = get_transaction_manager()
-            async with transaction_manager.transaction(
-                user_id=user_id,
-                operation_type="connector_sync_completion"
-            ) as tx:
-                await tx.update('sync_runs', {
-                    'status': 'succeeded',
-                    'finished_at': datetime.utcnow().isoformat(),
-                    'stats': json.dumps(stats)
-                }, {'id': sync_run_id})
-                await tx.update('user_connections', {
-                    'last_synced_at': datetime.utcnow().isoformat()
-                }, {'nango_connection_id': connection_id})
-        except Exception as completion_err:
-            logger.error(f"Failed to update Stripe sync completion status: {completion_err}")
-        try:
-            JOBS_PROCESSED.labels(provider=provider_key, status='succeeded').inc()
-        except Exception:
-            pass
-        return {'status': 'succeeded', 'sync_run_id': sync_run_id, 'stats': stats}
-    except HTTPException:
-        supabase.table('sync_runs').update({'status': 'failed', 'finished_at': datetime.utcnow().isoformat(), 'stats': json.dumps(stats)}).eq('id', sync_run_id).execute()
-        JOBS_PROCESSED.labels(provider=provider_key, status='failed').inc()
-        raise
-    except Exception as e:
-        logger.error(f"Stripe sync failed: {e}")
-        
-        # Error recovery
-        try:
-            recovery_system = get_error_recovery_system()
-            error_context = ErrorContext(
-                error_id=str(uuid.uuid4()),
-                user_id=user_id,
-                job_id=sync_run_id,
-                transaction_id=None,
-                operation_type='stripe_sync',
-                error_message=str(e),
-                error_details={'sync_run_id': sync_run_id, 'connection_id': connection_id, 'provider': provider_key, 'correlation_id': req.correlation_id},
-                severity=ErrorSeverity.HIGH,
-                occurred_at=datetime.utcnow()
-            )
-            await recovery_system.handle_processing_error(error_context)
-        except Exception as recovery_error:
-            logger.error(f"Error recovery failed: {recovery_error}")
-        
-        supabase.table('sync_runs').update({'status': 'failed', 'finished_at': datetime.utcnow().isoformat(), 'error': str(e), 'stats': json.dumps(stats)}).eq('id', sync_run_id).execute()
-        JOBS_PROCESSED.labels(provider=provider_key, status='failed').inc()
-        raise HTTPException(status_code=500, detail='Stripe sync failed')
-
-async def _razorpay_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> Dict[str, Any]:
-    """
-    Razorpay ingestion: fetch Payments, Orders, and Customers via Razorpay API.
-    
-    ✅ UNIFIED PIPELINE: Uses the main ExcelProcessor pipeline for:
-    - Multi-phased duplicate detection
-    - Advanced data enrichment
-    - Standardized entity resolution
-    - Consistent data semantics across all data sources
-    
-    Data flow: API → CSV format → ExcelProcessor → raw_events (with full enrichment)
-    """
-    provider_key = NANGO_RAZORPAY_INTEGRATION_ID
-    connection_id = req.connection_id
-    user_id = req.user_id
-    stats = {'records_fetched': 0, 'actions_used': 0, 'attachments_saved': 0, 'queued_jobs': 0, 'skipped': 0}
-
-    # Ensure connector and user_connection
-    conn_row = supabase.table('connectors').select('id').eq('provider', provider_key).limit(1).execute()
-    connector_id = conn_row.data[0]['id'] if conn_row.data else None
-    if not connector_id:
-        try:
-            res = supabase.table('connectors').insert({
-                'provider': provider_key,
-                'integration_id': provider_key,
-                'auth_type': 'BASIC',
-                'scopes': json.dumps([]),
-                'endpoints_needed': json.dumps([]),
-                'enabled': True
-            }).execute()
-            connector_id = (res.data[0]['id'] if res and res.data else None)
-        except Exception as e:
-            logger.warning(f"Razorpay connectors upsert failed: {e}")
-    try:
-        supabase.table('user_connections').insert({
-            'user_id': user_id,
-            'connector_id': connector_id,
-            'nango_connection_id': connection_id,
-            'status': 'active',
-            'sync_mode': 'pull'
-        }).execute()
-    except Exception:
-        pass
-    uc_row = supabase.table('user_connections').select('id, metadata').eq('nango_connection_id', connection_id).limit(1).execute()
-    user_connection_id = uc_row.data[0]['id'] if uc_row.data else None
-    uc_meta = (uc_row.data[0].get('metadata') if uc_row.data else {}) or {}
-    if isinstance(uc_meta, str):
-        try:
-            uc_meta = json.loads(uc_meta)
-        except Exception:
-            uc_meta = {}
-
-    # Start sync run
-    sync_run_id = str(uuid.uuid4())
-    try:
-        transaction_manager = get_transaction_manager()
-        async with transaction_manager.transaction(
-            user_id=user_id,
-            operation_type="connector_sync_start"
-        ) as tx:
-            await tx.insert('sync_runs', {
-                'id': sync_run_id,
-                'user_id': user_id,
-                'user_connection_id': user_connection_id,
-                'type': req.mode,
-                'status': 'running',
-                'started_at': datetime.utcnow().isoformat(),
-                'stats': json.dumps(stats)
-            })
-    except Exception:
-        pass
-
-    try:
-        limit = max(1, min(req.max_results or 100, 500))
-
-        async def razorpay_get(path: str, params: Dict[str, Any] | None = None) -> Dict[str, Any]:
-            page = await nango.proxy_get('razorpay', path, params=params or {}, connection_id=connection_id, provider_config_key=provider_key)
-            stats['actions_used'] += 1
-            return page
-
-        # Fetch Payments
-        fetched = 0
-        skip = 0
-        while fetched < limit:
-            params = {'count': 100, 'skip': skip}
-            payment_page = await razorpay_get('v1/payments', params=params)
-            payments = payment_page.get('items') or []
-            if not payments:
-                break
-            batch_items: List[Dict[str, Any]] = []
-            for payment in payments:
-                pid = payment.get('id')
-                if not pid:
-                    stats['skipped'] += 1
-                    continue
-                meta = {
-                    'TxnType': 'Payment',
-                    'Amount': payment.get('amount'),
-                    'Currency': payment.get('currency'),
-                    'Status': payment.get('status'),
-                    'Created': payment.get('created_at'),
-                    'CustomerEmail': payment.get('email'),
-                    'correlation_id': req.correlation_id,
-                }
-                item = {
-                    'user_id': user_id,
-                    'user_connection_id': user_connection_id,
-                    'provider_id': f"Payment:{pid}",
-                    'kind': 'txn',
-                    'source_ts': datetime.utcfromtimestamp(payment.get('created_at', 0)).isoformat() if payment.get('created_at') else None,
-                    'hash': None,
-                    'storage_path': None,
-                    'metadata': meta,
-                    'status': 'fetched'
-                }
-                batch_items.append(item)
-                fetched += 1
-                if fetched >= limit:
-                    break
-            if batch_items:
-                try:
-                    transaction_manager = get_transaction_manager()
-                    async with transaction_manager.transaction(
-                        user_id=user_id,
-                        operation_type="connector_sync_batch"
-                    ) as tx:
-                        for item in batch_items:
-                            try:
-                                await tx.insert('external_items', item)
-                                stats['records_fetched'] += 1
-                            except Exception as insert_err:
-                                if 'duplicate key' in str(insert_err).lower() or 'unique' in str(insert_err).lower():
-                                    stats['skipped'] += 1
-                                else:
-                                    logger.error(f"Razorpay payment insert failed: {insert_err}")
-                                    stats['skipped'] += 1
-                except Exception as batch_err:
-                    logger.error(f"Razorpay payment batch transaction failed: {batch_err}")
-            skip += len(payments)
-            if len(payments) < 100:
-                break
-
-        # Process through unified pipeline
-        try:
-            _t0r = time.time()
-            
-            all_razorpay_data = []
-            
-            # Fetch all external_items for this sync
-            ext_items_res = supabase.table('external_items').select(
-                'id, provider_id, kind, metadata, source_ts'
-            ).eq('user_connection_id', user_connection_id).eq('status', 'fetched').limit(1000).execute()
-            
-            items = ext_items_res.data or []
-            
-            # Filter by correlation_id if present
-            if req.correlation_id:
-                items = [it for it in items 
-                        if (it.get('metadata') or {}).get('correlation_id') == req.correlation_id]
-            
-            if items:
-                # Convert external_items to standardized format
-                for it in items:
-                    meta = it.get('metadata') or {}
-                    if isinstance(meta, str):
-                        try:
-                            meta = json.loads(meta)
-                        except Exception:
-                            meta = {}
-                    
-                    record = {
-                        'transaction_id': it.get('provider_id'),
-                        'transaction_type': meta.get('TxnType', 'Transaction'),
-                        'document_number': '',
-                        'transaction_date': it.get('source_ts', ''),
-                        'total_amount': meta.get('Amount', 0),
-                        'currency': meta.get('Currency', 'INR'),
-                        'entity_name': meta.get('CustomerEmail', ''),
-                        'source': 'Razorpay',
-                        'source_timestamp': it.get('source_ts', datetime.utcnow().isoformat())
-                    }
-                    all_razorpay_data.append(record)
-                
-                # Process through unified pipeline
-                logger.info(f"🔄 Processing {len(all_razorpay_data)} Razorpay records through unified pipeline...")
-                pipeline_result = await _process_api_data_through_pipeline(
-                    user_id=user_id,
-                    data=all_razorpay_data,
-                    source_platform='Razorpay',
-                    sync_run_id=sync_run_id,
-                    user_connection_id=user_connection_id
-                )
-                
-                stats['normalized_events'] = pipeline_result.get('processed_rows', 0)
-                stats['pipeline_job_id'] = pipeline_result.get('job_id')
-                
-                # Mark external_items as processed (bulk update)
-                if items:
-                    item_ids = [it['id'] for it in items]
-                    try:
-                        supabase.table('external_items').update({'status': 'processed'}).in_('id', item_ids).execute()
-                    except Exception as e:
-                        logger.warning(f"Razorpay bulk status update failed: {e}")
-                        for it in items:
-                            try:
-                                supabase.table('external_items').update({'status': 'processed'}).eq('id', it['id']).execute()
-                            except Exception:
-                                pass
-                
-                NORMALIZATION_EVENTS.labels(provider='razorpay').inc(stats['normalized_events'])
-                NORMALIZATION_DURATION.labels(provider='razorpay').observe(max(0.0, time.time() - _t0r))
-                structured_logger.info("Unified pipeline processing complete", {
-                    "provider": "razorpay",
-                    "processed_rows": stats['normalized_events'],
-                    "job_id": stats.get('pipeline_job_id')
-                })
-            else:
-                logger.info("No Razorpay items to process")
-                stats['normalized_events'] = 0
-                
-        except Exception as e:
-            logger.error(f"Razorpay unified pipeline processing failed: {e}")
-            stats['normalized_events'] = 0
-
-        # Complete sync
-        try:
-            transaction_manager = get_transaction_manager()
-            async with transaction_manager.transaction(
-                user_id=user_id,
-                operation_type="connector_sync_completion"
-            ) as tx:
-                await tx.update('sync_runs', {
-                    'status': 'succeeded',
-                    'finished_at': datetime.utcnow().isoformat(),
-                    'stats': json.dumps(stats)
-                }, {'id': sync_run_id})
-                await tx.update('user_connections', {
-                    'last_synced_at': datetime.utcnow().isoformat()
-                }, {'nango_connection_id': connection_id})
-        except Exception as completion_err:
-            logger.error(f"Failed to update Razorpay sync completion status: {completion_err}")
-        try:
-            JOBS_PROCESSED.labels(provider=provider_key, status='succeeded').inc()
-        except Exception:
-            pass
-        return {'status': 'succeeded', 'sync_run_id': sync_run_id, 'stats': stats}
-    except HTTPException:
-        supabase.table('sync_runs').update({'status': 'failed', 'finished_at': datetime.utcnow().isoformat(), 'stats': json.dumps(stats)}).eq('id', sync_run_id).execute()
-        JOBS_PROCESSED.labels(provider=provider_key, status='failed').inc()
-        raise
-    except Exception as e:
-        logger.error(f"Razorpay sync failed: {e}")
-        
-        # Error recovery
-        try:
-            recovery_system = get_error_recovery_system()
-            error_context = ErrorContext(
-                error_id=str(uuid.uuid4()),
-                user_id=user_id,
-                job_id=sync_run_id,
-                transaction_id=None,
-                operation_type='razorpay_sync',
-                error_message=str(e),
-                error_details={'sync_run_id': sync_run_id, 'connection_id': connection_id, 'provider': provider_key, 'correlation_id': req.correlation_id},
-                severity=ErrorSeverity.HIGH,
-                occurred_at=datetime.utcnow()
-            )
-            await recovery_system.handle_processing_error(error_context)
-        except Exception as recovery_error:
-            logger.error(f"Error recovery failed: {recovery_error}")
-        
-        supabase.table('sync_runs').update({'status': 'failed', 'finished_at': datetime.utcnow().isoformat(), 'error': str(e), 'stats': json.dumps(stats)}).eq('id', sync_run_id).execute()
-        JOBS_PROCESSED.labels(provider=provider_key, status='failed').inc()
-        raise HTTPException(status_code=500, detail='Razorpay sync failed')
-
-async def _paypal_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> Dict[str, Any]:
-    """
-    PayPal ingestion: fetch Payments, Invoices, Transactions via PayPal API.
-    
-    Endpoints:
-    - /v1/payments/payment (Payments)
-    - /v2/invoicing/invoices (Invoices)
-    - /v2/payments/captures (Payment Captures)
-    - /v1/reporting/transactions (Transaction History)
-    
-    Data flow: API → CSV format → ExcelProcessor → raw_events (with full enrichment)
-    """
-    provider_key = NANGO_PAYPAL_INTEGRATION_ID
-    connection_id = req.connection_id
-    user_id = req.user_id
-    stats = {'records_fetched': 0, 'actions_used': 0, 'attachments_saved': 0, 'queued_jobs': 0, 'skipped': 0}
-    
-    sync_run_id = str(uuid.uuid4())
-    try:
-        supabase.table('sync_runs').insert({
-            'id': sync_run_id,
-            'user_id': user_id,
-            'provider': provider_key,
-            'status': 'running',
-            'started_at': datetime.utcnow().isoformat(),
-            'correlation_id': req.correlation_id
-        }).execute()
-    except Exception as e:
-        logger.warning(f"Failed to create sync_run record: {e}")
-    
-    try:
-        logger.info(f"🔵 PayPal sync started: connection_id={connection_id}, user_id={user_id}, mode={req.mode}")
-        
-        # Fetch Payments
-        payments_data = []
-        try:
-            logger.info("Fetching PayPal payments...")
-            payments_resp = await nango.proxy_request(
-                connection_id=connection_id,
-                method='GET',
-                endpoint='/v1/payments/payment',
-                params={'count': req.max_results or 100, 'sort_order': 'desc'}
-            )
-            payments_list = payments_resp.get('payments', [])
-            logger.info(f"✅ Fetched {len(payments_list)} PayPal payments")
-            
-            for payment in payments_list:
-                payments_data.append({
-                    'payment_id': payment.get('id'),
-                    'state': payment.get('state'),
-                    'intent': payment.get('intent'),
-                    'payer_email': (payment.get('payer', {}).get('payer_info', {}).get('email')),
-                    'amount': payment.get('transactions', [{}])[0].get('amount', {}).get('total'),
-                    'currency': payment.get('transactions', [{}])[0].get('amount', {}).get('currency'),
-                    'create_time': payment.get('create_time'),
-                    'update_time': payment.get('update_time'),
-                    'description': payment.get('transactions', [{}])[0].get('description', ''),
-                })
-            stats['records_fetched'] += len(payments_list)
-        except Exception as e:
-            logger.warning(f"Failed to fetch PayPal payments: {e}")
-        
-        # Fetch Invoices
-        invoices_data = []
-        try:
-            logger.info("Fetching PayPal invoices...")
-            invoices_resp = await nango.proxy_request(
-                connection_id=connection_id,
-                method='GET',
-                endpoint='/v2/invoicing/invoices',
-                params={'page_size': req.max_results or 100}
-            )
-            invoices_list = invoices_resp.get('items', [])
-            logger.info(f"✅ Fetched {len(invoices_list)} PayPal invoices")
-            
-            for invoice in invoices_list:
-                detail = invoice.get('detail', {})
-                amount_info = invoice.get('amount', {})
-                invoices_data.append({
-                    'invoice_id': invoice.get('id'),
-                    'invoice_number': detail.get('invoice_number'),
-                    'status': invoice.get('status'),
-                    'invoice_date': detail.get('invoice_date'),
-                    'due_date': detail.get('payment_term', {}).get('due_date'),
-                    'currency_code': amount_info.get('currency_code'),
-                    'total_amount': amount_info.get('value'),
-                    'recipient_email': (invoice.get('primary_recipients', [{}])[0].get('billing_info', {}).get('email_address')),
-                })
-            stats['records_fetched'] += len(invoices_list)
-        except Exception as e:
-            logger.warning(f"Failed to fetch PayPal invoices: {e}")
-        
-        # Convert to CSV and process
-        all_records = []
-        if payments_data:
-            df_payments = pd.DataFrame(payments_data)
-            df_payments['record_type'] = 'payment'
-            all_records.append(df_payments)
-        
-        if invoices_data:
-            df_invoices = pd.DataFrame(invoices_data)
-            df_invoices['record_type'] = 'invoice'
-            all_records.append(df_invoices)
-        
-        if all_records:
-            combined_df = pd.concat(all_records, ignore_index=True, sort=False)
-            csv_buffer = io.StringIO()
-            combined_df.to_csv(csv_buffer, index=False)
-            csv_content = csv_buffer.getvalue().encode('utf-8')
-            
-            # Process via ExcelProcessor
-            processor = ExcelProcessor()
-            job_id = await processor.process_file_async(
-                file_content=csv_content,
-                filename=f'paypal_sync_{datetime.utcnow().strftime("%Y%m%d_%H%M%S")}.csv',
-                user_id=user_id,
-                custom_prompt=None,
-                progress_callback=None
-            )
-            stats['queued_jobs'] += 1
-            logger.info(f"✅ PayPal data queued for processing: job_id={job_id}")
-        
-        # Mark sync as completed
-        try:
-            async with supabase_transaction() as tx:
-                await tx.update('sync_runs', {
-                    'status': 'succeeded',
-                    'finished_at': datetime.utcnow().isoformat(),
-                    'stats': json.dumps(stats)
-                }, {'id': sync_run_id})
-                await tx.update('user_connections', {
-                    'last_synced_at': datetime.utcnow().isoformat()
-                }, {'nango_connection_id': connection_id})
-        except Exception as completion_err:
-            logger.error(f"Failed to update PayPal sync completion status: {completion_err}")
-        
-        try:
-            JOBS_PROCESSED.labels(provider=provider_key, status='succeeded').inc()
-        except Exception:
-            pass
-        
-        return {'status': 'succeeded', 'sync_run_id': sync_run_id, 'stats': stats}
-    
-    except HTTPException:
-        supabase.table('sync_runs').update({'status': 'failed', 'finished_at': datetime.utcnow().isoformat(), 'stats': json.dumps(stats)}).eq('id', sync_run_id).execute()
-        JOBS_PROCESSED.labels(provider=provider_key, status='failed').inc()
-        raise
-    except Exception as e:
-        logger.error(f"PayPal sync failed: {e}")
-        
-        # Error recovery
-        try:
-            recovery_system = get_error_recovery_system()
-            error_context = ErrorContext(
-                error_id=str(uuid.uuid4()),
-                user_id=user_id,
-                job_id=sync_run_id,
-                transaction_id=None,
-                operation_type='paypal_sync',
-                error_message=str(e),
-                error_details={'sync_run_id': sync_run_id, 'connection_id': connection_id, 'provider': provider_key, 'correlation_id': req.correlation_id},
-                severity=ErrorSeverity.HIGH,
-                occurred_at=datetime.utcnow()
-            )
-            await recovery_system.handle_processing_error(error_context)
-        except Exception as recovery_error:
-            logger.error(f"Error recovery failed: {recovery_error}")
-        
-        supabase.table('sync_runs').update({'status': 'failed', 'finished_at': datetime.utcnow().isoformat(), 'error': str(e), 'stats': json.dumps(stats)}).eq('id', sync_run_id).execute()
-        JOBS_PROCESSED.labels(provider=provider_key, status='failed').inc()
-        raise HTTPException(status_code=500, detail='PayPal sync failed')
-    
-    async def _process_excel_streaming(self, file_content: bytes, filename: str, progress_callback=None) -> Dict[str, pd.DataFrame]:
-        """Process Excel files using true streaming approach for large files"""
-        temp_path = None
-        try:
-            if progress_callback:
-                await progress_callback("streaming", "📊 Streaming large Excel file...", 30)
-            
-            # Create temporary file for streaming processing
-            with tempfile.NamedTemporaryFile(suffix='.xlsx', delete=False) as temp_file:
-                temp_file.write(file_content)
-                temp_path = temp_file.name
-            
-            # Use thread pool for Excel processing to avoid blocking
-            loop = asyncio.get_event_loop()
-            sheets = await loop.run_in_executor(
-                None,  # Use default executor
-                self._stream_excel_file_sync,
-                temp_path
-            )
-            
-            if progress_callback:
-                await progress_callback("complete", "✅ Excel streaming complete", 100)
-            
-            return sheets
-            
-        except Exception as e:
-            logger.error(f"Excel streaming failed: {e}")
-            raise
-        finally:
-            # Ensure cleanup
-            if temp_path and os.path.exists(temp_path):
-                try:
-                    os.unlink(temp_path)
-                except Exception as e:
-                    logger.warning(f"Failed to clean up temp file {temp_path}: {e}")
-    
-    def _stream_excel_file_sync(self, file_path: str) -> Dict[str, pd.DataFrame]:
-        """Synchronous Excel streaming processing (runs in thread pool)"""
-        sheets = {}
-        try:
-            # Use openpyxl for streaming (most memory efficient)
-            from openpyxl import load_workbook
-            workbook = load_workbook(file_path, read_only=True, data_only=True)
-            
-            for sheet_name in workbook.sheetnames:
-                try:
-                    sheet = workbook[sheet_name]
-                    
-                    # Convert to DataFrame in chunks
-                    data = []
-                    headers = None
-                    
-                    for row_idx, row in enumerate(sheet.iter_rows(values_only=True)):
-                        if row_idx == 0:
-                            headers = [str(cell) if cell is not None else f'Column_{i}' for i, cell in enumerate(row)]
-                        else:
-                            data.append(row)
-                        
-                        # Process in chunks to manage memory
-                        if len(data) >= self.excel_chunk_size:
-                            chunk_df = pd.DataFrame(data, columns=headers)
-                            if sheet_name not in sheets:
-                                sheets[sheet_name] = chunk_df
-                            else:
-                                sheets[sheet_name] = pd.concat([sheets[sheet_name], chunk_df], ignore_index=True)
-                            data = []  # Clear processed data
-                    
-                    # Process remaining data
-                    if data:
-                        chunk_df = pd.DataFrame(data, columns=headers)
-                        if sheet_name not in sheets:
-                            sheets[sheet_name] = chunk_df
-                        else:
-                            sheets[sheet_name] = pd.concat([sheets[sheet_name], chunk_df], ignore_index=True)
-                            
-                except Exception as e:
-                    logger.warning(f"Failed to process sheet {sheet_name}: {e}")
-                    continue
-            
-            workbook.close()
-            
-        except Exception as e:
-            logger.error(f"Excel streaming processing failed: {e}")
-            raise
-        
-        return sheets
-    
-    async def _process_csv_enhanced(self, file_content: bytes, filename: str, progress_callback=None) -> Dict[str, pd.DataFrame]:
-        """Enhanced CSV processing with streaming for large files"""
-        # Check file size for streaming approach
-        file_size_mb = len(file_content) / (1024 * 1024)
-        use_streaming = file_size_mb > 50  # 50MB threshold for CSV
-        
-        if use_streaming:
-            if progress_callback:
-                await progress_callback("streaming", f"📊 Large CSV detected ({file_size_mb:.1f}MB), using streaming...", 25)
-            return await self._process_csv_streaming(file_content, filename, progress_callback)
-        
-        if progress_callback:
-            await progress_callback("processing", "📊 Processing CSV with enhanced encoding detection...", 20)
-        
-        encodings = ['utf-8', 'latin-1', 'cp1252', 'iso-8859-1', 'utf-16']
-        
-        for encoding in encodings:
-            try:
-                temp_path = None
-                try:
-                    # Use temporary file instead of BytesIO for better memory management
-                    with tempfile.NamedTemporaryFile(suffix='.csv', delete=False, mode='wb') as temp_file:
-                        temp_file.write(file_content)
-                        temp_path = temp_file.name
-                    
-                    try:
-                        df = pd.read_csv(temp_path, encoding=encoding)
-                        if not df.empty:
-                            return {'Sheet1': df}
-                    except Exception as e:
-                        logger.warning(f"CSV processing failed with encoding {encoding}: {e}")
-                        continue
-                    finally:
-                        if temp_path and os.path.exists(temp_path):
-                            try:
-                                os.unlink(temp_path)
-                            except Exception as e:
-                                logger.warning(f"Failed to clean up temp file {temp_path}: {e}")
-                except Exception as e:
-                    logger.warning(f"Temp file creation failed for encoding {encoding}: {e}")
-                    continue
-            except Exception as e:
-                continue
-        
-        raise Exception("Could not read CSV with any encoding")
-    
-    async def _process_csv_streaming(self, file_content: bytes, filename: str, progress_callback=None) -> Dict[str, pd.DataFrame]:
-        """Process CSV files using true streaming approach"""
-        temp_path = None
-        try:
-            # Create temporary file for streaming processing
-            with tempfile.NamedTemporaryFile(suffix='.csv', delete=False, mode='wb') as temp_file:
-                temp_file.write(file_content)
-                temp_path = temp_file.name
-            
-            # Use thread pool for CSV processing
-            loop = asyncio.get_event_loop()
-            df = await loop.run_in_executor(
-                None,
-                self._stream_csv_file_sync,
-                temp_path
-            )
-            
-            if progress_callback:
-                await progress_callback("complete", "✅ CSV streaming complete", 100)
-            
-            return {'Sheet1': df}
-            
-        except Exception as e:
-            logger.error(f"CSV streaming failed: {e}")
-            raise
-        finally:
-            if temp_path and os.path.exists(temp_path):
-                try:
-                    os.unlink(temp_path)
-                except Exception as e:
-                    logger.warning(f"Failed to clean up temp file {temp_path}: {e}")
-    
-    def _stream_csv_file_sync(self, file_path: str) -> pd.DataFrame:
-        """Synchronous CSV streaming processing (runs in thread pool)"""
-        try:
-            # Read CSV in chunks to manage memory
-            chunk_list = []
-            chunk_size = self.csv_chunk_size
-            
-            for chunk in pd.read_csv(file_path, chunksize=chunk_size):
-                chunk_list.append(chunk)
-            
-            # Combine chunks
-            if chunk_list:
-                return pd.concat(chunk_list, ignore_index=True)
-            else:
-                return pd.DataFrame()
-                
-        except Exception as e:
-            logger.error(f"CSV streaming processing failed: {e}")
-            raise
-    
-    async def _process_ods(self, file_content: bytes, filename: str, progress_callback=None) -> Dict[str, pd.DataFrame]:
-        """Process OpenDocument Spreadsheet files"""
-        if not is_feature_available('odf'):
-            raise Exception("ODS processing not available - missing odf library")
-        
-        if progress_callback:
-            await progress_callback("processing", "📊 Processing ODS file...", 20)
-        
-        try:
-            with tempfile.NamedTemporaryFile(suffix='.ods', delete=False) as temp_file:
-                temp_file.write(file_content)
-                temp_file.flush()
-                
-                doc = load_ods(temp_file.name)
-                sheets = {}
-                
-                for table in doc.spreadsheet.getElementsByType(Table):
-                    sheet_name = table.getAttribute('name') or f"Sheet{len(sheets)+1}"
-                    data = []
-                    
-                    for row in table.getElementsByType(TableRow):
-                        row_data = []
-                        for cell in row.getElementsByType(TableCell):
-                            text_elements = cell.getElementsByType(P)
-                            cell_text = ' '.join([p.getAttribute('text') or '' for p in text_elements])
-                            row_data.append(cell_text)
-                        if row_data:
-                            data.append(row_data)
-                    
-                    if data:
-                        df = pd.DataFrame(data[1:], columns=data[0] if data else [])
-                        if not df.empty:
-                            sheets[sheet_name] = df
-                
-                # Ensure cleanup
-                try:
-                    os.unlink(temp_file.name)
-                except Exception as e:
-                    logger.warning(f"Failed to clean up temp file {temp_file.name}: {e}")
-                return sheets
-                
-        except Exception as e:
-            logger.error(f"ODS processing failed: {e}")
-            raise
-    
-    async def _process_archive(self, file_content: bytes, filename: str, progress_callback=None) -> Dict[str, pd.DataFrame]:
-        """Process archive files (ZIP, 7Z, RAR)"""
-        required_archive_features = ['zipfile', 'py7zr', 'rarfile']
-        available_archive_features = [f for f in required_archive_features if is_feature_available(f)]
-        if not available_archive_features:
-            raise Exception("Archive processing not available - missing zipfile, py7zr, or rarfile")
-        
-        if progress_callback:
-            await progress_callback("processing", "📦 Processing archive file...", 20)
-        
-        try:
-            with tempfile.TemporaryDirectory() as temp_dir:
-                temp_file_path = os.path.join(temp_dir, filename)
-                
-                with open(temp_file_path, 'wb') as temp_file:
-                    temp_file.write(file_content)
-                
-                # Extract archive
-                if filename.lower().endswith('.zip'):
-                    with zipfile.ZipFile(temp_file_path, 'r') as zip_ref:
-                        zip_ref.extractall(temp_dir)
-                elif filename.lower().endswith('.7z'):
-                    with py7zr.SevenZipFile(temp_file_path, 'r') as seven_zip:
-                        seven_zip.extractall(temp_dir)
-                elif filename.lower().endswith('.rar'):
-                    with rarfile.RarFile(temp_file_path, 'r') as rar_ref:
-                        rar_ref.extractall(temp_dir)
-                
-                # Process extracted files
-                all_sheets = {}
-                for root, dirs, files in os.walk(temp_dir):
-                    for file in files:
-                        if file.lower().endswith(('.xlsx', '.xls', '.csv', '.ods')):
-                            file_path = os.path.join(root, file)
-                            try:
-                                # Recursively process extracted files
-                                with open(file_path, 'rb') as f:
-                                    file_content = f.read()
-                                
-                                # Use basic processor for extracted files
-                                # Process extracted file using the existing streaming methods
-                                basic_processor = self
-                                # Use the existing process_file_enhanced method instead of missing read_file_streaming
-                                extracted_sheets = await basic_processor.process_file_enhanced(file_content, file, progress_callback)
-                                
-                                # Prefix sheet names with archive name
-                                for sheet_name, df in extracted_sheets.items():
-                                    prefixed_name = f"{filename}_{file}_{sheet_name}"
-                                    all_sheets[prefixed_name] = df
-                                    
-                            except Exception as extract_error:
-                                logger.warning(f"Failed to process extracted file {file}: {extract_error}")
-                
-                if all_sheets:
-                    return all_sheets
-                else:
-                    raise Exception("No processable files found in archive")
-                    
-        except Exception as e:
-            logger.error(f"Archive processing failed: {e}")
-            raise
-    
-    # Image/OCR processing is now handled by UniversalExtractorsOptimized
-    
-    async def _fallback_processing(self, file_content: bytes, filename: str, progress_callback=None) -> Dict[str, pd.DataFrame]:
-        """Fallback to basic processing if advanced methods fail"""
-        if progress_callback:
-            await progress_callback("fallback", "⚠️ Falling back to basic processing...", 15)
-        
-        try:
-            # For now, use basic pandas processing
-            # This will be enhanced when we integrate with the existing file processor
-            file_stream = io.BytesIO(file_content)
-            
-            # Try Excel first
-            try:
-                excel_file = pd.ExcelFile(file_stream)
-                sheets = {}
-                for sheet_name in excel_file.sheet_names:
-                    df = pd.read_excel(file_stream, sheet_name=sheet_name)
-                    if not df.empty:
-                        sheets[sheet_name] = df
-                if sheets:
-                    return sheets
-            except Exception:
-                pass
-            
-            # Try CSV
-            try:
-                file_stream.seek(0)
-                df = pd.read_csv(file_stream)
-                if not df.empty:
-                    return {'Sheet1': df}
-            except Exception:
-                pass
-            
-            raise Exception("Fallback processing failed")
-            
-        except Exception as e:
-            logger.error(f"Fallback processing failed: {e}")
-            raise
 
 class VendorStandardizer:
     """Handles vendor name standardization and cleaning"""
@@ -5226,126 +2252,6 @@ async def _learn_field_mappings_from_extraction(
                     break
     except Exception as e:
         logger.warning(f"Failed to learn field mappings from extraction: {e}")
-    
-    async def _learn_field_mappings_from_extraction(
-        self,
-        user_id: str,
-        row_data: Dict,
-        extraction_results: Dict,
-        platform: Optional[str] = None,
-        document_type: Optional[str] = None
-    ):
-        """
-        UNIVERSAL FIX: Learn field mappings from successful extractions.
-        
-        This method infers which columns were used for each field and records
-        them in the field_mappings table for future use.
-        """
-        if not user_id or not self.supabase:
-            return
-            
-        try:
-            # Infer mappings from successful extractions
-            # We look for columns that match the extracted values
-            
-            # Amount mapping
-            amount = extraction_results.get('amount', 0.0)
-            if amount and amount > 0:
-                for col_name, col_value in row_data.items():
-                    if isinstance(col_value, (int, float)) and abs(float(col_value) - amount) < 0.01:
-                        await learn_field_mapping(
-                            user_id=user_id,
-                            source_column=col_name,
-                            target_field='amount',
-                            platform=platform,
-                            document_type=document_type,
-                            confidence=0.9,
-                            extraction_success=True,
-                            metadata={'inferred_from': 'extraction'},
-                            supabase=self.supabase
-                        )
-                        break
-            
-            # Vendor mapping
-            vendor = extraction_results.get('vendor_name', '')
-            if vendor:
-                for col_name, col_value in row_data.items():
-                    if isinstance(col_value, str) and col_value.strip() == vendor.strip():
-                        await learn_field_mapping(
-                            user_id=user_id,
-                            source_column=col_name,
-                            target_field='vendor',
-                            platform=platform,
-                            document_type=document_type,
-                            confidence=0.85,
-                            extraction_success=True,
-                            metadata={'inferred_from': 'extraction'},
-                            supabase=self.supabase
-                        )
-                        break
-            
-            # Date mapping
-            date = extraction_results.get('date', '')
-            if date and date != datetime.now().strftime('%Y-%m-%d'):
-                for col_name, col_value in row_data.items():
-                    if isinstance(col_value, str):
-                        try:
-                            from dateutil import parser
-                            parsed = parser.parse(col_value)
-                            if parsed.strftime('%Y-%m-%d') == date:
-                                await learn_field_mapping(
-                                    user_id=user_id,
-                                    source_column=col_name,
-                                    target_field='date',
-                                    platform=platform,
-                                    document_type=document_type,
-                                    confidence=0.9,
-                                    extraction_success=True,
-                                    metadata={'inferred_from': 'extraction'},
-                                    supabase=self.supabase
-                                )
-                                break
-                        except:
-                            continue
-            
-            # Description mapping
-            description = extraction_results.get('description', '')
-            if description:
-                for col_name, col_value in row_data.items():
-                    if isinstance(col_value, str) and col_value.strip() == description.strip():
-                        await learn_field_mapping(
-                            user_id=user_id,
-                            source_column=col_name,
-                            target_field='description',
-                            platform=platform,
-                            document_type=document_type,
-                            confidence=0.8,
-                            extraction_success=True,
-                            metadata={'inferred_from': 'extraction'},
-                            supabase=self.supabase
-                        )
-                        break
-            
-            # Currency mapping
-            currency = extraction_results.get('currency', 'USD')
-            if currency != 'USD':
-                for col_name, col_value in row_data.items():
-                    if isinstance(col_value, str) and col_value.strip().upper() == currency.upper():
-                        await learn_field_mapping(
-                            user_id=user_id,
-                            source_column=col_name,
-                            target_field='currency',
-                            platform=platform,
-                            document_type=document_type,
-                            confidence=0.95,
-                            extraction_success=True,
-                            metadata={'inferred_from': 'extraction'},
-                            supabase=self.supabase
-                        )
-                        break
-                        
-        except Exception as e:
-            logger.warning(f"Failed to learn field mappings from extraction: {e}")
     
     def _extract_amount(self, row_data: Dict) -> float:
         """Extract amount from row data - case-insensitive field matching"""
@@ -9200,12 +6106,10 @@ class ExcelProcessor:
             # If transaction_id is None (transaction creation failed), create a new one
             entity_transaction_id = transaction_id if transaction_id else str(uuid.uuid4())
             
-            # Fetch events for this file to extract entities
-            events_query = supabase.table('raw_events').select('id, payload, classification_metadata').eq('user_id', user_id)
-            if file_id:
-                events_query = events_query.eq('source_file_id', file_id)
-            events_result = events_query.execute()
-            events = events_result.data or []
+            # CRITICAL FIX: Use optimized query for entity extraction
+            # Old: .select('id, payload, classification_metadata') - still fetches unnecessary data
+            # New: optimized_db.get_events_for_entity_extraction() - only necessary fields
+            events = await optimized_db.get_events_for_entity_extraction(user_id, file_id) if file_id else []
             
             # Extract entity names from events
             entity_names = []
@@ -9567,16 +6471,18 @@ class ExcelProcessor:
             # Initialize NASA-GRADE EntityResolver
             entity_resolver = EntityResolver(supabase_client=supabase, cache_client=safe_get_ai_cache())
             
-            # Get events based on filter criteria
+            # CRITICAL FIX: Use optimized query for entity extraction
+            # Old: Manual .select() with multiple conditions
+            # New: optimized_db.get_events_for_entity_extraction() - optimized with proper indexing
             if file_id:
-                events_query = supabase.table('raw_events').select('id, payload, classification_metadata').eq('user_id', user_id).eq('file_id', file_id)
+                events = await optimized_db.get_events_for_entity_extraction(user_id, file_id)
                 filter_desc = f"file_id={file_id}"
             else:
-                events_query = supabase.table('raw_events').select('id, payload, classification_metadata').eq('user_id', user_id).eq('transaction_id', transaction_id)
+                # Fallback to manual query for transaction_id (not in optimized_db yet)
+                events_query = supabase.table('raw_events').select('id, payload, kind, source_platform, row_index').eq('user_id', user_id).eq('transaction_id', transaction_id)
+                events_result = events_query.execute()
+                events = events_result.data or []
                 filter_desc = f"transaction_id={transaction_id}"
-            
-            events_result = events_query.execute()
-            events = events_result.data or []
             
             logger.info(f"Found {len(events)} events for entity resolution ({filter_desc})")
             
@@ -10641,11 +7547,10 @@ async def handle_duplicate_decision(request: DuplicateDecisionRequest):
                         progress=10
                     )
                     
-                    existing_file = supabase.table('raw_records').select('*').eq(
-                        'id', existing_file_id
-                    ).eq('user_id', user_id).single().execute()
+                    # CRITICAL FIX: Use optimized query for file lookup
+                    existing_file_data = await optimized_db.get_file_by_id(user_id, existing_file_id)
                     
-                    if not existing_file.data:
+                    if not existing_file_data:
                         raise ValueError(f"Existing file not found or access denied: {existing_file_id}")
                     
                     logger.info(f"Delta merge: validated existing file {existing_file_id}")
@@ -10764,27 +7669,23 @@ async def handle_duplicate_decision(request: DuplicateDecisionRequest):
                     
                     raise HTTPException(status_code=500, detail=error_msg)
             
-            # FIX ISSUE #11: For replace/keep_both, trigger actual processing
-            # Create background task to process the file
-            async def resume_processing():
-                try:
-                    # Re-trigger processing with resume flag
-                    from fastapi_backend_v2 import process_file_inline
-                    await process_file_inline({
-                        'user_id': user_id,
-                        'storage_path': storage_path,
-                        'filename': filename,
-                        'job_id': request.job_id,
-                        'resume_after_duplicate': True,
-                        'duplicate_decision': decision,
-                        'existing_file_id': existing_file_id
-                    })
-                except Exception as e:
-                    logger.error(f"Resume processing failed for job {request.job_id}: {e}")
-                    await websocket_manager.send_error(request.job_id, f"Processing failed: {str(e)}")
-            
-            # Start processing in background
-            asyncio.create_task(resume_processing())
+            # CRITICAL FIX: Re-enqueue to ARQ instead of inline processing
+            # This prevents 1,000 concurrent duplicate resolutions from overwhelming API servers
+            try:
+                pool = await get_arq_pool()
+                await pool.enqueue_job(
+                    'process_spreadsheet',
+                    user_id=user_id,
+                    filename=filename,
+                    storage_path=storage_path,
+                    job_id=request.job_id,
+                    duplicate_decision=decision,
+                    existing_file_id=existing_file_id
+                )
+                logger.info(f" Job {request.job_id} re-enqueued to ARQ after duplicate decision: {decision}")
+            except Exception as arq_error:
+                logger.error(f"Failed to re-enqueue job {request.job_id} to ARQ: {arq_error}")
+                raise HTTPException(status_code=500, detail=f"Failed to resume processing: {str(arq_error)}")
             
             return {"status": "success", "message": "Duplicate decision processed: resuming"}
 
@@ -10802,7 +7703,7 @@ async def get_delta_merge_history(file_id: str, user_id: str, session_token: Opt
     FIX ISSUE #15: Get delta merge history for a file.
     Returns all delta merge operations involving this file.
     """
-    await _require_security('delta-merge-history', user_id, session_token)
+    await _validate_security('delta-merge-history', user_id, session_token)
     try:
         # Use the database function created in migration 20250920130000
         result = supabase.rpc('get_delta_merge_history', {
@@ -10822,7 +7723,7 @@ async def get_delta_merge_history(file_id: str, user_id: str, session_token: Opt
 @app.get("/api/connectors/history")
 async def connectors_history(connection_id: str, user_id: str, page: int = 1, page_size: int = 20, session_token: Optional[str] = None):
     """Paginated sync_runs for a connection. Returns {runs, page, page_size, has_more}."""
-    await _require_security('connectors-history', user_id, session_token)
+    await _validate_security('connectors-history', user_id, session_token)
     try:
         if page < 1:
             page = 1
@@ -11310,32 +8211,12 @@ async def release_duplicate_lock(file_hash: str):
 from collections import defaultdict
 import time
 
-rate_limit_store = defaultdict(list)  # user_id -> list of timestamps
-rate_limit_lock = asyncio.Lock()
-
-async def check_rate_limit(user_id: str, max_requests: int = 100, window_seconds: int = 60) -> Tuple[bool, str]:
-    """
-    FIX #18: Check if user has exceeded rate limit for duplicate checks.
-    Returns (is_allowed, message)
-    """
-    async with rate_limit_lock:
-        current_time = time.time()
-        
-        # Clean up old timestamps
-        if user_id in rate_limit_store:
-            rate_limit_store[user_id] = [
-                ts for ts in rate_limit_store[user_id]
-                if current_time - ts < window_seconds
-            ]
-        
-        # Check rate limit
-        request_count = len(rate_limit_store[user_id])
-        if request_count >= max_requests:
-            return False, f"Rate limit exceeded: {request_count}/{max_requests} requests in {window_seconds}s"
-        
-        # Add current request
-        rate_limit_store[user_id].append(current_time)
-        return True, "OK"
+# DEAD CODE REMOVED: In-memory rate limiter (broken in multi-worker deployments)
+# Old: defaultdict + asyncio.Lock = per-worker state, easily bypassed
+# New: Use Redis-backed rate limiter (see acquire_upload_slot below) for all rate limiting
+# rate_limit_store = defaultdict(list)  # REMOVED
+# rate_limit_lock = asyncio.Lock()  # REMOVED
+# async def check_rate_limit(...): # REMOVED
 
 # CRITICAL FIX: Distributed rate limiter using Redis for multi-worker support
 MAX_CONCURRENT_UPLOADS_PER_USER = 10  # Allow max 10 concurrent uploads per user (increased for batch uploads)
@@ -11421,11 +8302,34 @@ async def check_duplicate_endpoint(request: dict):
         if not user_id or not file_hash:
             raise HTTPException(status_code=400, detail="user_id and file_hash are required")
         
-        # FIX #18: CRITICAL - Check rate limit BEFORE any processing
-        is_allowed, rate_limit_msg = await check_rate_limit(user_id, max_requests=100, window_seconds=60)
-        if not is_allowed:
-            logger.warning(f"Rate limit exceeded for user {user_id}: {rate_limit_msg}")
-            raise HTTPException(status_code=429, detail=rate_limit_msg)
+        # CRITICAL FIX: Use Redis-backed rate limiter (works across all workers)
+        # Old: check_rate_limit() used in-memory defaultdict (broken in multi-worker)
+        # New: Use Redis counter with TTL for distributed rate limiting
+        try:
+            from centralized_cache import get_cache
+            cache = get_cache()
+            rate_limit_key = f"rate_limit:duplicate_check:{user_id}"
+            
+            # Get current count
+            current_count = await cache.get(rate_limit_key) or 0
+            if isinstance(current_count, bytes):
+                current_count = int(current_count.decode())
+            elif isinstance(current_count, str):
+                current_count = int(current_count)
+            
+            # Check limit (100 requests per 60 seconds)
+            if current_count >= 100:
+                logger.warning(f"Rate limit exceeded for user {user_id}: {current_count}/100 requests in 60s")
+                raise HTTPException(status_code=429, detail=f"Rate limit exceeded: {current_count}/100 requests in 60s")
+            
+            # Increment counter with 60s TTL
+            await cache.incr(rate_limit_key)
+            await cache.expire(rate_limit_key, 60)
+            
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.warning(f"Rate limit check failed (allowing request): {e}")
         
         # Security validation
         try:
@@ -11715,10 +8619,8 @@ async def process_excel_endpoint(request: Request):
                 return
             
             try:
-                dup_res = supabase.table('raw_records').select(
-                    'id, file_name, created_at, content'
-                ).eq('user_id', user_id).eq('file_hash', file_hash).limit(10).execute()
-                duplicates = dup_res.data or []
+                # CRITICAL FIX: Use optimized duplicate query
+                duplicates = await optimized_db.get_duplicate_records(user_id, file_hash, limit=10)
                 if duplicates:
                     duplicate_files = [{
                         "id": d.get("id"),
@@ -12134,84 +9036,29 @@ class ConnectorDisconnectRequest(BaseModel):
     provider: Optional[str] = None
     session_token: Optional[str] = None
 
-async def _require_security(endpoint: str, user_id: str, session_token: Optional[str]):
+# DEAD CODE REMOVED: _require_security function (duplicate auth logic)
+# This function duplicated JWT validation logic from security_system.py
+# All endpoints now use security_validator.validate_request() directly
+# This eliminates security maintenance risk and ensures single source of truth
+
+async def _validate_security(endpoint: str, user_id: str, session_token: Optional[str]):
+    """
+    CRITICAL FIX: Use centralized security validator (single source of truth)
+    Replaces duplicate _require_security function
+    """
     try:
-        # Optional dev bypass for connector testing
-        if (
-            os.environ.get("CONNECTORS_DEV_TRUST") == "1"
-            or os.environ.get("SECURITY_DEV_TRUST") == "1"
-            or os.environ.get("SECURITY_FORCE_ALLOW") == "1"
-        ):
-            # Prime an in-memory session when possible so downstream checks pass
-            if user_id and session_token:
-                security_validator.auth_validator.active_sessions[user_id] = {
-                    'token': session_token,
-                    'created_at': datetime.utcnow(),
-                    'expires_at': datetime.utcnow() + timedelta(hours=1),
-                    'last_activity': datetime.utcnow(),
-                }
-            return
-
-        # If we have a Supabase JWT but no active in-memory session, validate via Supabase Auth
-        if user_id and session_token and user_id not in security_validator.auth_validator.active_sessions:
-            try:
-                # Prefer initialized supabase_url, otherwise read from env
-                sb_url = (
-                    globals().get('supabase_url')
-                    or os.environ.get("SUPABASE_URL")
-                    or os.environ.get("SUPABASE_PROJECT_URL")
-                )
-                api_key = (
-                    os.environ.get("SUPABASE_ANON_KEY")
-                    or os.environ.get("SUPABASE_SERVICE_KEY")
-                    or os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
-                    or os.environ.get("SUPABASE_KEY")
-                )
-                if sb_url and api_key:
-                    headers = {
-                        "Authorization": f"Bearer {session_token}",
-                        "apikey": api_key,
-                    }
-                    resp = requests.get(f"{sb_url}/auth/v1/user", headers=headers, timeout=10)
-                    if resp.status_code == 200:
-                        data = resp.json()
-                        if data.get("id") == user_id:
-                            # Extract expiry from JWT payload (no signature check; we already trusted Supabase response)
-                            exp_ts = None
-                            try:
-                                parts = session_token.split('.')
-                                if len(parts) >= 2:
-                                    payload_b64 = parts[1] + '==='  # pad for urlsafe decode
-                                    payload_json = base64.urlsafe_b64decode(payload_b64).decode('utf-8')
-                                    payload = json.loads(payload_json)
-                                    exp_ts = payload.get('exp')
-                            except Exception:
-                                exp_ts = None
-                            expires_at = (
-                                datetime.utcfromtimestamp(exp_ts)
-                                if isinstance(exp_ts, (int, float)) else datetime.utcnow() + timedelta(hours=1)
-                            )
-                            security_validator.auth_validator.active_sessions[user_id] = {
-                                'token': session_token,
-                                'created_at': datetime.utcnow(),
-                                'expires_at': expires_at,
-                                'last_activity': datetime.utcnow(),
-                            }
-            except Exception as e:
-                logger.warning(f"Supabase session validation bridge failed: {e}")
-
         valid, violations = await security_validator.validate_request({
             'endpoint': endpoint,
             'user_id': user_id,
             'session_token': session_token
         }, SecurityContext(user_id=user_id))
         if not valid:
-            logger.warning(f"Security validation failed for endpoint {endpoint}: {violations}")
+            logger.warning(f"Security validation failed for {endpoint}: {violations}")
             raise HTTPException(status_code=401, detail="Unauthorized or invalid session")
     except HTTPException:
         raise
-    except Exception as sec_e:
-        logger.warning(f"Security validation error for endpoint {endpoint}: {sec_e}")
+    except Exception as e:
+        logger.error(f"Security validation error for {endpoint}: {e}")
         raise HTTPException(status_code=401, detail="Unauthorized or invalid session")
 
 def _safe_filename(name: str) -> str:
@@ -12772,107 +9619,127 @@ async def _gmail_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> Dict
         page_batch_items = []
 
         for mid in message_ids:
-                try:
-                    msg = await nango.get_gmail_message(provider_key, connection_id, mid)
-                    stats['actions_used'] += 1
-                    payload = msg.get('payload') or {}
-                    headers = payload.get('headers') or []
-                    subject = next((h.get('value') for h in headers if h.get('name') == 'Subject'), '')
-                    date_hdr = next((h.get('value') for h in headers if h.get('name') == 'Date'), None)
-                    source_ts = None
-                    if date_hdr:
+            try:
+                msg = await nango.get_gmail_message(provider_key, connection_id, mid)
+                stats['actions_used'] += 1
+                payload = msg.get('payload') or {}
+                headers = payload.get('headers') or []
+                subject = next((h.get('value') for h in headers if h.get('name') == 'Subject'), '')
+                date_hdr = next((h.get('value') for h in headers if h.get('name') == 'Date'), None)
+                source_ts = None
+                if date_hdr:
+                    try:
+                        source_ts = parsedate_to_datetime(date_hdr).isoformat()
+                    except Exception:
+                        source_ts = datetime.utcnow().isoformat()
+
+                # Walk parts recursively to find attachments
+                def iter_parts(node):
+                    if not node:
+                        return
+                    if node.get('filename') and node.get('body', {}).get('attachmentId'):
+                        yield node
+                    for child in node.get('parts', []) or []:
+                        yield from iter_parts(child)
+
+                parts = list(iter_parts(payload))
+
+                async def process_part(part):
+                    filename = part.get('filename') or ''
+                    body = part.get('body') or {}
+                    attach_id = body.get('attachmentId')
+                    mime_type = part.get('mimeType', '')
+                    if not attach_id or not filename:
+                        return None
+                    # Relevance scoring
+                    score = 0.0
+                    name_l = filename.lower()
+                    subj_l = (subject or '').lower()
+                    patterns = ['invoice', 'statement', 'receipt', 'bill', 'payout', 'reconciliation']
+                    if any(p in name_l for p in patterns):
+                        score += 0.5
+                    if any(p in subj_l for p in patterns):
+                        score += 0.4
+                    if any(x in name_l for x in ['.csv', '.xlsx', '.xls', '.pdf']):
+                        score += 0.2
+                    score = min(score, 1.0)
+                    if score < 0.5:
+                        stats['skipped'] += 1
+                        return None
+                    async with sem:
+                        content = await nango.get_gmail_attachment(provider_key, connection_id, mid, attach_id)
+                        stats['actions_used'] += 1
+                        if not content:
+                            return None
+                        storage_path, file_hash = await _store_external_item_attachment(user_id, 'gmail', mid, filename, content)
+                        stats['attachments_saved'] += 1
+                        
+                        provider_attachment_id = f"{mid}:{attach_id}"
+                        item = {
+                            'user_id': user_id,
+                            'user_connection_id': user_connection_id,
+                            'provider_id': provider_attachment_id,
+                            'kind': 'email',
+                            'source_ts': source_ts or datetime.utcnow().isoformat(),
+                            'hash': file_hash,
+                            'storage_path': storage_path,
+                            'metadata': {'subject': subject, 'filename': filename, 'mime_type': mime_type, 'correlation_id': req.correlation_id},
+                            'relevance_score': score,
+                            'status': 'stored'
+                        }
+                        
+                        # Check for duplicate and enqueue processing
                         try:
-                            source_ts = parsedate_to_datetime(date_hdr).isoformat()
+                            # CRITICAL FIX: Use optimized duplicate check
+                            dup = await optimized_db.check_duplicate_by_hash(user_id, file_hash)
+                            is_dup = bool(dup)
                         except Exception:
-                            source_ts = datetime.utcnow().isoformat()
+                            is_dup = False
+                        if not is_dup:
+                            if any(name_l.endswith(ext) for ext in ['.csv', '.xlsx', '.xls']):
+                                await _enqueue_file_processing(user_id, filename, storage_path)
+                                stats['queued_jobs'] += 1
+                            elif name_l.endswith('.pdf'):
+                                await _enqueue_pdf_processing(user_id, filename, storage_path)
+                                stats['queued_jobs'] += 1
+                        
+                        return item
 
-                    # Walk parts recursively to find attachments
-                    def iter_parts(node):
-                        if not node:
-                            return
-                        if node.get('filename') and node.get('body', {}).get('attachmentId'):
-                            yield node
-                        for child in node.get('parts', []) or []:
-                            yield from iter_parts(child)
+                if parts:
+                    tasks = [asyncio.create_task(process_part(p)) for p in parts]
+                    if tasks:
+                        results = await asyncio.gather(*tasks, return_exceptions=True)
+                        # Collect valid items for batch insert
+                        for result in results:
+                            if result and isinstance(result, dict) and not isinstance(result, Exception):
+                                page_batch_items.append(result)
 
-                    parts = list(iter_parts(payload))
-
-                    async def process_part(part):
-                        filename = part.get('filename') or ''
-                        body = part.get('body') or {}
-                        attach_id = body.get('attachmentId')
-                        mime_type = part.get('mimeType', '')
-                        if not attach_id or not filename:
-                            return None
-                        # Relevance scoring
-                        score = 0.0
-                        name_l = filename.lower()
-                        subj_l = (subject or '').lower()
-                        patterns = ['invoice', 'statement', 'receipt', 'bill', 'payout', 'reconciliation']
-                        if any(p in name_l for p in patterns):
-                            score += 0.5
-                        if any(p in subj_l for p in patterns):
-                            score += 0.4
-                        if any(x in name_l for x in ['.csv', '.xlsx', '.xls', '.pdf']):
-                            score += 0.2
-                        score = min(score, 1.0)
-                        if score < 0.5:
-                            stats['skipped'] += 1
-                            return None
-                        async with sem:
-                            content = await nango.get_gmail_attachment(provider_key, connection_id, mid, attach_id)
-                            stats['actions_used'] += 1
-                            if not content:
-                                return None
-                            storage_path, file_hash = await _store_external_item_attachment(user_id, 'gmail', mid, filename, content)
-                            stats['attachments_saved'] += 1
-                            
-                            provider_attachment_id = f"{mid}:{attach_id}"
-                            item = {
-                                'user_id': user_id,
-                                'user_connection_id': user_connection_id,
-                                'provider_id': provider_attachment_id,
-                                'kind': 'email',
-                                'source_ts': source_ts or datetime.utcnow().isoformat(),
-                                'hash': file_hash,
-                                'storage_path': storage_path,
-                                'metadata': {'subject': subject, 'filename': filename, 'mime_type': mime_type, 'correlation_id': req.correlation_id},
-                                'relevance_score': score,
-                                'status': 'stored'
-                            }
-                            
-                            # Check for duplicate and enqueue processing
-                            try:
-                                dup = supabase.table('raw_records').select('id').eq('user_id', user_id).eq('file_hash', file_hash).limit(1).execute()
-                                is_dup = bool(dup.data)
-                            except Exception:
-                                is_dup = False
-                            if not is_dup:
-                                if any(name_l.endswith(ext) for ext in ['.csv', '.xlsx', '.xls']):
-                                    await _enqueue_file_processing(user_id, filename, storage_path)
-                                    stats['queued_jobs'] += 1
-                                elif name_l.endswith('.pdf'):
-                                    await _enqueue_pdf_processing(user_id, filename, storage_path)
-                                    stats['queued_jobs'] += 1
-                            
-                            return item
-
-                    if parts:
-                        tasks = [asyncio.create_task(process_part(p)) for p in parts]
-                        if tasks:
-                            results = await asyncio.gather(*tasks, return_exceptions=True)
-                            # Collect valid items for batch insert
-                            for result in results:
-                                if result and isinstance(result, dict) and not isinstance(result, Exception):
-                                    page_batch_items.append(result)
-
-                except Exception as item_e:
-                    logger.warning(f"Failed to process message {mid}: {item_e}")
-                    errors.append(str(item_e))
+            except Exception as item_e:
+                logger.warning(f"Failed to process message {mid}: {item_e}")
+                errors.append(str(item_e))
         
         # Batch insert all items from this page using transaction
         if page_batch_items:
             try:
+                transaction_manager = get_transaction_manager()
+                async with transaction_manager.transaction(
+                    user_id=user_id,
+                    operation_type="connector_sync_batch"
+                ) as tx:
+                    for item in page_batch_items:
+                        try:
+                            await tx.insert('external_items', item)
+                            stats['records_fetched'] += 1
+                        except Exception as insert_err:
+                            insert_err_str = str(insert_err).lower()
+                            if 'duplicate key' in insert_err_str or 'unique constraint' in insert_err_str:
+                                stats['skipped'] += 1
+                            else:
+                                logger.error(f"Gmail item insert failed: {insert_err}")
+                                errors.append(str(insert_err)[:100])
+            except Exception as batch_err:
+                logger.error(f"Gmail batch insert transaction failed: {batch_err}")
+                errors.append(f"Batch insert failed: {str(batch_err)[:100]}")
 
         run_status = 'succeeded' if not errors else ('partial' if stats['records_fetched'] > 0 else 'failed')
         
@@ -13129,8 +9996,9 @@ async def _dropbox_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> Di
                     }
                     
                     try:
-                        dup = supabase.table('raw_records').select('id').eq('user_id', user_id).eq('file_hash', file_hash).limit(1).execute()
-                        is_dup = bool(dup.data)
+                        # CRITICAL FIX: Use optimized duplicate check
+                        dup = await optimized_db.check_duplicate_by_hash(user_id, file_hash)
+                        is_dup = bool(dup)
                     except Exception:
                         is_dup = False
                     if not is_dup:
@@ -13395,8 +10263,9 @@ async def _gdrive_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> Dic
                         }
                         
                         try:
-                            dup = supabase.table('raw_records').select('id').eq('user_id', user_id).eq('file_hash', file_hash).limit(1).execute()
-                            is_dup = bool(dup.data)
+                            # CRITICAL FIX: Use optimized duplicate check
+                            dup = await optimized_db.check_duplicate_by_hash(user_id, file_hash)
+                            is_dup = bool(dup)
                         except Exception:
                             is_dup = False
                         if not is_dup:
@@ -13507,7 +10376,7 @@ async def list_providers(request: dict):
         user_id = (request or {}).get('user_id') or ''
         session_token = (request or {}).get('session_token')
         if user_id:
-            await _require_security('connectors-providers', user_id, session_token)
+            await _validate_security('connectors-providers', user_id, session_token)
         return {
             'providers': [
                 {'provider': 'google-mail', 'display_name': 'Gmail', 'integration_id': NANGO_GMAIL_INTEGRATION_ID, 'auth_type': 'OAUTH2', 'scopes': ['https://mail.google.com/'], 'endpoints': ['/emails', '/labels', '/attachment'], 'category': 'email'},
@@ -13531,7 +10400,7 @@ async def list_providers(request: dict):
 @app.post("/api/connectors/initiate")
 async def initiate_connector(req: ConnectorInitiateRequest):
     """Create a Nango Connect session for supported providers."""
-    await _require_security('connectors-initiate', req.user_id, req.session_token)
+    await _validate_security('connectors-initiate', req.user_id, req.session_token)
     try:
         provider_map = {
             'google-mail': NANGO_GMAIL_INTEGRATION_ID,
@@ -13618,7 +10487,7 @@ async def verify_connection(req: dict):
     provider = req.get('provider')
     session_token = req.get('session_token')
     
-    await _require_security('connectors-verify', user_id, session_token)
+    await _validate_security('connectors-verify', user_id, session_token)
     
     try:
         # Map provider to integration_id
@@ -13775,7 +10644,7 @@ async def connectors_sync(req: ConnectorSyncRequest):
     - No inline fallback execution (returns HTTP 503 if worker unavailable)
     - Single source of truth for all 9 providers
     """
-    await _require_security('connectors-sync', req.user_id, req.session_token)
+    await _validate_security('connectors-sync', req.user_id, req.session_token)
     try:
         integ = (req.integration_id or NANGO_GMAIL_INTEGRATION_ID)
         
@@ -13800,7 +10669,7 @@ class ConnectorMetadataUpdate(BaseModel):
 @app.post('/api/connectors/metadata')
 async def update_connection_metadata(req: ConnectorMetadataUpdate):
     """Update provider-specific metadata for a user connection (e.g., realmId, tenantId)."""
-    await _require_security('connectors-metadata', req.user_id, req.session_token)
+    await _validate_security('connectors-metadata', req.user_id, req.session_token)
     try:
         row = supabase.table('user_connections').select('metadata').eq('nango_connection_id', req.connection_id).limit(1).execute()
         base_meta = (row.data[0].get('metadata') if row.data else {}) or {}
@@ -13838,7 +10707,7 @@ class ConnectorFrequencyUpdate(BaseModel):
 @app.post('/api/connectors/frequency')
 async def update_connection_frequency(req: ConnectorFrequencyUpdate):
     """Update sync frequency in minutes for a user connection."""
-    await _require_security('connectors-frequency', req.user_id, req.session_token)
+    await _validate_security('connectors-frequency', req.user_id, req.session_token)
     try:
         minutes = max(0, min(int(req.minutes), 7 * 24 * 60))  # clamp to [0, 10080]
         supabase.table('user_connections').update({'sync_frequency_minutes': minutes}).eq('nango_connection_id', req.connection_id).execute()
@@ -13850,7 +10719,7 @@ async def update_connection_frequency(req: ConnectorFrequencyUpdate):
 @app.post('/api/connectors/disconnect')
 async def connectors_disconnect(req: ConnectorDisconnectRequest):
     """Disconnect a user's connector and remove the Nango connection."""
-    await _require_security('connectors-disconnect', req.user_id, req.session_token)
+    await _validate_security('connectors-disconnect', req.user_id, req.session_token)
 
     connection_id = req.connection_id
 
@@ -13921,7 +10790,7 @@ async def connectors_disconnect(req: ConnectorDisconnectRequest):
 
 @app.get("/api/connectors/status")
 async def connectors_status(connection_id: str, user_id: str, session_token: Optional[str] = None):
-    await _require_security('connectors-status', user_id, session_token)
+    await _validate_security('connectors-status', user_id, session_token)
     try:
         # Fetch user_connection and recent runs
         uc_res = supabase.table('user_connections').select('id, user_id, nango_connection_id, connector_id, status, last_synced_at, created_at, provider_account_id, metadata, sync_frequency_minutes').eq('nango_connection_id', connection_id).limit(1).execute()
@@ -13949,7 +10818,7 @@ async def list_user_connections(req: UserConnectionsRequest):
     
     Connections are created via webhook when user authorizes in Nango popup.
     """
-    await _require_security('connectors-user-connections', req.user_id, req.session_token)
+    await _validate_security('connectors-user-connections', req.user_id, req.session_token)
     try:
         # Fetch from database (connections created by webhook handler)
         res = supabase.table('user_connections').select('id, user_id, nango_connection_id, connector_id, status, last_synced_at, created_at').eq('user_id', req.user_id).limit(1000).execute()
@@ -14661,7 +11530,7 @@ async def _authorize_websocket_connection(websocket: WebSocket, job_id: str):
         token = qp.get('session_token') or websocket.headers.get('authorization')
         if not user_id or not token:
             raise HTTPException(status_code=401, detail='Missing user credentials for WebSocket')
-        await _require_security('websocket', user_id, token)
+        await _validate_security('websocket', user_id, token)
         
         # CRITICAL SECURITY FIX: Job MUST exist in database before WebSocket connection
         # This prevents attackers from claiming future job_ids

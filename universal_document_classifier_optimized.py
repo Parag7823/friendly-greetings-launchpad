@@ -129,8 +129,8 @@ class UniversalDocumentClassifierOptimized:
     - Real-time classification updates
     """
     
-    def __init__(self, anthropic_client=None, cache_client=None, supabase_client=None, config=None):
-        self.anthropic = anthropic_client
+    def __init__(self, groq_client=None, cache_client=None, supabase_client=None, config=None):
+        self.groq_client = groq_client
         self.supabase = supabase_client
         self.config = config or self._get_default_config()
         
@@ -557,7 +557,7 @@ class UniversalDocumentClassifierOptimized:
             
             # 2. AI-powered classification (primary method)
             ai_result = None
-            if self.config.enable_ai_classification and self.anthropic:
+            if self.config.enable_ai_classification and self.groq_client:
                 ai_result = await self._classify_document_with_ai(payload, filename)
                 if ai_result and ai_result['confidence'] >= 0.8:
                     self.metrics['ai_classifications'] += 1
