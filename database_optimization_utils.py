@@ -455,7 +455,7 @@ class OptimizedDatabaseQueries:
             logger.error(f"Component results query failed: {e}")
             return []
 
-def create_optimized_database_client() -> OptimizedDatabaseQueries:
+def create_optimized_db_client() -> OptimizedDatabaseQueries:
     """
     Factory function to create an optimized database client.
     CRITICAL FIX: Uses pooled Supabase client to prevent connection exhaustion.
