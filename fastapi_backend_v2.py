@@ -141,7 +141,38 @@ class DocumentClassificationRequest(BaseModel):
 
 # Database and external services
 from supabase import Client
-from supabase_client import get_supabase_client  # CRITICAL FIX: Use pooled client
+try:
+    from supabase_client import get_supabase_client  # type: ignore
+    _HAS_SUPABASE_HELPER = True
+except ModuleNotFoundError:
+    from supabase import create_client
+
+    _HAS_SUPABASE_HELPER = False
+    _FALLBACK_SUPABASE_CLIENTS: Dict[bool, Optional[Client]] = {True: None, False: None}
+
+    def get_supabase_client(use_service_role: bool = True) -> Client:  # type: ignore
+        """Fallback Supabase client creator when supabase_client module is unavailable."""
+        client = _FALLBACK_SUPABASE_CLIENTS[use_service_role]
+        if client is not None:
+            return client
+
+        supabase_url = os.getenv('SUPABASE_URL')
+        service_role_key = os.getenv('SUPABASE_SERVICE_ROLE_KEY')
+        anon_key = os.getenv('SUPABASE_ANON_KEY')
+        key = service_role_key if use_service_role else anon_key
+
+        if not supabase_url or not key:
+            raise RuntimeError(
+                "Supabase client fallback requires SUPABASE_URL and the appropriate API key environment variables."
+            )
+
+        logger.warning(
+            "Supabase client fallback activated: using direct create_client due to missing supabase_client module."
+        )
+
+        client = create_client(supabase_url, key)
+        _FALLBACK_SUPABASE_CLIENTS[use_service_role] = client
+        return client
 from prometheus_client import Counter, Histogram, Gauge, generate_latest, CONTENT_TYPE_LATEST
 
 # CLEANUP: Removed Celery support - Using ARQ only for async task queue
