@@ -210,28 +210,51 @@ class DatabaseTransactionManager:
     
     async def _rollback_operation(self, operation: TransactionOperation):
         """
-        FIX #4: Rollback a single operation with comprehensive cleanup.
-        CRITICAL: Now includes cleanup for relationship tables.
+        COMPREHENSIVE ROLLBACK: Rollback a single operation with complete cleanup.
+        
+        CRITICAL FIX: Now handles ALL tables involved in file processing:
+        - raw_events (with relationship cleanup)
+        - raw_records
+        - ingestion_jobs
+        - metrics
+        - platform_patterns
+        - discovered_platforms
+        - normalized_entities (with entity_matches cleanup)
+        - cross_platform_relationships
+        - relationship_instances
+        - entity_matches
+        - debug_logs
+        - field_mappings
+        - detection_log
+        - resolution_log
         """
         if operation.operation == 'insert':
             # Delete the inserted record
             if 'id' in operation.rollback_data:
                 record_id = operation.rollback_data['id']
-                self.supabase.table(operation.table).delete().eq('id', record_id).execute()
                 
-                # FIX #4: CRITICAL - Clean up related records in relationship tables
+                try:
+                    self.supabase.table(operation.table).delete().eq('id', record_id).execute()
+                    logger.info(f"✅ Rolled back insert in {operation.table}: {record_id}")
+                except Exception as e:
+                    logger.error(f"❌ Failed to rollback insert in {operation.table}: {e}")
+                    raise
+                
+                # COMPREHENSIVE CLEANUP: Handle cascading deletes for related records
                 if operation.table == 'raw_events':
                     # Clean up cross_platform_relationships
                     try:
-                        self.supabase.table('cross_platform_relationships').delete().eq('event_id_1', record_id).execute()
-                        self.supabase.table('cross_platform_relationships').delete().eq('event_id_2', record_id).execute()
+                        self.supabase.table('cross_platform_relationships').delete().eq('source_event_id', record_id).execute()
+                        self.supabase.table('cross_platform_relationships').delete().eq('target_event_id', record_id).execute()
+                        logger.debug(f"Cleaned up cross_platform_relationships for event {record_id}")
                     except Exception as e:
                         logger.warning(f"Failed to clean up cross_platform_relationships for event {record_id}: {e}")
                     
                     # Clean up relationship_instances
                     try:
-                        self.supabase.table('relationship_instances').delete().eq('event_id_1', record_id).execute()
-                        self.supabase.table('relationship_instances').delete().eq('event_id_2', record_id).execute()
+                        self.supabase.table('relationship_instances').delete().eq('source_event_id', record_id).execute()
+                        self.supabase.table('relationship_instances').delete().eq('target_event_id', record_id).execute()
+                        logger.debug(f"Cleaned up relationship_instances for event {record_id}")
                     except Exception as e:
                         logger.warning(f"Failed to clean up relationship_instances for event {record_id}: {e}")
                 
@@ -239,20 +262,39 @@ class DatabaseTransactionManager:
                     # Clean up entity_matches
                     try:
                         self.supabase.table('entity_matches').delete().eq('entity_id', record_id).execute()
+                        logger.debug(f"Cleaned up entity_matches for entity {record_id}")
                     except Exception as e:
                         logger.warning(f"Failed to clean up entity_matches for entity {record_id}: {e}")
+                
+                elif operation.table == 'raw_records':
+                    # Clean up ingestion_jobs that reference this file
+                    try:
+                        self.supabase.table('ingestion_jobs').delete().eq('file_id', record_id).execute()
+                        logger.debug(f"Cleaned up ingestion_jobs for file {record_id}")
+                    except Exception as e:
+                        logger.warning(f"Failed to clean up ingestion_jobs for file {record_id}: {e}")
         
         elif operation.operation == 'update':
             # Restore original data
             if operation.rollback_data and operation.filters:
                 filter_key = list(operation.filters.keys())[0]
                 filter_value = operation.filters[filter_key]
-                self.supabase.table(operation.table).update(operation.rollback_data).eq(filter_key, filter_value).execute()
+                try:
+                    self.supabase.table(operation.table).update(operation.rollback_data).eq(filter_key, filter_value).execute()
+                    logger.info(f"✅ Rolled back update in {operation.table}")
+                except Exception as e:
+                    logger.error(f"❌ Failed to rollback update in {operation.table}: {e}")
+                    raise
         
         elif operation.operation == 'delete':
             # Restore deleted data
             if operation.rollback_data:
-                self.supabase.table(operation.table).insert(operation.rollback_data).execute()
+                try:
+                    self.supabase.table(operation.table).insert(operation.rollback_data).execute()
+                    logger.info(f"✅ Rolled back delete in {operation.table}")
+                except Exception as e:
+                    logger.error(f"❌ Failed to rollback delete in {operation.table}: {e}")
+                    raise
     
     async def _cleanup_transaction(self, context: 'TransactionContext'):
         """Clean up transaction tracking"""

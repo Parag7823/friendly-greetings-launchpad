@@ -487,3 +487,133 @@ def append_lineage_step(
 ) -> List[Dict[str, Any]]:
     """Convenience function for appending lineage step"""
     return provenance_tracker.append_lineage_step(existing_path, step, operation, metadata)
+
+
+# ============================================================================
+# BUSINESS LOGIC NORMALIZATION - Shared across all analytics modules
+# ============================================================================
+
+# Allowed values enforced by relationship_instances_business_logic_check
+ALLOWED_BUSINESS_LOGIC = {
+    'standard_payment_flow',
+    'revenue_recognition',
+    'expense_reimbursement',
+    'payroll_processing',
+    'tax_withholding',
+    'asset_depreciation',
+    'loan_repayment',
+    'refund_processing',
+    'recurring_billing',
+    'unknown'
+}
+
+# Map commonly generated synonyms to allowed business logic categories
+BUSINESS_LOGIC_ALIASES = {
+    'invoice_payment': 'standard_payment_flow',
+    'vendor_payment': 'standard_payment_flow',
+    'vendor_payments': 'standard_payment_flow',
+    'payment_workflow': 'standard_payment_flow',
+    'cash_outflow': 'standard_payment_flow',
+    'cash_inflow': 'revenue_recognition',
+    'revenue_collection': 'revenue_recognition',
+    'recurring_revenue': 'recurring_billing',
+    'subscription_billing': 'recurring_billing',
+    'refunds': 'refund_processing',
+    'loan_payments': 'loan_repayment',
+    'asset_management': 'asset_depreciation',
+    'depreciation_schedule': 'asset_depreciation',
+    'payroll': 'payroll_processing',
+    'tax_payments': 'tax_withholding',
+    'expense_management': 'expense_reimbursement',
+    # Temporal pattern learner specific aliases
+    'predictable_pattern': 'recurring_billing',
+    'historical_pattern': 'recurring_billing',
+    'pattern_based': 'recurring_billing'
+}
+
+
+def normalize_business_logic(value: Optional[str]) -> str:
+    """
+    Normalize AI-generated text to allowed business_logic enum values.
+    
+    This is the SINGLE SOURCE OF TRUTH for business logic normalization.
+    All analytics modules (enhanced_relationship_detector, temporal_pattern_learner,
+    causal_inference_engine) MUST use this function before writing to database.
+    
+    Args:
+        value: Raw AI-generated or rule-based business logic text
+        
+    Returns:
+        Normalized business logic value from ALLOWED_BUSINESS_LOGIC set
+    """
+    if not value:
+        return 'standard_payment_flow'
+
+    normalized = value.strip().lower().replace(' ', '_')
+    if normalized in ALLOWED_BUSINESS_LOGIC:
+        return normalized
+
+    alias = BUSINESS_LOGIC_ALIASES.get(normalized)
+    if alias:
+        return alias
+
+    # Attempt to match simple prefixes (e.g., "refund" -> "refund_processing")
+    for prefix, mapped in BUSINESS_LOGIC_ALIASES.items():
+        if normalized.startswith(prefix):
+            return mapped
+
+    return 'unknown'
+
+
+# Allowed temporal causality values
+ALLOWED_TEMPORAL_CAUSALITY = {
+    'source_causes_target',
+    'target_causes_source',
+    'bidirectional',
+    'correlation_only',
+    'unknown'
+}
+
+# Map commonly generated synonyms to allowed temporal causality categories
+TEMPORAL_CAUSALITY_ALIASES = {
+    'source_to_target': 'source_causes_target',
+    'forward_causality': 'source_causes_target',
+    'target_to_source': 'target_causes_source',
+    'reverse_causality': 'target_causes_source',
+    'mutual_causality': 'bidirectional',
+    'two_way': 'bidirectional',
+    'correlation': 'correlation_only',
+    'no_causality': 'correlation_only'
+}
+
+
+def normalize_temporal_causality(value: Optional[str]) -> str:
+    """
+    Normalize AI-generated text to allowed temporal_causality enum values.
+    
+    This is the SINGLE SOURCE OF TRUTH for temporal causality normalization.
+    All analytics modules MUST use this function before writing to database.
+    
+    Args:
+        value: Raw AI-generated or rule-based temporal causality text
+        
+    Returns:
+        Normalized temporal causality value from ALLOWED_TEMPORAL_CAUSALITY set
+    """
+    if not value:
+        return 'unknown'
+
+    normalized = value.strip().lower().replace(' ', '_')
+    if normalized in ALLOWED_TEMPORAL_CAUSALITY:
+        return normalized
+
+    alias = TEMPORAL_CAUSALITY_ALIASES.get(normalized)
+    if alias:
+        return alias
+
+    # Attempt to match simple prefixes
+    for prefix, mapped in TEMPORAL_CAUSALITY_ALIASES.items():
+        if normalized.startswith(prefix):
+            return mapped
+
+    return 'unknown'

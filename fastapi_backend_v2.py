@@ -137,7 +137,8 @@ class DocumentClassificationRequest(BaseModel):
     platform: Optional[str] = None
 
 # Database and external services
-from supabase import create_client, Client
+from supabase import Client
+from supabase_client import get_supabase_client  # CRITICAL FIX: Use pooled client
 from prometheus_client import Counter, Histogram, Gauge, generate_latest, CONTENT_TYPE_LATEST
 
 # CLEANUP: Removed Celery support - Using ARQ only for async task queue
@@ -975,9 +976,9 @@ try:
             missing_vars.append("SUPABASE_SERVICE_KEY (or SUPABASE_SERVICE_ROLE_KEY)")
         raise ValueError(f"Missing required environment variables: {', '.join(missing_vars)}. Please check your deployment configuration.")
     
-    # Create global Supabase client
-    supabase = create_client(supabase_url, supabase_key)
-    logger.info("✅ Supabase client initialized successfully")
+    # CRITICAL FIX: Use pooled Supabase client to prevent connection exhaustion
+    supabase = get_supabase_client()
+    logger.info("✅ Supabase pooled client initialized successfully")
     
     # Initialize critical systems
     initialize_transaction_manager(supabase)
@@ -1197,10 +1198,15 @@ try:
 except Exception as e:
     logger.error(f"❌ Configuration validation failed: {e}")
     raise
+# DEAD CODE REMOVED: EnhancedFileProcessor class (lines 1204-4173)
+# This class was never instantiated or used in the codebase.
+# All file processing is handled by ExcelProcessor which uses:
+# - UniversalExtractorsOptimized for advanced formats
+# - StreamingProcessor for memory-efficient processing
+# - Production-grade duplicate detection and entity resolution
+# Keeping this dead code would increase maintenance burden with no benefit.
 
-
-
-class EnhancedFileProcessor:
+class VendorStandardizer:
     """Enhanced file processor with 100X capabilities for advanced file formats"""
     
     def __init__(self):
@@ -1249,10 +1255,15 @@ class EnhancedFileProcessor:
             elif file_format == 'ods':
                 return await self._process_ods(file_content, filename, progress_callback)
             elif file_format == 'pdf' or file_format == 'image':
-                # PDF and image processing now handled by UniversalExtractorsOptimized
+                # CRITICAL FIX: Use streaming processor instead of loading full file
                 if progress_callback:
-                    await progress_callback("processing", f"📄 Processing {file_format} with UniversalExtractors...", 30)
-                return await self.read_file(file_content, filename)
+                    await progress_callback("processing", f"📄 Processing {file_format} with streaming...", 30)
+                # Use universal_extractors directly for streaming extraction
+                return await self.universal_extractors.extract_data_universal(
+                    streamed_file=file_content,
+                    filename=filename,
+                    user_id="system"
+                )
             elif file_format == 'archive':
                 return await self._process_archive(file_content, filename, progress_callback)
             else:
@@ -1547,19 +1558,9 @@ async def _zohomail_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> D
                     }
                     batch_items.append(item)
 
-                    # Enqueue processing
-                    try:
-                        lower = (fname or '').lower()
-                        if lower.endswith('.pdf'):
-                            await _enqueue_pdf_processing(user_id, fname, storage_path)
-                        else:
-                            await _enqueue_file_processing(user_id, fname, storage_path)
-                        stats['queued_jobs'] += 1
-                    except Exception as e:
-                        logger.warning(f"Zoho enqueue failed: {e}")
-
-                # Batch insert for this message's attachments
+                # FIX #3: Batch insert FIRST, then enqueue with external_item_id
                 if batch_items:
+                    inserted_items = []
                     try:
                         transaction_manager = get_transaction_manager()
                         async with transaction_manager.transaction(
@@ -1568,14 +1569,16 @@ async def _zohomail_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> D
                         ) as tx:
                             try:
                                 # Batch insert for better performance
-                                await tx.insert_batch('external_items', batch_items)
-                                stats['records_fetched'] += len(batch_items)
+                                inserted_items = await tx.insert_batch('external_items', batch_items)
+                                stats['records_fetched'] += len(inserted_items)
                             except Exception as insert_err:
                                 # Fallback to individual inserts if batch fails (e.g., duplicates)
                                 if 'duplicate key' in str(insert_err).lower() or 'unique' in str(insert_err).lower():
                                     for item in batch_items:
                                         try:
-                                            await tx.insert('external_items', item)
+                                            result = await tx.insert('external_items', item)
+                                            if result:
+                                                inserted_items.append(result)
                                             stats['records_fetched'] += 1
                                         except Exception:
                                             pass
@@ -1583,6 +1586,22 @@ async def _zohomail_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> D
                                     logger.error(f"Zoho batch insert failed: {insert_err}")
                     except Exception as batch_err:
                         logger.error(f"Zoho batch insert transaction failed: {batch_err}")
+                    
+                    # Now enqueue processing with external_item_id
+                    for idx, inserted_item in enumerate(inserted_items):
+                        try:
+                            external_item_id = inserted_item.get('id')
+                            fname = inserted_item.get('metadata', {}).get('filename', '')
+                            storage_path = inserted_item.get('storage_path', '')
+                            
+                            lower = (fname or '').lower()
+                            if lower.endswith('.pdf'):
+                                await _enqueue_pdf_processing(user_id, fname, storage_path, external_item_id)
+                            else:
+                                await _enqueue_file_processing(user_id, fname, storage_path, external_item_id)
+                            stats['queued_jobs'] += 1
+                        except Exception as e:
+                            logger.warning(f"Zoho enqueue failed: {e}")
                 fetched += 1
                 if fetched >= max_total:
                     break
@@ -8124,8 +8143,11 @@ class ExcelProcessor:
             # Fallback: return empty metadata, streaming will still work
             return {}
     
-    async def read_file(self, streamed_file: StreamedFile) -> Dict[str, pd.DataFrame]:
-        """Read file using UniversalExtractorsOptimized (NASA-GRADE) and return dictionary of sheets"""
+    # REMOVED: read_file method caused OOM by loading full files into memory
+    # Use _get_sheet_metadata() and streaming_processor instead
+    async def read_file_DEPRECATED_DO_NOT_USE(self, streamed_file: StreamedFile) -> Dict[str, pd.DataFrame]:
+        """DEPRECATED: This method loads full files into memory causing OOM errors"""
+        raise NotImplementedError("read_file is deprecated. Use _get_sheet_metadata() and streaming_processor instead")
         try:
             # REFACTORED: Use UniversalExtractorsOptimized for all file reading
             # This provides consistent extraction across PDF, DOCX, PPTX, CSV, JSON, TXT, and images
@@ -8201,7 +8223,8 @@ class ExcelProcessor:
                           existing_file_id: Optional[str] = None,
                           original_file_hash: Optional[str] = None,
                           streamed_file_hash: Optional[str] = None,
-                          streamed_file_size: Optional[int] = None) -> Dict[str, Any]:
+                          streamed_file_size: Optional[int] = None,
+                          external_item_id: Optional[str] = None) -> Dict[str, Any]:
         """Optimized processing pipeline with duplicate detection and batch AI classification"""
 
         # BUG #11 FIX: Remove pointless if/else - always use production service
@@ -8578,11 +8601,12 @@ class ExcelProcessor:
             })
         
         # Universal document classification (AI + pattern + OCR)
+        # CRITICAL FIX: Use metadata instead of undefined first_sheet variable
         doc_cache_key = {
-            'columns': list(first_sheet.columns),
+            'columns': first_sheet_meta['columns'],
             'filename': streamed_file.filename,
             'user_id': user_id,
-            'sample_hash': hashlib.sha256(first_sheet.head(10).to_json().encode()).hexdigest() if not first_sheet.empty else None
+            'sample_hash': first_sheet_meta.get('sample_hash')
         }
 
         cached_doc = None
@@ -8684,14 +8708,18 @@ class ExcelProcessor:
             sheets_row_hashes = {}
             logger.info("Row hashes will be computed during streaming processing")
             
-            # Attempt to resolve originating external_item_id via file hash
-            external_item_id = None
-            try:
-                ext_res = tx.manager.supabase.table('external_items').select('id').eq('user_id', user_id).eq('hash', file_hash).limit(1).execute()
-                if ext_res and getattr(ext_res, 'data', None):
-                    external_item_id = ext_res.data[0].get('id')
-            except Exception as e:
-                logger.warning(f"external_item lookup failed for raw_records link: {e}")
+            # FIX #3: Use external_item_id passed from connector (no redundant lookup)
+            # If not provided, attempt fallback lookup via file hash (for manual uploads)
+            if external_item_id is None:
+                try:
+                    ext_res = tx.manager.supabase.table('external_items').select('id').eq('user_id', user_id).eq('hash', file_hash).limit(1).execute()
+                    if ext_res and getattr(ext_res, 'data', None):
+                        external_item_id = ext_res.data[0].get('id')
+                        logger.info(f"✅ Resolved external_item_id via file hash lookup: {external_item_id}")
+                except Exception as e:
+                    logger.warning(f"external_item lookup failed for raw_records link: {e}")
+            else:
+                logger.info(f"✅ Using external_item_id passed from connector: {external_item_id}")
             
             # Store in raw_records using transaction
             raw_record_data = {
@@ -8878,7 +8906,8 @@ class ExcelProcessor:
                             try:
                                 row = batch_df.loc[row_index]
                                 
-                                # Create event for this row using enriched data
+                                # CRITICAL FIX #4: Use complete event object from row_processor
+                                # This includes ALL provenance data (row_hash, lineage_path, created_by, job_id)
                                 event = await self.row_processor.process_row(
                                     row, row_index, sheet_name, platform_info, file_context, column_names
                                 )
@@ -8886,8 +8915,9 @@ class ExcelProcessor:
                                 # Update event with batch classification and enrichment results
                                 event['classification_metadata'].update(classification)
                                 
-                                # CRITICAL: Use batch-enriched payload (already processed)
-                                event['payload'] = enriched_payload
+                                # CRITICAL FIX: payload should contain ONLY raw data, not enriched data
+                                raw_row_data = row.to_dict()
+                                event['payload'] = serialize_datetime_objects(raw_row_data)
 
                                 # Apply vectorized row-level platform guess
                                 if row_platform_series is not None:
@@ -8903,77 +8933,57 @@ class ExcelProcessor:
                                 # Clean the enriched payload to ensure all datetime objects are converted
                                 cleaned_enriched_payload = serialize_datetime_objects(enriched_payload)
                                 
-                                # Prepare event data for batch insertion
-                                # FIX: Ensure file_id is valid (not None and exists in raw_records)
-                                validated_file_id = file_id if file_id else None
-                                event_data = {
-                                'user_id': user_id,
-                                'file_id': validated_file_id,  # CRITICAL FIX #20: Add file_id to enable entity extraction queries
-                                'provider': event['provider'],
-                                'kind': event['kind'],
-                                'source_platform': event['source_platform'],
-                                'category': event['classification_metadata'].get('category'),
-                                'subcategory': event['classification_metadata'].get('subcategory'),
-                                'payload': cleaned_enriched_payload,  # Use cleaned payload
-                                'row_index': event['row_index'],
-                                'sheet_name': event['sheet_name'],
-                                'source_filename': event['source_filename'],
-                                'uploader': event['uploader'],
-                                'ingest_ts': event['ingest_ts'],
-                                'status': event['status'],
-                                'confidence_score': event['confidence_score'],
-                                'classification_metadata': {
-                                    **event['classification_metadata'],
-                                    'document_type': platform_info.get('document_type', 'unknown'),
-                                    'document_confidence': platform_info.get('document_confidence', 0.0),
-                                    'document_classification_method': platform_info.get('document_classification_method', 'unknown'),
-                                    'document_indicators': platform_info.get('document_indicators', [])
-                                },
+                                # Add enrichment fields to event (top-level columns, not in payload)
+                                event['user_id'] = user_id
+                                event['file_id'] = file_id  # CRITICAL FIX #4: Add file_id from context
+                                event['job_id'] = file_context.get('job_id')  # CRITICAL FIX #4: Add job_id from context
+                                event['category'] = event['classification_metadata'].get('category')
+                                event['subcategory'] = event['classification_metadata'].get('subcategory')
+                                
+                                # Add document type from platform detection
+                                event['classification_metadata']['document_type'] = platform_info.get('document_type', 'unknown')
+                                event['classification_metadata']['document_confidence'] = platform_info.get('document_confidence', 0.0)
+                                event['classification_metadata']['document_classification_method'] = platform_info.get('document_classification_method', 'unknown')
+                                event['classification_metadata']['document_indicators'] = platform_info.get('document_indicators', [])
+                                
                                 # FIX #4: Extract entities from enriched_payload (standardized names)
-                                'entities': cleaned_enriched_payload.get('entities', event['classification_metadata'].get('entities', {})),
-                                'relationships': cleaned_enriched_payload.get('relationships', event['classification_metadata'].get('relationships', {})),
-                                # FIX #2: Add document_type from Phase 3
-                                'document_type': platform_info.get('document_type', 'unknown'),
-                                'document_confidence': platform_info.get('document_confidence', 0.0),
+                                event['entities'] = cleaned_enriched_payload.get('entities', event['classification_metadata'].get('entities', {}))
+                                event['relationships'] = cleaned_enriched_payload.get('relationships', event['classification_metadata'].get('relationships', {}))
+                                event['document_type'] = platform_info.get('document_type', 'unknown')
+                                event['document_confidence'] = platform_info.get('document_confidence', 0.0)
+                                
                                 # Enrichment fields
-                                'amount_original': cleaned_enriched_payload.get('amount_original'),
-                                'amount_usd': cleaned_enriched_payload.get('amount_usd'),
-                                'currency': cleaned_enriched_payload.get('currency'),
-                                'exchange_rate': cleaned_enriched_payload.get('exchange_rate'),
-                                'exchange_date': cleaned_enriched_payload.get('exchange_date'),
-                                'vendor_raw': cleaned_enriched_payload.get('vendor_raw'),
-                                'vendor_standard': cleaned_enriched_payload.get('vendor_standard'),
-                                'vendor_confidence': cleaned_enriched_payload.get('vendor_confidence'),
-                                'vendor_cleaning_method': cleaned_enriched_payload.get('vendor_cleaning_method'),
-                                'platform_ids': cleaned_enriched_payload.get('platform_ids', {}),
-                                'standard_description': cleaned_enriched_payload.get('standard_description'),
-                                # ACCURACY FIX #1: Amount direction and transaction type
-                                'transaction_type': cleaned_enriched_payload.get('transaction_type'),
-                                'amount_direction': cleaned_enriched_payload.get('amount_direction'),
-                                'amount_signed_usd': cleaned_enriched_payload.get('amount_signed_usd'),
-                                'affects_cash': cleaned_enriched_payload.get('affects_cash'),
-                                # ACCURACY FIX #2: Standardized timestamps
-                                'source_ts': cleaned_enriched_payload.get('source_ts'),
-                                'ingested_ts': cleaned_enriched_payload.get('ingested_ts'),
-                                'processed_ts': cleaned_enriched_payload.get('processed_ts'),
-                                'transaction_date': cleaned_enriched_payload.get('transaction_date'),
-                                'exchange_rate_date': cleaned_enriched_payload.get('exchange_rate_date'),
-                                # ACCURACY FIX #3: Data validation flags
-                                'validation_flags': cleaned_enriched_payload.get('validation_flags'),
-                                'is_valid': cleaned_enriched_payload.get('is_valid'),
-                                # ACCURACY FIX #4: Canonical entity IDs
-                                'vendor_canonical_id': cleaned_enriched_payload.get('vendor_canonical_id'),
-                                'vendor_verified': cleaned_enriched_payload.get('vendor_verified'),
-                                'vendor_alternatives': cleaned_enriched_payload.get('vendor_alternatives'),
-                                # ACCURACY FIX #5: Confidence-based flagging
-                                'overall_confidence': cleaned_enriched_payload.get('overall_confidence'),
-                                'requires_review': cleaned_enriched_payload.get('requires_review'),
-                                'review_reason': cleaned_enriched_payload.get('review_reason'),
-                                'review_priority': cleaned_enriched_payload.get('review_priority'),
-                                # Accuracy metadata
-                                'accuracy_enhanced': cleaned_enriched_payload.get('accuracy_enhanced'),
-                                'accuracy_version': cleaned_enriched_payload.get('accuracy_version')
-                                }
+                                event['amount_original'] = cleaned_enriched_payload.get('amount_original')
+                                event['amount_usd'] = cleaned_enriched_payload.get('amount_usd')
+                                event['currency'] = cleaned_enriched_payload.get('currency')
+                                event['exchange_rate'] = cleaned_enriched_payload.get('exchange_rate')
+                                event['exchange_date'] = cleaned_enriched_payload.get('exchange_date')
+                                event['vendor_raw'] = cleaned_enriched_payload.get('vendor_raw')
+                                event['vendor_standard'] = cleaned_enriched_payload.get('vendor_standard')
+                                event['vendor_confidence'] = cleaned_enriched_payload.get('vendor_confidence')
+                                event['vendor_cleaning_method'] = cleaned_enriched_payload.get('vendor_cleaning_method')
+                                event['platform_ids'] = cleaned_enriched_payload.get('platform_ids', {})
+                                event['standard_description'] = cleaned_enriched_payload.get('standard_description')
+                                event['transaction_type'] = cleaned_enriched_payload.get('transaction_type')
+                                event['amount_direction'] = cleaned_enriched_payload.get('amount_direction')
+                                event['amount_signed_usd'] = cleaned_enriched_payload.get('amount_signed_usd')
+                                event['affects_cash'] = cleaned_enriched_payload.get('affects_cash')
+                                event['source_ts'] = cleaned_enriched_payload.get('source_ts')
+                                event['ingested_ts'] = cleaned_enriched_payload.get('ingested_ts')
+                                event['processed_ts'] = cleaned_enriched_payload.get('processed_ts')
+                                event['transaction_date'] = cleaned_enriched_payload.get('transaction_date')
+                                event['exchange_rate_date'] = cleaned_enriched_payload.get('exchange_rate_date')
+                                event['validation_flags'] = cleaned_enriched_payload.get('validation_flags')
+                                event['is_valid'] = cleaned_enriched_payload.get('is_valid')
+                                event['vendor_canonical_id'] = cleaned_enriched_payload.get('vendor_canonical_id')
+                                event['vendor_verified'] = cleaned_enriched_payload.get('vendor_verified')
+                                event['vendor_alternatives'] = cleaned_enriched_payload.get('vendor_alternatives')
+                                event['overall_confidence'] = cleaned_enriched_payload.get('overall_confidence')
+                                event['requires_review'] = cleaned_enriched_payload.get('requires_review')
+                                event['review_reason'] = cleaned_enriched_payload.get('review_reason')
+                                event['review_priority'] = cleaned_enriched_payload.get('review_priority')
+                                event['accuracy_enhanced'] = cleaned_enriched_payload.get('accuracy_enhanced')
+                                event['accuracy_version'] = cleaned_enriched_payload.get('accuracy_version')
                                 
                                 # CRITICAL FIX: Compute row hash for delta analysis
                                 row_str = "|".join([str(val) for val in row.values() if pd.notna(val)])
@@ -8984,7 +8994,8 @@ class ExcelProcessor:
                                     sheets_row_hashes[sheet_name] = []
                                 sheets_row_hashes[sheet_name].append(row_hash)
                                 
-                                events_batch.append(event_data)
+                                # Use the complete event object (includes provenance data)
+                                events_batch.append(event)
                                 processed_rows += 1
                                 
                                 # CONSUMER EXPERIENCE: Send enrichment progress every 50 rows
@@ -11957,7 +11968,8 @@ async def process_excel_universal_endpoint(
         if not supabase_url or not supabase_key:
             raise HTTPException(status_code=500, detail="Supabase credentials not configured")
         
-        supabase = create_client(supabase_url, supabase_key)
+        # CRITICAL FIX: Use pooled client instead of creating new connection
+        supabase = get_supabase_client()
         
         # Step 1: Process Excel file
         excel_result = await excel_processor.stream_xlsx_processing(
@@ -12235,8 +12247,12 @@ async def _store_external_item_attachment(user_id: str, provider: str, message_i
         logger.error(f"Storage upload failed: {e}")
         raise
 
-async def _enqueue_file_processing(user_id: str, filename: str, storage_path: str) -> str:
-    """Create an ingestion job and start processing asynchronously. Returns job_id."""
+async def _enqueue_file_processing(user_id: str, filename: str, storage_path: str, external_item_id: Optional[str] = None) -> str:
+    """
+    Create an ingestion job and start processing asynchronously. Returns job_id.
+    
+    FIX #4: Now accepts external_item_id to avoid redundant database lookup.
+    """
     job_id = str(uuid.uuid4())
     # Create/update ingestion_jobs like existing code path
     try:
@@ -12267,7 +12283,8 @@ async def _enqueue_file_processing(user_id: str, filename: str, storage_path: st
                     file_content=file_bytes,
                     filename=filename,
                     user_id=user_id,
-                    supabase=supabase
+                    supabase=supabase,
+                    external_item_id=external_item_id
                 )
             except Exception as e:
                 logger.error(f"Inline processing failed for {job_id}: {e}")
@@ -12279,8 +12296,12 @@ async def _enqueue_file_processing(user_id: str, filename: str, storage_path: st
         logger.error(f"Failed to enqueue processing: {e}")
         raise
 
-async def _enqueue_pdf_processing(user_id: str, filename: str, storage_path: str) -> str:
-    """Create a PDF OCR ingestion job and start processing asynchronously. Returns job_id."""
+async def _enqueue_pdf_processing(user_id: str, filename: str, storage_path: str, external_item_id: Optional[str] = None) -> str:
+    """
+    Create a PDF OCR ingestion job and start processing asynchronously. Returns job_id.
+    
+    FIX #4: Now accepts external_item_id to avoid redundant database lookup.
+    """
     job_id = str(uuid.uuid4())
     try:
         job_data = {
@@ -12297,14 +12318,18 @@ async def _enqueue_pdf_processing(user_id: str, filename: str, storage_path: str
             pass
         # Process PDF inline (direct processing, no ARQ)
         logger.info(f"🔄 Processing PDF inline: {job_id}")
-        asyncio.create_task(start_pdf_processing_job(user_id, job_id, storage_path, filename))
+        asyncio.create_task(start_pdf_processing_job(user_id, job_id, storage_path, filename, external_item_id))
         return job_id
     except Exception as e:
         logger.error(f"Failed to enqueue PDF processing: {e}")
         raise
 
-async def start_pdf_processing_job(user_id: str, job_id: str, storage_path: str, filename: str):
-    """Download a PDF from storage, extract text/tables, and store into raw_records."""
+async def start_pdf_processing_job(user_id: str, job_id: str, storage_path: str, filename: str, external_item_id: Optional[str] = None):
+    """
+    Download a PDF from storage, extract text/tables, and store into raw_records.
+    
+    FIX #4: Now accepts external_item_id to link raw_records to external_items.
+    """
     try:
         # Bind job to user for WebSocket authorization
         base = (await websocket_manager.get_job_status(job_id)) or {}
@@ -12371,13 +12396,19 @@ async def start_pdf_processing_job(user_id: str, job_id: str, storage_path: str,
             'status': 'completed',
             'classification_status': 'pending'
         }
-        # Try to link to external_items by file hash
-        try:
-            ext_res = supabase.table('external_items').select('id').eq('user_id', user_id).eq('hash', file_hash).limit(1).execute()
-            if ext_res and getattr(ext_res, 'data', None):
-                record['external_item_id'] = ext_res.data[0].get('id')
-        except Exception as e:
-            logger.warning(f"external_item lookup failed for PDF raw_records link: {e}")
+        # FIX #4: Use external_item_id passed from connector (no redundant lookup)
+        if external_item_id:
+            record['external_item_id'] = external_item_id
+            logger.info(f"✅ Using external_item_id passed from connector: {external_item_id}")
+        else:
+            # Fallback: Try to link to external_items by file hash (for manual uploads)
+            try:
+                ext_res = supabase.table('external_items').select('id').eq('user_id', user_id).eq('hash', file_hash).limit(1).execute()
+                if ext_res and getattr(ext_res, 'data', None):
+                    record['external_item_id'] = ext_res.data[0].get('id')
+                    logger.info(f"✅ Resolved external_item_id via file hash lookup: {record['external_item_id']}")
+            except Exception as e:
+                logger.warning(f"external_item lookup failed for PDF raw_records link: {e}")
         # Persist raw_records and mark job completed atomically
         try:
             transaction_manager = get_transaction_manager()
@@ -12842,27 +12873,6 @@ async def _gmail_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> Dict
         # Batch insert all items from this page using transaction
         if page_batch_items:
             try:
-                transaction_manager = get_transaction_manager()
-                async with transaction_manager.transaction(
-                    user_id=user_id,
-                    operation_type="connector_sync_batch"
-                ) as tx:
-                    # Insert all items in batch within transaction
-                    for item in page_batch_items:
-                        try:
-                            await tx.insert('external_items', item)
-                            stats['records_fetched'] += 1
-                        except Exception as insert_err:
-                            # Handle duplicate key conflicts gracefully
-                            if 'duplicate key' in str(insert_err).lower() or 'unique' in str(insert_err).lower():
-                                stats['skipped'] += 1
-                            else:
-                                logger.error(f"Failed to insert external_item: {insert_err}")
-                                stats['skipped'] += 1
-                # Transaction committed successfully
-            except Exception as batch_err:
-                logger.error(f"Batch insert transaction failed: {batch_err}")
-                errors.append(f"Batch insert failed: {str(batch_err)[:100]}")
 
         run_status = 'succeeded' if not errors else ('partial' if stats['records_fetched'] > 0 else 'failed')
         
@@ -15112,7 +15122,8 @@ async def start_processing_job(user_id: str, job_id: str, storage_path: str, fil
                                duplicate_decision: Optional[str] = None,
                                existing_file_id: Optional[str] = None,
                                original_file_hash: Optional[str] = None,
-                               file_bytes_cached: Optional[bytes] = None):
+                               file_bytes_cached: Optional[bytes] = None,
+                               external_item_id: Optional[str] = None):
     try:
         # Bind job to user for WebSocket authorization
         base = (await websocket_manager.get_job_status(job_id)) or {}
@@ -15175,7 +15186,8 @@ async def start_processing_job(user_id: str, job_id: str, storage_path: str, fil
             filename=filename,
             user_id=user_id,
             supabase=supabase,
-            duplicate_decision=duplicate_decision
+            duplicate_decision=duplicate_decision,
+            external_item_id=external_item_id
         )
     except Exception as e:
         logger.error(f"Processing job failed (resume path): {e}")
@@ -16305,11 +16317,100 @@ async def delete_file_completely(job_id: str, user_id: str):
         except Exception as e:
             logger.warning(f"Failed to delete event_delta_logs: {e}")
         
-        # Step 9: Delete raw_events (CASCADE will handle some related tables)
+        # CRITICAL FIX: Delete advanced analytics data (previously orphaned)
+        # Step 9: Delete temporal_patterns
+        try:
+            temporal_patterns_result = supabase.table('temporal_patterns').delete().eq('job_id', job_id).eq('user_id', user_id).execute()
+            deletion_stats['deleted_records']['temporal_patterns'] = len(temporal_patterns_result.data or [])
+            logger.info(f"Deleted {deletion_stats['deleted_records']['temporal_patterns']} temporal patterns")
+        except Exception as e:
+            logger.warning(f"Failed to delete temporal_patterns: {e}")
+        
+        # Step 10: Delete predicted_relationships
+        try:
+            predicted_relationships_result = supabase.table('predicted_relationships').delete().eq('job_id', job_id).eq('user_id', user_id).execute()
+            deletion_stats['deleted_records']['predicted_relationships'] = len(predicted_relationships_result.data or [])
+            logger.info(f"Deleted {deletion_stats['deleted_records']['predicted_relationships']} predicted relationships")
+        except Exception as e:
+            logger.warning(f"Failed to delete predicted_relationships: {e}")
+        
+        # Step 11: Delete temporal_anomalies
+        try:
+            temporal_anomalies_result = supabase.table('temporal_anomalies').delete().eq('job_id', job_id).eq('user_id', user_id).execute()
+            deletion_stats['deleted_records']['temporal_anomalies'] = len(temporal_anomalies_result.data or [])
+            logger.info(f"Deleted {deletion_stats['deleted_records']['temporal_anomalies']} temporal anomalies")
+        except Exception as e:
+            logger.warning(f"Failed to delete temporal_anomalies: {e}")
+        
+        # Step 12: Delete causal_relationships
+        try:
+            causal_relationships_result = supabase.table('causal_relationships').delete().eq('job_id', job_id).eq('user_id', user_id).execute()
+            deletion_stats['deleted_records']['causal_relationships'] = len(causal_relationships_result.data or [])
+            logger.info(f"Deleted {deletion_stats['deleted_records']['causal_relationships']} causal relationships")
+        except Exception as e:
+            logger.warning(f"Failed to delete causal_relationships: {e}")
+        
+        # Step 13: Delete root_cause_analyses
+        try:
+            root_cause_analyses_result = supabase.table('root_cause_analyses').delete().eq('job_id', job_id).eq('user_id', user_id).execute()
+            deletion_stats['deleted_records']['root_cause_analyses'] = len(root_cause_analyses_result.data or [])
+            logger.info(f"Deleted {deletion_stats['deleted_records']['root_cause_analyses']} root cause analyses")
+        except Exception as e:
+            logger.warning(f"Failed to delete root_cause_analyses: {e}")
+        
+        # Step 14: Delete counterfactual_analyses
+        try:
+            counterfactual_analyses_result = supabase.table('counterfactual_analyses').delete().eq('job_id', job_id).eq('user_id', user_id).execute()
+            deletion_stats['deleted_records']['counterfactual_analyses'] = len(counterfactual_analyses_result.data or [])
+            logger.info(f"Deleted {deletion_stats['deleted_records']['counterfactual_analyses']} counterfactual analyses")
+        except Exception as e:
+            logger.warning(f"Failed to delete counterfactual_analyses: {e}")
+        
+        # Step 15: Delete seasonal_patterns
+        try:
+            seasonal_patterns_result = supabase.table('seasonal_patterns').delete().eq('job_id', job_id).eq('user_id', user_id).execute()
+            deletion_stats['deleted_records']['seasonal_patterns'] = len(seasonal_patterns_result.data or [])
+            logger.info(f"Deleted {deletion_stats['deleted_records']['seasonal_patterns']} seasonal patterns")
+        except Exception as e:
+            logger.warning(f"Failed to delete seasonal_patterns: {e}")
+        
+        # Step 16: Delete cross_platform_relationships
+        try:
+            cross_platform_relationships_result = supabase.table('cross_platform_relationships').delete().eq('job_id', job_id).eq('user_id', user_id).execute()
+            deletion_stats['deleted_records']['cross_platform_relationships'] = len(cross_platform_relationships_result.data or [])
+            logger.info(f"Deleted {deletion_stats['deleted_records']['cross_platform_relationships']} cross-platform relationships")
+        except Exception as e:
+            logger.warning(f"Failed to delete cross_platform_relationships: {e}")
+        
+        # Step 17: Delete platform_patterns
+        try:
+            platform_patterns_result = supabase.table('platform_patterns').delete().eq('job_id', job_id).eq('user_id', user_id).execute()
+            deletion_stats['deleted_records']['platform_patterns'] = len(platform_patterns_result.data or [])
+            logger.info(f"Deleted {deletion_stats['deleted_records']['platform_patterns']} platform patterns")
+        except Exception as e:
+            logger.warning(f"Failed to delete platform_patterns: {e}")
+        
+        # Step 18: Delete metrics
+        try:
+            metrics_result = supabase.table('metrics').delete().eq('job_id', job_id).eq('user_id', user_id).execute()
+            deletion_stats['deleted_records']['metrics'] = len(metrics_result.data or [])
+            logger.info(f"Deleted {deletion_stats['deleted_records']['metrics']} metrics")
+        except Exception as e:
+            logger.warning(f"Failed to delete metrics: {e}")
+        
+        # Step 19: Delete duplicate_transactions
+        try:
+            duplicate_transactions_result = supabase.table('duplicate_transactions').delete().eq('job_id', job_id).eq('user_id', user_id).execute()
+            deletion_stats['deleted_records']['duplicate_transactions'] = len(duplicate_transactions_result.data or [])
+            logger.info(f"Deleted {deletion_stats['deleted_records']['duplicate_transactions']} duplicate transactions")
+        except Exception as e:
+            logger.warning(f"Failed to delete duplicate_transactions: {e}")
+        
+        # Step 20: Delete raw_events (CASCADE will handle some related tables)
         raw_events_result = supabase.table('raw_events').delete().eq('job_id', job_id).eq('user_id', user_id).execute()
         logger.info(f"Deleted {len(raw_events_result.data or [])} raw events")
         
-        # Step 10: Finally, delete the ingestion_job record
+        # Step 21: Finally, delete the ingestion_job record (CASCADE will delete remaining linked records)
         job_delete_result = supabase.table('ingestion_jobs').delete().eq('id', job_id).eq('user_id', user_id).execute()
         deletion_stats['deleted_records']['ingestion_jobs'] = len(job_delete_result.data or [])
         logger.info(f"Deleted ingestion job record")

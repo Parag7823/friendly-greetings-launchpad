@@ -43,42 +43,9 @@ from rapidfuzz import fuzz, process  # Already in dependencies, 100x faster than
 from sentence_transformers import SentenceTransformer, util  # Semantic similarity
 from sklearn.ensemble import RandomForestClassifier  # ML for adaptive weights
 import numpy as np
+from provenance_tracker import normalize_business_logic, normalize_temporal_causality
 
 logger = logging.getLogger(__name__)
-
-# Allowed values enforced by relationship_instances_business_logic_check
-ALLOWED_BUSINESS_LOGIC = {
-    'standard_payment_flow',
-    'revenue_recognition',
-    'expense_reimbursement',
-    'payroll_processing',
-    'tax_withholding',
-    'asset_depreciation',
-    'loan_repayment',
-    'refund_processing',
-    'recurring_billing',
-    'unknown'
-}
-
-# Map commonly generated synonyms to allowed business logic categories
-BUSINESS_LOGIC_ALIASES = {
-    'invoice_payment': 'standard_payment_flow',
-    'vendor_payment': 'standard_payment_flow',
-    'vendor_payments': 'standard_payment_flow',
-    'payment_workflow': 'standard_payment_flow',
-    'cash_outflow': 'standard_payment_flow',
-    'cash_inflow': 'revenue_recognition',
-    'revenue_collection': 'revenue_recognition',
-    'recurring_revenue': 'recurring_billing',
-    'subscription_billing': 'recurring_billing',
-    'refunds': 'refund_processing',
-    'loan_payments': 'loan_repayment',
-    'asset_management': 'asset_depreciation',
-    'depreciation_schedule': 'asset_depreciation',
-    'payroll': 'payroll_processing',
-    'tax_payments': 'tax_withholding',
-    'expense_management': 'expense_reimbursement'
-}
 
 # Initialize Groq client for semantic analysis
 try:
@@ -536,29 +503,9 @@ Return ONLY valid JSON, no markdown blocks or explanations."""
         return {
             'semantic_description': semantic_description,
             'reasoning': reasoning,
-            'temporal_causality': temporal_causality,
-            'business_logic': self._normalize_business_logic(business_logic_source)
+            'temporal_causality': normalize_temporal_causality(temporal_causality),
+            'business_logic': normalize_business_logic(business_logic_source)
         }
-
-    def _normalize_business_logic(self, value: Optional[str]) -> str:
-        """Normalize model outputs to the allowed business_logic values."""
-        if not value:
-            return 'standard_payment_flow'
-
-        normalized = value.strip().lower().replace(' ', '_')
-        if normalized in ALLOWED_BUSINESS_LOGIC:
-            return normalized
-
-        alias = BUSINESS_LOGIC_ALIASES.get(normalized)
-        if alias:
-            return alias
-
-        # Attempt to match simple prefixes (e.g., "refund" -> "refund_processing")
-        for prefix, mapped in BUSINESS_LOGIC_ALIASES.items():
-            if normalized.startswith(prefix):
-                return mapped
-
-        return 'unknown'
 
     async def _store_relationships(self, relationships: List[Dict], user_id: str, transaction_id: Optional[str] = None) -> List[Dict]:
         """
@@ -657,8 +604,8 @@ Return ONLY valid JSON, no markdown blocks or explanations."""
                     'key_factors': key_factors,
                     'semantic_description': semantic_description,  # ✅ NEW: AI-generated description
                     'reasoning': reasoning or 'Detected based on matching criteria',  # ✅ FIX: Ensure reasoning is never NULL
-                    'temporal_causality': temporal_causality,  # ✅ NEW: AI-determined causality
-                    'business_logic': self._normalize_business_logic(business_logic),  # ✅ FIX: Normalize business logic
+                    'temporal_causality': normalize_temporal_causality(temporal_causality),  # ✅ FIX: Normalize temporal causality
+                    'business_logic': normalize_business_logic(business_logic),  # ✅ FIX: Normalize business logic
                     'created_at': datetime.utcnow().isoformat()
                 })
             

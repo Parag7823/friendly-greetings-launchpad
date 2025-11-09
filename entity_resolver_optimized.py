@@ -262,7 +262,12 @@ class EntityResolverOptimized:
         }
     
     async def _extract_identifiers_presidio(self, row_data: Dict, column_names: List[str]) -> Dict[str, str]:
-        """v4.0: presidio-analyzer for PII detection (30x faster, +40% accuracy)"""
+        """
+        v4.0: presidio-analyzer for PII detection (30x faster, +40% accuracy)
+        
+        CRITICAL SECURITY FIX: Only extract NON-SENSITIVE identifiers.
+        DO NOT store tax IDs, bank accounts, SSNs, or credit cards.
+        """
         text = " ".join(str(v) for v in row_data.values() if v)
         
         # Presidio scan
@@ -272,14 +277,14 @@ class EntityResolverOptimized:
         for r in results:
             if r.score > 0.7:
                 entity_type = r.entity_type.lower()
+                # SECURITY FIX: Only extract safe, non-sensitive identifiers
                 if entity_type == 'email_address':
                     identifiers['email'] = r.text
                 elif entity_type == 'phone_number':
                     identifiers['phone'] = r.text
-                elif entity_type in ['us_ssn', 'us_itin', 'us_passport']:
-                    identifiers['tax_id'] = r.text
-                elif entity_type in ['us_bank_number', 'iban_code']:
-                    identifiers['bank_account'] = r.text
+                # CRITICAL: DO NOT store sensitive PII (tax_id, bank_account, SSN, credit cards)
+                # If business requires storing these, use tokenization vault (Stripe, Basis Theory)
+                # or encrypt with application-level encryption before storage
         
         return identifiers
     

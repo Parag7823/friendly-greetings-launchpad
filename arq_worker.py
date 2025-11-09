@@ -290,13 +290,19 @@ async def detect_relationships(ctx, user_id: str, file_id: str = None) -> Dict[s
         try:
             logger.info(f"🔬 Starting advanced analytics for user_id={user_id}")
             
-            # Import advanced analytics modules
-            from temporal_pattern_learner import TemporalPatternLearner
-            from causal_inference_engine import CausalInferenceEngine
+            # CRITICAL FIX: Use engines already initialized by EnhancedRelationshipDetector
+            # This eliminates redundant initialization and ensures consistent state
+            temporal_learner = relationship_detector.temporal_learner if hasattr(relationship_detector, 'temporal_learner') else None
+            causal_engine = relationship_detector.causal_engine if hasattr(relationship_detector, 'causal_engine') else None
             
-            # Initialize engines
-            temporal_learner = TemporalPatternLearner(supabase)
-            causal_engine = CausalInferenceEngine(supabase)
+            # Fallback: Initialize only if not available (backward compatibility)
+            if temporal_learner is None or causal_engine is None:
+                from temporal_pattern_learner import TemporalPatternLearner
+                from causal_inference_engine import CausalInferenceEngine
+                if temporal_learner is None:
+                    temporal_learner = TemporalPatternLearner(supabase)
+                if causal_engine is None:
+                    causal_engine = CausalInferenceEngine(supabase)
             
             # 1. Learn temporal patterns
             pattern_results = await temporal_learner.learn_all_patterns(user_id)

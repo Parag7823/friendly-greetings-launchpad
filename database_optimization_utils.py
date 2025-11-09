@@ -8,7 +8,8 @@ import os
 import logging
 from typing import Dict, List, Any, Optional, Tuple
 from datetime import datetime, date
-from supabase import create_client, Client
+from supabase import Client
+from supabase_client import get_supabase_client
 import asyncio
 from dataclasses import dataclass
 
@@ -356,28 +357,14 @@ class OptimizedDatabaseQueries:
             logger.error(f"Component results query failed: {e}")
             return []
 
-def create_optimized_db_client() -> OptimizedDatabaseQueries:
+def create_optimized_database_client() -> OptimizedDatabaseQueries:
     """
     Factory function to create an optimized database client.
+    CRITICAL FIX: Uses pooled Supabase client to prevent connection exhaustion.
     """
     try:
-        supabase_url = (
-            os.getenv('SUPABASE_URL') or
-            os.getenv('SUPABASE_PROJECT_URL') or
-            os.getenv('DATABASE_URL')
-        )
-        supabase_key = (
-            os.getenv('SUPABASE_SERVICE_ROLE_KEY') or
-            os.getenv('SUPABASE_SERVICE_KEY') or
-            os.getenv('SUPABASE_KEY') or
-            os.getenv('SUPABASE_ANON_KEY')
-        )
-        
-        if not supabase_url or not supabase_key:
-            raise ValueError("Supabase credentials not configured")
-        
-        supabase_key = supabase_key.strip()
-        supabase_client = create_client(supabase_url, supabase_key)
+        # CRITICAL FIX: Use pooled client instead of direct create_client
+        supabase_client = get_supabase_client()
         return OptimizedDatabaseQueries(supabase_client)
         
     except Exception as e:
