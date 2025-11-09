@@ -42,7 +42,8 @@ from pathlib import Path
 
 # NASA-GRADE v4.0 LIBRARIES (Consistent with all optimized files)
 import ahocorasick  # Replaces flashtext (2x faster, async-ready)
-import easyocr  # 92% OCR accuracy vs 60% tesseract
+# REMOVED: Direct easyocr import - lazy-loaded via inference_service (line 200)
+# import easyocr  # 92% OCR accuracy vs 60% tesseract
 import structlog  # Structured JSON logging
 import numpy as np  # For entropy calculation
 from pydantic import BaseModel, Field, validator
