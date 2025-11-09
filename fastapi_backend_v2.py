@@ -2603,9 +2603,8 @@ async def _learn_field_mappings_from_extraction(
                 'vendor_name': '',
                 'date': datetime.now().strftime('%Y-%m-%d'),
                 'description': '',
-                'currency': 'USD',
-    
-    return None
+                'currency': 'USD'
+            }
 
 async def _cache_enrichment_result(self, enrichment_id: str, result: Dict[str, Any]) -> None:
     """Cache enrichment result for future use"""
