@@ -269,9 +269,15 @@ class NangoClient:
             raise last_exc
         raise RuntimeError("request failed with unknown error")
 
-    async def proxy_get(self, provider: str, path: str, params: dict | None = None,
-                        connection_id: str | None = None, provider_config_key: str | None = None,
-                        headers: dict | None = None) -> dict:
+    async def proxy_get(
+        self,
+        provider: str,
+        path: str,
+        params: Optional[Dict[str, Any]] = None,
+        connection_id: Optional[str] = None,
+        provider_config_key: Optional[str] = None,
+        headers: Optional[Dict[str, str]] = None,
+    ) -> Dict[str, Any]:
         """Perform a GET via Nango Proxy and parse JSON response.
 
         Example: await client.proxy_get('google-drive', 'drive/v3/files', params={...}, ...)
@@ -297,8 +303,14 @@ class NangoClient:
             pass
         return resp.json()
 
-    async def proxy_get_bytes(self, provider: str, path: str, params: dict | None = None,
-                              connection_id: str | None = None, provider_config_key: str | None = None) -> bytes:
+    async def proxy_get_bytes(
+        self,
+        provider: str,
+        path: str,
+        params: Optional[Dict[str, Any]] = None,
+        connection_id: Optional[str] = None,
+        provider_config_key: Optional[str] = None,
+    ) -> bytes:
         """Perform a GET via Nango Proxy and return raw bytes (for media endpoints)."""
         url = f"{self.base_url}/proxy/{provider}/{path.lstrip('/')}"
         merged_headers = self._headers(provider_config_key, connection_id)
@@ -319,9 +331,15 @@ class NangoClient:
             pass
         return resp.content
 
-    async def proxy_post(self, provider: str, path: str, json_body: dict | None = None,
-                         connection_id: str | None = None, provider_config_key: str | None = None,
-                         headers: dict | None = None) -> dict:
+    async def proxy_post(
+        self,
+        provider: str,
+        path: str,
+        json_body: Optional[Dict[str, Any]] = None,
+        connection_id: Optional[str] = None,
+        provider_config_key: Optional[str] = None,
+        headers: Optional[Dict[str, str]] = None,
+    ) -> Dict[str, Any]:
         """Perform a POST via Nango Proxy.
 
         If the response body is not JSON, return a dict with {'_raw': bytes}.
