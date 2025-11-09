@@ -115,9 +115,6 @@ class IntelligentChatOrchestrator:
             cache_client=cache_client
         )
         
-        # Conversation context (simple in-memory for now)
-        self.conversation_context: Dict[str, List[Dict[str, Any]]] = {}
-        
         logger.info("✅ IntelligentChatOrchestrator initialized with all engines")
     
     async def _parallel_query(self, queries: List[Tuple[str, callable]]) -> Dict[str, Any]:
@@ -205,11 +202,7 @@ class IntelligentChatOrchestrator:
             else:
                 response = await self._handle_general_question(question, user_id, context, conversation_history)
             
-            # Step 3: Store in conversation context
-            if chat_id:
-                self._update_conversation_context(chat_id, question, response)
-            
-            # Step 4: Store in database
+            # Step 3: Store in database
             await self._store_chat_message(user_id, chat_id, question, response)
             
             logger.info(f"✅ Question processed successfully: {question_type.value}")
@@ -901,11 +894,7 @@ Remember: You're not just answering questions - you're running their finance dep
             
             answer = response.choices[0].message.content
             
-            # Store in conversation history
-            self.conversation_context.setdefault(user_id, []).extend([
-                {"is_user": True, "content": question},
-                {"is_user": False, "content": answer}
-            ])
+            # Conversation history is persisted in database via _store_chat_message()
             
             # Generate intelligent follow-up questions based on context
             follow_ups = self._generate_intelligent_followups(user_id, question, answer, user_context)
@@ -1387,25 +1376,6 @@ DATA STATUS: {'Rich data available - provide specific, quantified insights!' if 
             return f"User discussed: {', '.join(topics)}"
         else:
             return f"User asked {len(user_questions)} questions about their finances"
-    
-    def _update_conversation_context(
-        self,
-        chat_id: str,
-        question: str,
-        response: ChatResponse
-    ):
-        """Update conversation context for continuity"""
-        if chat_id not in self.conversation_context:
-            self.conversation_context[chat_id] = []
-        
-        self.conversation_context[chat_id].append({
-            'question': question,
-            'response': response.to_dict(),
-            'timestamp': datetime.utcnow().isoformat()
-        })
-        
-        # Keep only last 10 exchanges
-        self.conversation_context[chat_id] = self.conversation_context[chat_id][-10:]
     
     async def _store_chat_message(
         self,

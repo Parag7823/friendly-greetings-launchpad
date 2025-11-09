@@ -72,33 +72,35 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
     }
   }, [user?.id, searchParams]);
 
-  // Load chat history on mount
+  // CRITICAL FIX: Load chat history on mount or when chat_id changes
   useEffect(() => {
     const loadChatHistory = async () => {
       if (!user?.id || !currentChatId) return;
       
       try {
-        // TODO: Implement chat_messages table in Supabase schema
-        // For now, chat history is stored in component state only
-        /* const { data, error } = await supabase
+        // Load chat messages from backend
+        const { data, error } = await supabase
           .from('chat_messages')
           .select('*')
           .eq('user_id', user.id)
           .eq('chat_id', currentChatId)
           .order('created_at', { ascending: true });
 
-        if (error) throw error;
+        if (error) {
+          console.error('Failed to load chat history:', error);
+          return;
+        }
 
         if (data && data.length > 0) {
           const loadedMessages = data.map((msg: any) => ({
             id: msg.id,
             text: msg.message,
-            isUser: msg.role === 'user',
+            isUser: msg.is_user,
             timestamp: new Date(msg.created_at)
           }));
           setMessages(loadedMessages);
           setIsNewChat(false);
-        } */
+        }
       } catch (error) {
         console.error('Failed to load chat history:', error);
       }
@@ -203,7 +205,11 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
   useEffect(() => {
     if (currentView !== 'marketplace') return;
     fetchConnections();
-    const id = window.setInterval(fetchConnections, 15000);
+    // CRITICAL FIX: Reduce polling frequency to prevent database overload
+    // With 1000 concurrent users, 15-second polling = 4,000 req/min
+    // Changed to 60 seconds = 1,000 req/min (4x reduction)
+    // Connections don't change frequently, so 1-minute polling is sufficient
+    const id = window.setInterval(fetchConnections, 60000);
     return () => window.clearInterval(id);
   }, [currentView, user?.id]);
 

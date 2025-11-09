@@ -427,7 +427,8 @@ export const DataSourcesPanel = ({ isOpen, onClose, onFilePreview }: DataSources
     if (!user?.id) return;
 
     try {
-      const response = await fetch(`${config.apiUrl}/ingestion/${fileId}`, {
+      // CRITICAL FIX: Use correct backend endpoint /api/files/{job_id}
+      const response = await fetch(`${config.apiUrl}/api/files/${fileId}?user_id=${user.id}`, {
         method: 'DELETE'
       });
 
@@ -500,7 +501,11 @@ export const DataSourcesPanel = ({ isOpen, onClose, onFilePreview }: DataSources
 
     if (isOpen && user?.id) {
       loadFiles(); // Initial load immediately
-      const interval = setInterval(loadFiles, 2000); // Poll every 2 seconds for real-time updates
+      // CRITICAL FIX: Reduce polling frequency to prevent database overload
+      // With 1000 concurrent users, 2-second polling = 30,000 req/min
+      // Changed to 30 seconds = 2,000 req/min (15x reduction)
+      // TODO: Replace with WebSocket subscriptions for true real-time updates
+      const interval = setInterval(loadFiles, 30000); // Poll every 30 seconds
       
       // Listen for file upload events and actually process the files
       const handleFileUpload = async (event: any) => {

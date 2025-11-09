@@ -90,7 +90,7 @@ from urllib.parse import quote
 from email.utils import parsedate_to_datetime
 import base64
 import hmac
-# REMOVED: pdfplumber, tabula - Now using UniversalExtractorsOptimized (NASA-GRADE)
+# Now using UniversalExtractorsOptimized for all PDF/document extraction
 
 # FastAPI and web framework imports
 from fastapi import FastAPI, HTTPException, BackgroundTasks, WebSocket, WebSocketDisconnect, UploadFile, Form, File, Response, Depends
@@ -211,8 +211,7 @@ async def get_arq_pool():
         logger.info(f"✅ ARQ connection pool created and cached for reuse")
         return _arq_pool
 
-# REMOVED: from anthropic import Anthropic (now using Groq/Llama exclusively)
-# CRITICAL FIX: Remove inline fallback class - fail hard if import fails
+# Using Groq/Llama exclusively for all AI operations
 from nango_client import NangoClient
 
 # Import critical fixes systems
@@ -229,6 +228,10 @@ optimized_db: Optional[OptimizedDatabaseQueries] = None
 # REFACTORED: Import centralized Redis cache (replaces ai_cache_system.py)
 # This provides distributed caching across all workers and instances for true scalability
 from centralized_cache import initialize_cache, get_cache, safe_get_cache
+
+# CRITICAL FIX: Create alias for backward compatibility
+# Many modules call safe_get_ai_cache() expecting the old ai_cache_system
+safe_get_ai_cache = safe_get_cache
 
 # Import batch optimizer for 5x performance improvement
 from batch_optimizer import batch_optimizer
@@ -1035,7 +1038,6 @@ try:
     
     logger.info("✅ Observability and security systems initialized")
     
-    # REMOVED: Duplicate optimized_db initialization (already initialized above with OptimizedDatabaseQueries)
     
     # REFACTORED: Initialize centralized Redis cache (replaces ai_cache_system.py)
     # This provides distributed caching across all workers and instances for true scalability
@@ -1126,9 +1128,7 @@ try:
 except ImportError:
     logger.warning("⚠️ OpenDocument processing not available")
 
-# REMOVED: tabula, camelot, pdfplumber, pytesseract
-# Now using UniversalExtractorsOptimized (NASA-GRADE) with easyocr + pdfminer.six
-# These libraries are no longer needed as UniversalExtractors provides superior extraction
+# Using UniversalExtractorsOptimized with easyocr + pdfminer.six for all extraction
 
 try:
     from PIL import Image
@@ -1235,10 +1235,6 @@ except Exception as e:
     logger.error(f"❌ Configuration validation failed: {e}")
     raise
 
-# DEAD CODE REMOVED: First VendorStandardizer class (file processor variant, ~3000 lines)
-# - Had __init__(self) with no cache_client parameter
-# - Was shadowed by second VendorStandardizer definition
-# - Never instantiated (line 4818 uses cache_client= which only second class accepts)
 # - Removed to eliminate code duplication and reduce maintenance burden
 
 
@@ -1876,7 +1872,6 @@ class DataEnrichmentProcessor:
         # Initialize components with error handling
         try:
             self.vendor_standardizer = VendorStandardizer(cache_client=safe_get_ai_cache())
-            # REMOVED: self.platform_id_extractor - using UniversalPlatformDetectorOptimized instead
             self.universal_extractors = UniversalExtractors(cache_client=safe_get_ai_cache())
             # FIX #1: Don't initialize platform detector here - will be passed from Phase 3
             # self.universal_platform_detector = UniversalPlatformDetector(openai_client, cache_client=safe_get_ai_cache())
@@ -2609,21 +2604,64 @@ async def _learn_field_mappings_from_extraction(
                 'date': datetime.now().strftime('%Y-%m-%d'),
                 'description': '',
                 'currency': 'USD',
-                'confidence': 0.0,
-                'fields_extracted': 0,
-                'error': str(e)
+    
+    return None
+
+async def _cache_enrichment_result(self, enrichment_id: str, result: Dict[str, Any]) -> None:
+    """Cache enrichment result for future use"""
+    if not self.config['enable_caching']:
+        return
+    
+    try:
+        # Use centralized cache (already initialized in __init__)
+        if self.cache and hasattr(self.cache, 'store_classification'):
+            await self.cache.store_classification(
+                {'enrichment_id': enrichment_id},
+                result,
+                'enrichment',
+                ttl_hours=self.config['cache_ttl'] / 3600
+            )
+            logger.debug(f"Cached enrichment result for {enrichment_id}")
+    except Exception as e:
+        logger.warning(f"Cache storage failed for {enrichment_id}: {e}")
+
+async def _extract_core_fields(self, validated_data: Dict) -> Dict[str, Any]:
+    """Extract and validate core fields using UniversalFieldDetector"""
+    row_data = validated_data['row_data']
+    column_names = validated_data['column_names']
+    platform_info = validated_data.get('platform_info', {})
+    file_context = validated_data.get('file_context', {})
+    user_id = file_context.get('user_id')
+    
+    try:
+        # Use UniversalFieldDetector for all field detection
+        field_detection_result = await self.universal_field_detector.detect_field_types_universal(
+            data=row_data,
+            filename=file_context.get('filename'),
+            context={
+                'platform': platform_info.get('platform'),
+                'document_type': platform_info.get('document_type'),
+                'user_id': user_id,
+                'column_names': column_names
             }
-    
-    # REMOVED: _classify_platform_and_document - This method is obsolete because:
-    # 1. Platform detection is already done in process_file using UniversalPlatformDetector
-    # 2. Document classification is already done in process_file using UniversalDocumentClassifier
-    # 3. The simple heuristic here (has_vendor + has_amount = invoice) is inferior to the
-    #    NASA-grade classifier which uses AI, OCR, TF-IDF, and comprehensive document patterns
-    # The platform_info passed to enrich_row_data already contains both platform and document_type
-    
-    async def _resolve_vendor_entity(self, extraction_results: Dict, classification_results: Dict, 
-                                     user_id: str, supabase: Client) -> Dict[str, Any]:
-        """Resolve vendor using EntityResolverOptimized (consolidated - no duplication)"""
+        )
+        
+        # Extract detected fields with type-aware parsing
+        field_types = field_detection_result.get('field_types', {})
+        detected_fields = field_detection_result.get('detected_fields', [])
+        
+        # Map detected fields to core financial fields
+        amount = 0.0
+        vendor_name = ''
+        date = datetime.now().strftime('%Y-%m-%d')
+        description = ''
+        currency = 'USD'
+        
+        for field_info in detected_fields:
+            field_name = field_info.get('name', '').lower()
+            field_type = field_info.get('type', '').lower()
+            field_value = row_data.get(field_info.get('name'))
+            field_confidence = field_info.get('confidence', 0.0)
         try:
             vendor_name = extraction_results.get('vendor_name', '')
             
@@ -5080,8 +5118,6 @@ class ExcelProcessor:
             # Fallback: return empty metadata, streaming will still work
             return {}
     
-    # REMOVED: read_file method caused OOM by loading full files into memory
-    # Use _get_sheet_metadata() and streaming_processor instead
     async def read_file_DEPRECATED_DO_NOT_USE(self, streamed_file: StreamedFile) -> Dict[str, pd.DataFrame]:
         """DEPRECATED: This method loads full files into memory causing OOM errors"""
         raise NotImplementedError("read_file is deprecated. Use _get_sheet_metadata() and streaming_processor instead")
@@ -5609,9 +5645,10 @@ class ExcelProcessor:
 
         transaction_manager = get_transaction_manager()
         
+        # CRITICAL FIX: Pass the primary transaction_id to prevent orphaned transaction records
         # Use atomic transaction for all database operations
         async with transaction_manager.transaction(
-            transaction_id=None,
+            transaction_id=transaction_id,
             user_id=user_id,
             operation_type="file_processing"
         ) as tx:
@@ -5746,8 +5783,9 @@ class ExcelProcessor:
             raise ValueError(error_msg)
         
         logger.info(f"🔄 Starting row processing transaction for {len(sheets_metadata)} sheets, {total_rows} total rows with file_id={file_id}")
+        # CRITICAL FIX: Pass primary transaction_id to prevent orphaned transaction records
         async with transaction_manager.transaction(
-            transaction_id=None,
+            transaction_id=transaction_id,
             user_id=user_id,
             operation_type="row_processing"
         ) as tx:
@@ -6043,7 +6081,9 @@ class ExcelProcessor:
         
         try:
             transaction_manager = get_transaction_manager()
+            # CRITICAL FIX: Pass primary transaction_id to prevent orphaned transaction records
             async with transaction_manager.transaction(
+                transaction_id=transaction_id,
                 user_id=user_id,
                 operation_type="file_processing_completion"
             ) as tx:
@@ -6583,13 +6623,6 @@ class ExcelProcessor:
     #   await excel_processor.run_entity_resolution_pipeline(user_id, supabase, file_id=file_id)
     # ============================================================================
     
-    async def _old_extract_entities_DELETED(self, *args, **kwargs):
-        """DELETED: Use run_entity_resolution_pipeline() instead"""
-        raise NotImplementedError("This method has been deleted. Use run_entity_resolution_pipeline() instead.")
-    
-    async def _old_resolve_entities_DELETED(self, *args, **kwargs):
-        """DELETED: Use run_entity_resolution_pipeline() instead"""
-        raise NotImplementedError("This method has been deleted. Use run_entity_resolution_pipeline() instead.")
     
     async def _learn_platform_patterns(self, platform_info: Dict, user_id: str, filename: str, supabase: Client) -> List[Dict]:
         """Learn platform patterns from the detected platform"""
@@ -8242,14 +8275,8 @@ async def release_duplicate_lock(file_hash: str):
 from collections import defaultdict
 import time
 
-# DEAD CODE REMOVED: In-memory rate limiter (broken in multi-worker deployments)
-# Old: defaultdict + asyncio.Lock = per-worker state, easily bypassed
-# New: Use Redis-backed rate limiter (see acquire_upload_slot below) for all rate limiting
-# rate_limit_store = defaultdict(list)  # REMOVED
-# rate_limit_lock = asyncio.Lock()  # REMOVED
-# async def check_rate_limit(...): # REMOVED
-
 # CRITICAL FIX: Distributed rate limiter using Redis for multi-worker support
+# Replaces old in-memory rate limiter that was broken in multi-worker deployments
 MAX_CONCURRENT_UPLOADS_PER_USER = 10  # Allow max 10 concurrent uploads per user (increased for batch uploads)
 
 async def acquire_upload_slot(user_id: str) -> Tuple[bool, str]:
@@ -9067,10 +9094,6 @@ class ConnectorDisconnectRequest(BaseModel):
     provider: Optional[str] = None
     session_token: Optional[str] = None
 
-# DEAD CODE REMOVED: _require_security function (duplicate auth logic)
-# This function duplicated JWT validation logic from security_system.py
-# All endpoints now use security_validator.validate_request() directly
-# This eliminates security maintenance risk and ensures single source of truth
 
 async def _validate_security(endpoint: str, user_id: str, session_token: Optional[str]):
     """
@@ -9895,6 +9918,64 @@ async def _gmail_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> Dict
         except Exception:
             pass
         raise
+
+
+async def _zohomail_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> Dict[str, Any]:
+    """Placeholder Zoho Mail sync implementation to prevent import errors."""
+    provider_key = req.integration_id or NANGO_ZOHO_MAIL_INTEGRATION_ID
+    connection_id = req.connection_id
+    user_id = req.user_id
+
+    stats = {
+        'records_fetched': 0,
+        'actions_used': 0,
+        'attachments_saved': 0,
+        'queued_jobs': 0,
+        'skipped': 0,
+    }
+    error_message = (
+        "Zoho Mail sync is currently unavailable. "
+        "Enable the Zoho Mail connector implementation before scheduling jobs."
+    )
+    errors = [error_message]
+    sync_run_id = str(uuid.uuid4())
+
+    logger.warning(
+        "Zoho Mail sync invoked for user=%s connection=%s but the implementation is unavailable.",
+        user_id,
+        connection_id,
+    )
+
+    # Attempt to record the failed sync run for observability.
+    try:
+        transaction_manager = get_transaction_manager()
+        async with transaction_manager.transaction(
+            user_id=user_id,
+            operation_type="connector_sync_start",
+        ) as tx:
+            await tx.insert(
+                'sync_runs',
+                {
+                    'id': sync_run_id,
+                    'user_id': user_id,
+                    'user_connection_id': None,
+                    'type': req.mode,
+                    'status': 'failed',
+                    'started_at': datetime.utcnow().isoformat(),
+                    'finished_at': datetime.utcnow().isoformat(),
+                    'stats': json.dumps(stats),
+                    'error': error_message,
+                },
+            )
+    except Exception as record_err:
+        logger.error(f"Failed to record Zoho Mail sync failure: {record_err}")
+
+    try:
+        JOBS_PROCESSED.labels(provider=provider_key, status='failed').inc()
+    except Exception:
+        pass
+
+    return {'status': 'failed', 'sync_run_id': sync_run_id, 'stats': stats, 'errors': errors}
 
 async def _dropbox_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> Dict[str, Any]:
     provider_key = NANGO_DROPBOX_INTEGRATION_ID

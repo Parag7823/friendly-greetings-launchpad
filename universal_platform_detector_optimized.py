@@ -527,8 +527,12 @@ class UniversalPlatformDetectorOptimized:
             if DEBUG_LOGGER_AVAILABLE and user_id:
                 try:
                     debug_logger = get_debug_logger(self.supabase, None)
+                    # CRITICAL FIX: Generate valid UUID if job_id is missing to enable debug_logs persistence
+                    job_id_for_debug = final_result.get('metadata', {}).get('job_id')
+                    if not job_id_for_debug or job_id_for_debug == 'unknown':
+                        job_id_for_debug = str(__import__('uuid').uuid4())
                     await debug_logger.log_platform_detection(
-                        job_id=final_result.get('metadata', {}).get('job_id', 'unknown'),
+                        job_id=job_id_for_debug,
                         user_id=user_id,
                         platform=final_result['platform'],
                         confidence=final_result['confidence'],

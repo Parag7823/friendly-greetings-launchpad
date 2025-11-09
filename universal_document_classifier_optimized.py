@@ -632,8 +632,12 @@ class UniversalDocumentClassifierOptimized:
             if DEBUG_LOGGER_AVAILABLE and user_id:
                 try:
                     debug_logger = get_debug_logger(self.supabase, None)
+                    # CRITICAL FIX: Generate valid UUID if job_id is missing to enable debug_logs persistence
+                    job_id_for_debug = final_result.get('metadata', {}).get('job_id')
+                    if not job_id_for_debug or job_id_for_debug == 'unknown':
+                        job_id_for_debug = str(__import__('uuid').uuid4())
                     await debug_logger.log_document_classification(
-                        job_id=final_result.get('metadata', {}).get('job_id', 'unknown'),
+                        job_id=job_id_for_debug,
                         user_id=user_id,
                         document_type=final_result['document_type'],
                         confidence=final_result['confidence'],

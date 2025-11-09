@@ -331,10 +331,11 @@ async def detect_relationships(ctx, user_id: str, file_id: str = None) -> Dict[s
         
         logger.info(f"🔍 Starting background relationship detection for user_id={user_id}, file_id={file_id}")
         
-        # Get cache client if available
+        # CRITICAL FIX: Use centralized_cache instead of deprecated ai_cache_system
+        # This ensures workers share the same Redis cache as the main application
         try:
-            from ai_cache_system import safe_get_ai_cache
-            cache_client = safe_get_ai_cache()
+            from centralized_cache import safe_get_cache
+            cache_client = safe_get_cache()
         except:
             cache_client = None
         
