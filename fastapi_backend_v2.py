@@ -2661,60 +2661,88 @@ async def _extract_core_fields(self, validated_data: Dict) -> Dict[str, Any]:
             field_type = field_info.get('type', '').lower()
             field_value = row_data.get(field_info.get('name'))
             field_confidence = field_info.get('confidence', 0.0)
-        try:
-            vendor_name = extraction_results.get('vendor_name', '')
             
-            if not vendor_name:
-                return {
-                    'vendor_raw': '',
-                    'vendor_standard': '',
-                    'vendor_confidence': 0.0,
-                    'vendor_canonical_id': '',
-                    'vendor_alternatives': [],
-                    'vendor_cleaning_method': 'none'
-                }
+            # Only use high-confidence detections
+            if field_confidence < 0.5:
+                continue
             
-            # Use EntityResolverOptimized for vendor resolution
-            entity_resolver = EntityResolver(supabase_client=supabase, cache_client=safe_get_ai_cache())
+            # Amount extraction
+            if 'amount' in field_type or any(kw in field_name for kw in ['amount', 'total', 'price', 'value', 'sum']):
+                try:
+                    if isinstance(field_value, (int, float)):
+                        amount = float(field_value)
+                    elif isinstance(field_value, str):
+                        cleaned = re.sub(r'[^\d.-]', '', field_value)
+                        amount = float(cleaned) if cleaned else 0.0
+                except:
+                    pass
             
-            # Resolve vendor as entity
-            resolution_results = await entity_resolver.resolve_entities_batch(
-                entities=[vendor_name],
-                platform=classification_results.get('platform', 'unknown'),
-                user_id=user_id,
-                source_file='enrichment'
-            )
+            # Vendor extraction
+            elif 'vendor' in field_type or any(kw in field_name for kw in ['vendor', 'payee', 'merchant', 'company', 'recipient']):
+                vendor_name = str(field_value).strip() if field_value else ''
             
-            if resolution_results and len(resolution_results) > 0:
-                vendor_result = resolution_results[0]
-                return {
-                    'vendor_raw': vendor_name,
-                    'vendor_standard': vendor_result.get('canonical_name', vendor_name),
-                    'vendor_confidence': vendor_result.get('confidence', 0.7),
-                    'vendor_canonical_id': vendor_result.get('canonical_id', ''),
-                    'vendor_alternatives': vendor_result.get('alternatives', []),
-                    'vendor_cleaning_method': 'entity_resolver_optimized'
-                }
-            else:
-                return {
-                    'vendor_raw': vendor_name,
-                    'vendor_standard': vendor_name,
-                    'vendor_confidence': 0.5,
-                    'vendor_canonical_id': '',
-                    'vendor_alternatives': [],
-                    'vendor_cleaning_method': 'fallback'
-                }
-        except Exception as e:
-            logger.error(f"Vendor entity resolution failed: {e}")
-            vendor_name = extraction_results.get('vendor_name', '')
-            return {
-                'vendor_raw': vendor_name,
-                'vendor_standard': vendor_name,
-                'vendor_confidence': 0.5,
-                'vendor_canonical_id': '',
-                'vendor_alternatives': [],
-                'vendor_cleaning_method': 'error_fallback'
+            # Date extraction
+            elif 'date' in field_type or any(kw in field_name for kw in ['date', 'timestamp', 'created_at', 'payment_date']):
+                try:
+                    if isinstance(field_value, str):
+                        from dateutil import parser
+                        parsed_date = parser.parse(field_value)
+                        date = parsed_date.strftime('%Y-%m-%d')
+                    elif hasattr(field_value, 'strftime'):
+                        date = field_value.strftime('%Y-%m-%d')
+                except:
+                    pass
+            
+            # Description extraction
+            elif any(kw in field_name for kw in ['description', 'memo', 'notes', 'details', 'comment']):
+                description = str(field_value).strip() if field_value else ''
+            
+            # Currency extraction
+            elif 'currency' in field_name:
+                currency = str(field_value).upper() if field_value else 'USD'
+        
+        # Calculate extraction confidence from UniversalFieldDetector
+        confidence = field_detection_result.get('confidence', 0.0)
+        fields_found = sum([bool(amount), bool(vendor_name), bool(date), bool(description)])
+        
+        extraction_results = {
+            'amount': amount,
+            'vendor_name': vendor_name,
+            'date': date,
+            'description': description,
+            'currency': currency,
+            'confidence': confidence,
+            'fields_extracted': fields_found,
+            'field_detection_metadata': {
+                'method': field_detection_result.get('method'),
+                'detected_fields_count': len(detected_fields),
+                'field_types': {f['name']: f['type'] for f in detected_fields}
             }
+        }
+        
+        # UNIVERSAL FIX: Learn field mappings from successful extraction
+        if confidence > 0.5:  # Only learn from reasonably successful extractions
+            await self._learn_field_mappings_from_extraction(
+                user_id=user_id,
+                row_data=row_data,
+                extraction_results=extraction_results,
+                platform=platform_info.get('platform'),
+                document_type=platform_info.get('document_type')
+            )
+        
+        return extraction_results
+    except Exception as e:
+        logger.error(f"Core field extraction failed: {e}")
+        return {
+            'amount': 0.0,
+            'vendor_name': '',
+            'date': datetime.now().strftime('%Y-%m-%d'),
+            'description': '',
+            'currency': 'USD',
+            'confidence': 0.0,
+            'fields_extracted': 0,
+            'error': str(e)
+        }
     
     async def _extract_platform_ids_universal(self, validated_data: Dict, classification_results: Dict) -> Dict[str, Any]:
         """Extract platform-specific IDs using UniversalPlatformDetectorOptimized (consolidated)"""
