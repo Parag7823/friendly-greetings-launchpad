@@ -8602,7 +8602,8 @@ async def process_excel_endpoint(request: Request):
                 return
 
             storage = supabase.storage.from_("finely-upload")
-            signed_response = storage.create_signed_url(storage_path, expires_in=600, download=True)
+            # CRITICAL FIX: Remove download parameter - not supported in newer Supabase Python SDK
+            signed_response = storage.create_signed_url(storage_path, expires_in=600)
             signed_url = (
                 (signed_response or {}).get("signedURL")
                 or (signed_response or {}).get("signedUrl")
