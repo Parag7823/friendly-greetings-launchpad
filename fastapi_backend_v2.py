@@ -157,7 +157,12 @@ except ModuleNotFoundError:
             return client
 
         supabase_url = os.getenv('SUPABASE_URL')
-        service_role_key = os.getenv('SUPABASE_SERVICE_ROLE_KEY')
+        # CRITICAL FIX: Check multiple possible environment variable names for Railway/Render compatibility
+        service_role_key = (
+            os.getenv('SUPABASE_SERVICE_ROLE_KEY') or 
+            os.getenv('SUPABASE_SERVICE_KEY') or  # Railway uses this
+            os.getenv('SUPABASE_KEY')
+        )
         anon_key = os.getenv('SUPABASE_ANON_KEY')
         key = service_role_key if use_service_role else anon_key
 
