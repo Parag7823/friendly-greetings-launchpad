@@ -4610,10 +4610,11 @@ class ExcelProcessor:
         self.anthropic = None
         
         # DIAGNOSTIC: Log critical methods on initialization
+        # NOTE: _extract_entities_from_events and _resolve_entities were removed and replaced
+        # by run_entity_resolution_pipeline which uses EntityResolverOptimized
         critical_methods = [
             '_normalize_entity_type', '_store_entity_matches', '_store_platform_patterns',
-            '_extract_entities_from_events', '_resolve_entities', '_learn_platform_patterns',
-            '_discover_new_platforms', '_store_discovered_platforms'
+            '_learn_platform_patterns', '_discover_new_platforms', '_store_discovered_platforms'
         ]
         missing_methods = [m for m in critical_methods if not hasattr(self, m)]
         if missing_methods:
@@ -6268,10 +6269,8 @@ class ExcelProcessor:
         except Exception as e:
             import traceback
             
-            # DIAGNOSTIC: Check if methods exist
+            # DIAGNOSTIC: Check if methods exist (removed deleted methods)
             diagnostic_info = {
-                '_extract_entities_from_events': hasattr(self, '_extract_entities_from_events'),
-                '_resolve_entities': hasattr(self, '_resolve_entities'),
                 '_store_entity_matches': hasattr(self, '_store_entity_matches'),
                 '_normalize_entity_type': hasattr(self, '_normalize_entity_type'),
                 'ExcelProcessor_methods': [m for m in dir(self) if not m.startswith('__')][:20]
@@ -6281,7 +6280,7 @@ class ExcelProcessor:
                 'error_type': type(e).__name__,
                 'error_message': str(e),
                 'traceback': traceback.format_exc(),
-                'method': '_extract_entities_from_events or _resolve_entities',
+                'method': 'run_entity_resolution_pipeline',
                 'diagnostic': diagnostic_info
             }
             logger.error(f"❌ Entity resolution failed: {error_details}")
@@ -12194,10 +12193,12 @@ async def start_processing_job(user_id: str, job_id: str, storage_path: str, fil
             return
 
         excel_processor = ExcelProcessor()
+        # CRITICAL FIX: Create StreamedFile object from bytes using from_bytes() method
+        from streaming_source import StreamedFile
+        streamed_file = StreamedFile.from_bytes(data=file_bytes, filename=filename)
         await excel_processor.process_file(
             job_id=job_id,
-            file_content=file_bytes,
-            filename=filename,
+            streamed_file=streamed_file,
             user_id=user_id,
             supabase=supabase,
             duplicate_decision=duplicate_decision,
