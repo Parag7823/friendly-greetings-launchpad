@@ -617,7 +617,7 @@ class ProductionDuplicateDetectionService:
                 duplicate_type=DuplicateType(cached_dict['duplicate_type']),
                 similarity_score=cached_dict['similarity_score'],
                 duplicate_files=cached_dict['duplicate_files'],
-                recommendation=DuplicateRecommendation(cached_dict['recommendation']),
+                recommendation=DuplicateAction(cached_dict['recommendation']),
                 message=cached_dict['message'],
                 confidence=cached_dict['confidence'],
                 processing_time_ms=cached_dict['processing_time_ms']
