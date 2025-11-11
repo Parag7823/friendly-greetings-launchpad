@@ -611,8 +611,32 @@ class ProductionDuplicateDetectionService:
         except Exception:
             return None
     
+    async def _set_cache(self, cache_key: str, result: DuplicateResult) -> None:
+        """
+        Save duplicate detection result to cache.
+        
+        Args:
+            cache_key: Cache key
+            result: DuplicateResult to cache
+        """
+        try:
+            # Convert DuplicateResult to dict for caching
+            result_dict = {
+                'is_duplicate': result.is_duplicate,
+                'duplicate_type': result.duplicate_type.value if hasattr(result.duplicate_type, 'value') else str(result.duplicate_type),
+                'similarity_score': result.similarity_score,
+                'duplicate_files': result.duplicate_files,
+                'recommendation': result.recommendation.value if hasattr(result.recommendation, 'value') else str(result.recommendation),
+                'message': result.message,
+                'confidence': result.confidence,
+                'processing_time_ms': result.processing_time_ms
+            }
+            await self.cache.set(cache_key, result_dict, ttl=self.config.cache_ttl)
+        except Exception as e:
+            logger.warning("cache_save_failed", error=str(e))
+    
     async def _save_to_cache(self, cache_key: str, result: Dict[str, Any]) -> None:
-        """Save duplicate detection result to cache."""
+        """Save duplicate detection result to cache (legacy compatibility)."""
         try:
             await self.cache.set(cache_key, result, ttl=self.config.cache_ttl)
         except Exception as e:
