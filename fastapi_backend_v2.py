@@ -184,8 +184,10 @@ from prometheus_client import Counter, Histogram, Gauge, generate_latest, CONTEN
 # ARQ is async-native and better integrated with FastAPI
 
 def _queue_backend() -> str:
-    """Return the queue backend mode: 'sync' (default) or 'arq'."""
-    return (os.environ.get("QUEUE_BACKEND") or "arq").lower()  # Default to ARQ
+    """Return the queue backend mode: 'sync' or 'arq' (default)."""
+    # Default to ARQ so background workers handle heavy processing.
+    # Set QUEUE_BACKEND=sync in environments without an ARQ worker (e.g. local dev).
+    return (os.environ.get("QUEUE_BACKEND") or "arq").lower()
 
 # Global ARQ pool (singleton pattern for connection reuse)
 _arq_pool = None
