@@ -292,19 +292,21 @@ class CentralizedCache:
         
         return await self.set(cache_key, result, ttl=ttl)
     
-    async def store_classification(self, content: Any, classification_type: str, result: Any, ttl: Optional[int] = None) -> bool:
+    async def store_classification(self, content: Any, result: Any, classification_type: str, ttl_hours: Optional[int] = None, **kwargs) -> bool:
         """
         Alias for set_cached_classification (compatibility method).
         
         Args:
             content: Content to use for cache key generation
-            classification_type: Type of classification
             result: Classification result to cache
-            ttl: Optional TTL override
+            classification_type: Type of classification
+            ttl_hours: Optional TTL in hours (converted to seconds)
+            **kwargs: Additional arguments (ignored for compatibility)
             
         Returns:
             True if successful, False otherwise
         """
+        ttl = int(ttl_hours * 3600) if ttl_hours else None
         return await self.set_cached_classification(content, classification_type, result, ttl)
     
     async def incr(self, key: str, delta: int = 1) -> int:

@@ -600,6 +600,24 @@ class ProductionDuplicateDetectionService:
     # - _calculate_fingerprint_similarity → datasketch
     # - _calculate_date_similarity → Not needed
     
+    def _generate_cache_key(self, file_metadata: FileMetadata) -> str:
+        """Generate cache key from file metadata."""
+        return f"dup:{file_metadata.user_id}:{file_metadata.file_hash}"
+    
+    async def _get_from_cache(self, cache_key: str) -> Optional[Dict[str, Any]]:
+        """Get duplicate detection result from cache."""
+        try:
+            return await self.cache.get(cache_key)
+        except Exception:
+            return None
+    
+    async def _save_to_cache(self, cache_key: str, result: Dict[str, Any]) -> None:
+        """Save duplicate detection result to cache."""
+        try:
+            await self.cache.set(cache_key, result, ttl=self.config.cache_ttl)
+        except Exception as e:
+            logger.warning("cache_save_failed", error=str(e))
+    
     async def _detect_near_duplicates_from_path(self, streamed_file, file_metadata: FileMetadata) -> DuplicateResult:
         """
         OPTIMIZED: Near-duplicate detection using persistent LSH service from file path
