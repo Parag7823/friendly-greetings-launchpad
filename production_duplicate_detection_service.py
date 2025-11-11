@@ -450,12 +450,15 @@ class ProductionDuplicateDetectionService:
         """
         try:
             # OPTIMIZED: Use Supabase client (SQLAlchemy removed in v4.0)
+            logger.info(f"🔍 Checking for exact duplicates: user_id={file_metadata.user_id}, file_hash={file_metadata.file_hash[:16]}...")
             result = self.supabase.table('raw_records').select(
                 'id, file_name, created_at, file_size, status'
             ).eq('user_id', file_metadata.user_id).eq('file_hash', file_metadata.file_hash).order('created_at', desc=True).limit(10).execute()
             records = result.data or []
+            logger.info(f"📊 Exact duplicate check result: found {len(records)} matching records")
             
             if not records:
+                logger.info("✅ No exact duplicates found - file is unique")
                 return DuplicateResult(
                     is_duplicate=False,
                     duplicate_type=DuplicateType.NONE,
@@ -477,6 +480,7 @@ class ProductionDuplicateDetectionService:
             } for r in records]
             
             latest = duplicate_files[0]
+            logger.warning(f"⚠️ EXACT DUPLICATE DETECTED: Found {len(duplicate_files)} matching file(s) - latest: '{latest['filename']}' (id={latest['id']})")
             
             return DuplicateResult(
                 is_duplicate=True,
