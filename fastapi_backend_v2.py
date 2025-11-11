@@ -5254,8 +5254,8 @@ class ExcelProcessor:
         }
         
         try:
-            # Create transaction record
-            supabase.table('processing_transactions').insert(transaction_data).execute()
+            # Create transaction record (use upsert to handle retries gracefully)
+            supabase.table('processing_transactions').upsert(transaction_data, on_conflict='id').execute()
             logger.info(f"Created processing transaction: {transaction_id}")
         except Exception as e:
             logger.warning(f"Failed to create processing transaction: {e}")
