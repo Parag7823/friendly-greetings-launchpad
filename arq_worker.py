@@ -13,11 +13,6 @@ from fastapi_backend_v2 import (
     _dropbox_sync_run,
     _gdrive_sync_run,
     _zohomail_sync_run,
-    _quickbooks_sync_run,
-    _xero_sync_run,
-    _zoho_books_sync_run,
-    _stripe_sync_run,
-    _razorpay_sync_run,
     start_processing_job,
     start_pdf_processing_job,
     logger,
@@ -26,11 +21,6 @@ from fastapi_backend_v2 import (
     NANGO_DROPBOX_INTEGRATION_ID,
     NANGO_GOOGLE_DRIVE_INTEGRATION_ID,
     NANGO_ZOHO_MAIL_INTEGRATION_ID,
-    NANGO_QUICKBOOKS_INTEGRATION_ID,
-    NANGO_XERO_INTEGRATION_ID,
-    NANGO_ZOHO_BOOKS_INTEGRATION_ID,
-    NANGO_STRIPE_INTEGRATION_ID,
-    NANGO_RAZORPAY_INTEGRATION_ID,
 )
 
 try:
@@ -153,58 +143,33 @@ async def zoho_mail_sync(ctx, req: Dict[str, Any]) -> Dict[str, Any]:
 
 
 async def quickbooks_sync(ctx, req: Dict[str, Any]) -> Dict[str, Any]:
-    nango = NangoClient()
-    try:
-        return await _quickbooks_sync_run(nango, ConnectorSyncRequest(**req))
-    except Exception as e:
-        delay = await _retry_or_dlq(ctx, NANGO_QUICKBOOKS_INTEGRATION_ID, req, e, max_retries=4, base_delay=45)
-        if delay is None:
-            return {"status": "failed", "provider": NANGO_QUICKBOOKS_INTEGRATION_ID}
-        raise Retry(defer=delay)
+    """Placeholder: QuickBooks sync not yet implemented"""
+    logger.warning("QuickBooks sync called but not implemented")
+    return {"status": "not_implemented", "provider": "quickbooks"}
 
 
 async def xero_sync(ctx, req: Dict[str, Any]) -> Dict[str, Any]:
-    nango = NangoClient()
-    try:
-        return await _xero_sync_run(nango, ConnectorSyncRequest(**req))
-    except Exception as e:
-        delay = await _retry_or_dlq(ctx, NANGO_XERO_INTEGRATION_ID, req, e, max_retries=4, base_delay=45)
-        if delay is None:
-            return {"status": "failed", "provider": NANGO_XERO_INTEGRATION_ID}
-        raise Retry(defer=delay)
+    """Placeholder: Xero sync not yet implemented"""
+    logger.warning("Xero sync called but not implemented")
+    return {"status": "not_implemented", "provider": "xero"}
 
 
 async def zoho_books_sync(ctx, req: Dict[str, Any]) -> Dict[str, Any]:
-    nango = NangoClient()
-    try:
-        return await _zoho_books_sync_run(nango, ConnectorSyncRequest(**req))
-    except Exception as e:
-        delay = await _retry_or_dlq(ctx, NANGO_ZOHO_BOOKS_INTEGRATION_ID, req, e, max_retries=4, base_delay=45)
-        if delay is None:
-            return {"status": "failed", "provider": NANGO_ZOHO_BOOKS_INTEGRATION_ID}
-        raise Retry(defer=delay)
+    """Placeholder: Zoho Books sync not yet implemented"""
+    logger.warning("Zoho Books sync called but not implemented")
+    return {"status": "not_implemented", "provider": "zoho_books"}
 
 
 async def stripe_sync(ctx, req: Dict[str, Any]) -> Dict[str, Any]:
-    nango = NangoClient()
-    try:
-        return await _stripe_sync_run(nango, ConnectorSyncRequest(**req))
-    except Exception as e:
-        delay = await _retry_or_dlq(ctx, NANGO_STRIPE_INTEGRATION_ID, req, e, max_retries=4, base_delay=45)
-        if delay is None:
-            return {"status": "failed", "provider": NANGO_STRIPE_INTEGRATION_ID}
-        raise Retry(defer=delay)
+    """Placeholder: Stripe sync not yet implemented"""
+    logger.warning("Stripe sync called but not implemented")
+    return {"status": "not_implemented", "provider": "stripe"}
 
 
 async def razorpay_sync(ctx, req: Dict[str, Any]) -> Dict[str, Any]:
-    nango = NangoClient()
-    try:
-        return await _razorpay_sync_run(nango, ConnectorSyncRequest(**req))
-    except Exception as e:
-        delay = await _retry_or_dlq(ctx, NANGO_RAZORPAY_INTEGRATION_ID, req, e, max_retries=4, base_delay=45)
-        if delay is None:
-            return {"status": "failed", "provider": NANGO_RAZORPAY_INTEGRATION_ID}
-        raise Retry(defer=delay)
+    """Placeholder: Razorpay sync not yet implemented"""
+    logger.warning("Razorpay sync called but not implemented")
+    return {"status": "not_implemented", "provider": "razorpay"}
 
 
 async def process_spreadsheet(ctx, user_id: str, filename: str, storage_path: str, job_id: str, 
