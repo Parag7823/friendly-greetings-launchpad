@@ -2096,6 +2096,14 @@ class DataEnrichmentProcessor:
         if len(batch_data) > self.config['batch_size']:
             logger.warning(f"Batch size {len(batch_data)} exceeds limit {self.config['batch_size']}")
             batch_data = batch_data[:self.config['batch_size']]
+            ai_classifications = ai_classifications[:len(batch_data)]
+
+        if len(ai_classifications) < len(batch_data):
+            logger.warning(
+                "AI classifications shorter than batch (%s vs %s); padding with empty dicts",
+                len(ai_classifications), len(batch_data)
+            )
+            ai_classifications = ai_classifications + [{} for _ in range(len(batch_data) - len(ai_classifications))]
         
         # Process batch concurrently with memory monitoring
         semaphore = asyncio.Semaphore(10)  # Limit concurrent operations
@@ -6246,7 +6254,7 @@ class ExcelProcessor:
                     user_id=user_id,
                     row_data={},  # Not needed for batch resolution
                     column_names=[],
-                    filename=filename,
+                    filename=streamed_file.filename,
                     row_id=entity_transaction_id
                 )
                 
