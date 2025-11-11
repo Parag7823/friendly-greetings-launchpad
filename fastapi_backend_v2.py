@@ -8126,6 +8126,20 @@ async def chat_endpoint(request: dict):
             )
         raise HTTPException(status_code=500, detail=f"Sorry, I encountered an error: {error_message}")
 
+@app.get("/debug/env")
+async def debug_environment():
+    """Debug endpoint to check environment variable visibility"""
+    groq_key = os.getenv('GROQ_API_KEY')
+    return {
+        "GROQ_API_KEY_present": bool(groq_key),
+        "GROQ_API_KEY_length": len(groq_key) if groq_key else 0,
+        "GROQ_API_KEY_prefix": groq_key[:10] + "..." if groq_key else None,
+        "all_groq_vars": sorted([k for k in os.environ.keys() if 'GROQ' in k.upper()]),
+        "all_env_vars_count": len(os.environ.keys()),
+        "groq_client_initialized": groq_client is not None,
+        "redis_url_present": bool(os.getenv('REDIS_URL')),
+        "supabase_url_present": bool(os.getenv('SUPABASE_URL'))
+    }
 
 @app.get("/chat-health")
 async def chat_health_check():

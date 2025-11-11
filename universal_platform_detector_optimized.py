@@ -462,9 +462,9 @@ class UniversalPlatformDetectorOptimized:
         detection_id = self._generate_detection_id(payload, filename, user_id)
         
         try:
-            # 1. OPTIMIZED: Check cachetools TTLCache
+            # 1. OPTIMIZED: Check centralized Redis cache
             if self.config.enable_caching:
-                cached_result = self.cache.get(detection_id)
+                cached_result = await self.cache.get(detection_id)
                 if cached_result:
                     self.metrics['cache_hits'] += 1
                     logger.debug("Cache hit", detection_id=detection_id)
@@ -511,9 +511,9 @@ class UniversalPlatformDetectorOptimized:
                 }
             })
             
-            # 6. OPTIMIZED: Cache with cachetools (auto-evicting)
+            # 6. OPTIMIZED: Cache with centralized Redis cache
             if self.config.enable_caching:
-                self.cache[detection_id] = final_result
+                await self.cache.set(detection_id, final_result)
             
             # 7. Update metrics and learning
             self._update_detection_metrics(final_result)

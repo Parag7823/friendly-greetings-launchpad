@@ -546,9 +546,9 @@ class UniversalDocumentClassifierOptimized:
         }
         
         try:
-            # 1. OPTIMIZED: Check cachetools TTLCache
+            # 1. OPTIMIZED: Check centralized Redis cache
             if self.config.enable_caching:
-                cached_result = self.cache.get(classification_id)
+                cached_result = await self.cache.get(classification_id)
                 if cached_result:
                     self.metrics['cache_hits'] += 1
                     logger.debug("Cache hit", classification_id=classification_id)
@@ -616,9 +616,9 @@ class UniversalDocumentClassifierOptimized:
                 }
             })
             
-            # 7. OPTIMIZED: Cache with cachetools (auto-evicting)
+            # 7. OPTIMIZED: Cache with centralized Redis cache
             if self.config.enable_caching:
-                self.cache[classification_id] = final_result
+                await self.cache.set(classification_id, final_result)
             
             # 8. Update metrics and learning
             self._update_classification_metrics(final_result)
