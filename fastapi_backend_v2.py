@@ -5391,7 +5391,9 @@ class ExcelProcessor:
                 )
 
                 dup_result = await duplicate_service.detect_duplicates(
-                    streamed_file, file_metadata, enable_near_duplicate=True
+                    file_metadata=file_metadata, 
+                    streamed_file=streamed_file, 
+                    enable_near_duplicate=True
                 )
 
                 dup_type_val = getattr(getattr(dup_result, 'duplicate_type', None), 'value', None)

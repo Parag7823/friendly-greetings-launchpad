@@ -248,6 +248,50 @@ class CentralizedCache:
             'hit_rate_percent': round(hit_rate, 2)
         }
     
+    async def get_cached_classification(self, content: Any, classification_type: str) -> Optional[Any]:
+        """
+        Get cached classification result (compatibility method for AI cache).
+        
+        Args:
+            content: Content to use for cache key generation
+            classification_type: Type of classification
+            
+        Returns:
+            Cached classification result or None
+        """
+        import hashlib
+        import json
+        
+        # Generate cache key from content
+        content_str = json.dumps(content, sort_keys=True) if isinstance(content, dict) else str(content)
+        content_hash = hashlib.sha256(content_str.encode()).hexdigest()[:16]
+        cache_key = f"{classification_type}:{content_hash}"
+        
+        return await self.get(cache_key)
+    
+    async def set_cached_classification(self, content: Any, classification_type: str, result: Any, ttl: Optional[int] = None) -> bool:
+        """
+        Set cached classification result (compatibility method for AI cache).
+        
+        Args:
+            content: Content to use for cache key generation
+            classification_type: Type of classification
+            result: Classification result to cache
+            ttl: Optional TTL override
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        import hashlib
+        import json
+        
+        # Generate cache key from content
+        content_str = json.dumps(content, sort_keys=True) if isinstance(content, dict) else str(content)
+        content_hash = hashlib.sha256(content_str.encode()).hexdigest()[:16]
+        cache_key = f"{classification_type}:{content_hash}"
+        
+        return await self.set(cache_key, result, ttl=ttl)
+    
     async def close(self):
         """Close cache connections."""
         try:
