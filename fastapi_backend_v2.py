@@ -5831,7 +5831,8 @@ class ExcelProcessor:
             # CRITICAL FIX: Process file using streaming to prevent memory exhaustion
             # Stream processes ALL sheets automatically - no need to iterate over sheets dict
             async for chunk_info in streaming_processor.process_file_streaming(
-                streamed_file, progress_callback=lambda step, msg, prog: manager.send_update(job_id, {
+                streamed_file=streamed_file,
+                progress_callback=lambda step, msg, prog: manager.send_update(job_id, {
                     "step": step,
                     "message": msg,
                     "progress": 40 + int(prog * 0.4)  # Progress from 40% to 80%
