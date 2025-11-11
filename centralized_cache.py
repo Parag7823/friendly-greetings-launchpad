@@ -292,6 +292,69 @@ class CentralizedCache:
         
         return await self.set(cache_key, result, ttl=ttl)
     
+    async def store_classification(self, content: Any, classification_type: str, result: Any, ttl: Optional[int] = None) -> bool:
+        """
+        Alias for set_cached_classification (compatibility method).
+        
+        Args:
+            content: Content to use for cache key generation
+            classification_type: Type of classification
+            result: Classification result to cache
+            ttl: Optional TTL override
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        return await self.set_cached_classification(content, classification_type, result, ttl)
+    
+    async def incr(self, key: str, delta: int = 1) -> int:
+        """
+        Increment a counter in cache (for rate limiting).
+        
+        Args:
+            key: Cache key
+            delta: Amount to increment by (default: 1)
+            
+        Returns:
+            New value after increment
+        """
+        try:
+            if self.redis_client:
+                return await self.redis_client.incr(key, delta)
+            else:
+                # Fallback to memory cache
+                current = await self.get(key) or 0
+                new_value = int(current) + delta
+                await self.set(key, new_value)
+                return new_value
+        except Exception as e:
+            logger.error("cache_incr_error", key=key, error=str(e))
+            return 1
+    
+    async def expire(self, key: str, seconds: int) -> bool:
+        """
+        Set expiration time on a key.
+        
+        Args:
+            key: Cache key
+            seconds: TTL in seconds
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            if self.redis_client:
+                return await self.redis_client.expire(key, seconds)
+            else:
+                # Memory cache handles TTL differently - re-set with TTL
+                value = await self.get(key)
+                if value is not None:
+                    await self.set(key, value, ttl=seconds)
+                return True
+        except Exception as e:
+            logger.error("cache_expire_error", key=key, error=str(e))
+            return False
+    
     async def close(self):
         """Close cache connections."""
         try:

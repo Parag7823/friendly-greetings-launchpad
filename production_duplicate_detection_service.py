@@ -151,6 +151,7 @@ class ProductionDuplicateDetectionService:
         """
         self.supabase = supabase
         self.redis_client = redis_client
+        self.config = config  # Store config instance
         
         # CRITICAL FIX: Use centralized Redis cache - FAIL FAST if unavailable
         from centralized_cache import safe_get_cache
@@ -409,8 +410,8 @@ class ProductionDuplicateDetectionService:
             raise TypeError("streamed_file must be a StreamedFile instance")
         
         # Quick size check
-        if streamed_file.size > self.config.max_file_size_bytes:
-            raise ValueError(f"File size {streamed_file.size} exceeds maximum {self.config.max_file_size_bytes}")
+        if streamed_file.size > self.config.max_file_size:
+            raise ValueError(f"File size {streamed_file.size} exceeds maximum {self.config.max_file_size}")
         
         # Validate metadata
         if not file_metadata or not file_metadata.user_id:
