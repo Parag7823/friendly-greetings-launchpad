@@ -130,7 +130,7 @@ class DatabaseTransactionManager:
                 }
             }
             
-            result = self.supabase.table('processing_transactions').insert(transaction_record).execute()
+            result = self.supabase.table('processing_transactions').upsert(transaction_record, on_conflict='id').execute()
             
             if not result.data:
                 raise Exception("Failed to create transaction record")
