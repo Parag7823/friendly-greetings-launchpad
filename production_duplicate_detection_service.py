@@ -604,11 +604,26 @@ class ProductionDuplicateDetectionService:
         """Generate cache key from file metadata."""
         return f"dup:{file_metadata.user_id}:{file_metadata.file_hash}"
     
-    async def _get_from_cache(self, cache_key: str) -> Optional[Dict[str, Any]]:
-        """Get duplicate detection result from cache."""
+    async def _get_from_cache(self, cache_key: str) -> Optional[DuplicateResult]:
+        """Get duplicate detection result from cache and convert back to DuplicateResult."""
         try:
-            return await self.cache.get(cache_key)
-        except Exception:
+            cached_dict = await self.cache.get(cache_key)
+            if not cached_dict:
+                return None
+            
+            # Convert dict back to DuplicateResult
+            return DuplicateResult(
+                is_duplicate=cached_dict['is_duplicate'],
+                duplicate_type=DuplicateType(cached_dict['duplicate_type']),
+                similarity_score=cached_dict['similarity_score'],
+                duplicate_files=cached_dict['duplicate_files'],
+                recommendation=DuplicateRecommendation(cached_dict['recommendation']),
+                message=cached_dict['message'],
+                confidence=cached_dict['confidence'],
+                processing_time_ms=cached_dict['processing_time_ms']
+            )
+        except Exception as e:
+            logger.warning("cache_get_failed", error=str(e))
             return None
     
     async def _set_cache(self, cache_key: str, result: DuplicateResult) -> None:
