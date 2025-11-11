@@ -5732,6 +5732,10 @@ class ExcelProcessor:
             else:
                 logger.info(f"✅ Using external_item_id passed from connector: {external_item_id}")
             
+            # Precompute sheet names and initial row estimates from metadata
+            sheet_names = list(sheets_metadata.keys())
+            total_rows_estimate = sum(meta.get('row_count', 0) for meta in sheets_metadata.values())
+
             # Store in raw_records using transaction
             raw_record_data = {
                 'user_id': user_id,
@@ -5740,13 +5744,13 @@ class ExcelProcessor:
                 'file_hash': file_hash,
                 'source': 'file_upload',
                 'content': {
-                    'sheets': list(sheets.keys()),
+                    'sheets': sheet_names,
                     'platform_detection': platform_info,
                     'document_analysis': doc_analysis,
                     'file_hash': file_hash,
                     'content_fingerprint': content_fingerprint,
                     'sheets_row_hashes': sheets_row_hashes,
-                    'total_rows': sum(len(sheet) for sheet in sheets.values()),
+                    'total_rows': total_rows_estimate,
                     'processed_at': datetime.utcnow().isoformat(),
                     'duplicate_analysis': duplicate_analysis
                 },
