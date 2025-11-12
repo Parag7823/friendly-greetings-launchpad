@@ -101,7 +101,6 @@ COPY transaction_manager.py .
 COPY streaming_processor.py .
 COPY error_recovery_system.py .
 COPY centralized_cache.py .
-COPY batch_optimizer.py .
 COPY observability_system.py .
 COPY security_system.py .
 COPY nango_client.py .
