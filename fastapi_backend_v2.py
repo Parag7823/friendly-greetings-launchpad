@@ -11951,8 +11951,6 @@ class SocketIOWebSocketManager:
 
 # REMOVED: UniversalWebSocketManager class (368 lines) - replaced with Socket.IO above
 
-websocket_manager = SocketIOWebSocketManager()
-
     def set_redis(self, redis_client):
         """Set Redis client and initialize Pub/Sub for multi-worker support"""
         self.redis = redis_client
@@ -11997,7 +11995,7 @@ websocket_manager = SocketIOWebSocketManager()
         base.update(patch)
         await self._save_state(job_id, base)
         return base
-    
+
     async def _safe_send_json(self, job_id: str, payload: Dict[str, Any], context: str) -> bool:
         """Best-effort WebSocket send that tolerates closed connections."""
         websocket = self.active_connections.get(job_id)
