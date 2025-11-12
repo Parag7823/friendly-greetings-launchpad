@@ -2180,63 +2180,63 @@ class DataEnrichmentProcessor:
             return {}
     
     async def _learn_field_mappings_from_extraction(
-    self,
-    user_id: str,
-    row_data: Dict,
-    extraction_results: Dict,
-    platform: Optional[str] = None,
-    document_type: Optional[str] = None
-):
-    """
-    UNIVERSAL FIX: Learn field mappings from successful extractions.
-        
-    This method infers which columns were used for each field and records
-    them in the field_mappings table for future use.
-    """
-    if not user_id or not self.supabase:
-        return
-            
-    try:
-        # Infer mappings from successful extractions
-        # We look for columns that match the extracted values
-            
-        # Amount mapping
-        amount = extraction_results.get('amount', 0.0)
-        if amount and amount > 0:
-            for col_name, col_value in row_data.items():
-                if isinstance(col_value, (int, float)) and abs(float(col_value) - amount) < 0.01:
-                    await learn_field_mapping(
-                        user_id=user_id,
-                        source_column=col_name,
-                        target_field='amount',
-                        platform=platform,
-                        document_type=document_type,
-                        confidence=0.9,
-                        extraction_success=True,
-                        metadata={'inferred_from': 'extraction'},
-                        supabase=self.supabase
-                    )
-                    break
-            
-        # Vendor mapping
-        vendor = extraction_results.get('vendor_name', '')
-        if vendor:
-            for col_name, col_value in row_data.items():
-                if isinstance(col_value, str) and col_value.strip() == vendor.strip():
-                    await learn_field_mapping(
-                        user_id=user_id,
-                        source_column=col_name,
-                        target_field='vendor',
-                        platform=platform,
-                        document_type=document_type,
-                        confidence=0.85,
-                        extraction_success=True,
-                        metadata={'inferred_from': 'extraction'},
-                        supabase=self.supabase
-                    )
-                    break
-            
-        # Date mapping
+        self,
+        user_id: str,
+        row_data: Dict,
+        extraction_results: Dict,
+        platform: Optional[str] = None,
+        document_type: Optional[str] = None,
+    ):
+        """
+        UNIVERSAL FIX: Learn field mappings from successful extractions.
+
+        This method infers which columns were used for each field and records
+        them in the field_mappings table for future use.
+        """
+        if not user_id or not self.supabase:
+            return
+
+        try:
+            # Infer mappings from successful extractions
+            # We look for columns that match the extracted values
+
+            # Amount mapping
+            amount = extraction_results.get('amount', 0.0)
+            if amount and amount > 0:
+                for col_name, col_value in row_data.items():
+                    if isinstance(col_value, (int, float)) and abs(float(col_value) - amount) < 0.01:
+                        await learn_field_mapping(
+                            user_id=user_id,
+                            source_column=col_name,
+                            target_field='amount',
+                            platform=platform,
+                            document_type=document_type,
+                            confidence=0.9,
+                            extraction_success=True,
+                            metadata={'inferred_from': 'extraction'},
+                            supabase=self.supabase,
+                        )
+                        break
+
+            # Vendor mapping
+            vendor = extraction_results.get('vendor_name', '')
+            if vendor:
+                for col_name, col_value in row_data.items():
+                    if isinstance(col_value, str) and col_value.strip() == vendor.strip():
+                        await learn_field_mapping(
+                            user_id=user_id,
+                            source_column=col_name,
+                            target_field='vendor',
+                            platform=platform,
+                            document_type=document_type,
+                            confidence=0.85,
+                            extraction_success=True,
+                            metadata={'inferred_from': 'extraction'},
+                            supabase=self.supabase,
+                        )
+                        break
+
+            # Date mapping
         date = extraction_results.get('date', '')
         if date and date != datetime.now().strftime('%Y-%m-%d'):
             for col_name, col_value in row_data.items():
