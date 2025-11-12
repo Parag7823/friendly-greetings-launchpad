@@ -2236,67 +2236,67 @@ class DataEnrichmentProcessor:
                         )
                         break
 
-            # Date mapping
-        date = extraction_results.get('date', '')
-        if date and date != datetime.now().strftime('%Y-%m-%d'):
-            for col_name, col_value in row_data.items():
-                if isinstance(col_value, str):
-                    try:
-                        from dateutil import parser
-                        parsed = parser.parse(col_value)
-                        if parsed.strftime('%Y-%m-%d') == date:
-                            await learn_field_mapping(
-                                user_id=user_id,
-                                source_column=col_name,
-                                target_field='date',
-                                platform=platform,
-                                document_type=document_type,
-                                confidence=0.9,
-                                extraction_success=True,
-                                metadata={'inferred_from': 'extraction'},
-                                supabase=self.supabase
-                            )
-                            break
-                    except:
-                        continue
-            
-        # Description mapping
-        description = extraction_results.get('description', '')
-        if description:
-            for col_name, col_value in row_data.items():
-                if isinstance(col_value, str) and col_value.strip() == description.strip():
-                    await learn_field_mapping(
-                        user_id=user_id,
-                        source_column=col_name,
-                        target_field='description',
-                        platform=platform,
-                        document_type=document_type,
-                        confidence=0.8,
-                        extraction_success=True,
-                        metadata={'inferred_from': 'extraction'},
-                        supabase=self.supabase
-                    )
-                    break
-            
-        # Currency mapping
-        currency = extraction_results.get('currency', 'USD')
-        if currency != 'USD':
-            for col_name, col_value in row_data.items():
-                if isinstance(col_value, str) and col_value.strip().upper() == currency.upper():
-                    await learn_field_mapping(
-                        user_id=user_id,
-                        source_column=col_name,
-                        target_field='currency',
-                        platform=platform,
-                        document_type=document_type,
-                        confidence=0.95,
-                        extraction_success=True,
-                        metadata={'inferred_from': 'extraction'},
-                        supabase=self.supabase
-                    )
-                    break
-    except Exception as e:
-        logger.warning(f"Failed to learn field mappings from extraction: {e}")
+                # Date mapping
+            date = extraction_results.get('date', '')
+            if date and date != datetime.now().strftime('%Y-%m-%d'):
+                for col_name, col_value in row_data.items():
+                    if isinstance(col_value, str):
+                        try:
+                            from dateutil import parser
+                            parsed = parser.parse(col_value)
+                            if parsed.strftime('%Y-%m-%d') == date:
+                                await learn_field_mapping(
+                                    user_id=user_id,
+                                    source_column=col_name,
+                                    target_field='date',
+                                    platform=platform,
+                                    document_type=document_type,
+                                    confidence=0.9,
+                                    extraction_success=True,
+                                    metadata={'inferred_from': 'extraction'},
+                                    supabase=self.supabase,
+                                )
+                                break
+                        except Exception:
+                            continue
+
+            # Description mapping
+            description = extraction_results.get('description', '')
+            if description:
+                for col_name, col_value in row_data.items():
+                    if isinstance(col_value, str) and col_value.strip() == description.strip():
+                        await learn_field_mapping(
+                            user_id=user_id,
+                            source_column=col_name,
+                            target_field='description',
+                            platform=platform,
+                            document_type=document_type,
+                            confidence=0.8,
+                            extraction_success=True,
+                            metadata={'inferred_from': 'extraction'},
+                            supabase=self.supabase,
+                        )
+                        break
+
+            # Currency mapping
+            currency = extraction_results.get('currency', 'USD')
+            if currency != 'USD':
+                for col_name, col_value in row_data.items():
+                    if isinstance(col_value, str) and col_value.strip().upper() == currency.upper():
+                        await learn_field_mapping(
+                            user_id=user_id,
+                            source_column=col_name,
+                            target_field='currency',
+                            platform=platform,
+                            document_type=document_type,
+                            confidence=0.95,
+                            extraction_success=True,
+                            metadata={'inferred_from': 'extraction'},
+                            supabase=self.supabase,
+                        )
+                        break
+        except Exception as e:
+            logger.warning(f"Failed to learn field mappings from extraction: {e}")
     
     def _extract_amount(self, row_data: Dict) -> float:
         """Extract amount from row data - case-insensitive field matching"""
