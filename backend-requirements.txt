@@ -2,6 +2,7 @@
 fastapi==0.115.0
 uvicorn[standard]==0.32.0
 websockets==13.1
+python-socketio==5.10.0  # Replaces UniversalWebSocketManager (368 lines)
 pandas==2.2.3
 numpy==1.26.4
 openpyxl==3.1.5
