@@ -94,6 +94,9 @@ class CentralizedCache:
         
         self.cache = Cache(Cache.REDIS, **cache_config)
         
+        # Initialize direct Redis client for operations not supported by aiocache
+        self.redis_client = None  # Will be initialized lazily when needed
+        
         # Metrics
         self.metrics = {
             'hits': 0,

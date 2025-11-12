@@ -2175,7 +2175,7 @@ class DataEnrichmentProcessor:
             logger.warning(f"Failed to get field mappings: {e}")
             return {}
     
-async def _learn_field_mappings_from_extraction(
+    async def _learn_field_mappings_from_extraction(
     self,
     user_id: str,
     row_data: Dict,
@@ -8359,11 +8359,11 @@ async def acquire_upload_slot(user_id: str) -> Tuple[bool, str]:
                 return False, f"Too many concurrent uploads. Please wait for some uploads to complete. ({current_count}/{MAX_CONCURRENT_UPLOADS_PER_USER} active)"
             
             # Increment counter atomically
-            new_count = await cache.cache.incr(redis_key)
+            new_count = await cache.incr(redis_key)
             
             # Set expiry on first increment (TTL: 1 hour for safety)
             if new_count == 1:
-                await cache.cache.expire(redis_key, 3600)
+                await cache.expire(redis_key, 3600)
             
             logger.info(f"User {user_id} started upload. Active uploads: {new_count}/{MAX_CONCURRENT_UPLOADS_PER_USER} (distributed)")
             return True, "OK"
