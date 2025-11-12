@@ -1906,6 +1906,31 @@ class DataEnrichmentProcessor:
         
         logger.info("✅ DataEnrichmentProcessor initialized with production-grade features")
     
+    async def _initialize_observability(self):
+        """Initialize observability system"""
+        if not self._observability_system_initialized:
+            self._observability_system_initialized = True
+    
+    async def _create_fallback_payload(self, row_data: Dict, platform_info: Dict, 
+                                      ai_classification: Dict, file_context: Dict, 
+                                      error_message: str) -> Dict[str, Any]:
+        """Create fallback payload when enrichment fails"""
+        return {
+            **row_data,
+            'kind': ai_classification.get('row_type', 'transaction'),
+            'category': ai_classification.get('category', 'other'),
+            'subcategory': ai_classification.get('subcategory', 'general'),
+            'amount_original': self._extract_amount(row_data),
+            'amount_usd': self._extract_amount(row_data),
+            'currency': 'USD',
+            'vendor_raw': '',
+            'vendor_standard': '',
+            'platform_ids': {},
+            'enrichment_error': error_message,
+            'enrichment_version': '2.0.0-fallback',
+            'ingested_on': datetime.now().isoformat()
+        }
+    
     def _get_default_config(self) -> Dict[str, Any]:
         """Get default configuration for enrichment processor"""
         return {
