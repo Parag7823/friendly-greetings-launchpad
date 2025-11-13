@@ -3050,7 +3050,16 @@ class DataEnrichmentProcessor:
                 'canonical_entity_ids',
                 'confidence_flagging'
             ]
-
+            
+            return enhanced
+            
+        except Exception as e:
+            logger.error(f"Accuracy enhancement failed: {e}")
+            # Return original payload if enhancement fails
+            validated_payload['accuracy_enhanced'] = False
+            validated_payload['accuracy_error'] = str(e)
+            return validated_payload
+    
     async def _validate_security(self, row_data: Dict, platform_info: Dict, 
                                 column_names: List[str], ai_classification: Dict, 
                                 file_context: Dict) -> bool:
