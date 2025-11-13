@@ -4,9 +4,9 @@ from __future__ import annotations
 import os
 import sys
 import logging
-import hashlib  # Keep for crypto needs
 import xxhash  # LIBRARY REPLACEMENT: 5-10x faster non-crypto hashing
 import uuid
+import secrets  # CRITICAL FIX #8: Use secrets for cryptographically secure random generation
 import time
 import mmap
 
@@ -228,7 +228,7 @@ from nango_client import NangoClient
 
 # Import critical fixes systems
 from transaction_manager import initialize_transaction_manager, get_transaction_manager
-from streaming_processor import initialize_streaming_processor, get_streaming_processor, StreamingConfig
+from streaming_processor import initialize_streaming_processor, get_streaming_processor, StreamingConfig, StreamingFileProcessor
 from error_recovery_system import initialize_error_recovery_system, get_error_recovery_system, ErrorContext, ErrorSeverity
 
 # Import optimization goldmine - FINALLY USING THIS!
@@ -257,7 +257,8 @@ from security_system import SecurityValidator, InputSanitizer, SecurityContext
 # Import provenance tracking for complete data lineage
 from provenance_tracker import provenance_tracker, calculate_row_hash, create_lineage_path, append_lineage_step
 
-# PHASE 3.5: structlog as PRIMARY logger (JSON logs, better structured logging)
+
+
 import structlog
 
 # Configure structlog for production-grade JSON logging
@@ -391,7 +392,12 @@ def _db_update(table: str, updates: dict, eq_col: str, eq_val):
 
 # Import production duplicate detection service
 try:
-    from production_duplicate_detection_service import ProductionDuplicateDetectionService, FileMetadata, DuplicateType
+    from production_duplicate_detection_service import (
+        ProductionDuplicateDetectionService, 
+        FileMetadata, 
+        DuplicateType,
+        DuplicateDetectionError  # CRITICAL FIX #4: Import error class for proper exception handling
+    )
     PRODUCTION_DUPLICATE_SERVICE_AVAILABLE = True
     logger.info("✅ Production duplicate detection service available")
 except ImportError as e:
@@ -480,53 +486,9 @@ async def safe_openai_call(client, model: str, messages: list, temperature: floa
             raise e
 
 
-# Add fallback processing when AI is unavailable
-def get_fallback_platform_detection(payload: dict, filename: str = None) -> dict:
-    """Fallback platform detection when AI is unavailable"""
-    platform_indicators = {
-        'stripe': ['stripe', 'stripe.com', 'st_'],
-        'razorpay': ['razorpay', 'rzp_'],
-        'paypal': ['paypal', 'pp_'],
-        'quickbooks': ['quickbooks', 'qb_', 'intuit'],
-        'xero': ['xero', 'xero.com'],
-        'shopify': ['shopify', 'shopify.com'],
-        'woocommerce': ['woocommerce', 'wc_'],
-        'salesforce': ['salesforce', 'sf_'],
-        'hubspot': ['hubspot', 'hs_']
-    }
-    
-    # Check filename
-    if filename:
-        filename_lower = filename.lower()
-        for platform, indicators in platform_indicators.items():
-            if any(indicator in filename_lower for indicator in indicators):
-                return {
-                    'platform': platform,
-                    'confidence': 0.7,
-                    'detection_method': 'filename_pattern',
-                    'indicators': [indicator for indicator in indicators if indicator in filename_lower],
-                    'reasoning': f'Detected from filename: {filename}'
-                }
-    
-    # Check payload content
-    content_str = str(payload).lower()
-    for platform, indicators in platform_indicators.items():
-        if any(indicator in content_str for indicator in indicators):
-            return {
-                'platform': platform,
-                'confidence': 0.6,
-                'detection_method': 'content_pattern',
-                'indicators': [indicator for indicator in indicators if indicator in content_str],
-                'reasoning': 'Detected from content patterns'
-            }
-    
-    return {
-        'platform': 'unknown',
-        'confidence': 0.0,
-        'detection_method': 'fallback',
-        'indicators': [],
-        'reasoning': 'No patterns detected'
-    }
+# REMOVED: get_fallback_platform_detection() - Use UniversalPlatformDetector instead
+# Hardcoded platform patterns are brittle and hard to maintain.
+# All platform detection now uses UniversalPlatformDetector library.
 
 def safe_json_parse(json_str, fallback=None):
     """
@@ -1633,9 +1595,11 @@ class PlatformIDExtractor:
                     logger.warning(f"Invalid regex pattern for {id_type}: {pattern} - {e}")
                     continue
             
+            # LIBRARY FIX: Use rapidfuzz for ID column detection (replaces manual .lower() checks)
+            from rapidfuzz import fuzz
+            
             # Extract IDs from individual column values first (higher confidence)
             for col_name in column_names:
-                col_lower = col_name.lower()
                 col_value = row_data.get(col_name)
                 
                 if not col_value:
@@ -1646,8 +1610,8 @@ class PlatformIDExtractor:
                     continue
                 
                 # Check if column name suggests it contains IDs
-                is_id_column = any(id_indicator in col_lower for id_indicator in 
-                                 ['id', 'reference', 'number', 'ref', 'num', 'code', 'key'])
+                id_indicators = ['id', 'reference', 'number', 'ref', 'num', 'code', 'key']
+                is_id_column = any(fuzz.token_set_ratio(col_name.lower(), indicator) > 80 for indicator in id_indicators)
                 
                 for id_type, compiled_pattern in compiled_patterns.items():
                     if compiled_pattern.match(col_value_str):
@@ -1779,15 +1743,23 @@ class PlatformIDExtractor:
             if not validation_result['is_valid']:
                 return validation_result
             
-            # Check for suspicious patterns
-            if any(suspicious in id_value.lower() for suspicious in ['test', 'dummy', 'sample', 'example']):
-                validation_result['warnings'].append('ID contains test/sample indicators')
-                validation_result['confidence'] = 0.5
+            # LIBRARY FIX: Use rapidfuzz for suspicious pattern detection (replaces manual .lower() checks)
+            from rapidfuzz import fuzz
+            suspicious_patterns = ['test', 'dummy', 'sample', 'example']
+            for suspicious in suspicious_patterns:
+                if fuzz.partial_ratio(id_value.lower(), suspicious) > 80:
+                    validation_result['warnings'].append('ID contains test/sample indicators')
+                    validation_result['confidence'] = 0.5
+                    break
             
-            # Check for mixed platforms (potential data quality issue)
-            if platform == 'quickbooks' and any(other_platform in id_value.lower() for other_platform in ['stripe', 'paypal', 'square']):
-                validation_result['warnings'].append('ID contains mixed platform indicators')
-                validation_result['confidence'] = 0.3
+            # LIBRARY FIX: Use rapidfuzz for mixed platform detection
+            if platform == 'quickbooks':
+                other_platforms = ['stripe', 'paypal', 'square']
+                for other_platform in other_platforms:
+                    if fuzz.partial_ratio(id_value.lower(), other_platform) > 75:
+                        validation_result['warnings'].append('ID contains mixed platform indicators')
+                        validation_result['confidence'] = 0.3
+                        break
             
             return validation_result
             
@@ -2390,17 +2362,16 @@ class DataEnrichmentProcessor:
                         cleaned = re.sub(r'[^\d.-]', '', value)
                         return float(cleaned) if cleaned else 0.0
             
-            # Then try case-insensitive match
-            row_data_lower = {k.lower(): v for k, v in row_data.items()}
-            for field in amount_fields:
-                if field in row_data_lower:
-                    value = row_data_lower[field]
-                    if isinstance(value, (int, float)):
-                        return float(value)
-                    elif isinstance(value, str):
-                        # Remove currency symbols and convert
-                        cleaned = re.sub(r'[^\d.-]', '', value)
-                        return float(cleaned) if cleaned else 0.0
+            # LIBRARY FIX: Use rapidfuzz for case-insensitive field matching (replaces manual .lower() dict)
+            from rapidfuzz import fuzz
+            for row_key, row_value in row_data.items():
+                for field in amount_fields:
+                    if fuzz.token_set_ratio(row_key.lower(), field) > 85:
+                        if isinstance(row_value, (int, float)):
+                            return float(row_value)
+                        elif isinstance(row_value, str):
+                            cleaned = re.sub(r'[^\d.-]', '', row_value)
+                            return float(cleaned) if cleaned else 0.0
         except:
             pass
         return 0.0
@@ -2420,11 +2391,15 @@ class DataEnrichmentProcessor:
             if field in row_data and row_data[field]:
                 return str(row_data[field]).strip()
         
-        # Check column names for vendor patterns
+        # LIBRARY FIX: Use rapidfuzz for vendor column detection (replaces manual .lower() checks)
+        from rapidfuzz import fuzz
+        vendor_keywords = ['vendor', 'payee', 'recipient', 'company', 'description']
         for col in column_names:
-            if any(vendor_word in col.lower() for vendor_word in ['vendor', 'payee', 'recipient', 'company', 'description']):
-                if col in row_data and row_data[col]:
-                    return str(row_data[col]).strip()
+            for keyword in vendor_keywords:
+                if fuzz.token_set_ratio(col.lower(), keyword) > 80:
+                    if col in row_data and row_data[col]:
+                        return str(row_data[col]).strip()
+                    break
         
         return ""
     
@@ -2529,20 +2504,70 @@ class DataEnrichmentProcessor:
             raise ValidationError(f"Input validation failed: {str(e)}")
     
     def _sanitize_string(self, value: str) -> str:
-        """Sanitize string input to prevent injection attacks"""
+        """LIBRARY FIX: Sanitize string input using validators + presidio (replaces manual char removal)"""
         if not isinstance(value, str):
             return str(value)
         
-        # Remove potentially dangerous characters
-        dangerous_chars = ['<', '>', '&', '"', "'", '\\', '/', '\x00']
-        for char in dangerous_chars:
-            value = value.replace(char, '')
+        # LIBRARY FIX: Use validators for length validation
+        from validators import length
         
-        # Limit length
+        # Limit length first
         if len(value) > 1000:
             value = value[:1000]
         
-        return value.strip()
+        # Validate length using validators library
+        if not length(value, min=1, max=1000):
+            raise ValueError("String length validation failed")
+        
+        # LIBRARY FIX: Use bleach for HTML/XSS sanitization (replaces manual char removal)
+        from bleach import clean
+        sanitized = clean(value, tags=[], strip=True)
+        
+        # LIBRARY FIX: Use presidio for PII detection and redaction
+        try:
+            from presidio_analyzer import AnalyzerEngine
+            analyzer = AnalyzerEngine()
+            
+            # Detect PII entities
+            results = analyzer.analyze(text=sanitized, language='en')
+            
+            # Log if PII detected
+            if results:
+                pii_types = [r.entity_type for r in results]
+                logger.warning(f"PII detected in string: {pii_types}")
+                # Redact PII for safety
+                for result in results:
+                    start = result.start
+                    end = result.end
+                    sanitized = sanitized[:start] + '[REDACTED]' + sanitized[end:]
+        except Exception as e:
+            logger.debug(f"Presidio PII detection skipped: {e}")
+        
+        return sanitized.strip()
+    
+    def _validate_filename(self, filename: str) -> bool:
+        """LIBRARY FIX: Validate filename using validators (replaces manual path traversal checks)"""
+        if not filename or not isinstance(filename, str):
+            return False
+        
+        # LIBRARY FIX: Use validators for slug validation (prevents path traversal)
+        from validators import slug
+        
+        # Extract just the filename without path
+        import os
+        basename = os.path.basename(filename)
+        
+        # Check for path traversal attempts
+        if '..' in basename or '/' in basename or '\\' in basename:
+            logger.warning(f"Path traversal attempt detected: {filename}")
+            return False
+        
+        # Validate filename format
+        if not slug(basename.replace('.', '-')):
+            logger.warning(f"Invalid filename format: {filename}")
+            return False
+        
+        return True
     
     async def _get_cached_enrichment(self, enrichment_id: str) -> Optional[Dict[str, Any]]:
         """Get cached enrichment result if available"""
@@ -3261,19 +3286,20 @@ class DataEnrichmentProcessor:
             'document_type_indicators': []
         }
         
-        columns_lower = [col.lower() for col in columns]
+        # LIBRARY FIX: Use rapidfuzz for column keyword matching (replaces manual .lower() checks)
+        from rapidfuzz import fuzz
         
         # Financial terms
         financial_keywords = ['amount', 'total', 'sum', 'value', 'price', 'cost', 'revenue', 'income', 'expense']
-        patterns['financial_terms'] = [col for col in columns_lower if any(keyword in col for keyword in financial_keywords)]
+        patterns['financial_terms'] = [col for col in columns if any(fuzz.token_set_ratio(col.lower(), kw) > 80 for kw in financial_keywords)]
         
         # Platform indicators
         platform_keywords = ['stripe', 'razorpay', 'paypal', 'quickbooks', 'xero', 'gusto']
-        patterns['platform_indicators'] = [col for col in columns_lower if any(keyword in col for keyword in platform_keywords)]
+        patterns['platform_indicators'] = [col for col in columns if any(fuzz.token_set_ratio(col.lower(), kw) > 80 for kw in platform_keywords)]
         
         # Document type indicators
         doc_type_keywords = ['invoice', 'receipt', 'statement', 'report', 'ledger', 'payroll']
-        patterns['document_type_indicators'] = [col for col in columns_lower if any(keyword in col for keyword in doc_type_keywords)]
+        patterns['document_type_indicators'] = [col for col in columns if any(fuzz.token_set_ratio(col.lower(), kw) > 80 for kw in doc_type_keywords)]
         
         return patterns
     
@@ -3320,8 +3346,11 @@ class DataEnrichmentProcessor:
             # Check data patterns
             if doc_type == 'income_statement' and data_patterns['has_numeric_data']:
                 score += 0.2
-            elif doc_type == 'payroll_data' and any('employee' in col.lower() for col in column_names):
-                score += 0.2
+            elif doc_type == 'payroll_data':
+                # LIBRARY FIX: Use rapidfuzz for employee column detection
+                from rapidfuzz import fuzz
+                if any(fuzz.token_set_ratio(col.lower(), 'employee') > 80 for col in column_names):
+                    score += 0.2
             
             scores[doc_type] = score
         
@@ -3351,8 +3380,14 @@ class DataEnrichmentProcessor:
             if matched_keywords:
                 indicators.append(f"keywords: {', '.join(matched_keywords)}")
             
-            # Check for column matches
-            matched_columns = [col for col in patterns['columns'] if any(col.lower() in name.lower() for name in column_names)]
+            # LIBRARY FIX: Use rapidfuzz for column pattern matching (replaces manual .lower() checks)
+            from rapidfuzz import fuzz
+            matched_columns = []
+            for pattern_col in patterns['columns']:
+                for col_name in column_names:
+                    if fuzz.token_set_ratio(pattern_col.lower(), col_name.lower()) > 80:
+                        matched_columns.append(pattern_col)
+                        break
             if matched_columns:
                 indicators.append(f"columns: {', '.join(matched_columns)}")
         
@@ -3533,9 +3568,10 @@ class DataEnrichmentProcessor:
                 text_length = len(extracted_text.strip())
                 confidence = min(0.9, text_length / 1000) if text_length > 0 else 0.0
                 
-                # Analyze extracted text for financial keywords
+                # LIBRARY FIX: Use rapidfuzz for keyword detection (replaces manual .lower() checks)
+                from rapidfuzz import fuzz
                 financial_keywords = ['invoice', 'receipt', 'total', 'amount', 'payment', 'date', 'vendor', 'customer']
-                keyword_count = sum(1 for keyword in financial_keywords if keyword.lower() in extracted_text.lower())
+                keyword_count = sum(1 for keyword in financial_keywords if fuzz.partial_ratio(extracted_text.lower(), keyword) > 80)
                 
                 analysis = f"Extracted {text_length} characters, found {keyword_count} financial keywords"
                 
@@ -3767,9 +3803,10 @@ class AIRowClassifier:
             if cleaned_result.endswith('```'):
                 cleaned_result = cleaned_result[:-3]
             
+            # LIBRARY FIX: Use orjson for 3-5x faster JSON parsing
             # Parse JSON
             try:
-                classification = json.loads(cleaned_result)
+                classification = orjson.loads(cleaned_result)
                 
                 # Resolve entities if entity resolver is available
                 if self.entity_resolver and classification.get('entities'):
@@ -3823,19 +3860,25 @@ class AIRowClassifier:
     
     def _fallback_classification(self, row: pd.Series, platform_info: Dict, column_names: List[str]) -> Dict[str, Any]:
         """Fallback classification when AI fails"""
+        from rapidfuzz import fuzz
+        
         platform = platform_info.get('platform', 'unknown')
         row_str = ' '.join(str(val).lower() for val in row.values if pd.notna(val))
         
-        # Basic classification
-        if any(word in row_str for word in ['salary', 'wage', 'payroll', 'employee']):
+        # LIBRARY FIX: Use rapidfuzz for keyword matching (replaces manual substring checks)
+        payroll_keywords = ['salary', 'wage', 'payroll', 'employee']
+        revenue_keywords = ['revenue', 'income', 'sales', 'payment']
+        expense_keywords = ['expense', 'cost', 'bill', 'payment']
+        
+        if any(fuzz.partial_ratio(row_str, word) > 80 for word in payroll_keywords):
             row_type = 'payroll_expense'
             category = 'payroll'
             subcategory = 'employee_salary'
-        elif any(word in row_str for word in ['revenue', 'income', 'sales', 'payment']):
+        elif any(fuzz.partial_ratio(row_str, word) > 80 for word in revenue_keywords):
             row_type = 'revenue_income'
             category = 'revenue'
             subcategory = 'client_payment'
-        elif any(word in row_str for word in ['expense', 'cost', 'bill', 'payment']):
+        elif any(fuzz.partial_ratio(row_str, word) > 80 for word in expense_keywords):
             row_type = 'operating_expense'
             category = 'expense'
             subcategory = 'operating_cost'
@@ -4245,16 +4288,22 @@ class BatchAIRowClassifier:
 
         row_str = ' '.join(str(val).lower() for val in iterable_values)
         
-        # Basic classification
-        if any(word in row_str for word in ['salary', 'wage', 'payroll', 'employee']):
+        # LIBRARY FIX: Use rapidfuzz for keyword matching (replaces manual substring checks)
+        from rapidfuzz import fuzz
+        
+        payroll_keywords = ['salary', 'wage', 'payroll', 'employee']
+        revenue_keywords = ['revenue', 'income', 'sales', 'payment']
+        expense_keywords = ['expense', 'cost', 'bill', 'payment']
+        
+        if any(fuzz.partial_ratio(row_str, word) > 80 for word in payroll_keywords):
             row_type = 'payroll_expense'
             category = 'payroll'
             subcategory = 'employee_salary'
-        elif any(word in row_str for word in ['revenue', 'income', 'sales', 'payment']):
+        elif any(fuzz.partial_ratio(row_str, word) > 80 for word in revenue_keywords):
             row_type = 'revenue_income'
             category = 'revenue'
             subcategory = 'client_payment'
-        elif any(word in row_str for word in ['expense', 'cost', 'bill', 'payment']):
+        elif any(fuzz.partial_ratio(row_str, word) > 80 for word in expense_keywords):
             row_type = 'operating_expense'
             category = 'expense'
             subcategory = 'operating_cost'
@@ -4567,6 +4616,17 @@ class ExcelProcessor:
         self.batch_classifier = BatchAIRowClassifier()
         # Initialize data enrichment processor with Supabase client
         self.enrichment_processor = DataEnrichmentProcessor(cache_client=safe_get_ai_cache(), supabase_client=supabase)
+        
+        # CRITICAL FIX: Initialize streaming processor for memory-efficient file processing
+        try:
+            initialize_streaming_processor(StreamingConfig.from_env())
+            self.streaming_processor = get_streaming_processor()
+            logger.info("✅ Streaming processor initialized successfully")
+        except Exception as e:
+            logger.error(f"❌ Failed to initialize streaming processor: {e}")
+            # Create fallback instance
+            self.streaming_processor = StreamingFileProcessor()
+        
         # Initialize RowProcessor with all dependencies
         self.row_processor = RowProcessor(
             platform_detector=self.universal_platform_detector,
@@ -4661,11 +4721,13 @@ class ExcelProcessor:
             # Check for duplicate rows
             anomalies['duplicate_rows'] = df.duplicated().sum()
             
-            # Check for data inconsistencies (e.g., negative amounts where they shouldn't be)
+            # LIBRARY FIX: Use rapidfuzz for amount column detection (replaces manual .lower() checks)
+            from rapidfuzz import fuzz
             for col in df.columns:
                 if df[col].dtype in ['int64', 'float64']:
                     # Check for negative values in amount columns
-                    if any(keyword in col.lower() for keyword in ['amount', 'revenue', 'income', 'sales']):
+                    amount_keywords = ['amount', 'revenue', 'income', 'sales']
+                    if any(fuzz.token_set_ratio(col.lower(), kw) > 80 for kw in amount_keywords):
                         negative_mask = df[col] < 0
                         if negative_mask.any():
                             anomalies['data_inconsistencies'].extend([
@@ -5047,78 +5109,6 @@ class ExcelProcessor:
             # Fallback: return empty metadata, streaming will still work
             return {}
     
-    async def read_file_DEPRECATED_DO_NOT_USE(self, streamed_file: StreamedFile) -> Dict[str, pd.DataFrame]:
-        """DEPRECATED: This method loads full files into memory causing OOM errors"""
-        raise NotImplementedError("read_file is deprecated. Use _get_sheet_metadata() and streaming_processor instead")
-        try:
-            # REFACTORED: Use UniversalExtractorsOptimized for all file reading
-            # This provides consistent extraction across PDF, DOCX, PPTX, CSV, JSON, TXT, and images
-            extraction_result = await self.universal_extractors.extract_data_universal(
-                streamed_file=streamed_file,
-                filename=streamed_file.filename,
-                user_id="system"
-            )
-            
-            # Convert extraction result to pandas DataFrames
-            sheets = {}
-            
-            # Check if we have structured data (tables)
-            extracted_tables = extraction_result.get('extracted_data', {}).get('tables')
-            if extracted_tables:
-                for i, table_data in enumerate(extracted_tables):
-                    sheet_name = table_data.get('sheet_name', f'Sheet{i+1}')
-
-                    # Convert table data to DataFrame
-                    if isinstance(table_data.get('data'), list) and table_data['data']:
-                        try:
-                            df = pd.DataFrame(table_data['data'])
-                            if not df.empty:
-                                sheets[sheet_name] = df
-                        except Exception as table_e:
-                            logger.warning(f"Failed to convert table {i} to DataFrame: {table_e}")
-            
-            # If no tables found, try to parse text as CSV-like data
-            extracted_text = extraction_result.get('extracted_data', {}).get('text')
-            if not sheets and extracted_text:
-                try:
-                    # Try to parse as CSV
-                    from io import StringIO
-                    df = pd.read_csv(StringIO(extracted_text))
-                    if not df.empty:
-                        sheets['Sheet1'] = df
-                        logger.info(f"Parsed text content as CSV for {streamed_file.filename}")
-                except Exception as text_parse_e:
-                    logger.warning(f"Could not parse text as CSV: {text_parse_e}")
-
-            # Fallback: If UniversalExtractors didn't work, use pandas directly for Excel/CSV
-            if not sheets:
-                logger.warning(f"UniversalExtractors returned no data, falling back to pandas for {streamed_file.filename}")
-
-                if streamed_file.filename.lower().endswith('.csv'):
-                    df = pd.read_csv(streamed_file.path)
-                    if not df.empty:
-                        sheets = {'Sheet1': df}
-                elif streamed_file.filename.lower().endswith(('.xlsx', '.xls')):
-                    try:
-                        excel_data = pd.read_excel(streamed_file.path, sheet_name=None, engine='openpyxl')
-                        sheets = {k: v for k, v in excel_data.items() if not v.empty}
-                    except:
-                        # Try xlrd for older .xls files
-                        excel_data = pd.read_excel(streamed_file.path, sheet_name=None, engine='xlrd')
-                        sheets = {k: v for k, v in excel_data.items() if not v.empty}
-
-            if not sheets:
-                raise HTTPException(status_code=400, detail=f"Could not extract any data from {streamed_file.filename}")
-
-            logger.info(f"Successfully read {len(sheets)} sheet(s) from {streamed_file.filename} using UniversalExtractors")
-            return sheets
-
-        except HTTPException:
-            raise
-        except Exception as e:
-            logger.error(f"Error reading file {streamed_file.filename}: {e}")
-            raise HTTPException(status_code=400, detail=f"Error reading file {streamed_file.filename}: {str(e)}")
-
     async def process_file(self, job_id: str, streamed_file: StreamedFile,
                           user_id: str, supabase: Client,
                           duplicate_decision: Optional[str] = None,
@@ -5187,8 +5177,6 @@ class ExcelProcessor:
         })
 
         try:
-            streaming_processor = get_streaming_processor()
-            
             # CRITICAL FIX: Get lightweight sheet metadata for duplicate detection
             # This reads only headers and counts, NOT full data (prevents OOM)
             sheets_metadata = await self._get_sheet_metadata(streamed_file)
@@ -5284,11 +5272,43 @@ class ExcelProcessor:
                     upload_timestamp=datetime.utcnow()
                 )
 
-                dup_result = await duplicate_service.detect_duplicates(
-                    file_metadata=file_metadata, 
-                    streamed_file=streamed_file, 
-                    enable_near_duplicate=True
-                )
+                # CRITICAL FIX: Load sheets data for comprehensive duplicate detection
+                # This enables delta analysis and content-level duplicate detection
+                sheets_data = {}
+                async for chunk_info in self.streaming_processor.process_file_streaming(streamed_file=streamed_file):
+                    sheet_name = chunk_info['sheet_name']
+                    chunk_data = chunk_info['chunk_data']
+                    if sheet_name not in sheets_data:
+                        sheets_data[sheet_name] = []
+                    sheets_data[sheet_name].extend(chunk_data.to_dict('records'))
+                
+                try:
+                    # CRITICAL FIX #4: Catch DuplicateDetectionError to prevent silent failures
+                    dup_result = await duplicate_service.detect_duplicates(
+                        file_metadata=file_metadata, 
+                        streamed_file=streamed_file,
+                        sheets_data=sheets_data,  # CRITICAL: Now passes sheets_data for delta analysis
+                        enable_near_duplicate=True
+                    )
+                except DuplicateDetectionError as dup_err:
+                    # CRITICAL FIX #4: Fail explicitly instead of silently returning false negative
+                    error_msg = f"Duplicate detection service failed: {str(dup_err)}. Cannot proceed with ingestion."
+                    logger.error(error_msg)
+                    await manager.send_update(job_id, {
+                        "step": "error",
+                        "message": "Duplicate detection failed - please try again",
+                        "error": error_msg,
+                        "progress": 0
+                    })
+                    try:
+                        supabase.table('ingestion_jobs').update({
+                            'status': 'failed',
+                            'error_message': error_msg,
+                            'updated_at': datetime.utcnow().isoformat()
+                        }).eq('id', job_id).execute()
+                    except Exception as db_err:
+                        logger.warning(f"Failed to update job status on duplicate detection error: {db_err}")
+                    raise HTTPException(status_code=503, detail="Duplicate detection service unavailable")
 
                 dup_type_val = getattr(getattr(dup_result, 'duplicate_type', None), 'value', None)
                 if getattr(dup_result, 'is_duplicate', False) and dup_type_val == 'exact':
@@ -5362,24 +5382,10 @@ class ExcelProcessor:
                         "existing_file_id": (dup_result.duplicate_files or [{}])[0].get('id') if getattr(dup_result, 'duplicate_files', None) else None
                     }
 
-                # CRITICAL FIX: Use lightweight metadata instead of full sheets data
-                try:
-                    # Use metadata (columns, row counts, sample hashes) - no full data loaded
-                    content_fingerprint_data = {
-                        'columns': [meta['columns'] for meta in sheets_metadata.values()],
-                        'row_counts': [meta['row_count'] for meta in sheets_metadata.values()],
-                        'dtypes': [meta['dtypes'] for meta in sheets_metadata.values()],
-                        'sample_hashes': [meta['sample_hash'] for meta in sheets_metadata.values()]
-                    }
-                    content_fingerprint = xxhash.xxh64(
-                        orjson.dumps(content_fingerprint_data)
-                    ).hexdigest()
-                except Exception as fingerprint_error:
-                    logger.warning(f"Content fingerprint calculation failed: {fingerprint_error}")
-                    content_fingerprint = file_hash  # Fallback to file hash
-
+                # CRITICAL FIX: Let ProductionDuplicateDetectionService handle its own fingerprinting
+                # Remove manual fingerprint calculation - service does this internally
                 content_duplicate_analysis = await duplicate_service.check_content_duplicate(
-                    user_id, content_fingerprint, streamed_file.filename
+                    user_id, file_hash, streamed_file.filename
                 )
                 if content_duplicate_analysis.get('is_content_duplicate', False):
                     await manager.send_update(job_id, {
@@ -5393,8 +5399,18 @@ class ExcelProcessor:
                     delta_analysis = None
                     if content_duplicate_analysis.get('overlapping_files'):
                         existing_file_id = content_duplicate_analysis['overlapping_files'][0]['id']
+                        # CRITICAL FIX: Load sheets data for delta analysis
+                        # Use streaming processor to load data efficiently
+                        sheets_data = {}
+                        async for chunk_info in self.streaming_processor.process_file_streaming(streamed_file=streamed_file):
+                            sheet_name = chunk_info['sheet_name']
+                            chunk_data = chunk_info['chunk_data']
+                            if sheet_name not in sheets_data:
+                                sheets_data[sheet_name] = []
+                            sheets_data[sheet_name].extend(chunk_data.to_dict('records'))
+                        
                         delta_analysis = await duplicate_service.analyze_delta_ingestion(
-                            user_id, sheets, existing_file_id
+                            user_id, sheets_data, existing_file_id
                         )
 
                         await manager.send_update(job_id, {
@@ -5593,25 +5609,18 @@ class ExcelProcessor:
             # ACCURACY FIX #9: Reuse file_hash calculated earlier (no recalculation)
             # file_hash already calculated at line 6570
             
-            # CRITICAL FIX: Use lightweight metadata for storage fingerprint
-            try:
-                storage_fingerprint_data = {
-                    'sheet_names': list(sheets_metadata.keys()),
-                    'columns': {name: meta['columns'] for name, meta in sheets_metadata.items()},
-                    'row_counts': {name: meta['row_count'] for name, meta in sheets_metadata.items()},
-                    'column_types': {name: meta['dtypes'] for name, meta in sheets_metadata.items()}
-                }
-                content_fingerprint = xxhash.xxh64(
-                    orjson.dumps(storage_fingerprint_data)
-                ).hexdigest()
-            except Exception as e:
-                logger.warning(f"Failed to calculate storage content fingerprint: {e}")
-                content_fingerprint = file_hash  # Fallback to file hash
+            # CRITICAL FIX: Remove manual fingerprint calculation
+            # ProductionDuplicateDetectionService handles all fingerprinting internally
+            # This eliminates duplicate fingerprint calculations and ensures single source of truth
             
-            # CRITICAL FIX: Row hashes will be computed during streaming processing
-            # Initialize empty dict here, will be populated during streaming loop
-            sheets_row_hashes = {}
-            logger.info("Row hashes will be computed during streaming processing")
+            # CRITICAL FIX #10: DO NOT compute row hashes in backend
+            # Only duplicate service should hash rows via polars for consistency
+            # Backend row hashing can diverge from duplicate service hashing due to:
+            # - encoding differences, whitespace trimming, dtype conversions
+            # - float formatting, timezone normalization, null handling
+            # This inconsistency breaks delta merge detection
+            # Solution: Backend sends raw sheets_data to duplicate service only
+            sheets_row_hashes = {}  # Empty - duplicate service handles all hashing
             
             # FIX #3: Use external_item_id passed from connector (no redundant lookup)
             # If not provided, attempt fallback lookup via file hash (for manual uploads)
@@ -5638,7 +5647,6 @@ class ExcelProcessor:
                     'platform_detection': platform_info,
                     'document_analysis': doc_analysis,
                     'file_hash': file_hash,
-                    'content_fingerprint': content_fingerprint,
                     'sheets_row_hashes': sheets_row_hashes,
                     'total_rows': sum(meta.get('row_count', 0) for meta in sheets_metadata.values()),
                     'processed_at': datetime.utcnow().isoformat(),
@@ -5694,8 +5702,9 @@ class ExcelProcessor:
         events_created = 0
         errors = []
         
-        # CRITICAL FIX: Collect row hashes during streaming for delta analysis
-        sheets_row_hashes = {}
+        # CRITICAL FIX #10: DO NOT compute row hashes in backend
+        # Only duplicate service should hash rows via polars for consistency
+        sheets_row_hashes = {}  # Empty - duplicate service handles all hashing
         
         file_context = {
             'filename': streamed_file.filename,
@@ -5724,7 +5733,7 @@ class ExcelProcessor:
             
             # CRITICAL FIX: Process file using streaming to prevent memory exhaustion
             # Stream processes ALL sheets automatically - no need to iterate over sheets dict
-            async for chunk_info in streaming_processor.process_file_streaming(
+            async for chunk_info in self.streaming_processor.process_file_streaming(
                 streamed_file=streamed_file,
                 progress_callback=lambda step, msg, prog: manager.send_update(job_id, {
                     "step": step,
@@ -5921,14 +5930,13 @@ class ExcelProcessor:
                                 event['accuracy_enhanced'] = cleaned_enriched_payload.get('accuracy_enhanced')
                                 event['accuracy_version'] = cleaned_enriched_payload.get('accuracy_version')
                                 
-                                # CRITICAL FIX: Compute row hash for delta analysis
-                                row_str = "|".join([str(val) for val in row.values() if pd.notna(val)])
-                                row_hash = xxhash.xxh64(row_str.encode('utf-8')).hexdigest()
-                                
-                                # Store hash by sheet name
-                                if sheet_name not in sheets_row_hashes:
-                                    sheets_row_hashes[sheet_name] = []
-                                sheets_row_hashes[sheet_name].append(row_hash)
+                                # CRITICAL FIX #10: DO NOT compute row hashes in backend
+                                # Backend row hashing can diverge from duplicate service hashing due to:
+                                # - encoding differences, whitespace trimming, dtype conversions
+                                # - float formatting, timezone normalization, null handling
+                                # This inconsistency breaks delta merge detection
+                                # Solution: Only duplicate service should hash rows via polars
+                                # Backend sends raw sheets_data to duplicate service only
                                 
                                 # Use the complete event object (includes provenance data)
                                 events_batch.append(event)
@@ -8395,7 +8403,6 @@ async def check_duplicate_endpoint(request: dict):
             duplicate_service = ProductionDuplicateDetectionService(supabase)
             
             # Create file metadata for production service
-            from production_duplicate_detection_service import FileMetadata
             file_metadata = FileMetadata(
                 user_id=user_id,
                 file_hash=file_hash,
@@ -9126,8 +9133,10 @@ async def _enqueue_file_processing(user_id: str, filename: str, storage_path: st
     Create an ingestion job and start processing asynchronously. Returns job_id.
     
     FIX #4: Now accepts external_item_id to avoid redundant database lookup.
+    CRITICAL FIX #8: Use cryptographically secure random job ID (not guessable)
     """
-    job_id = str(uuid.uuid4())
+    # CRITICAL FIX #8: Generate unpredictable job_id using secrets module
+    job_id = f"job_{secrets.token_urlsafe(24)}"
     # Create/update ingestion_jobs like existing code path
     try:
         job_data = {
@@ -9175,8 +9184,11 @@ async def _enqueue_pdf_processing(user_id: str, filename: str, storage_path: str
     Create a PDF OCR ingestion job and start processing asynchronously. Returns job_id.
     
     FIX #4: Now accepts external_item_id to avoid redundant database lookup.
+    CRITICAL FIX #8: Use cryptographically secure random job ID (not guessable)
     """
-    job_id = str(uuid.uuid4())
+    # CRITICAL FIX #8: Generate unpredictable job_id using secrets module
+    # UUID4 is random but can be brute-forced; secrets.token_urlsafe is cryptographically secure
+    job_id = f"job_{secrets.token_urlsafe(24)}"
     try:
         job_data = {
             'id': job_id,

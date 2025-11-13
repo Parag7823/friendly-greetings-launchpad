@@ -83,6 +83,11 @@ class DuplicateServiceConfig(BaseSettings):
 
 config = DuplicateServiceConfig()
 
+# CRITICAL FIX #4: Custom exception for duplicate detection failures
+class DuplicateDetectionError(Exception):
+    """Raised when duplicate detection fails - prevents silent false negatives"""
+    pass
+
 class DuplicateType(Enum):
     """Types of duplicates detected"""
     EXACT = "exact"
@@ -361,8 +366,14 @@ class ProductionDuplicateDetectionService:
                         return result
                         
                 except Exception as e:
-                    logger.warning(f"Content duplicate detection failed: {e}")
-                    # Continue to "no duplicates" if content check fails
+                    # CRITICAL FIX #4: Raise error instead of silent failure
+                    # Silent failures cause false negatives - duplicates get uploaded
+                    logger.error(f"Content duplicate detection failed: {e}", exc_info=True)
+                    # Re-raise to prevent false negatives
+                    raise DuplicateDetectionError(
+                        f"Content duplicate detection failed: {str(e)}. "
+                        f"Cannot proceed with ingestion due to detection failure."
+                    ) from e
             
             # No duplicates found
             result = DuplicateResult(
