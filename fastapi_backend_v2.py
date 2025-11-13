@@ -3048,7 +3048,9 @@ class DataEnrichmentProcessor:
                 'timestamp_standardization',
                 'data_validation',
                 'canonical_entity_ids',
-    
+                'confidence_flagging'
+            ]
+
     async def _validate_security(self, row_data: Dict, platform_info: Dict, 
                                 column_names: List[str], ai_classification: Dict, 
                                 file_context: Dict) -> bool:
