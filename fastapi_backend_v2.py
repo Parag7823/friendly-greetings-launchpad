@@ -1884,6 +1884,7 @@ class DataEnrichmentProcessor:
         try:
             self.vendor_standardizer = VendorStandardizer(cache_client=safe_get_ai_cache())
             self.universal_extractors = UniversalExtractors(cache_client=safe_get_ai_cache())
+            self.universal_field_detector = UniversalFieldDetector()
             # FIX #1: Don't initialize platform detector here - will be passed from Phase 3
             # self.universal_platform_detector = UniversalPlatformDetector(openai_client, cache_client=safe_get_ai_cache())
             # self.universal_document_classifier = UniversalDocumentClassifier(openai_client, cache_client=safe_get_ai_cache())
@@ -1906,10 +1907,7 @@ class DataEnrichmentProcessor:
         
         logger.info("✅ DataEnrichmentProcessor initialized with production-grade features")
     
-    async def _initialize_observability(self):
-        """Initialize observability system"""
-        if not self._observability_system_initialized:
-            self._observability_system_initialized = True
+    
     
     async def _create_fallback_payload(self, row_data: Dict, platform_info: Dict, 
                                       ai_classification: Dict, file_context: Dict, 
@@ -2649,144 +2647,7 @@ class DataEnrichmentProcessor:
                 'description': '',
                 'currency': 'USD'
             }
-
-async def _cache_enrichment_result(self, enrichment_id: str, result: Dict[str, Any]) -> None:
-    """Cache enrichment result for future use"""
-    if not self.config['enable_caching']:
-        return
-    
-    try:
-        # Use centralized cache (already initialized in __init__)
-        if self.cache and hasattr(self.cache, 'store_classification'):
-            await self.cache.store_classification(
-                {'enrichment_id': enrichment_id},
-                result,
-                'enrichment',
-                ttl_hours=self.config['cache_ttl'] / 3600
-            )
-            logger.debug(f"Cached enrichment result for {enrichment_id}")
-    except Exception as e:
-        logger.warning(f"Cache storage failed for {enrichment_id}: {e}")
-
-async def _extract_core_fields(self, validated_data: Dict) -> Dict[str, Any]:
-    """Extract and validate core fields using UniversalFieldDetector"""
-    row_data = validated_data['row_data']
-    column_names = validated_data['column_names']
-    platform_info = validated_data.get('platform_info', {})
-    file_context = validated_data.get('file_context', {})
-    user_id = file_context.get('user_id')
-    
-    try:
-        # Use UniversalFieldDetector for all field detection
-        field_detection_result = await self.universal_field_detector.detect_field_types_universal(
-            data=row_data,
-            filename=file_context.get('filename'),
-            context={
-                'platform': platform_info.get('platform'),
-                'document_type': platform_info.get('document_type'),
-                'user_id': user_id,
-                'column_names': column_names
-            }
-        )
-        
-        # Extract detected fields with type-aware parsing
-        field_types = field_detection_result.get('field_types', {})
-        detected_fields = field_detection_result.get('detected_fields', [])
-        
-        # Map detected fields to core financial fields
-        amount = 0.0
-        vendor_name = ''
-        date = datetime.now().strftime('%Y-%m-%d')
-        description = ''
-        currency = 'USD'
-        
-        for field_info in detected_fields:
-            field_name = field_info.get('name', '').lower()
-            field_type = field_info.get('type', '').lower()
-            field_value = row_data.get(field_info.get('name'))
-            field_confidence = field_info.get('confidence', 0.0)
-            
-            # Only use high-confidence detections
-            if field_confidence < 0.5:
-                continue
-            
-            # Amount extraction
-            if 'amount' in field_type or any(kw in field_name for kw in ['amount', 'total', 'price', 'value', 'sum']):
-                try:
-                    if isinstance(field_value, (int, float)):
-                        amount = float(field_value)
-                    elif isinstance(field_value, str):
-                        cleaned = re.sub(r'[^\d.-]', '', field_value)
-                        amount = float(cleaned) if cleaned else 0.0
-                except:
-                    pass
-            
-            # Vendor extraction
-            elif 'vendor' in field_type or any(kw in field_name for kw in ['vendor', 'payee', 'merchant', 'company', 'recipient']):
-                vendor_name = str(field_value).strip() if field_value else ''
-            
-            # Date extraction
-            elif 'date' in field_type or any(kw in field_name for kw in ['date', 'timestamp', 'created_at', 'payment_date']):
-                try:
-                    if isinstance(field_value, str):
-                        from dateutil import parser
-                        parsed_date = parser.parse(field_value)
-                        date = parsed_date.strftime('%Y-%m-%d')
-                    elif hasattr(field_value, 'strftime'):
-                        date = field_value.strftime('%Y-%m-%d')
-                except:
-                    pass
-            
-            # Description extraction
-            elif any(kw in field_name for kw in ['description', 'memo', 'notes', 'details', 'comment']):
-                description = str(field_value).strip() if field_value else ''
-            
-            # Currency extraction
-            elif 'currency' in field_name:
-                currency = str(field_value).upper() if field_value else 'USD'
-        
-        # Calculate extraction confidence from UniversalFieldDetector
-        confidence = field_detection_result.get('confidence', 0.0)
-        fields_found = sum([bool(amount), bool(vendor_name), bool(date), bool(description)])
-        
-        extraction_results = {
-            'amount': amount,
-            'vendor_name': vendor_name,
-            'date': date,
-            'description': description,
-            'currency': currency,
-            'confidence': confidence,
-            'fields_extracted': fields_found,
-            'field_detection_metadata': {
-                'method': field_detection_result.get('method'),
-                'detected_fields_count': len(detected_fields),
-                'field_types': {f['name']: f['type'] for f in detected_fields}
-            }
-        }
-        
-        # UNIVERSAL FIX: Learn field mappings from successful extraction
-        if confidence > 0.5:  # Only learn from reasonably successful extractions
-            await self._learn_field_mappings_from_extraction(
-                user_id=user_id,
-                row_data=row_data,
-                extraction_results=extraction_results,
-                platform=platform_info.get('platform'),
-                document_type=platform_info.get('document_type')
-            )
-        
-        return extraction_results
-    except Exception as e:
-        logger.error(f"Core field extraction failed: {e}")
-        return {
-            'amount': 0.0,
-            'vendor_name': '',
-            'date': datetime.now().strftime('%Y-%m-%d'),
-            'description': '',
-            'currency': 'USD',
-            'confidence': 0.0,
-            'fields_extracted': 0,
-            'error': str(e)
-        }
+ 
     
     async def _extract_platform_ids_universal(self, validated_data: Dict, classification_results: Dict) -> Dict[str, Any]:
         """Extract platform-specific IDs using UniversalPlatformDetectorOptimized (consolidated)"""
@@ -3187,37 +3048,6 @@ async def _extract_core_fields(self, validated_data: Dict) -> Dict[str, Any]:
                 'timestamp_standardization',
                 'data_validation',
                 'canonical_entity_ids',
-                'confidence_flagging'
-            ]
-            
-            return enhanced
-            
-        except Exception as e:
-            logger.error(f"Accuracy enhancement failed: {e}")
-            # Return original payload if enhancement fails
-            validated_payload['accuracy_enhanced'] = False
-            validated_payload['accuracy_error'] = str(e)
-            return validated_payload
-    
-    async def _create_fallback_payload(self, row_data: Dict, platform_info: Dict, 
-                                      ai_classification: Dict, file_context: Dict, 
-                                      error_message: str) -> Dict[str, Any]:
-        """Create fallback payload when enrichment fails"""
-        return {
-            **row_data,
-            'kind': ai_classification.get('row_type', 'transaction'),
-            'category': ai_classification.get('category', 'other'),
-            'subcategory': ai_classification.get('subcategory', 'general'),
-            'amount_original': self._extract_amount(row_data),
-            'amount_usd': self._extract_amount(row_data),
-            'currency': 'USD',
-            'vendor_raw': '',
-            'vendor_standard': '',
-            'platform_ids': {},
-            'enrichment_error': error_message,
-            'enrichment_version': '2.0.0-fallback',
-            'ingested_on': datetime.now().isoformat()
-        }
     
     async def _validate_security(self, row_data: Dict, platform_info: Dict, 
                                 column_names: List[str], ai_classification: Dict, 
