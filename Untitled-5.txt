@@ -1,0 +1,50 @@
+# python-igraph manual | igraph – the network analysis package
+
+[igraph](https://igraph.org/)
+- [python-igraph](https://igraph.org/python/versions/latest)
+[python-igraph](https://igraph.org/python/versions/latest)
+- 
+            [News](https://igraph.org/news.html)
+          
+- 
+            Packages
+            
+              igraph R package
+              python-igraph
+              IGraph/M
+              igraph C library
+              
+              [igraphdata R package](https://github.com/igraph/igraphdata)
+            
+          
+- 
+            Community
+            
+               Community packages
+               Forum
+               Discord
+              [Code of Conduct](https://igraph.org/code-of-conduct.html)
+            
+          
+- 
+            [On GitHub](https://github.com/igraph)
+          
+[News](https://igraph.org/news.html)
+Packages
+[igraph R package](https://r.igraph.org)
+[python-igraph](https://python.igraph.org)
+[IGraph/M](http://szhorvat.net/mathematica/IGraphM)
+[igraph C library](https://igraph.org/c)
+[igraphdata R package](https://github.com/igraph/igraphdata)
+Community
+[Community packages](https://igraph.org/community/packages.html)
+[Forum](https://igraph.discourse.group)
+[Discord](https://discord.gg/cSyHDPJWDD)
+[Code of Conduct](https://igraph.org/code-of-conduct.html)
+[On GitHub](https://github.com/igraph)
+
+# python-igraph manual
+For using igraph from Python
+[documentation page of
+the Python interface](https://python.igraph.org)
+© 2003 – 2025 The igraph core team. • Code licensed under GNU GPL 2 or later, documentation under [GNU FDL](http://www.gnu.org/copyleft/fdl.html).
