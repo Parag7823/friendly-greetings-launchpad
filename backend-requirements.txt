@@ -76,6 +76,7 @@ forex-python==1.8  # Real-time currency conversion (PHASE 3.3)
 glom==23.5.0  # Declarative nested data extraction (PHASE 3.4)
 dedupe==2.0.21  # ML-based vendor deduplication (40% more accurate than fuzzy matching)
 recordlinkage==0.16  # Probabilistic entity resolution (better than custom fuzzy matching)
+xxhash==3.4.1  # 5-10x faster non-crypto hashing for large files/data
 # REMOVED (FIX #7a): flashtext==2.7 (deprecated, replaced by pyahocorasick in v4.0.0)
 # flashtext is NOT async-ready and slower than pyahocorasick
 # See line 105: pyahocorasick==2.1.0 (NASA-GRADE v4.0.0 standard)
