@@ -15,8 +15,8 @@ Author: Finley AI Team
 Date: 2025-10-16
 """
 
-import hashlib
-import json
+import xxhash  # LIBRARY REPLACEMENT: xxhash for 5-10x faster hashing
+import orjson as json  # LIBRARY REPLACEMENT: orjson for 3-5x faster JSON parsing
 from datetime import datetime
 from typing import Dict, Any, List, Optional
 from dataclasses import dataclass, asdict
@@ -99,9 +99,8 @@ class ProvenanceTracker:
             # Create canonical representation
             hash_input = f"{source_filename}||{row_index}||{json.dumps(payload, sort_keys=True)}"
             
-            # Calculate SHA256
-            hash_obj = hashlib.sha256(hash_input.encode('utf-8'))
-            row_hash = hash_obj.hexdigest()
+            # LIBRARY REPLACEMENT: xxhash for 5-10x faster hashing
+            row_hash = xxhash.xxh64(hash_input.encode('utf-8')).hexdigest()
             
             self.logger.debug(f"Calculated row hash for {source_filename}:{row_index} = {row_hash[:16]}...")
             return row_hash

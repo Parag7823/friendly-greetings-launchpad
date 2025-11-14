@@ -3,7 +3,7 @@ Production-Grade Observability System
 Provides structured logging, metrics collection, and monitoring capabilities.
 """
 
-import json
+import orjson as json  # LIBRARY REPLACEMENT: orjson for 3-5x faster JSON parsing
 import time
 import logging
 import asyncio

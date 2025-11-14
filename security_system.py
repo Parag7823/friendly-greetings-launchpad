@@ -17,7 +17,7 @@ MAINTAINABILITY: +300% (no custom regex hell)
 
 import os
 import re
-import json
+import orjson as json  # LIBRARY REPLACEMENT: orjson for 3-5x faster JSON parsing
 import base64
 import secrets
 import httpx
@@ -144,8 +144,9 @@ class InputSanitizer:
         """Sanitize JSON input"""
         if isinstance(json_data, str):
             try:
+                # LIBRARY REPLACEMENT: orjson for 3-5x faster JSON parsing
                 json_data = json.loads(json_data)
-            except json.JSONDecodeError:
+            except (orjson.JSONDecodeError, ValueError):
                 return {}
         
         if not isinstance(json_data, dict):

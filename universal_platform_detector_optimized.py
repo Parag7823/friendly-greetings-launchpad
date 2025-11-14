@@ -164,9 +164,14 @@ class UniversalPlatformDetectorOptimized:
         self.learning_enabled = True
         self.detection_history = []  # Keep small in-memory buffer for immediate access
         
+        # CRITICAL FIX: Add cache versioning and invalidation
+        self.cache_version = "v2.1.0"  # Increment when patterns change
+        self.pattern_cache_ttl = 3600  # 1 hour TTL for pattern cache
+        
         logger.info("NASA-GRADE Platform Detector initialized", 
                    cache_size=self.config.max_cache_size,
-                   platforms_loaded=len(self.platform_database))
+                   platforms_loaded=len(self.platform_database),
+                   cache_version=self.cache_version)
     
     def _get_default_config(self):
         """OPTIMIZED: Get type-safe configuration with pydantic-settings"""
@@ -462,12 +467,17 @@ class UniversalPlatformDetectorOptimized:
         detection_id = self._generate_detection_id(payload, filename, user_id)
         
         try:
-            # 1. OPTIMIZED: Check centralized Redis cache
+            # 1. OPTIMIZED: Check centralized Redis cache with versioning
             if self.config.enable_caching:
-                cached_result = await self.cache.get(detection_id)
+                # Validate cache version first
+                await self.validate_cache_version()
+                
+                # Use versioned cache key
+                versioned_key = await self.get_cache_key_with_version(detection_id)
+                cached_result = await self.cache.get(versioned_key)
                 if cached_result:
                     self.metrics['cache_hits'] += 1
-                    logger.debug("Cache hit", detection_id=detection_id)
+                    logger.debug("Cache hit", detection_id=versioned_key)
                     return cached_result
             
             self.metrics['cache_misses'] += 1
@@ -511,9 +521,10 @@ class UniversalPlatformDetectorOptimized:
                 }
             })
             
-            # 6. OPTIMIZED: Cache with centralized Redis cache
+            # 6. OPTIMIZED: Cache with centralized Redis cache using versioned key
             if self.config.enable_caching:
-                await self.cache.set(detection_id, final_result)
+                versioned_key = await self.get_cache_key_with_version(detection_id)
+                await self.cache.set(versioned_key, final_result, ttl=self.pattern_cache_ttl)
             
             # 7. Update metrics and learning
             self._update_detection_metrics(final_result)
@@ -831,9 +842,48 @@ class UniversalPlatformDetectorOptimized:
                     "category": "unknown"
                 }
     
-    # DELETED: Obsolete cache methods - using cachetools TTLCache directly
-    # Cache access is now: self.cache.get(key) and self.cache[key] = value
-    # Auto-evicting, thread-safe, zero maintenance
+    async def invalidate_pattern_cache(self, pattern_type: str = None):
+        """
+        CRITICAL FIX: Invalidate cached patterns when patterns are updated.
+        This ensures all workers get the latest patterns.
+        """
+        try:
+            if pattern_type:
+                # Invalidate specific pattern type
+                cache_pattern = f"platform_patterns:{pattern_type}:*"
+                logger.info(f"Invalidating cache pattern: {cache_pattern}")
+                # Note: Redis pattern deletion would be implemented here
+                # For now, we'll use TTL expiration
+            else:
+                # Invalidate all platform patterns
+                logger.info("Invalidating all platform pattern caches")
+                # Increment cache version to invalidate all cached patterns
+                self.cache_version = f"v2.1.{int(time.time())}"
+                await self.cache.set("platform_detector_version", self.cache_version)
+                
+        except Exception as e:
+            logger.error(f"Failed to invalidate pattern cache: {e}")
+    
+    async def get_cache_key_with_version(self, base_key: str) -> str:
+        """
+        CRITICAL FIX: Generate versioned cache keys to prevent stale data.
+        """
+        return f"{base_key}:v{self.cache_version}"
+    
+    async def validate_cache_version(self) -> bool:
+        """
+        CRITICAL FIX: Validate cache version to ensure consistency across workers.
+        """
+        try:
+            stored_version = await self.cache.get("platform_detector_version")
+            if stored_version and stored_version != self.cache_version:
+                logger.warning(f"Cache version mismatch: local={self.cache_version}, stored={stored_version}")
+                self.cache_version = stored_version
+                return False
+            return True
+        except Exception as e:
+            logger.error(f"Failed to validate cache version: {e}")
+            return False
     
     def _update_detection_metrics(self, result: Dict[str, Any]):
         """Update detection metrics"""

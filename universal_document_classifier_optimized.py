@@ -31,7 +31,7 @@ Version: 4.0.0 (NASA-GRADE v4.0)
 
 import asyncio
 import hashlib
-import json
+import orjson as json  # LIBRARY REPLACEMENT: orjson for 3-5x faster JSON parsing
 import re
 import time
 import os
@@ -1018,8 +1018,9 @@ class UniversalDocumentClassifierOptimized:
                 response_text = response_text[:-3]
             response_text = response_text.strip()
             
+            # LIBRARY REPLACEMENT: orjson for 3-5x faster JSON parsing
             return json.loads(response_text)
-        except json.JSONDecodeError as e:
+        except (orjson.JSONDecodeError, ValueError) as e:
             logger.error(f"AI response JSON parsing failed: {e}")
             logger.error(f"Raw AI response: {response_text}")
             return None

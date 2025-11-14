@@ -31,8 +31,8 @@ Version: 4.0.0 (NASA-GRADE v4.0)
 """
 
 import asyncio
-import hashlib
-import json
+import xxhash  # LIBRARY REPLACEMENT: xxhash for 5-10x faster hashing
+import orjson as json  # LIBRARY REPLACEMENT: orjson for 3-5x faster JSON parsing
 import os
 import re
 import time
@@ -1350,7 +1350,8 @@ class ProductionDuplicateDetectionService:
             normalized = json.dumps(payload, sort_keys=True, default=str)
         except Exception:
             normalized = str(payload)
-        return hashlib.sha256(normalized.encode('utf-8')).hexdigest()
+        # LIBRARY REPLACEMENT: xxhash for 5-10x faster hashing
+        return xxhash.xxh64(normalized.encode('utf-8')).hexdigest()
     
     async def get_metrics(self) -> Dict[str, Any]:
         """OPTIMIZED: Get service metrics for monitoring"""
