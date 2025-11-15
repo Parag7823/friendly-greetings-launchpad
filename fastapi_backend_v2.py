@@ -4743,8 +4743,8 @@ class ExcelProcessor:
             
         except Exception as e:
             logger.error(f"Error in streaming XLSX processing: {e}")
-            # Fallback to pandas
-            fallback_sheets = pd.read_excel(streamed_file.path, sheet_name=None)
+            # FIX #NEW_6: Fix broken fallback - use file_content instead of undefined streamed_file.path
+            fallback_sheets = pd.read_excel(io.BytesIO(file_content), sheet_name=None)
             return {
                 'sheets': fallback_sheets if isinstance(fallback_sheets, dict) else {'Sheet1': fallback_sheets},
                 'summary': {
@@ -4770,9 +4770,15 @@ class ExcelProcessor:
     async def _fast_classify_row_cached(self, row: pd.Series, platform_info: dict, column_names: list) -> dict:
         """Fast cached classification with AI fallback - 90% cost reduction"""
         try:
-            # Create cache key from row content (sanitize NaN values)
-            row_dict = row.to_dict()
-            row_dict_sanitized = self._sanitize_nan_for_json(row_dict)
+            # FIX #16: Move CPU-bound row.to_dict() to thread pool
+            def _convert_row_sync(row_copy):
+                row_dict = row_copy.to_dict()
+                return self._sanitize_nan_for_json(row_dict)
+            
+            import asyncio
+            loop = asyncio.get_event_loop()
+            with ThreadPoolExecutor(max_workers=1) as executor:
+                row_dict_sanitized = await loop.run_in_executor(executor, _convert_row_sync, row.copy())
             
             row_content = {
                 'data': row_dict_sanitized,
@@ -4988,9 +4994,12 @@ class ExcelProcessor:
         transaction_data = {
             'id': transaction_id,
             'user_id': user_id,
-            'status': 'active',
+            'status': 'pending',  # FIXED: Use 'pending' instead of 'active' for initial state
             'operation_type': 'file_processing',
             'started_at': datetime.utcnow().isoformat(),
+            'job_id': job_id,  # FIXED: Add job_id as top-level field
+            'file_id': None,  # Will be set after raw_record creation
+            'start_time': datetime.utcnow().isoformat(),  # FIXED: Add start_time for monitoring
             'metadata': {
                 'job_id': job_id,
                 'filename': streamed_file.filename,
@@ -5521,6 +5530,15 @@ class ExcelProcessor:
             file_id = raw_record_result['id']
             logger.info(f"✅ Created raw_record with file_id={file_id}")
             
+            # Update processing_transaction with file_id
+            try:
+                supabase.table('processing_transactions').update({
+                    'file_id': file_id,
+                    'status': 'active'  # Now move to active state
+                }).eq('id', transaction_id).execute()
+            except Exception as e:
+                logger.warning(f"Failed to update processing_transaction with file_id: {e}")
+            
             # Step 4: Create or update ingestion_jobs entry within transaction
             job_data = {
                 'id': job_id,
@@ -5528,6 +5546,11 @@ class ExcelProcessor:
                 'file_id': file_id,
                 'job_type': 'file_upload',  # ✅ CRITICAL FIX: Add required job_type field
                 'status': 'processing',
+                'processing_stage': 'streaming',  # FIXED: Add processing stage
+                'stream_offset': 0,  # FIXED: Add stream offset
+                'extracted_rows': 0,  # FIXED: Add extracted rows count
+                'total_rows': 0,  # FIXED: Add total rows (will be updated later)
+                'transaction_id': transaction_id,  # FIXED: Link to transaction
                 'created_at': datetime.utcnow().isoformat(),
                 'updated_at': datetime.utcnow().isoformat()
             }
@@ -5616,10 +5639,13 @@ class ExcelProcessor:
                 
                 logger.info(f"🚀 OPTIMIZATION 2: Using dynamic batch_size={optimal_batch_size} for {len(chunk_data)} rows")
                 
-                # OPTIMIZATION 3: Memory monitoring to prevent OOM
+                # FIX #NEW_5: Move CPU-heavy memory monitoring out of async loop
+                # Initialize memory monitoring once outside the loop
                 import psutil
                 process = psutil.Process()
                 MEMORY_LIMIT_MB = 400  # 400MB limit for batch processing
+                memory_check_interval = 10  # Check memory every 10 batches
+                batch_counter = 0
                 
                 events_batch = []
                 
@@ -5632,12 +5658,9 @@ class ExcelProcessor:
                         batch_rows_data = []
                         batch_row_indices = []
                         
-                        for row_tuple in batch_df.itertuples(index=True, name='Row'):
-                            row_index = row_tuple.Index
-                            row = batch_df.loc[row_index]
-                            row_dict = row.to_dict()
-                            batch_rows_data.append(row_dict)
-                            batch_row_indices.append(row_index)
+                        # FIX #NEW_5: Optimize pandas to_dict operations - use vectorized approach
+                        batch_rows_data = batch_df.to_dict('records')
+                        batch_row_indices = list(batch_df.index)
                         
                         # Batch classify rows (single AI call for entire batch)
                         batch_classifications = await self.ai_classifier.classify_rows_batch(
@@ -5679,14 +5702,18 @@ class ExcelProcessor:
                                             pl.concat_str(text_cols, separator=" ").fill_null("").str.to_lowercase().alias("combined_text")
                                         )["combined_text"]
                                         
+                                        # FIX #NEW_4: Fix dangerous overwrite - use priority-based classification
                                         # Initialize classification column
                                         classification = pl.Series("classification", ["unknown"] * len(pl_df))
                                         
-                                        # Apply pattern matching with Polars expressions
+                                        # Apply pattern matching with priority (first match wins, no overwrite)
                                         for platform, pattern_list in pattern_dict.items():
                                             for pattern in pattern_list:
                                                 mask = combined_text.str.contains(pattern.lower())
-                                                classification = classification.zip_with(mask, pl.lit(platform))
+                                                # Only update if still unknown (prevent overwrite)
+                                                unknown_mask = classification == "unknown"
+                                                final_mask = mask & unknown_mask
+                                                classification = classification.zip_with(final_mask, pl.lit(platform))
                                         
                                         # Convert back to pandas Series for compatibility
                                         row_platform_series = classification.to_pandas()
@@ -5738,6 +5765,7 @@ class ExcelProcessor:
                                 event['user_id'] = user_id
                                 event['file_id'] = file_id  # CRITICAL FIX #4: Add file_id from context
                                 event['job_id'] = file_context.get('job_id')  # CRITICAL FIX #4: Add job_id from context
+                                event['transaction_id'] = tx.transaction_id  # CRITICAL FIX: Ensure transaction_id is set for rollback capability
                                 event['category'] = event['classification_metadata'].get('category')
                                 event['subcategory'] = event['classification_metadata'].get('subcategory')
                                 
@@ -5786,6 +5814,10 @@ class ExcelProcessor:
                                 event['accuracy_enhanced'] = cleaned_enriched_payload.get('accuracy_enhanced')
                                 event['accuracy_version'] = cleaned_enriched_payload.get('accuracy_version')
                                 
+                                # Add AI classification fields
+                                event['ai_confidence'] = classification.get('ai_confidence') or cleaned_enriched_payload.get('ai_confidence')
+                                event['ai_reasoning'] = classification.get('ai_reasoning') or cleaned_enriched_payload.get('ai_reasoning')
+                                
                                 # CRITICAL FIX #10: DO NOT compute row hashes in backend
                                 # Backend row hashing can diverge from duplicate service hashing due to:
                                 # - encoding differences, whitespace trimming, dtype conversions
@@ -5829,23 +5861,29 @@ class ExcelProcessor:
                                 events_created += len(batch_result)
                                 events_batch = []  # Clear batch
                                 
-                                # OPTIMIZATION 3: Check memory usage after batch insert
-                                mem_mb = process.memory_info().rss / 1024 / 1024
-                                if mem_mb > MEMORY_LIMIT_MB:
-                                    logger.warning(f"⚠️ Memory usage high: {mem_mb:.1f}MB, allowing GC...")
-                                    import gc
-                                    gc.collect()
-                                    await asyncio.sleep(0.1)  # Allow garbage collection
+                                # FIX #NEW_5: Check memory usage less frequently to reduce CPU overhead
+                                batch_counter += 1
+                                if batch_counter % memory_check_interval == 0:
+                                    mem_mb = process.memory_info().rss / 1024 / 1024
+                                    if mem_mb > MEMORY_LIMIT_MB:
+                                        logger.warning(f"⚠️ Memory usage high: {mem_mb:.1f}MB, allowing GC...")
+                                        import gc
+                                        gc.collect()
+                                        await asyncio.sleep(0.1)  # Allow garbage collection
                                 
                             except Exception as e:
+                                # CRITICAL FIX: Copy batch before clearing for accurate error reporting
+                                events_batch_copy = events_batch[:]
+                                batch_size = len(events_batch_copy)
+                                
                                 # CRITICAL FIX #3: Retry with individual inserts to prevent data loss
-                                error_msg = f"Batch insert failed: {str(e)}, attempting individual inserts"
+                                error_msg = f"Batch insert failed: {str(e)}, attempting individual inserts for {batch_size} events"
                                 logger.error(error_msg)
                                 errors.append(error_msg)
                                 
                                 # Try to save rows individually as fallback
                                 saved_count = 0
-                                for event_data in events_batch:
+                                for event_data in events_batch_copy:
                                     try:
                                         await tx.insert('raw_events', event_data)
                                         saved_count += 1
@@ -5856,7 +5894,7 @@ class ExcelProcessor:
                                         logger.error(individual_error_msg)
                                 
                                 events_batch = []  # Clear batch
-                                logger.info(f"Saved {saved_count}/{len(events_batch)} rows individually after batch failure")
+                                logger.info(f"Saved {saved_count}/{batch_size} rows individually after batch failure")
                                 
                                 # Handle error with recovery system
                                 error_recovery = get_error_recovery_system()
@@ -5868,7 +5906,7 @@ class ExcelProcessor:
                                     operation_type="batch_insert",
                                     error_message=str(e),
                                     error_details={
-                                        "batch_size": len(events_batch), 
+                                        "batch_size": batch_size, 
                                         "sheet_name": sheet_name,
                                         "saved_individually": saved_count
                                     },
@@ -6127,6 +6165,10 @@ class ExcelProcessor:
             await self._store_platform_patterns(platform_patterns, user_id, platform_transaction_id, supabase)
             await self._store_discovered_platforms(discovered_platforms, user_id, platform_transaction_id, supabase)
             
+            # CRITICAL FIX: Store relationship patterns learned from this processing
+            if relationships:
+                await self._store_learned_relationship_patterns(relationships, user_id, platform_transaction_id, supabase)
+            
             insights['platform_learning'] = {
                 'patterns_learned': len(platform_patterns),
                 'platforms_discovered': len(discovered_platforms)
@@ -6236,7 +6278,7 @@ class ExcelProcessor:
                         ).execute()
                         rel_count = count_result.count or 0
                         supabase.table('raw_events').update({
-                            'relationships': rel_count,
+                            'relationship_count': rel_count,
                             'last_relationship_check': datetime.utcnow().isoformat()
                         }).eq('id', event_id).execute()
                     except Exception as update_err:
@@ -6317,6 +6359,7 @@ class ExcelProcessor:
                 supabase.table('processing_transactions').update({
                     'status': 'committed',
                     'committed_at': datetime.utcnow().isoformat(),
+                    'end_time': datetime.utcnow().isoformat(),  # FIXED: Add end_time for monitoring
                     'metadata': {
                         **transaction_data['metadata'],
                         'events_created': events_created,
@@ -6336,6 +6379,9 @@ class ExcelProcessor:
         ) as tx:
             await tx.update('ingestion_jobs', {
                 'status': 'completed',
+                'processing_stage': 'completed',  # FIXED: Update processing stage
+                'extracted_rows': events_created,  # FIXED: Set final extracted rows count
+                'total_rows': processed_rows,  # FIXED: Set total rows processed
                 'updated_at': datetime.utcnow().isoformat(),
                 'transaction_id': transaction_id
             }, {'id': job_id})
@@ -6831,7 +6877,7 @@ class ExcelProcessor:
                             
                             # Update raw_events.relationships
                             supabase.table('raw_events').update({
-                                'relationships': rel_count,
+                                'relationship_count': rel_count,
                                 'last_relationship_check': datetime.utcnow().isoformat()
                             }).eq('id', event_id).execute()
                         except Exception as update_err:
@@ -6997,33 +7043,71 @@ class ExcelProcessor:
         except Exception as e:
             logger.error(f"❌ Error storing discovered platforms (transaction rolled back): {e}")
     
-    async def store_computed_metrics(self, metrics: Dict, user_id: str, transaction_id: str, supabase: Client):
-        """Store computed metrics in the database atomically."""
+    async def _store_learned_relationship_patterns(self, relationships: List[Dict], user_id: str, transaction_id: str, supabase: Client):
+        """Store learned relationship patterns in the database atomically."""
         try:
-            if not metrics or not supabase:
+            if not relationships or not supabase:
                 return
 
-            logger.info("Storing computed metrics")
+            logger.info(f"Learning and storing relationship patterns from {len(relationships)} relationships")
 
+            # Analyze relationships to extract patterns
+            pattern_stats = {}
+            for rel in relationships:
+                rel_type = rel.get('relationship_type', 'unknown')
+                if rel_type not in pattern_stats:
+                    pattern_stats[rel_type] = {
+                        'count': 0,
+                        'confidence_scores': [],
+                        'detection_methods': set(),
+                        'sample_reasoning': []
+                    }
+                
+                pattern_stats[rel_type]['count'] += 1
+                pattern_stats[rel_type]['confidence_scores'].append(rel.get('confidence_score', 0.5))
+                pattern_stats[rel_type]['detection_methods'].add(rel.get('detection_method', 'unknown'))
+                if rel.get('reasoning'):
+                    pattern_stats[rel_type]['sample_reasoning'].append(rel.get('reasoning'))
+
+            # Create relationship patterns
             transaction_manager = get_transaction_manager()
             async with transaction_manager.transaction(
                 user_id=user_id,
-                operation_type="metrics_storage"
+                operation_type="relationship_pattern_learning"
             ) as tx:
-                metrics_data = {
-                    'user_id': user_id,
-                    'metric_type': metrics.get('metric_type', 'processing_summary'),
-                    'metric_value': metrics.get('metric_value', 0),
-                    'metric_data': metrics.get('metric_data', {}),
-                    'computed_at': datetime.utcnow().isoformat(),
-                    'transaction_id': transaction_id
-                }
+                patterns_batch = []
+                for rel_type, stats in pattern_stats.items():
+                    avg_confidence = sum(stats['confidence_scores']) / len(stats['confidence_scores']) if stats['confidence_scores'] else 0.5
+                    
+                    pattern_data = {
+                        'user_id': user_id,
+                        'relationship_type': rel_type,
+                        'pattern_data': {
+                            'occurrence_count': stats['count'],
+                            'average_confidence': avg_confidence,
+                            'detection_methods': list(stats['detection_methods']),
+                            'sample_reasoning': stats['sample_reasoning'][:3],  # Keep top 3 examples
+                            'learned_from_transaction': transaction_id,
+                            'pattern_strength': 'high' if stats['count'] >= 5 else 'medium' if stats['count'] >= 2 else 'low'
+                        },
+                        'transaction_id': transaction_id
+                    }
+                    patterns_batch.append(pattern_data)
 
-                await tx.insert('metrics', metrics_data)
-                logger.debug("Stored computed metrics")
+                if patterns_batch:
+                    # Use upsert to update existing patterns or create new ones
+                    for pattern in patterns_batch:
+                        await tx.upsert('relationship_patterns', pattern, 
+                                      on_conflict='user_id,relationship_type',
+                                      update_columns=['pattern_data', 'updated_at', 'transaction_id'])
+                    
+                    logger.info(f"✅ Stored/updated {len(patterns_batch)} relationship patterns")
 
         except Exception as e:
-            logger.error(f"❌ Error storing computed metrics (transaction rolled back): {e}")
+            logger.error(f"❌ Error storing relationship patterns (transaction rolled back): {e}")
+    
+    # REMOVED: store_computed_metrics method - metrics table deleted
+    # Metrics are now handled by Prometheus/observability system only
 
     async def _populate_causal_relationships(self, relationships: List[Dict], user_id: str, transaction_id: str, supabase: Client):
         """
@@ -7511,11 +7595,27 @@ async def handle_duplicate_decision(request: DuplicateDecisionRequest):
                     
                     import polars as pl
                     import io
-                    if filename.endswith('.csv'):
-                        df = pl.read_csv(io.BytesIO(file_bytes))
-                        sheets_data = {'Sheet1': df}
+                    
+                    # FIX #NEW_2: Use streaming for large files to avoid memory issues
+                    file_size_mb = len(file_bytes) / (1024 * 1024)
+                    if file_size_mb > 50:  # Use streaming for files > 50MB
+                        logger.info(f"Large file detected ({file_size_mb:.1f}MB), using streaming parser")
+                        # For delta merge, we need to read the file but can use chunked processing
+                        if filename.endswith('.csv'):
+                            # Read CSV in chunks for memory efficiency
+                            df = pl.read_csv(io.BytesIO(file_bytes), streaming=True).collect()
+                            sheets_data = {'Sheet1': df}
+                        else:
+                            # For Excel, we still need full read for delta comparison but log the memory usage
+                            logger.warning(f"Excel delta merge requires full file read ({file_size_mb:.1f}MB)")
+                            sheets_data = pl.read_excel(io.BytesIO(file_bytes), sheet_name=None)
                     else:
-                        sheets_data = pl.read_excel(io.BytesIO(file_bytes), sheet_name=None)
+                        # Small files can be read normally
+                        if filename.endswith('.csv'):
+                            df = pl.read_csv(io.BytesIO(file_bytes))
+                            sheets_data = {'Sheet1': df}
+                        else:
+                            sheets_data = pl.read_excel(io.BytesIO(file_bytes), sheet_name=None)
                     
                     logger.info(f"Delta merge: parsed {len(sheets_data)} sheets")
                     
@@ -12986,13 +13086,8 @@ async def delete_file_completely(job_id: str, user_id: str):
         except Exception as e:
             logger.warning(f"Failed to delete platform_patterns: {e}")
         
-        # Step 18: Delete metrics
-        try:
-            metrics_result = supabase.table('metrics').delete().eq('job_id', job_id).eq('user_id', user_id).execute()
-            deletion_stats['deleted_records']['metrics'] = len(metrics_result.data or [])
-            logger.info(f"Deleted {deletion_stats['deleted_records']['metrics']} metrics")
-        except Exception as e:
-            logger.warning(f"Failed to delete metrics: {e}")
+        # Step 18: REMOVED - metrics table deleted
+        # Metrics deletion no longer needed as table was removed
         
         # Step 19: Delete duplicate_transactions
         try:
