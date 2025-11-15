@@ -45,7 +45,8 @@ except ImportError:
     logger.warning("sentry_unavailable", reason="sentry-sdk not installed")
 except Exception as e:
     logger.error("sentry_init_failed", error=str(e))
-import orjson as json  # CONSISTENCY FIX: Use orjson everywhere (3-5x faster)
+import orjson  # CONSISTENCY FIX: Use orjson everywhere (3-5x faster)
+import json as stdlib_json  # Keep standard json for JSONEncoder compatibility
 import re
 import asyncio
 import io
@@ -91,6 +92,7 @@ from urllib.parse import quote
 from email.utils import parsedate_to_datetime
 import base64
 import hmac
+import binascii
 # Now using UniversalExtractorsOptimized for all PDF/document extraction
 
 # FastAPI and web framework imports
@@ -182,7 +184,9 @@ class FieldDetectionRequest(BaseModel):
     context: Optional[Dict[str, Any]] = None
 
 class PlatformDetectionRequest(BaseModel):
-    file_content: Optional[str] = None  # base64 or text content
+    # CRITICAL FIX: Remove ambiguous file_content field
+    # Platform detection should work with structured data only
+    payload: Optional[Dict[str, Any]] = None  # Structured data (columns, sample_data)
     filename: Optional[str] = None
     user_id: Optional[str] = None
 
@@ -410,8 +414,20 @@ def _sanitize_for_json(obj):
         if math.isnan(obj) or math.isinf(obj):
             return None
         return obj
+    # FIX #35: Handle all types of NaN values including numpy.nan
     elif pd.isna(obj):
         return None
+    elif obj is np.nan:  # Catch numpy.nan specifically
+        return None
+    elif hasattr(obj, '__array__') and hasattr(obj, 'dtype'):
+        # Handle numpy scalars (np.float64(nan), etc.)
+        try:
+            if np.isnan(obj):
+                return None
+            elif np.isinf(obj):
+                return None
+        except (TypeError, ValueError):
+            pass  # Not a numeric type
     else:
         return obj
 
@@ -477,7 +493,7 @@ except Exception as e:
 os.environ['OPENCV_AVAILABLE'] = str(OPENCV_AVAILABLE)
 
 # Custom JSON encoder to handle datetime objects
-class DateTimeEncoder(json.JSONEncoder):
+class DateTimeEncoder(stdlib_json.JSONEncoder):
     """
     Custom JSON encoder for handling datetime objects in API responses.
 
@@ -495,17 +511,21 @@ class DateTimeEncoder(json.JSONEncoder):
 
 # Utility function to clean JWT tokens
 def clean_jwt_token(token: str) -> str:
-    """Clean JWT token by removing all whitespace and newline characters"""
+    """Clean JWT token by removing only harmful whitespace, preserving valid Base64 padding"""
     if not token:
         return token
-    # Remove all whitespace, newlines, and tabs
-    cleaned = token.strip().replace('\n', '').replace('\r', '').replace(' ', '').replace('\t', '')
+    
+    # FIX #37: Only remove newlines, carriage returns, and tabs
+    # DO NOT remove spaces as they may be valid Base64 padding
+    cleaned = token.strip().replace('\n', '').replace('\r', '').replace('\t', '')
+    
     # Ensure it's a valid JWT format (3 parts separated by dots)
     parts = cleaned.split('.')
     if len(parts) == 3:
+        # Valid JWT format - return with only harmful whitespace removed
         return cleaned
     else:
-        # If not valid JWT format, return original cleaned version
+        # If not valid JWT format, be more conservative - only remove line breaks
         return token.strip().replace('\n', '').replace('\r', '')
 
 # Utility function for OpenAI calls with quota handling
@@ -540,6 +560,40 @@ async def safe_openai_call(client, model: str, messages: list, temperature: floa
 # REMOVED: get_fallback_platform_detection() - Use UniversalPlatformDetector instead
 # Hardcoded platform patterns are brittle and hard to maintain.
 # All platform detection now uses UniversalPlatformDetector library.
+
+def is_base64(s: str) -> bool:
+    """CRITICAL FIX: Check if string is valid base64"""
+    try:
+        if isinstance(s, str):
+            # Check if it looks like base64 (length multiple of 4, valid chars)
+            if len(s) % 4 != 0:
+                return False
+            # Try to decode
+            base64.b64decode(s, validate=True)
+            return True
+    except (ValueError, binascii.Error):
+        pass
+    return False
+
+def safe_decode_base64(content: str) -> str:
+    """CRITICAL FIX: Safely decode base64 content with fallback"""
+    if not content:
+        return content
+    
+    try:
+        if is_base64(content):
+            decoded_bytes = base64.b64decode(content)
+            # Try to decode as UTF-8 text
+            try:
+                return decoded_bytes.decode('utf-8')
+            except UnicodeDecodeError:
+                # If not text, return original (might be binary)
+                return content
+        else:
+            return content
+    except Exception as e:
+        logger.warning(f"Base64 decode failed: {e}")
+        return content
 
 def safe_json_parse(json_str, fallback=None):
     """
@@ -1328,8 +1382,8 @@ class VendorStandardizer:
             # Clean the vendor name
             cleaned_name = self._clean_vendor_name(vendor_name)
             
-            # Calculate similarity score using token_set_ratio (handles word order)
-            similarity = fuzz.token_set_ratio(vendor_name.lower(), cleaned_name.lower()) / 100.0
+            # CRITICAL FIX: Use token_sort_ratio for word order differences
+            similarity = fuzz.token_sort_ratio(vendor_name.lower(), cleaned_name.lower()) / 100.0
             
             result = {
                 "vendor_raw": vendor_name,
@@ -1474,7 +1528,7 @@ class PlatformIDExtractor:
                 
                 # Check if column name suggests it contains IDs
                 id_indicators = ['id', 'reference', 'number', 'ref', 'num', 'code', 'key']
-                is_id_column = any(fuzz.token_set_ratio(col_name.lower(), indicator) > 80 for indicator in id_indicators)
+                is_id_column = any(fuzz.token_sort_ratio(col_name.lower(), indicator) > 80 for indicator in id_indicators)
                 
                 for id_type, compiled_pattern in compiled_patterns.items():
                     if compiled_pattern.match(col_value_str):
@@ -1915,10 +1969,29 @@ class DataEnrichmentProcessor:
                 }
                 logger.debug(f"✅ Reusing platform info from Phase 3: {classification_results['platform']}")
 
-                # 5. Vendor resolution using EntityResolverOptimized (consolidated)
-                vendor_results = await self._resolve_vendor_entity(
-                    extraction_results, classification_results, user_id, self.supabase
-                )
+                # CRITICAL FIX: Vendor standardization MUST happen before entity resolution
+                # 4. Vendor standardization first (clean raw vendor names)
+                raw_vendor = extraction_results.get('vendor_name', '')
+                if raw_vendor:
+                    vendor_standardization = await self.vendor_standardizer.standardize_vendor(
+                        raw_vendor, 
+                        platform=classification_results.get('platform')
+                    )
+                    # Update extraction results with cleaned vendor
+                    extraction_results['vendor_name'] = vendor_standardization.get('vendor_standard', raw_vendor)
+                    extraction_results['vendor_raw'] = raw_vendor
+                    extraction_results['vendor_confidence'] = vendor_standardization.get('confidence', 0.0)
+                    extraction_results['vendor_cleaning_method'] = vendor_standardization.get('cleaning_method', 'none')
+                
+                # FIX #22: Remove duplicate entity resolution - entity resolution happens in batch later
+                # Entity resolution is handled by run_entity_resolution_pipeline() after all rows are processed
+                # This prevents double resolution and ensures consistent entity IDs across the dataset
+                vendor_results = {
+                    'vendor_raw': extraction_results.get('vendor_name', ''),
+                    'vendor_standard': extraction_results.get('vendor_name', ''),  # Will be resolved in batch
+                    'vendor_confidence': extraction_results.get('confidence', 0.0),
+                    'vendor_cleaning_method': 'deferred_to_batch_resolution'
+                }
 
                 # 6. Platform ID extraction using UniversalPlatformDetectorOptimized (consolidated)
                 platform_id_results = await self._extract_platform_ids_universal(
@@ -2229,7 +2302,7 @@ class DataEnrichmentProcessor:
             from rapidfuzz import fuzz
             for row_key, row_value in row_data.items():
                 for field in amount_fields:
-                    if fuzz.token_set_ratio(row_key.lower(), field) > 85:
+                    if fuzz.token_sort_ratio(row_key.lower(), field) > 85:
                         if isinstance(row_value, (int, float)):
                             return float(row_value)
                         elif isinstance(row_value, str):
@@ -2257,11 +2330,11 @@ class DataEnrichmentProcessor:
         # LIBRARY FIX: Use rapidfuzz for vendor column detection (replaces manual .lower() checks)
         from rapidfuzz import fuzz
         vendor_keywords = ['vendor', 'payee', 'recipient', 'company', 'description']
-        for col in column_names:
+        for col_name in column_names:
             for keyword in vendor_keywords:
-                if fuzz.token_set_ratio(col.lower(), keyword) > 80:
-                    if col in row_data and row_data[col]:
-                        return str(row_data[col]).strip()
+                if fuzz.token_sort_ratio(col_name.lower(), keyword) > 85:
+                    if col_name in row_data and row_data[col_name]:
+                        return str(row_data[col_name]).strip()
                     break
         
         return ""
@@ -2470,6 +2543,85 @@ class DataEnrichmentProcessor:
         except Exception as e:
             logger.warning(f"Cache storage failed for {enrichment_id}: {e}")
     
+    def _normalize_amount_value(self, amount_value) -> float:
+        """
+        FIX #28: Standardize amount handling across all data types
+        
+        Converts various amount formats (str, int, float, Decimal, etc.) to consistent float.
+        This ensures EntityResolver receives consistent amount format regardless of source.
+        """
+        try:
+            if amount_value is None or amount_value == '':
+                return 0.0
+            
+            # Handle numeric types directly
+            if isinstance(amount_value, (int, float)):
+                return float(amount_value)
+            
+            # Handle Decimal objects
+            elif hasattr(amount_value, '__float__'):
+                return float(amount_value)
+            
+            # Handle string amounts with currency symbols
+            elif isinstance(amount_value, str):
+                # Remove currency symbols, commas, and whitespace
+                cleaned = re.sub(r'[^\d.-]', '', amount_value.strip())
+                if cleaned:
+                    return float(cleaned)
+                else:
+                    return 0.0
+            
+            # Handle pandas/numpy numeric types
+            elif hasattr(amount_value, 'item'):  # numpy scalars
+                return float(amount_value.item())
+            
+            # Fallback for unexpected types
+            else:
+                logger.warning(f"Unexpected amount type: {type(amount_value)}, value: {amount_value}")
+                return 0.0
+                
+        except Exception as e:
+            logger.warning(f"Amount normalization failed for value '{amount_value}': {e}")
+            return 0.0
+
+    def _normalize_date_value(self, date_value) -> str:
+        """
+        FIX #27: Standardize date handling across all data types
+        
+        Converts various date formats (str, datetime, pd.Timestamp, etc.) to ISO format string.
+        This ensures EntityResolver receives consistent date format regardless of source.
+        """
+        try:
+            if date_value is None or date_value == '':
+                return datetime.now().strftime('%Y-%m-%d')
+            
+            # Handle pandas Timestamp
+            if isinstance(date_value, pd.Timestamp):
+                return date_value.strftime('%Y-%m-%d')
+            
+            # Handle datetime objects
+            elif isinstance(date_value, datetime):
+                return date_value.strftime('%Y-%m-%d')
+            
+            # Handle string dates
+            elif isinstance(date_value, str):
+                from dateutil import parser
+                parsed_date = parser.parse(date_value)
+                return parsed_date.strftime('%Y-%m-%d')
+            
+            # Handle objects with strftime method
+            elif hasattr(date_value, 'strftime'):
+                return date_value.strftime('%Y-%m-%d')
+            
+            # Fallback for unexpected types
+            else:
+                logger.warning(f"Unexpected date type: {type(date_value)}, value: {date_value}")
+                return datetime.now().strftime('%Y-%m-%d')
+                
+        except Exception as e:
+            logger.warning(f"Date normalization failed for value '{date_value}': {e}")
+            return datetime.now().strftime('%Y-%m-%d')
+
     async def _extract_core_fields(self, validated_data: Dict) -> Dict[str, Any]:
         """Extract and validate core fields using UniversalFieldDetector (NASA-GRADE)"""
         row_data = validated_data['row_data']
@@ -2495,13 +2647,33 @@ class DataEnrichmentProcessor:
             field_types = field_detection_result.get('field_types', {})
             detected_fields = field_detection_result.get('detected_fields', [])
             
-            # Map detected fields to core financial fields
+            # FIX #26: Add comprehensive fallback mappings for common column name variations
+            # Define extensive column name mappings for different financial data formats
+            amount_variations = [
+                'amount', 'total', 'price', 'value', 'sum', 'payment_amount', 'amt', 'gross_amount',
+                'debit', 'credit', 'payment', 'charge', 'cost', 'fee', 'balance', 'net_amount'
+            ]
+            vendor_variations = [
+                'vendor', 'payee', 'merchant', 'company', 'recipient', 'supplier', 'contractor',
+                'vendor_name', 'payee_name', 'merchant_name', 'business_name', 'entity_name'
+            ]
+            date_variations = [
+                'date', 'timestamp', 'created_at', 'payment_date', 'transaction_date', 'posted_date',
+                'effective_date', 'settlement_date', 'process_date', 'entry_date'
+            ]
+            description_variations = [
+                'description', 'memo', 'notes', 'details', 'comment', 'reference', 'narrative',
+                'transaction_description', 'payment_description', 'remarks'
+            ]
+            
+            # Map detected fields to core financial fields with fallback logic
             amount = 0.0
             vendor_name = ''
             date = datetime.now().strftime('%Y-%m-%d')
             description = ''
             currency = 'USD'
             
+            # First pass: Use field detector results with high confidence
             for field_info in detected_fields:
                 field_name = field_info.get('name', '').lower()
                 field_type = field_info.get('type', '').lower()
@@ -2512,40 +2684,57 @@ class DataEnrichmentProcessor:
                 if field_confidence < 0.5:
                     continue
                 
-                # Amount extraction
-                if 'amount' in field_type or any(kw in field_name for kw in ['amount', 'total', 'price', 'value', 'sum']):
-                    try:
-                        if isinstance(field_value, (int, float)):
-                            amount = float(field_value)
-                        elif isinstance(field_value, str):
-                            cleaned = re.sub(r'[^\d.-]', '', field_value)
-                            amount = float(cleaned) if cleaned else 0.0
-                    except:
-                        pass
+                # Amount extraction with enhanced patterns - FIX #28: Use standardized amount normalization
+                if 'amount' in field_type or any(kw in field_name for kw in amount_variations):
+                    amount = self._normalize_amount_value(field_value)
                 
-                # Vendor extraction
-                elif 'vendor' in field_type or any(kw in field_name for kw in ['vendor', 'payee', 'merchant', 'company', 'recipient']):
+                # Vendor extraction with enhanced patterns
+                elif 'vendor' in field_type or any(kw in field_name for kw in vendor_variations):
                     vendor_name = str(field_value).strip() if field_value else ''
                 
-                # Date extraction
-                elif 'date' in field_type or any(kw in field_name for kw in ['date', 'timestamp', 'created_at', 'payment_date']):
-                    try:
-                        if isinstance(field_value, str):
-                            from dateutil import parser
-                            parsed_date = parser.parse(field_value)
-                            date = parsed_date.strftime('%Y-%m-%d')
-                        elif hasattr(field_value, 'strftime'):
-                            date = field_value.strftime('%Y-%m-%d')
-                    except:
-                        pass
+                # Date extraction with enhanced patterns - FIX #27: Use standardized date normalization
+                elif 'date' in field_type or any(kw in field_name for kw in date_variations):
+                    date = self._normalize_date_value(field_value)
                 
-                # Description extraction
-                elif any(kw in field_name for kw in ['description', 'memo', 'notes', 'details', 'comment']):
+                # Description extraction with enhanced patterns
+                elif any(kw in field_name for kw in description_variations):
                     description = str(field_value).strip() if field_value else ''
                 
                 # Currency extraction
                 elif 'currency' in field_name:
                     currency = str(field_value).upper() if field_value else 'USD'
+            
+            # FIX #26: Second pass - Fallback to fuzzy column matching if no high-confidence fields found
+            if not amount or not vendor_name or not description:
+                from rapidfuzz import fuzz
+                
+                for col_name, col_value in row_data.items():
+                    col_name_lower = col_name.lower()
+                    
+                    # Fuzzy match for amount if not found - FIX #28: Use standardized amount normalization
+                    if not amount:
+                        for amount_pattern in amount_variations:
+                            if fuzz.token_sort_ratio(col_name_lower, amount_pattern) > 80:
+                                normalized_amount = self._normalize_amount_value(col_value)
+                                if normalized_amount > 0:
+                                    amount = normalized_amount
+                                    break
+                    
+                    # Fuzzy match for vendor if not found
+                    if not vendor_name:
+                        for vendor_pattern in vendor_variations:
+                            if fuzz.token_sort_ratio(col_name_lower, vendor_pattern) > 80:
+                                if isinstance(col_value, str) and col_value.strip():
+                                    vendor_name = str(col_value).strip()
+                                    break
+                    
+                    # Fuzzy match for description if not found
+                    if not description:
+                        for desc_pattern in description_variations:
+                            if fuzz.token_sort_ratio(col_name_lower, desc_pattern) > 80:
+                                if isinstance(col_value, str) and col_value.strip():
+                                    description = str(col_value).strip()
+                                    break
             
             # Calculate extraction confidence from UniversalFieldDetector
             confidence = field_detection_result.get('confidence', 0.0)
@@ -3184,7 +3373,7 @@ class DataEnrichmentProcessor:
             for col in columns:
                 if col not in assigned_columns:
                     for kw in keywords:
-                        if fuzz.token_set_ratio(col.lower(), kw) > 85:  # Higher threshold for specificity
+                        if fuzz.token_sort_ratio(col.lower(), kw) > 85:  # Higher threshold for specificity
                             patterns['platform_indicators'].append(col)
                             assigned_columns.add(col)
                             break
@@ -3196,7 +3385,7 @@ class DataEnrichmentProcessor:
             for col in columns:
                 if col not in assigned_columns:
                     for kw in keywords:
-                        if fuzz.token_set_ratio(col.lower(), kw) > 80:
+                        if fuzz.token_sort_ratio(col.lower(), kw) > 80:
                             patterns['document_type_indicators'].append(col)
                             assigned_columns.add(col)
                             break
@@ -3207,7 +3396,7 @@ class DataEnrichmentProcessor:
         for col in columns:
             if col not in assigned_columns:
                 for kw in financial_keywords:
-                    if fuzz.token_set_ratio(col.lower(), kw) > 75:  # Lower threshold for general terms
+                    if fuzz.token_sort_ratio(col.lower(), kw) > 75:  # Lower threshold for general terms
                         patterns['financial_terms'].append(col)
                         assigned_columns.add(col)
                         break
@@ -3260,7 +3449,7 @@ class DataEnrichmentProcessor:
             elif doc_type == 'payroll_data':
                 # LIBRARY FIX: Use rapidfuzz for employee column detection
                 from rapidfuzz import fuzz
-                if any(fuzz.token_set_ratio(col.lower(), 'employee') > 80 for col in column_names):
+                if any(fuzz.token_sort_ratio(col.lower(), 'employee') > 80 for col in column_names):
                     score += 0.2
             
             scores[doc_type] = score
@@ -3296,7 +3485,7 @@ class DataEnrichmentProcessor:
             matched_columns = []
             for pattern_col in patterns['columns']:
                 for col_name in column_names:
-                    if fuzz.token_set_ratio(pattern_col.lower(), col_name.lower()) > 80:
+                    if fuzz.token_sort_ratio(pattern_col.lower(), col_name.lower()) > 80:
                         matched_columns.append(pattern_col)
                         break
             if matched_columns:
@@ -4582,7 +4771,7 @@ class ExcelProcessor:
                     if df_copy[col].dtype in ['int64', 'float64']:
                         # Check for negative values in amount columns
                         amount_keywords = ['amount', 'revenue', 'income', 'sales']
-                        if any(fuzz.token_set_ratio(col.lower(), kw) > 80 for kw in amount_keywords):
+                        if any(fuzz.token_sort_ratio(col.lower(), kw) > 80 for kw in amount_keywords):
                             negative_mask = df_copy[col] < 0
                             if negative_mask.any():
                                 anomalies['data_inconsistencies'].extend([
@@ -4663,13 +4852,19 @@ class ExcelProcessor:
             logger.error(f"Error detecting financial fields in sheet {sheet_name}: {e}")
             return financial_detection
     
-    async def stream_xlsx_processing(self, file_content: bytes, filename: Optional[str] = None, user_id: Optional[str] = None, progress_callback=None) -> Dict[str, Any]:
-        """Memory-efficient streaming XLSX processing"""
+    async def stream_xlsx_processing(self, file_path: str, filename: Optional[str] = None, user_id: Optional[str] = None, progress_callback=None) -> Dict[str, Any]:
+        """CRITICAL FIX: True memory-efficient streaming XLSX processing - no bytes loading"""
         try:
-            # Use openpyxl for streaming processing
+            # CRITICAL FIX: Use file path directly, never load bytes into memory
             from openpyxl import load_workbook
+            import gc
             
-            workbook = load_workbook(io.BytesIO(file_content), read_only=True, data_only=True)
+            # Check file size first to prevent OOM
+            file_size = os.path.getsize(file_path)
+            if file_size > 100 * 1024 * 1024:  # 100MB limit
+                raise ValueError(f"File too large: {file_size/1024/1024:.1f}MB. Maximum allowed: 100MB")
+            
+            workbook = load_workbook(file_path, read_only=True, data_only=True)
             sheets = {}
             
             total_sheets = len(workbook.sheetnames)
@@ -4688,7 +4883,7 @@ class ExcelProcessor:
                     data = []
                     headers = []
                     
-                    # Read first row for headers
+                    # CRITICAL FIX: Use values_only=True and proper memory management
                     for row_idx, row in enumerate(worksheet.iter_rows(values_only=True), 1):
                         if row_idx == 1:
                             headers = [str(cell) if cell is not None else f"Column_{i}" for i, cell in enumerate(row)]
@@ -4696,14 +4891,17 @@ class ExcelProcessor:
                             if any(cell is not None for cell in row):  # Skip empty rows
                                 data.append(row)
                         
-                        # Process in chunks to manage memory
-                        if len(data) >= 1000:  # Process 1000 rows at a time
+                        # CRITICAL FIX: Process in smaller chunks and force garbage collection
+                        if len(data) >= 500:  # Reduced chunk size from 1000 to 500
                             temp_df = pd.DataFrame(data, columns=headers)
                             if sheet_name not in sheets:
                                 sheets[sheet_name] = temp_df
                             else:
                                 sheets[sheet_name] = pd.concat([sheets[sheet_name], temp_df], ignore_index=True)
                             data = []
+                            # CRITICAL FIX: Force garbage collection after each chunk
+                            del temp_df
+                            gc.collect()
                     
                     # Process remaining data
                     if data:
@@ -4762,8 +4960,20 @@ class ExcelProcessor:
             return [self._sanitize_nan_for_json(item) for item in obj]
         elif isinstance(obj, float) and (math.isnan(obj) or math.isinf(obj)):
             return None
+        # FIX #35: Handle all types of NaN values including numpy.nan
         elif pd.isna(obj):
             return None
+        elif obj is np.nan:  # Catch numpy.nan specifically
+            return None
+        elif hasattr(obj, '__array__') and hasattr(obj, 'dtype'):
+            # Handle numpy scalars (np.float64(nan), etc.)
+            try:
+                if np.isnan(obj):
+                    return None
+                elif np.isinf(obj):
+                    return None
+            except (TypeError, ValueError):
+                pass  # Not a numeric type
         else:
             return obj
     
@@ -5335,24 +5545,53 @@ class ExcelProcessor:
             })
             raise HTTPException(status_code=400, detail="File contains no data")
         
-        # Step 2: Fast Platform Detection and Document Classification
+        # CRITICAL FIX: Field detection MUST run before platform detection
+        # Platform detection relies on field types and vendor/description fields
+        first_sheet_meta = list(sheets_metadata.values())[0]
+        
+        # Step 1: Field Detection First (required for platform detection)
         await manager.send_update(job_id, {
-            "step": "analyzing",
-            "message": format_progress_message(ProcessingStage.UNDERSTAND, "Figuring out where this data came from"),
-            "progress": 20
+            "step": "field_detection",
+            "message": format_progress_message(ProcessingStage.UNDERSTAND, "Analyzing field types and structure"),
+            "progress": 18
         })
         
-        # CRITICAL FIX: Use metadata for detection instead of loading full sheet
-        # Platform detection only needs column names, not full data
-        first_sheet_meta = list(sheets_metadata.values())[0]
+        # Get sample data for field detection
+        sample_data = {}
+        if first_sheet_meta.get('sample_row'):
+            sample_data = dict(zip(first_sheet_meta['columns'], first_sheet_meta['sample_row']))
+        
+        # Run field detection to identify field types
+        field_detection_result = await self.universal_field_detector.detect_field_types_universal(
+            data=sample_data,
+            filename=streamed_file.filename,
+            context={
+                'columns': first_sheet_meta['columns'],
+                'sheet_name': list(sheets_metadata.keys())[0]
+            },
+            user_id=user_id
+        )
+        
+        # Extract field information for platform detection
+        detected_fields = field_detection_result.get('detected_fields', [])
+        field_types = field_detection_result.get('field_types', {})
+        
+        # Step 2: Platform Detection (now with field information)
+        await manager.send_update(job_id, {
+            "step": "platform_detection",
+            "message": format_progress_message(ProcessingStage.UNDERSTAND, "Figuring out where this data came from"),
+            "progress": 22
+        })
         
         # Convert metadata to payload dict for platform detection
         payload_for_detection = {
             'columns': first_sheet_meta['columns'],
-            'sample_data': []  # Platform detection works with columns only
+            'sample_data': [sample_data] if sample_data else [],
+            'detected_fields': detected_fields,  # CRITICAL: Include field detection results
+            'field_types': field_types  # CRITICAL: Include field type mapping
         }
         
-        # Fast pattern-based platform detection first (with AI cache)
+        # Fast pattern-based platform detection with field context
         ai_cache = safe_get_ai_cache()
         platform_cache_key = {
             'columns': first_sheet_meta['columns'],
@@ -5639,13 +5878,40 @@ class ExcelProcessor:
                 
                 logger.info(f"🚀 OPTIMIZATION 2: Using dynamic batch_size={optimal_batch_size} for {len(chunk_data)} rows")
                 
-                # FIX #NEW_5: Move CPU-heavy memory monitoring out of async loop
-                # Initialize memory monitoring once outside the loop
+                # CRITICAL FIX: Enhanced memory monitoring - check system/container limits
                 import psutil
+                import os
                 process = psutil.Process()
-                MEMORY_LIMIT_MB = 400  # 400MB limit for batch processing
+                
+                # CRITICAL FIX: Check container memory limits (cgroup v1 and v2)
+                def get_container_memory_limit():
+                    try:
+                        # Try cgroup v2 first
+                        if os.path.exists('/sys/fs/cgroup/memory.max'):
+                            with open('/sys/fs/cgroup/memory.max', 'r') as f:
+                                limit = f.read().strip()
+                                if limit != 'max':
+                                    return int(limit) // (1024 * 1024)  # Convert to MB
+                        
+                        # Try cgroup v1
+                        if os.path.exists('/sys/fs/cgroup/memory/memory.limit_in_bytes'):
+                            with open('/sys/fs/cgroup/memory/memory.limit_in_bytes', 'r') as f:
+                                limit = int(f.read().strip())
+                                # Ignore unrealistic limits (> 1TB)
+                                if limit < 1024 * 1024 * 1024 * 1024:
+                                    return limit // (1024 * 1024)  # Convert to MB
+                        
+                        # Fallback to system memory
+                        return psutil.virtual_memory().total // (1024 * 1024)
+                    except:
+                        return 2048  # 2GB fallback
+                
+                container_limit_mb = get_container_memory_limit()
+                MEMORY_LIMIT_MB = min(400, int(container_limit_mb * 0.8))  # Use 80% of container limit, max 400MB
                 memory_check_interval = 10  # Check memory every 10 batches
                 batch_counter = 0
+                
+                logger.info(f"Memory monitoring: Container limit {container_limit_mb}MB, using {MEMORY_LIMIT_MB}MB limit")
                 
                 events_batch = []
                 
@@ -5761,62 +6027,63 @@ class ExcelProcessor:
                                 # Clean the enriched payload to ensure all datetime objects are converted
                                 cleaned_enriched_payload = serialize_datetime_objects(enriched_payload)
                                 
-                                # Add enrichment fields to event (top-level columns, not in payload)
+                                # FIX #39: Store enrichment fields in classification_metadata to align with schema
+                                # Only set fields that exist as actual columns in raw_events table
                                 event['user_id'] = user_id
                                 event['file_id'] = file_id  # CRITICAL FIX #4: Add file_id from context
                                 event['job_id'] = file_context.get('job_id')  # CRITICAL FIX #4: Add job_id from context
                                 event['transaction_id'] = tx.transaction_id  # CRITICAL FIX: Ensure transaction_id is set for rollback capability
+                                
+                                # Schema-aligned fields (actual columns)
                                 event['category'] = event['classification_metadata'].get('category')
                                 event['subcategory'] = event['classification_metadata'].get('subcategory')
-                                
-                                # Add document type from platform detection
-                                event['classification_metadata']['document_type'] = platform_info.get('document_type', 'unknown')
-                                event['classification_metadata']['document_confidence'] = platform_info.get('document_confidence', 0.0)
-                                event['classification_metadata']['document_classification_method'] = platform_info.get('document_classification_method', 'unknown')
-                                event['classification_metadata']['document_indicators'] = platform_info.get('document_indicators', [])
-                                
-                                # FIX #4: Extract entities from enriched_payload (standardized names)
                                 event['entities'] = cleaned_enriched_payload.get('entities', event['classification_metadata'].get('entities', {}))
                                 event['relationships'] = cleaned_enriched_payload.get('relationships', event['classification_metadata'].get('relationships', {}))
                                 event['document_type'] = platform_info.get('document_type', 'unknown')
                                 event['document_confidence'] = platform_info.get('document_confidence', 0.0)
-                                
-                                # Enrichment fields
-                                event['amount_original'] = cleaned_enriched_payload.get('amount_original')
-                                event['amount_usd'] = cleaned_enriched_payload.get('amount_usd')
-                                event['currency'] = cleaned_enriched_payload.get('currency')
-                                event['exchange_rate'] = cleaned_enriched_payload.get('exchange_rate')
-                                event['exchange_date'] = cleaned_enriched_payload.get('exchange_date')
-                                event['vendor_raw'] = cleaned_enriched_payload.get('vendor_raw')
-                                event['vendor_standard'] = cleaned_enriched_payload.get('vendor_standard')
-                                event['vendor_confidence'] = cleaned_enriched_payload.get('vendor_confidence')
-                                event['vendor_cleaning_method'] = cleaned_enriched_payload.get('vendor_cleaning_method')
-                                event['platform_ids'] = cleaned_enriched_payload.get('platform_ids', {})
-                                event['standard_description'] = cleaned_enriched_payload.get('standard_description')
-                                event['transaction_type'] = cleaned_enriched_payload.get('transaction_type')
-                                event['amount_direction'] = cleaned_enriched_payload.get('amount_direction')
-                                event['amount_signed_usd'] = cleaned_enriched_payload.get('amount_signed_usd')
-                                event['affects_cash'] = cleaned_enriched_payload.get('affects_cash')
-                                event['source_ts'] = cleaned_enriched_payload.get('source_ts')
-                                event['ingested_ts'] = cleaned_enriched_payload.get('ingested_ts')
-                                event['processed_ts'] = cleaned_enriched_payload.get('processed_ts')
-                                event['transaction_date'] = cleaned_enriched_payload.get('transaction_date')
-                                event['exchange_rate_date'] = cleaned_enriched_payload.get('exchange_rate_date')
-                                event['validation_flags'] = cleaned_enriched_payload.get('validation_flags')
-                                event['is_valid'] = cleaned_enriched_payload.get('is_valid')
-                                event['vendor_canonical_id'] = cleaned_enriched_payload.get('vendor_canonical_id')
-                                event['vendor_verified'] = cleaned_enriched_payload.get('vendor_verified')
-                                event['vendor_alternatives'] = cleaned_enriched_payload.get('vendor_alternatives')
-                                event['overall_confidence'] = cleaned_enriched_payload.get('overall_confidence')
-                                event['requires_review'] = cleaned_enriched_payload.get('requires_review')
-                                event['review_reason'] = cleaned_enriched_payload.get('review_reason')
-                                event['review_priority'] = cleaned_enriched_payload.get('review_priority')
-                                event['accuracy_enhanced'] = cleaned_enriched_payload.get('accuracy_enhanced')
-                                event['accuracy_version'] = cleaned_enriched_payload.get('accuracy_version')
-                                
-                                # Add AI classification fields
                                 event['ai_confidence'] = classification.get('ai_confidence') or cleaned_enriched_payload.get('ai_confidence')
                                 event['ai_reasoning'] = classification.get('ai_reasoning') or cleaned_enriched_payload.get('ai_reasoning')
+                                event['source_ts'] = cleaned_enriched_payload.get('source_ts')
+                                
+                                # Store all enrichment data in classification_metadata JSONB column
+                                event['classification_metadata'].update({
+                                    'document_type': platform_info.get('document_type', 'unknown'),
+                                    'document_confidence': platform_info.get('document_confidence', 0.0),
+                                    'document_classification_method': platform_info.get('document_classification_method', 'unknown'),
+                                    'document_indicators': platform_info.get('document_indicators', []),
+                                    'enrichment_data': {
+                                        'amount_original': cleaned_enriched_payload.get('amount_original'),
+                                        'amount_usd': cleaned_enriched_payload.get('amount_usd'),
+                                        'currency': cleaned_enriched_payload.get('currency'),
+                                        'exchange_rate': cleaned_enriched_payload.get('exchange_rate'),
+                                        'exchange_date': cleaned_enriched_payload.get('exchange_date'),
+                                        'vendor_raw': cleaned_enriched_payload.get('vendor_raw'),
+                                        'vendor_standard': cleaned_enriched_payload.get('vendor_standard'),
+                                        'vendor_confidence': cleaned_enriched_payload.get('vendor_confidence'),
+                                        'vendor_cleaning_method': cleaned_enriched_payload.get('vendor_cleaning_method'),
+                                        'platform_ids': cleaned_enriched_payload.get('platform_ids', {}),
+                                        'standard_description': cleaned_enriched_payload.get('standard_description'),
+                                        'transaction_type': cleaned_enriched_payload.get('transaction_type'),
+                                        'amount_direction': cleaned_enriched_payload.get('amount_direction'),
+                                        'amount_signed_usd': cleaned_enriched_payload.get('amount_signed_usd'),
+                                        'affects_cash': cleaned_enriched_payload.get('affects_cash'),
+                                        'ingested_ts': cleaned_enriched_payload.get('ingested_ts'),
+                                        'processed_ts': cleaned_enriched_payload.get('processed_ts'),
+                                        'transaction_date': cleaned_enriched_payload.get('transaction_date'),
+                                        'exchange_rate_date': cleaned_enriched_payload.get('exchange_rate_date'),
+                                        'validation_flags': cleaned_enriched_payload.get('validation_flags'),
+                                        'is_valid': cleaned_enriched_payload.get('is_valid'),
+                                        'vendor_canonical_id': cleaned_enriched_payload.get('vendor_canonical_id'),
+                                        'vendor_verified': cleaned_enriched_payload.get('vendor_verified'),
+                                        'vendor_alternatives': cleaned_enriched_payload.get('vendor_alternatives'),
+                                        'overall_confidence': cleaned_enriched_payload.get('overall_confidence'),
+                                        'requires_review': cleaned_enriched_payload.get('requires_review'),
+                                        'review_reason': cleaned_enriched_payload.get('review_reason'),
+                                        'review_priority': cleaned_enriched_payload.get('review_priority'),
+                                        'accuracy_enhanced': cleaned_enriched_payload.get('accuracy_enhanced'),
+                                        'accuracy_version': cleaned_enriched_payload.get('accuracy_version')
+                                    }
+                                })
                                 
                                 # CRITICAL FIX #10: DO NOT compute row hashes in backend
                                 # Backend row hashing can diverge from duplicate service hashing due to:
@@ -5830,8 +6097,8 @@ class ExcelProcessor:
                                 events_batch.append(event)
                                 processed_rows += 1
                                 
-                                # CONSUMER EXPERIENCE: Send enrichment progress every 50 rows
-                                if processed_rows % 50 == 0:
+                                # FIX #42: Reduce progress frequency to prevent UI lockup (every 500 rows instead of 50)
+                                if processed_rows % 500 == 0:
                                     enrichment_stats = {
                                         'vendors_standardized': sum(1 for e in events_batch if e.get('vendor_standard')),
                                         'platform_ids_extracted': sum(1 for e in events_batch if e.get('platform_ids')),
@@ -5922,13 +6189,14 @@ class ExcelProcessor:
                         
                         processed_rows += 1
                     
-                    # Update progress every batch
-                    progress = 40 + (processed_rows / total_rows) * 40
-                    await manager.send_update(job_id, {
-                        "step": "streaming",
-                        "message": format_progress_message(ProcessingStage.ACT, "Working through your data", f"{processed_rows:,} rows completed"),
-                        "progress": int(progress)
-                    })
+                    # FIX #42: Update progress every 10 batches to reduce UI lockup
+                    if processed_rows % (10 * config.batch_size) == 0:
+                        progress = 40 + (processed_rows / total_rows) * 40
+                        await manager.send_update(job_id, {
+                            "step": "streaming",
+                            "message": format_progress_message(ProcessingStage.ACT, "Working through your data", f"{processed_rows:,} rows completed"),
+                            "progress": int(progress)
+                        })
             
             logger.info(f"✅ Completed row processing loop: {processed_rows} rows, {events_created} events")
             logger.info(f"🔄 Exiting transaction context manager...")
@@ -5975,73 +6243,117 @@ class ExcelProcessor:
             "progress": 85
         })
         
-        try:
-            # FIX #1: Use NASA-GRADE EntityResolverOptimized (v4.0) instead of internal methods
-            # Benefits: rapidfuzz (50x faster), presidio (30x faster), polars, AI learning
-            
-            # Initialize EntityResolver with Supabase client
-            entity_resolver = EntityResolver(supabase_client=supabase, cache_client=safe_get_ai_cache())
-            
-            # CRITICAL FIX #24: Ensure transaction_id exists for entity storage
-            # If transaction_id is None (transaction creation failed), create a new one
-            entity_transaction_id = transaction_id if transaction_id else str(uuid.uuid4())
-            
-            # CRITICAL FIX: Use optimized query for entity extraction
-            # Old: .select('id, payload, classification_metadata') - still fetches unnecessary data
-            # New: optimized_db.get_events_for_entity_extraction() - only necessary fields
-            events = await optimized_db.get_events_for_entity_extraction(user_id, file_id) if file_id else []
-            
-            # Extract entity names from events
-            entity_names = []
-            for event in events:
-                payload = event.get('payload', {})
-                classification = event.get('classification_metadata', {})
+        # FIX #23: Add transaction boundaries for atomic entity resolution
+        async with supabase.begin() as tx:
+            try:
+                # FIX #1: Use NASA-GRADE EntityResolverOptimized (v4.0) instead of internal methods
+                # Benefits: rapidfuzz (50x faster), presidio (30x faster), polars, AI learning
                 
-                # Extract vendor/customer/employee names
-                vendor = payload.get('vendor_standard') or payload.get('vendor_raw') or payload.get('vendor')
-                customer = payload.get('customer_standard') or payload.get('customer_raw') or payload.get('customer')
-                employee = payload.get('employee_name') or payload.get('employee')
+                # Initialize EntityResolver with transaction-aware Supabase client
+                entity_resolver = EntityResolver(supabase_client=tx, cache_client=safe_get_ai_cache())
                 
-                if vendor:
-                    entity_names.append({'name': vendor, 'type': 'vendor', 'event_id': event['id']})
-                if customer:
-                    entity_names.append({'name': customer, 'type': 'customer', 'event_id': event['id']})
-                if employee:
-                    entity_names.append({'name': employee, 'type': 'employee', 'event_id': event['id']})
-            
-            # Resolve entities using NASA-GRADE resolver
-            if entity_names:
-                resolution_results = await entity_resolver.resolve_entities_batch(
-                    entities=entity_names,
-                    platform='excel-upload',
-                    user_id=user_id,
-                    row_data={},  # Not needed for batch resolution
-                    column_names=[],
-                    filename=streamed_file.filename,
-                    row_id=entity_transaction_id
-                )
+                # CRITICAL FIX #24: Ensure transaction_id exists for entity storage
+                # If transaction_id is None (transaction creation failed), create a new one
+                entity_transaction_id = transaction_id if transaction_id else str(uuid.uuid4())
                 
-                entities = entity_names
-                entity_matches = resolution_results.get('resolution_results', [])
-            else:
-                entities = []
-                entity_matches = []
+                # CRITICAL FIX: Use optimized query for entity extraction
+                # Old: .select('id, payload, classification_metadata') - still fetches unnecessary data
+                # New: optimized_db.get_events_for_entity_extraction() - only necessary fields
+                events = await optimized_db.get_events_for_entity_extraction(user_id, file_id) if file_id else []
+                
+                # Extract entity names from events
+                entity_names = []
+                for event in events:
+                    payload = event.get('payload', {})
+                    classification = event.get('classification_metadata', {})
+                    
+                    # Extract vendor/customer/employee names
+                    vendor = payload.get('vendor_standard') or payload.get('vendor_raw') or payload.get('vendor')
+                    customer = payload.get('customer_standard') or payload.get('customer_raw') or payload.get('customer')
+                    employee = payload.get('employee_name') or payload.get('employee')
+                    
+                    if vendor:
+                        entity_names.append({'name': vendor, 'type': 'vendor', 'event_id': event['id']})
+                    if customer:
+                        entity_names.append({'name': customer, 'type': 'customer', 'event_id': event['id']})
+                    if employee:
+                        entity_names.append({'name': employee, 'type': 'employee', 'event_id': event['id']})
             
-            # Store entity matches (entities already created by EntityResolver)
-            if entity_matches:
-                await self._store_entity_matches(entity_matches, user_id, entity_transaction_id, supabase)
+                # FIX #20: Validate platform before entity resolution
+                # Determine platform from file analysis or default to 'excel-upload'
+                detected_platform = 'excel-upload'  # Default for file uploads
+                
+                # Try to get platform from classification results if available
+                try:
+                    if events and len(events) > 0:
+                        first_event = events[0]
+                        classification_metadata = first_event.get('classification_metadata', {})
+                        detected_platform = classification_metadata.get('platform', 'excel-upload')
+                        
+                        # Validate platform is not None or empty
+                        if not detected_platform or detected_platform.strip() == '':
+                            detected_platform = 'excel-upload'
+                            logger.warning("Empty platform detected, defaulting to 'excel-upload'")
+                        
+                        logger.info(f"Using platform '{detected_platform}' for entity resolution")
+                except Exception as e:
+                    logger.warning(f"Failed to extract platform from events: {e}, using default 'excel-upload'")
+                    detected_platform = 'excel-upload'
+                
+                # Resolve entities using NASA-GRADE resolver with validated platform
+                if entity_names:
+                    resolution_results = await entity_resolver.resolve_entities_batch(
+                        entities=entity_names,
+                        platform=detected_platform,  # Use validated platform
+                        user_id=user_id,
+                        row_data={},  # Not needed for batch resolution
+                        column_names=[],
+                        filename=streamed_file.filename,
+                        row_id=entity_transaction_id
+                    )
+                    
+                    entities = entity_names
+                    entity_matches = resolution_results.get('resolution_results', [])
+                else:
+                    entities = []
+                    entity_matches = []
             
-            # Update insights with entity resolution results
-            insights['entity_resolution'] = {
-                'entities_found': len(entities),
-                'matches_created': len(entity_matches)
-            }
+                # FIX #21: Apply confidence validation before storing entity matches
+                if entity_matches:
+                    # Filter matches by confidence threshold
+                    confidence_threshold = self.config.entity_similarity_threshold  # 0.9 from config
+                    valid_matches = []
+                    
+                    for match in entity_matches:
+                        match_confidence = match.get('confidence', 0.0)
+                        if match_confidence >= confidence_threshold:
+                            valid_matches.append(match)
+                        else:
+                            logger.warning(f"Entity match rejected due to low confidence: {match_confidence:.3f} < {confidence_threshold} for entity '{match.get('entity_name', 'unknown')}'")
+                    
+                    logger.info(f"Confidence validation: {len(valid_matches)}/{len(entity_matches)} matches passed threshold {confidence_threshold}")
+                    
+                    # Store only high-confidence matches within transaction
+                    if valid_matches:
+                        await self._store_entity_matches(valid_matches, user_id, entity_transaction_id, tx)
+                    else:
+                        logger.warning("No entity matches passed confidence validation - no entities stored")
             
-            await manager.send_update(job_id, {
-                "step": "entity_resolution_completed",
-                "message": format_progress_message(ProcessingStage.EXPLAIN, "Matched your vendors", f"{len(entities)} unique names, {len(entity_matches)} matches found"),
-                "progress": 90
-            })
+                # Update insights with entity resolution results
+                insights['entity_resolution'] = {
+                    'entities_found': len(entities),
+                    'matches_created': len(entity_matches)
+                }
+                
+                # Commit transaction - all entity resolution operations are atomic
+                await tx.commit()
+                logger.info(f"✅ Entity resolution transaction committed: {len(entities)} entities, {len(entity_matches)} matches")
+                
+                await manager.send_update(job_id, {
+                    "step": "entity_resolution_completed",
+                    "message": format_progress_message(ProcessingStage.EXPLAIN, "Matched your vendors", f"{len(entities)} unique names, {len(entity_matches)} matches found"),
+                    "progress": 90
+                })
             
         except Exception as e:
             import traceback
@@ -6480,15 +6792,26 @@ class ExcelProcessor:
                 source_file=filename
             )
             
-            entities_found = len(entity_names)
-            matches_created = len(resolution_results)
+            # FIX #21: Apply confidence validation to resolution results
+            confidence_threshold = config.entity_similarity_threshold  # 0.9 from config
+            valid_results = []
             
-            logger.info(f"✅ NASA-GRADE entity resolution complete: {entities_found} entities → {matches_created} matches")
+            for result in resolution_results:
+                result_confidence = result.get('confidence', 0.0)
+                if result_confidence >= confidence_threshold:
+                    valid_results.append(result)
+                else:
+                    logger.warning(f"Entity resolution rejected due to low confidence: {result_confidence:.3f} < {confidence_threshold} for entity '{result.get('entity_name', 'unknown')}'")
+            
+            entities_found = len(entity_names)
+            matches_created = len(valid_results)
+            
+            logger.info(f"✅ NASA-GRADE entity resolution complete: {entities_found} entities → {matches_created} high-confidence matches (filtered from {len(resolution_results)} total)")
             
             return {
                 'entities_found': entities_found,
                 'matches_created': matches_created,
-                'resolution_results': resolution_results
+                'resolution_results': valid_results  # Return only high-confidence results
             }
             
         except Exception as e:
@@ -8446,194 +8769,8 @@ async def check_duplicate_endpoint(request: dict):
             await release_duplicate_lock(file_hash)
             
     except HTTPException:
-        raise
-    except Exception as e:
         logger.error(f"Error checking duplicates: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/process-excel")
-async def process_excel_endpoint(request: Request):
-    """Start processing job from Supabase Storage and stream progress via WebSocket."""
-    user_id = None  # Initialize for finally block
-    try:
-        # Critical: Check database health before processing
-        check_database_health()
-
-        # CRITICAL FIX: Parse JSON body from Request object
-        try:
-            body = await request.json()
-        except Exception as e:
-            logger.error(f"Failed to parse request body: {e}")
-            raise HTTPException(status_code=400, detail="Invalid JSON body")
-
-        user_id = body.get('user_id')
-        job_id = body.get('job_id')
-        storage_path = body.get('storage_path')
-        filename = body.get('file_name') or 'uploaded_file'
-        if not user_id or not job_id or not storage_path:
-            raise HTTPException(status_code=400, detail="user_id, job_id, and storage_path are required")
-        
-        # FIX ISSUE #13: Check concurrent upload limit per user
-        can_upload, limit_message = await acquire_upload_slot(user_id)
-        if not can_upload:
-            logger.warning(f"Concurrent upload limit exceeded for user {user_id}")
-            raise HTTPException(status_code=429, detail=limit_message)
-
-        # Security validation: sanitize and require valid session token
-        try:
-            _ = security_validator.input_sanitizer.sanitize_string(filename)
-            valid, violations = await security_validator.validate_request({
-                'endpoint': 'process-excel',
-                'user_id': user_id,
-                'session_token': body.get('session_token')
-            }, SecurityContext(user_id=user_id))
-            if not valid:
-                logger.warning(f"Security validation failed for job {job_id}: {violations}")
-                raise HTTPException(status_code=401, detail="Unauthorized or invalid session")
-        except HTTPException:
-            raise
-        except Exception as sec_e:
-            logger.warning(f"Security validation error for job {job_id}: {sec_e}")
-            raise HTTPException(status_code=401, detail="Unauthorized or invalid session")
-        
-        # File metadata validation at entry point (before downloading)
-        # Get file size from request if provided, otherwise will validate after download
-        file_size_hint = body.get('file_size', 0)
-        file_valid, file_violations = security_validator.validate_file_metadata(
-            filename=filename,
-            file_size=file_size_hint if file_size_hint > 0 else 0,
-            content_type=body.get('content_type')
-        )
-        if not file_valid:
-            error_msg = f"Invalid file: {'; '.join(file_violations)}"
-            logger.warning(f"File validation failed for job {job_id}: {error_msg}")
-            raise HTTPException(status_code=400, detail=error_msg)
-
-        # Early duplicate check based on file hash
-        # NOTE: We verify the hash server-side after download for security
-        client_provided_hash = body.get('file_hash')  # Client hint, will be verified
-        resume_after_duplicate = body.get('resume_after_duplicate')
-        
-        # MEDIUM FIX #1: Validate file size BEFORE download to prevent DoS
-        # Client provides file_size hint which we validate first (defense in depth)
-        # Then we validate again after download as secondary check
-        MAX_FILE_SIZE = 500 * 1024 * 1024  # 500MB
-        
-        # Pre-download size check using client-provided hint
-        if file_size_hint and file_size_hint > MAX_FILE_SIZE:
-            error_msg = f"File too large: {file_size_hint / 1024 / 1024:.2f}MB (max: 500MB)"
-            logger.error(f"SECURITY: File size exceeded before download for job {job_id}")
-            raise HTTPException(status_code=400, detail=error_msg)
-        
-        # STREAMING DOWNLOAD: move file from Supabase Storage to disk without buffering whole content in memory
-        file_hash: Optional[str] = None
-        temp_file_path: Optional[str] = None
-        actual_file_size: int = 0
-        file_downloaded_successfully = False
-
-        async def _cleanup_temp_file() -> None:
-            nonlocal temp_file_path
-            if temp_file_path and os.path.exists(temp_file_path):
-                try:
-                    os.unlink(temp_file_path)
-                    logger.debug(f"Cleaned up temp file {temp_file_path}")
-                except Exception as cleanup_err:
-                    logger.warning(f"Failed to cleanup temp file {temp_file_path}: {cleanup_err}")
-                finally:
-                    temp_file_path = None
-
-        async def _stream_file_to_disk() -> None:
-            """Stream Supabase storage object to a temporary file to avoid OOM."""
-            nonlocal temp_file_path, actual_file_size, file_hash, file_downloaded_successfully
-
-            if temp_file_path and os.path.exists(temp_file_path):
-                # Already downloaded (e.g., resume path)
-                logger.debug(f"Streaming skipped – temp file already exists for job {job_id}: {temp_file_path}")
-                return
-
-            storage = supabase.storage.from_("finely-upload")
-            # CRITICAL FIX: Remove download parameter - not supported in newer Supabase Python SDK
-            signed_response = storage.create_signed_url(storage_path, expires_in=600)
-            signed_url = (
-                (signed_response or {}).get("signedURL")
-                or (signed_response or {}).get("signedUrl")
-            )
-
-            if not signed_url:
-                logger.error(f"Failed to generate signed URL for {storage_path}: {signed_response}")
-                raise HTTPException(status_code=500, detail="Unable to download file from storage")
-
-            base_supabase_url = globals().get('supabase_url') or os.environ.get("SUPABASE_URL")
-            if signed_url.startswith('/'):
-                if not base_supabase_url:
-                    raise HTTPException(status_code=500, detail="Supabase URL not configured")
-                download_url = f"{base_supabase_url}{signed_url}"
-            else:
-                download_url = signed_url
-
-            chunk_size = 8 * 1024 * 1024  # 8 MB
-            hasher = xxhash.xxh64()  # 5-10x faster for file integrity
-            actual_file_size = 0
-
-            tmp_file = tempfile.NamedTemporaryFile(delete=False)
-            temp_file_path = tmp_file.name
-            logger.info(f"Streaming storage object for job {job_id} to {temp_file_path}")
-
-            try:
-                await websocket_manager.send_overall_update(
-                    job_id=job_id,
-                    status="processing",
-                    message="📥 Streaming file from storage...",
-                    progress=5
-                )
-
-                async with httpx.AsyncClient(timeout=None) as client:
-                    async with client.stream("GET", download_url) as response:
-                        response.raise_for_status()
-                        async for chunk in response.aiter_bytes(chunk_size=chunk_size):
-                            if not chunk:
-                                continue
-                            actual_file_size += len(chunk)
-                            if actual_file_size > MAX_FILE_SIZE:
-                                error_msg = f"File too large: {actual_file_size / 1024 / 1024:.2f}MB (max: 500MB)"
-                                logger.error(
-                                    f"SECURITY: File size exceeded during stream for job {job_id}: {actual_file_size} bytes"
-                                )
-                                raise HTTPException(status_code=400, detail=error_msg)
-                            hasher.update(chunk)
-                            tmp_file.write(chunk)
-
-                tmp_file.flush()
-                file_hash = hasher.hexdigest()
-                file_downloaded_successfully = True
-                logger.info(
-                    f"File streamed successfully for job {job_id}: size={actual_file_size} bytes, hash={file_hash}"
-                )
-            except HTTPException:
-                raise
-            except Exception as stream_err:
-                logger.error(f"Streaming download failed for job {job_id}: {stream_err}")
-                raise HTTPException(status_code=500, detail=f"Failed to download file: {stream_err}")
-            finally:
-                tmp_file.close()
-                if not file_downloaded_successfully:
-                    await _cleanup_temp_file()
-                    actual_file_size = 0
-
-        # Perform streaming download unless caller explicitly resumes after duplicate (download might already exist)
-        if not resume_after_duplicate:
-            await _stream_file_to_disk()
-
-        # Calculate server-side hash for security (only if download succeeded and not resume path)
-        if file_downloaded_successfully and file_hash and not resume_after_duplicate:
-            # SECURITY FIX: Reject files with hash mismatch (indicates corruption or tampering)
-            if client_provided_hash and client_provided_hash != file_hash:
-                error_msg = f"File hash mismatch detected. Expected: {client_provided_hash}, Got: {file_hash}. File may be corrupted or tampered."
-                logger.error(f"SECURITY: Hash mismatch for job {job_id}: client={client_provided_hash}, server={file_hash}")
-                
-                # CRITICAL FIX #3: Cleanup orphaned file from storage to prevent storage leak
-                try:
-                    storage = supabase.storage.from_("finely-upload")
                     storage.remove([storage_path])
                     logger.info(f"Cleaned up orphaned file after hash mismatch: {storage_path}")
                 except Exception as cleanup_err:
@@ -8883,93 +9020,9 @@ async def process_excel_endpoint(request: Request):
         metrics_collector.increment_counter("file_processing_errors")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/api/process-excel-universal")
-async def process_excel_universal_endpoint(
-    file_content: bytes = File(...),
-    filename: str = Form(...),
-    user_id: str = Form(...)
-):
-    """Process Excel file using all universal components in pipeline"""
-    try:
-        # Critical: Check database health before processing
-        check_database_health()
-        
-        # Create StreamedFile from uploaded bytes
-        streamed_file = StreamedFile.from_bytes(file_content, filename)
-        
-        # Initialize components - FIX #14: Reuse singleton instances
-        excel_processor = ExcelProcessor()
-        field_detector = excel_processor.universal_field_detector
-        platform_detector = excel_processor.universal_platform_detector
-        document_classifier = excel_processor.universal_document_classifier
-        data_extractor = excel_processor.universal_extractors
-        
-        # Initialize Supabase client
-        supabase_url = os.environ.get("SUPABASE_URL")
-        supabase_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
-        if supabase_key:
-            supabase_key = clean_jwt_token(supabase_key)
-        
-        if not supabase_url or not supabase_key:
-            raise HTTPException(status_code=500, detail="Supabase credentials not configured")
-        
-        # CRITICAL FIX: Use pooled client instead of creating new connection
-        supabase = get_supabase_client()
-        
-        # Step 1: Process Excel file
-        excel_result = await excel_processor.stream_xlsx_processing(
-            file_content=file_content,
-            filename=filename,
-            user_id=user_id
-        )
-        
-        # Step 2: Detect platform
-        platform_result = await platform_detector.detect_platform_universal(
-            payload={"file_content": file_content, "filename": filename},
-            filename=filename,
-            user_id=user_id
-        )
-        
-        # Step 3: Classify document
-        document_result = await document_classifier.classify_document_universal(
-            payload={"file_content": file_content, "filename": filename},
-            filename=filename,
-            user_id=user_id
-        )
-        
-        # Step 4: Extract data using StreamedFile
-        extraction_result = await data_extractor.extract_data_universal(
-            streamed_file=streamed_file,
-            filename=filename,
-            user_id=user_id
-        )
-        
-        # Step 5: Detect fields for each sheet
-        field_results = {}
-        for sheet_name, df in excel_result.get('sheets', {}).items():
-            field_result = await field_detector.detect_field_types_universal(
-                data=df.to_dict('records')[0] if not df.empty else {},
-                filename=filename,
-                user_id=user_id
-            )
-            field_results[sheet_name] = field_result
-        
-        return {
-            "status": "success",
-            "results": {
-                "excel_processing": excel_result,
-                "platform_detection": platform_result,
-                "document_classification": document_result,
-                "data_extraction": extraction_result,
-                "field_detection": field_results
-            },
-            "user_id": user_id,
-            "filename": filename
-        }
-        
-    except Exception as e:
-        logger.error(f"Universal Excel processing error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+# REMOVED: Old duplicate ingestion path - process_excel_universal_endpoint
+# This endpoint created a second ingestion pipeline that competed with streaming processor
+# All file processing now goes through the unified streaming pipeline only
 
 @app.get("/api/component-metrics")
 async def get_component_metrics():
@@ -9775,27 +9828,6 @@ async def _gmail_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> Dict
         # Batch insert all items from this page using transaction
         if page_batch_items:
             try:
-                transaction_manager = get_transaction_manager()
-                async with transaction_manager.transaction(
-                    user_id=user_id,
-                    operation_type="connector_sync_batch"
-                ) as tx:
-                    for item in page_batch_items:
-                        try:
-                            await tx.insert('external_items', item)
-                            stats['records_fetched'] += 1
-                        except Exception as insert_err:
-                            insert_err_str = str(insert_err).lower()
-                            if 'duplicate key' in insert_err_str or 'unique constraint' in insert_err_str:
-                                stats['skipped'] += 1
-                            else:
-                                logger.error(f"Gmail item insert failed: {insert_err}")
-                                errors.append(str(insert_err)[:100])
-            except Exception as batch_err:
-                logger.error(f"Gmail batch insert transaction failed: {batch_err}")
-                errors.append(f"Batch insert failed: {str(batch_err)[:100]}")
-
-        run_status = 'succeeded' if not errors else ('partial' if stats['records_fetched'] > 0 else 'failed')
         
         # Update sync_runs, user_connections, and sync_cursors atomically in transaction
         try:
@@ -11747,10 +11779,13 @@ class SocketIOWebSocketManager:
 
     async def _get_state(self, job_id: str) -> Optional[Dict[str, Any]]:
         try:
-            if self.redis is not None:
-                raw = await self.redis.get(self._key(job_id))
+            # FIX #44: Use centralized cache instead of direct Redis
+            cache = safe_get_cache()
+            if cache is not None:
+                raw = await cache.get(self._key(job_id))
                 if raw:
-                    state = orjson.loads(raw)
+                    # Cache already handles JSON serialization
+                    state = raw if isinstance(raw, dict) else orjson.loads(raw)
                     self.job_status[job_id] = state
                     return state
             return self.job_status.get(job_id)
@@ -11759,9 +11794,12 @@ class SocketIOWebSocketManager:
 
     async def _save_state(self, job_id: str, state: Dict[str, Any]):
         self.job_status[job_id] = state
-        if self.redis is not None:
+        # FIX #44: Use centralized cache instead of direct Redis
+        cache = safe_get_cache()
+        if cache is not None:
             try:
-                await self.redis.set(self._key(job_id), orjson.dumps(state), ex=21600)
+                # Cache handles JSON serialization automatically, TTL in seconds
+                await cache.set(self._key(job_id), state, ttl=21600)  # 6 hours
             except Exception:
                 pass
 
@@ -11934,8 +11972,7 @@ async def cancel_upload(job_id: str):
 
 @app.post("/api/process-with-websocket")
 async def process_with_websocket_endpoint(
-    file_content: bytes = File(...),
-    filename: str = Form(...),
+    file: UploadFile = File(...),  # CRITICAL FIX: Use UploadFile instead of bytes
     user_id: str = Form(...),
     job_id: str = Form(default_factory=lambda: str(uuid.uuid4()))
 ):
@@ -11944,8 +11981,9 @@ async def process_with_websocket_endpoint(
         # Critical: Check database health before processing
         check_database_health()
         
-        # Create StreamedFile from uploaded bytes
-        streamed_file = StreamedFile.from_bytes(file_content, filename)
+        # CRITICAL FIX: Create StreamedFile from UploadFile without loading bytes
+        filename = file.filename
+        streamed_file = StreamedFile.from_upload(file)
         
         # Send initial update
         await websocket_manager.send_overall_update(
@@ -11989,7 +12027,35 @@ async def process_with_websocket_endpoint(
             data={"sheets_count": len(excel_result.get('sheets', {}))}
         )
         
-        # Step 2: Detect platform
+        # Step 2: Detect fields FIRST (required for platform detection)
+        await websocket_manager.send_component_update(
+            job_id=job_id,
+            component="field_detector",
+            status="processing",
+            message="🏷️ Detecting field types...",
+            progress=20
+        )
+        
+        field_results = {}
+        for sheet_name, df in excel_result.get('sheets', {}).items():
+            field_result = await field_detector.detect_field_types_universal(
+                data=df.to_dict('records')[0] if not df.empty else {},
+                filename=filename,
+                user_id=user_id
+            )
+            field_results[sheet_name] = field_result
+        results["field_detection"] = field_results
+        
+        await websocket_manager.send_component_update(
+            job_id=job_id,
+            component="field_detector",
+            status="completed",
+            message="✅ Field types detected",
+            progress=100,
+            data=field_results
+        )
+        
+        # Step 3: Detect platform (now with field information)
         await websocket_manager.send_component_update(
             job_id=job_id,
             component="platform_detector",
@@ -11998,8 +12064,19 @@ async def process_with_websocket_endpoint(
             progress=20
         )
         
+        # Include field detection results in platform detection payload
+        first_sheet_data = list(excel_result.get('sheets', {}).values())[0] if excel_result.get('sheets') else None
+        first_field_result = list(field_results.values())[0] if field_results else {}
+        
+        platform_payload = {
+            "file_content": file_content, 
+            "filename": filename,
+            "detected_fields": first_field_result.get('detected_fields', []),
+            "field_types": first_field_result.get('field_types', {})
+        }
+        
         platform_result = await platform_detector.detect_platform_universal(
-            payload={"file_content": file_content, "filename": filename},
+            payload=platform_payload,
             filename=filename,
             user_id=user_id
         )
@@ -12014,7 +12091,7 @@ async def process_with_websocket_endpoint(
             data=platform_result
         )
         
-        # Step 3: Classify document
+        # Step 4: Classify document
         await websocket_manager.send_component_update(
             job_id=job_id,
             component="document_classifier",
@@ -12039,7 +12116,7 @@ async def process_with_websocket_endpoint(
             data=document_result
         )
         
-        # Step 4: Extract data
+        # Step 5: Extract data
         await websocket_manager.send_component_update(
             job_id=job_id,
             component="data_extractor",
@@ -12064,34 +12141,7 @@ async def process_with_websocket_endpoint(
             data={"extracted_rows": len(extraction_result.get('extracted_data', []))}
         )
         
-        # Step 5: Detect fields for each sheet
-        await websocket_manager.send_component_update(
-            job_id=job_id,
-            component="field_detector",
-            status="processing",
-            message="🏷️ Detecting field types...",
-            progress=20
-        )
-        
-        field_results = {}
-        for sheet_name, df in excel_result.get('sheets', {}).items():
-            field_result = await field_detector.detect_field_types_universal(
-                data=df.to_dict('records')[0] if not df.empty else {},
-                filename=filename,
-                user_id=user_id
-            )
-            field_results[sheet_name] = field_result
-        
-        results["field_detection"] = field_results
-        
-        await websocket_manager.send_component_update(
-            job_id=job_id,
-            component="field_detector",
-            status="completed",
-            message="✅ Field detection completed",
-            progress=100,
-            data={"sheets_processed": len(field_results)}
-        )
+# REMOVED: Duplicate field detection - now happens in Step 2 before platform detection
         
         # Send final completion update
         await websocket_manager.send_overall_update(

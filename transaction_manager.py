@@ -24,6 +24,7 @@ logger = logging.getLogger(__name__)
 
 def _sanitize_for_json(obj):
     """Recursively sanitize NaN/Inf values for JSON serialization"""
+    import numpy as np
     if isinstance(obj, dict):
         return {k: _sanitize_for_json(v) for k, v in obj.items()}
     elif isinstance(obj, list):
@@ -32,8 +33,20 @@ def _sanitize_for_json(obj):
         if math.isnan(obj) or math.isinf(obj):
             return None
         return obj
+    # FIX #35: Handle all types of NaN values including numpy.nan
     elif pd.isna(obj):
         return None
+    elif obj is np.nan:  # Catch numpy.nan specifically
+        return None
+    elif hasattr(obj, '__array__') and hasattr(obj, 'dtype'):
+        # Handle numpy scalars (np.float64(nan), etc.)
+        try:
+            if np.isnan(obj):
+                return None
+            elif np.isinf(obj):
+                return None
+        except (TypeError, ValueError):
+            pass  # Not a numeric type
     else:
         return obj
 

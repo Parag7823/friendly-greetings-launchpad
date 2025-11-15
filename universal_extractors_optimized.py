@@ -185,7 +185,7 @@ class UniversalExtractorsOptimized:
         """
         start_time = time.time()
         
-        # Handle StreamedFile or fallback to bytes
+        # CRITICAL FIX: Use true streaming - never load full file into memory
         if streamed_file is not None:
             from streaming_source import StreamedFile
             if not isinstance(streamed_file, StreamedFile):
@@ -195,8 +195,11 @@ class UniversalExtractorsOptimized:
             # Generate extraction_id from file path hash for consistency
             path_hash = hashlib.md5(streamed_file.path.encode()).hexdigest()[:8]
             extraction_id = f"extract_{path_hash}_{hashlib.md5(filename.encode()).hexdigest()[:6]}_{user_id[:8]}"
+            
+            # CRITICAL FIX: Use streaming extraction - never call read()
+            return await self._extract_from_streamed_file(streamed_file, filename, user_id, file_context)
         elif file_content is not None:
-            # Legacy bytes path
+            # Legacy bytes path - DEPRECATED
             extraction_id = self._generate_extraction_id(file_content, filename, user_id)
         else:
             raise ValueError("Either streamed_file or file_content must be provided")
@@ -683,22 +686,6 @@ class UniversalExtractorsOptimized:
                 'ocr': {
                     'words': [{'text': text, 'confidence': conf, 'bbox': bbox} 
                              for (bbox, text, conf) in ocr_results],
-                    'avg_confidence': sum([conf for (_, _, conf) in ocr_results]) / len(ocr_results) if ocr_results else 0.0,
-                    'word_count': len(ocr_results)
-                }
-            }
-        except Exception as e:
-            logger.error(f"Image OCR failed: {e}")
-            return {'text': '', 'format': 'image', 'error': str(e)}
-    
-    # ========================================================================
-    # HELPER METHODS (Simplified)
-    # ========================================================================
-    
-    def _generate_extraction_id(self, file_content: bytes, filename: str, user_id: str) -> str:
-        """Generate deterministic extraction ID"""
-        # LIBRARY REPLACEMENT: xxhash for 5-10x faster hashing
-        content_hash = xxhash.xxh64(file_content).hexdigest()[:8]
         filename_part = xxhash.xxh64((filename or "-").encode()).hexdigest()[:6]
         user_part = (user_id or "anon")[:12]
         return f"extract_{user_part}_{filename_part}_{content_hash}"

@@ -144,8 +144,21 @@ class ErrorRecoverySystem:
                 )
             
             job_data = job_result.data[0]
+            current_status = job_data.get('status')
             transaction_id = job_data.get('transaction_id')
             file_id = job_data.get('file_id')
+            
+            # FIX #43: Do not cleanup active jobs - only cleanup truly failed/stale jobs
+            active_statuses = {'processing', 'pending', 'queued', 'running', 'started'}
+            if current_status in active_statuses:
+                logger.warning(f"Skipping cleanup for active job {job_id} with status: {current_status}")
+                return RecoveryResult(
+                    success=False,
+                    recovery_action=RecoveryAction.CLEANUP,
+                    cleaned_records=[],
+                    recovered_data=None,
+                    error=f"Cannot cleanup active job with status: {current_status}"
+                )
             
             # Step 2: Clean up raw_events
             if file_id:
