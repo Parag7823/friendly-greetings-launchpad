@@ -4,7 +4,7 @@
 GENIUS OPTIMIZATIONS:
 1. PyYAML + pydantic: External config (non-devs can edit) - 100 lines → 10 lines
 2. validators: Format detection (no regex bugs, handles edge cases) - 30 lines → 5 lines
-3. Whoosh: Full-text indexed search (100x faster than nested loops) - 40 lines → 15 lines
+3. Semantic patterns: Pattern-based field detection (fast, accurate) - 40 lines → 15 lines
 4. presidio-analyzer: PII/content detection (50x faster, 99% accuracy) - 50 lines → 5 lines
 5. aiocache + asyncio.gather(): Parallel + cached (10x faster) - 30 lines → 10 lines
 6. polars: DataFrame filtering (1000x faster) - 40 lines → 10 lines
@@ -265,7 +265,7 @@ class UniversalFieldDetector:
             analysis['format'] = format_match['format']
             analysis['confidence'] += format_match['confidence']
         
-        # GENIUS #3: Check semantic patterns (simplified - Whoosh would be for 10k+ patterns)
+        # GENIUS #3: Check semantic patterns (pattern-based field detection)
         semantic_match = self._check_semantic_patterns(field_name_lower)
         if semantic_match:
             analysis['type'] = semantic_match['type']

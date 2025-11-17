@@ -680,15 +680,53 @@ class UniversalExtractorsOptimized:
             
             self.metrics['ocr_operations'] += 1
             
+            # Calculate average OCR confidence
+            avg_confidence = sum([conf for (bbox, text, conf) in ocr_results]) / len(ocr_results) if ocr_results else 0.0
+            
             return {
                 'text': text,
                 'format': 'image',
                 'ocr': {
                     'words': [{'text': text, 'confidence': conf, 'bbox': bbox} 
                              for (bbox, text, conf) in ocr_results],
-        filename_part = xxhash.xxh64((filename or "-").encode()).hexdigest()[:6]
-        user_part = (user_id or "anon")[:12]
-        return f"extract_{user_part}_{filename_part}_{content_hash}"
+                    'avg_confidence': avg_confidence
+                },
+                'extraction_id': self._generate_extraction_id(file_content, file_path, None),
+                'confidence_score': avg_confidence
+            }
+        except Exception as e:
+            logger.error(f"Image extraction failed: {e}")
+            return {'text': '', 'format': 'image', 'error': str(e)}
+    
+    def _generate_extraction_id(self, file_content_or_path, filename: str, user_id: Optional[str]) -> str:
+        """Generate deterministic extraction ID using xxhash
+        
+        Args:
+            file_content_or_path: Either bytes (file content) or str (file path)
+            filename: Original filename
+            user_id: User ID (optional)
+        
+        Returns:
+            Deterministic extraction ID
+        """
+        try:
+            # Hash file content or path
+            if isinstance(file_content_or_path, bytes):
+                content_hash = xxhash.xxh64(file_content_or_path).hexdigest()[:8]
+            else:
+                # It's a path
+                content_hash = xxhash.xxh64(str(file_content_or_path).encode()).hexdigest()[:8]
+            
+            # Hash filename
+            filename_part = xxhash.xxh64((filename or "-").encode()).hexdigest()[:6]
+            
+            # User part
+            user_part = (user_id or "anon")[:12]
+            
+            return f"extract_{user_part}_{filename_part}_{content_hash}"
+        except Exception as e:
+            logger.error(f"Failed to generate extraction ID: {e}")
+            return f"extract_error_{xxhash.xxh64(str(time.time()).encode()).hexdigest()[:12]}"
     
     def _calculate_confidence(self, extracted_data: Dict) -> float:
         """GENIUS: Entropy-based confidence calculation"""

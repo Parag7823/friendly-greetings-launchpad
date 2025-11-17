@@ -656,7 +656,7 @@ class UniversalPlatformDetectorOptimized:
             return None
     
     async def _detect_platform_with_patterns(self, payload: Dict, filename: str = None) -> Optional[Dict[str, Any]]:
-        """OPTIMIZED: Pattern detection with flashtext (750x faster)"""
+        """OPTIMIZED: Pattern detection with pyahocorasick (750x faster)"""
         try:
             # Combine all text for pattern matching
             text_parts = []
@@ -689,8 +689,10 @@ class UniversalPlatformDetectorOptimized:
             # GENIUS v4.0: Use pyahocorasick automaton (2x faster, async-ready)
             # Single pass through text - O(n) with Aho-Corasick algorithm
             found_matches = []
+            found_indicators = []
             for end_index, (platform_id, indicator) in self.automaton.iter(combined_text):
                 found_matches.append(platform_id)
+                found_indicators.append(indicator)
             
             if not found_matches:
                 return None
@@ -736,8 +738,8 @@ class UniversalPlatformDetectorOptimized:
             return {
                 'platform': platform_info['name'],
                 'confidence': confidence_score,
-                'method': 'pattern_flashtext',
-                'indicators': list(set(found_platform_ids)),
+                'method': 'pattern_ahocorasick',
+                'indicators': list(set(found_indicators)),
                 'reasoning': f"Found {indicator_count} indicators using Aho-Corasick algorithm",
                 'category': platform_info['category']
             }
@@ -1011,3 +1013,7 @@ class UniversalPlatformDetectorOptimized:
         if platform_id in self.platform_database:
             self.platform_database[platform_id].update(updates)
             logger.info("Updated platform", platform_id=platform_id)
+
+
+# COMPATIBILITY FIX: Alias for backward compatibility with backend imports
+UniversalPlatformDetector = UniversalPlatformDetectorOptimized

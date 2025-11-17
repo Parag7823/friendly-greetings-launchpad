@@ -1019,7 +1019,7 @@ class UniversalDocumentClassifierOptimized:
             response_text = response_text.strip()
             
             # LIBRARY REPLACEMENT: orjson for 3-5x faster JSON parsing
-            return json.loads(response_text)
+            return orjson.loads(response_text)
         except (orjson.JSONDecodeError, ValueError) as e:
             logger.error(f"AI response JSON parsing failed: {e}")
             logger.error(f"Raw AI response: {response_text}")
