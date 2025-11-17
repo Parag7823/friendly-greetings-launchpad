@@ -1,22 +1,14 @@
-"""NASA-GRADE Universal Field Detector v3.0.0 - 65% Code Reduction
-====================================================================
+"""Universal Field Detector v3.0.0
 
-GENIUS OPTIMIZATIONS:
-1. PyYAML + pydantic: External config (non-devs can edit) - 100 lines → 10 lines
-2. validators: Format detection (no regex bugs, handles edge cases) - 30 lines → 5 lines
-3. Semantic patterns: Pattern-based field detection (fast, accurate) - 40 lines → 15 lines
-4. presidio-analyzer: PII/content detection (50x faster, 99% accuracy) - 50 lines → 5 lines
-5. aiocache + asyncio.gather(): Parallel + cached (10x faster) - 30 lines → 10 lines
-6. polars: DataFrame filtering (1000x faster) - 40 lines → 10 lines
-7. instructor + Jinja2: AI fallback with zero JSON hallucinations - 0 lines → 15 lines
-
-CODE REDUCTION: 275 → 95 lines (65% reduction)
-SPEED: 100x on 1000 fields
-ACCURACY: +40% on PII
-COST: $0
+Multi-faceted field type detection using:
+- Format validation (validators library)
+- Semantic pattern matching
+- PII detection (presidio-analyzer)
+- Parallel processing with caching (aiocache)
+- AI fallback (instructor + Groq)
 
 Author: Senior Full-Stack Engineer
-Version: 3.0.0 (NASA-GRADE)
+Version: 3.0.0
 """
 
 import asyncio
@@ -26,7 +18,6 @@ from typing import Any, Dict, List, Optional
 from pathlib import Path
 from functools import lru_cache
 
-# NASA-GRADE LIBRARIES (consistent with other optimized files)
 import yaml
 import polars as pl
 import structlog
@@ -40,6 +31,9 @@ from jinja2 import Template
 import instructor
 from groq import AsyncGroq
 import os
+
+# CRITICAL FIX: Import centralized cache for aiocache @cached decorator
+from centralized_cache import safe_get_cache
 
 logger = structlog.get_logger(__name__)
 
@@ -111,6 +105,13 @@ class UniversalFieldDetector:
         self.openai_client = openai_client
         self.config = FieldDetectorConfig()
         
+        # CRITICAL FIX: Initialize centralized cache for @cached decorator
+        self.cache = safe_get_cache()
+        if self.cache:
+            logger.info("Centralized cache initialized for field detector")
+        else:
+            logger.warning("Centralized cache unavailable, using in-memory cache for @cached decorator")
+        
         # GENIUS #1: Load patterns from YAML (non-devs can edit!)
         self.field_patterns = self._load_field_patterns()
         self.format_patterns = self._load_format_patterns()
@@ -165,13 +166,26 @@ class UniversalFieldDetector:
         return {}
     
     def _add_custom_recognizers(self):
-        """Add custom financial field recognizers to presidio"""
+        """Add custom financial field recognizers to presidio
+        
+        LIBRARY FIX: Using presidio's built-in recognizers + minimal custom patterns
+        Presidio already includes: EMAIL, PHONE_NUMBER, CREDIT_CARD, IBAN, etc.
+        """
+        # Add custom financial patterns that presidio doesn't have built-in
         invoice_pattern = Pattern(name="invoice_pattern",
                                   regex=r"\b(INV|INVOICE)[-\s]?\d{4,10}\b",
                                   score=0.85)
         invoice_recognizer = PatternRecognizer(supported_entity="INVOICE_NUMBER",
                                               patterns=[invoice_pattern])
         self.analyzer.registry.add_recognizer(invoice_recognizer)
+        
+        # Add PO number pattern
+        po_pattern = Pattern(name="po_pattern",
+                            regex=r"\b(PO|P\.O\.)[-\s]?\d{4,10}\b",
+                            score=0.85)
+        po_recognizer = PatternRecognizer(supported_entity="PO_NUMBER",
+                                         patterns=[po_pattern])
+        self.analyzer.registry.add_recognizer(po_recognizer)
     
     # ========================================================================
     # MAIN DETECTION METHOD (GENIUS: Parallel + Cached)

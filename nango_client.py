@@ -5,6 +5,7 @@ from typing import Any, Dict, Optional
 import httpx
 import time
 import asyncio
+import random
 from prometheus_client import Counter, Histogram
 
 
@@ -262,8 +263,12 @@ class NangoClient:
             except Exception as e:
                 last_exc = e
             attempt += 1
-            # Exponential backoff with jitter
-            await asyncio.sleep(backoff_base * (2 ** (attempt - 1)) + (0.1 * attempt))
+            # Exponential backoff with decorrelated jitter (prevents retry storms)
+            # Formula: base * 2^attempt + random(0, base * 2^attempt)
+            exponential_delay = backoff_base * (2 ** (attempt - 1))
+            jitter = random.uniform(0, exponential_delay)
+            total_delay = exponential_delay + jitter
+            await asyncio.sleep(total_delay)
         # Exhausted retries
         if last_exc:
             raise last_exc

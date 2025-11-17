@@ -1,29 +1,21 @@
-"""NASA-GRADE Universal Extractors v3.1.0 - ONNX-FREE
-================================================================
+"""Universal Extractors v3.1.0
 
-GENIUS OPTIMIZATIONS:
-- Direct lightweight parsers: PDF (pdfminer.six), DOCX (python-docx), PPTX (python-pptx), CSV, JSON, TXT
-- easyocr: 92% OCR accuracy (vs 60% tesseract) + spatial data + confidence
-- presidio-analyzer: PII/field detection (50x faster than custom loops)
-- aiocache: Async caching (consistent with all optimized files)
-- structlog: JSON logging + Prometheus metrics
+Multi-format data extraction using:
+- Direct lightweight parsers (pdfminer.six, python-docx, python-pptx, csv)
+- OCR processing (easyocr)
+- PII detection (presidio-analyzer)
+- Redis-backed caching (aiocache)
+- Structured logging (structlog)
 
-FIXED (v3.1.0):
-- REMOVED unstructured library (caused onnxruntime executable stack errors on Railway)
-- Direct parsers: pdfminer.six, python-docx, python-pptx, csv, json (NO ONNX dependencies)
-- 100% functionality preserved with zero compromise
-
-CODE REDUCTION: 793 → 250 lines (68% reduction)
-SPEED: 15x overall
-ACCURACY: +30%
-COMPROMISE: ZERO - All formats supported, NO onnxruntime errors
+ONNX-FREE: No unstructured/onnxruntime dependencies
 
 Author: Senior Full-Stack Engineer
-Version: 3.1.0 (NASA-GRADE - ONNX-FREE)
+Version: 3.1.0
 """
 
 import asyncio
-import xxhash  # LIBRARY REPLACEMENT: xxhash for 5-10x faster hashing
+import hashlib
+import xxhash
 import time
 from datetime import datetime
 from typing import Any, Dict, List, Optional
@@ -32,10 +24,8 @@ from pathlib import Path
 import tempfile
 import io
 
-# NASA-GRADE LIBRARIES (consistent with document classifier & platform detector)
-# REMOVED: Direct easyocr import - now lazy-loaded via inference_service
-# import easyocr  # 92% OCR accuracy vs 60% tesseract
-import structlog  # Structured JSON logging
+# REMOVED: Direct easyocr import - lazy-loaded via inference_service
+import structlog
 from aiocache import cached, Cache
 from aiocache.serializers import JsonSerializer
 from pydantic import BaseModel, Field, validator

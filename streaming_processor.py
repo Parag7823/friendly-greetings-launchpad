@@ -62,11 +62,29 @@ class ProcessingStats:
             self.errors = []
 
 class MemoryMonitor:
-    """Monitors memory usage during processing"""
+    """Monitors memory usage during processing with auto-scaling for wide data"""
     
-    def __init__(self, limit_mb: int = 500):
-        self.limit_mb = limit_mb
+    def __init__(self, limit_mb: int = 500, estimated_row_width: int = 1):
+        """
+        Initialize memory monitor with optional auto-scaling.
+        
+        Args:
+            limit_mb: Base memory limit in MB (default 500)
+            estimated_row_width: Estimated number of columns per row (for auto-scaling)
+                                 Used to adjust limit for wide Excel sheets
+        """
         self.process = psutil.Process()
+        
+        # Auto-scale memory limit for wide data (100+ columns)
+        # Wide sheets need more memory per chunk due to DataFrame overhead
+        if estimated_row_width > 50:
+            # Scale: 50 cols = 1x, 100 cols = 1.2x, 200 cols = 1.4x
+            scale_factor = 1.0 + (min(estimated_row_width - 50, 150) / 500.0)
+            self.limit_mb = max(limit_mb, int(limit_mb * scale_factor))
+            logger.info(f"memory_limit_auto_scaled", base_limit=limit_mb, 
+                       scaled_limit=self.limit_mb, row_width=estimated_row_width)
+        else:
+            self.limit_mb = limit_mb
     
     def get_memory_usage_mb(self) -> float:
         """Get current memory usage in MB"""
@@ -82,11 +100,12 @@ class MemoryMonitor:
         gc.collect()
 
 class StreamingExcelProcessor:
-    """Memory-efficient Excel file processor"""
+    """Memory-efficient Excel file processor with auto-scaling for wide sheets"""
     
     def __init__(self, config: StreamingConfig):
         self.config = config
-        self.memory_monitor = MemoryMonitor(config.memory_limit_mb)
+        # Initialize with default; will be updated per sheet based on column count
+        self.memory_monitor = MemoryMonitor(config.memory_limit_mb, estimated_row_width=1)
         self.executor = ThreadPoolExecutor(max_workers=2)
     
     async def process_excel_stream(self, file_path: str, 
@@ -118,6 +137,10 @@ class StreamingExcelProcessor:
                     headers = [str(sheet.cell_value(0, col)) if sheet.cell_value(0, col) else f'Column_{col}' 
                               for col in range(sheet.ncols)]
                     
+                    # Auto-scale memory limit based on sheet width
+                    self.memory_monitor = MemoryMonitor(self.config.memory_limit_mb, 
+                                                       estimated_row_width=sheet.ncols)
+                    
                     chunk_data = []
                     row_count = 0
                     
@@ -147,8 +170,9 @@ class StreamingExcelProcessor:
                             yield df_chunk
                             
                             # Clear chunk data and force garbage collection
-                            chunk_data = []
+                            del chunk_data
                             gc.collect()
+                            chunk_data = []
                             
                             # Progress callback
                             if progress_callback:
@@ -181,6 +205,11 @@ class StreamingExcelProcessor:
                     headers = None
                     chunk_data = []
                     row_count = 0
+                    sheet_width = sheet.max_column  # Get column count for auto-scaling
+                    
+                    # Auto-scale memory limit based on sheet width
+                    self.memory_monitor = MemoryMonitor(self.config.memory_limit_mb, 
+                                                       estimated_row_width=sheet_width)
                     
                     for row_idx, row in enumerate(sheet.iter_rows(values_only=True)):
                         # Check memory usage periodically
@@ -212,8 +241,9 @@ class StreamingExcelProcessor:
                             yield df_chunk
                             
                             # Clear chunk data and force garbage collection
-                            chunk_data = []
+                            del chunk_data
                             gc.collect()
+                            chunk_data = []
                             
                             # Progress callback
                             if progress_callback:
@@ -266,10 +296,9 @@ class StreamingCSVProcessor:
                 
                 yield chunk
                 
-                # Memory management
-                if chunk_count % 10 == 0:
-                    if self.memory_monitor.check_memory_limit():
-                        self.memory_monitor.force_garbage_collection()
+                # Memory management - check after EVERY chunk, not just every 10
+                if self.memory_monitor.check_memory_limit():
+                    self.memory_monitor.force_garbage_collection()
                 
                 # Progress callback
                 if progress_callback and chunk_count % self.config.progress_callback_interval == 0:

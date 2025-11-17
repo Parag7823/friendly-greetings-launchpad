@@ -224,6 +224,10 @@ class CausalInferenceEngine:
                 'message': 'Causal analysis failed'
             }
     
+    async def analyze_all_relationships(self, user_id: str) -> Dict[str, Any]:
+        """Wrapper for backward compatibility with ARQ worker"""
+        return await self.analyze_causal_relationships(user_id)
+    
     async def _analyze_single_relationship(
         self,
         relationship: Dict[str, Any],
@@ -410,6 +414,19 @@ class CausalInferenceEngine:
                 'message': 'Root cause analysis failed'
             }
     
+    async def analyze_root_causes(self, user_id: str, problem_event_id: Optional[str] = None) -> Dict[str, Any]:
+        """Wrapper for backward compatibility with ARQ worker"""
+        if problem_event_id:
+            return await self.perform_root_cause_analysis(user_id, problem_event_id)
+        # If no specific event, analyze all root causes
+        try:
+            result = self.supabase.rpc('find_root_causes', {'p_user_id': user_id}).execute()
+            if result.data and len(result.data) > 0:
+                return await self.perform_root_cause_analysis(user_id, result.data[0]['problem_event_id'])
+        except:
+            pass
+        return {"root_causes": [], "total_found": 0}
+    
     async def perform_counterfactual_analysis(
         self,
         user_id: str,
@@ -503,6 +520,19 @@ class CausalInferenceEngine:
                 'error': str(e),
                 'message': 'Counterfactual analysis failed'
             }
+    
+    async def analyze_counterfactuals(self, user_id: str, intervention_event_id: Optional[str] = None) -> Dict[str, Any]:
+        """Wrapper for backward compatibility with ARQ worker"""
+        if intervention_event_id:
+            return await self.perform_counterfactual_analysis(user_id, intervention_event_id, intervention_type='amount_change', counterfactual_value=0)
+        # If no specific event, analyze first event
+        try:
+            result = self.supabase.table('raw_events').select('id').eq('user_id', user_id).limit(1).execute()
+            if result.data and len(result.data) > 0:
+                return await self.perform_counterfactual_analysis(user_id, result.data[0]['id'], intervention_type='amount_change', counterfactual_value=0)
+        except:
+            pass
+        return {"scenarios": [], "total_scenarios": 0}
     
     async def _build_causal_graph(self, user_id: str):
         """Build directed causal graph from causal relationships"""

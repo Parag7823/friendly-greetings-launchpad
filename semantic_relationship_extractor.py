@@ -1,26 +1,16 @@
 """
-Production-Grade Semantic Relationship Extractor v2.0
-=====================================================
+Semantic Relationship Extractor v2.0
 
-COMPLETE REWRITE using genius libraries for production-grade quality.
-
-REPLACED:
-- 77 lines of custom caching → aiocache (5 lines)
-- 50 lines of custom metrics → prometheus_client (10 lines)
-- 40 lines of manual batching → aiometer (3 lines)
-- Manual JSON parsing → instructor auto-validation
-
-NEW CAPABILITIES:
-- Redis-backed distributed caching
+Production-grade semantic relationship extraction using:
+- Redis-backed distributed caching (aiocache)
 - Prometheus metrics (Grafana-ready)
-- Automatic rate limiting
-- Auto-retry on validation failure
+- Automatic rate limiting (aiometer)
+- Structured output validation (instructor)
 - Streaming support
-- Zero dead code
+- AI-powered extraction (Groq)
 
 Author: Senior Full-Stack Engineer
 Version: 2.0.0
-Date: 2025-11-05
 """
 
 import asyncio
@@ -37,14 +27,11 @@ from groq import AsyncGroq
 import instructor
 from pydantic import BaseModel, Field, field_validator
 
-# Caching (replaces 77 lines of custom code)
 from aiocache import cached, Cache
 from aiocache.serializers import PickleSerializer
 
-# Metrics (replaces 50 lines of custom code)
 from prometheus_client import Counter, Histogram, Gauge
 
-# Rate limiting (replaces 40 lines of manual batching)
 import aiometer
 
 # Embeddings

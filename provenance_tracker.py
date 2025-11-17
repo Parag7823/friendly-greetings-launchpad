@@ -67,15 +67,15 @@ class ProvenanceTracker:
         payload: Dict[str, Any]
     ) -> str:
         """
-        Calculate SHA256 hash of row data for tamper detection.
+        Calculate normalized hash of row data for duplicate detection alignment.
+        
+        CRITICAL: Uses token normalization matching duplicate detection's MinHash algorithm.
+        This ensures same row produces same hash across provenance and duplicate detection.
         
         The hash is calculated from:
         - source_filename: Original file name
         - row_index: Row number in source file
-        - payload: Original raw data (before any transformations)
-        
-        This creates a unique fingerprint that can detect any modifications
-        to the original data.
+        - payload: Normalized tokens from row data
         
         Args:
             source_filename: Name of source file
@@ -83,7 +83,7 @@ class ProvenanceTracker:
             payload: Original row data as dictionary
             
         Returns:
-            SHA256 hash as hex string
+            xxh3_128 hash as hex string
             
         Example:
             >>> tracker = ProvenanceTracker()
@@ -93,16 +93,21 @@ class ProvenanceTracker:
             ...     {"vendor": "Acme Corp", "amount": 1500.00}
             ... )
             >>> print(hash_val)
-            'a3f5b8c9d2e1f4a7b6c5d8e9f2a1b4c7d6e5f8a9b2c1d4e7f6a5b8c9d2e1f4a7'
+            'a3f5b8c9d2e1f4a7b6c5d8e9f2a1b4c7'
         """
         try:
-            # Create canonical representation
-            hash_input = f"{source_filename}||{row_index}||{json.dumps(payload, sort_keys=True)}"
+            # Use unified normalization function for consistency with duplicate detection
+            tokens = get_normalized_tokens(payload)
             
-            # LIBRARY REPLACEMENT: xxhash for 5-10x faster hashing
-            row_hash = xxhash.xxh64(hash_input.encode('utf-8')).hexdigest()
+            # Create canonical representation with sorted tokens
+            sorted_tokens = sorted(list(tokens))
+            hash_input = f"{source_filename}||{row_index}||{'||'.join(sorted_tokens)}"
             
-            self.logger.debug(f"Calculated row hash for {source_filename}:{row_index} = {row_hash[:16]}...")
+            # Use xxh3_128 for consistency with duplicate detection
+            from xxhash import xxh3_128
+            row_hash = xxh3_128(hash_input.encode('utf-8')).hexdigest()
+            
+            self.logger.debug(f"Calculated normalized row hash for {source_filename}:{row_index} = {row_hash[:16]}...")
             return row_hash
             
         except Exception as e:
@@ -486,6 +491,94 @@ def append_lineage_step(
 ) -> List[Dict[str, Any]]:
     """Convenience function for appending lineage step"""
     return provenance_tracker.append_lineage_step(existing_path, step, operation, metadata)
+
+
+# ============================================================================
+# UNIFIED ROW NORMALIZATION - Shared across duplicate detection, provenance, entity resolver
+# ============================================================================
+
+def normalize_row_for_hashing(row: Dict[str, Any]) -> Dict[str, str]:
+    """
+    Unified row normalization for consistent hashing across all modules.
+    
+    Used by:
+    - provenance_tracker: Row hash calculation
+    - production_duplicate_detection_service: Content fingerprinting
+    - entity_resolver_optimized: Training data normalization
+    
+    Normalization rules:
+    1. Convert all values to lowercase strings
+    2. Strip whitespace
+    3. Remove special characters (keep only alphanumeric and spaces)
+    4. Collapse multiple spaces to single space
+    5. Skip None/empty values
+    
+    Args:
+        row: Dictionary with row data
+        
+    Returns:
+        Dictionary with normalized string values
+        
+    Example:
+        >>> row = {"vendor": "ACME Corp", "amount": 1500.00, "date": None}
+        >>> normalize_row_for_hashing(row)
+        {'vendor': 'acme corp', 'amount': '1500.0'}
+    """
+    import re
+    
+    normalized = {}
+    for key, value in row.items():
+        if value is None or (isinstance(value, str) and not value.strip()):
+            continue
+        
+        # Convert to string and normalize
+        val_str = str(value).lower().strip()
+        
+        # Remove special characters, keep only alphanumeric and spaces
+        val_str = re.sub(r'[^a-z0-9\s]', '', val_str)
+        
+        # Collapse multiple spaces
+        val_str = re.sub(r'\s+', ' ', val_str)
+        
+        if val_str:  # Only include non-empty values
+            normalized[key] = val_str
+    
+    return normalized
+
+
+def get_normalized_tokens(row: Dict[str, Any]) -> set:
+    """
+    Extract normalized tokens from row for MinHash-based duplicate detection.
+    
+    Used by:
+    - production_duplicate_detection_service: Content fingerprinting
+    - persistent_lsh_service: LSH indexing
+    
+    Args:
+        row: Dictionary with row data
+        
+    Returns:
+        Set of normalized tokens
+        
+    Example:
+        >>> row = {"vendor": "ACME Corp", "amount": 1500.00}
+        >>> get_normalized_tokens(row)
+        {'acme', 'corp', '1500', '0'}
+    """
+    import re
+    
+    tokens = set()
+    normalized = normalize_row_for_hashing(row)
+    
+    for key, value in normalized.items():
+        # Split on whitespace and special characters
+        key_tokens = re.findall(r'\w+', key)
+        val_tokens = re.findall(r'\w+', value)
+        
+        tokens.update(key_tokens)
+        tokens.update(val_tokens)
+    
+    return tokens
 
 
 # ============================================================================

@@ -1,37 +1,21 @@
-"""Production-Grade Universal Document Classifier - NASA v4.0.0
-===================================================================
+"""Universal Document Classifier v4.0.0
 
-GENIUS UPGRADES (v3.0 → v4.0):
-- ❌ REMOVED: flashtext (deprecated, not async)
-- ❌ REMOVED: cachetools (replaced with aiocache + Redis)
-- ✅ ADDED: pyahocorasick (2x faster, async-ready)
-- ✅ ADDED: aiocache + Redis (10x faster, persistent)
-- ✅ ADDED: entropy-based confidence (35% more accurate)
-
-Libraries Used:
-- pyahocorasick: Aho-Corasick algorithm (2x faster than flashtext, async)
-- aiocache: Redis-backed async cache (persistent, visualizable)
-- easyocr: 92% OCR accuracy (vs 60% tesseract) + spatial data + confidence
-- sentence-transformers: Zero-shot classification (1000x cheaper than AI)
-- sklearn TF-IDF: Smart indicator weighting (handles ambiguity)
-- PyYAML: External document type config (non-devs can edit)
-- structlog: Structured JSON logging
-- pydantic-settings: Type-safe configuration
-
-Features PRESERVED:
-- AI-powered classification with Groq Llama-3.3-70B
-- Comprehensive document type database (20+ types)
-- Confidence scoring and validation
+Multi-faceted document classification using:
+- Pattern matching (pyahocorasick)
+- AI classification (Groq Llama-3.3-70B)
+- OCR processing (easyocr)
+- Zero-shot classification (sentence-transformers)
+- TF-IDF indicator weighting
+- Redis-backed caching (aiocache)
 - Learning system with database persistence
-- Async processing for high concurrency
 
 Author: Senior Full-Stack Engineer
-Version: 4.0.0 (NASA-GRADE v4.0)
+Version: 4.0.0
 """
 
 import asyncio
 import hashlib
-import orjson as json  # LIBRARY REPLACEMENT: orjson for 3-5x faster JSON parsing
+import orjson as json
 import re
 import time
 import os
@@ -40,24 +24,21 @@ from typing import Any, Dict, List, Optional, Tuple, Literal
 from dataclasses import dataclass
 from pathlib import Path
 
-# NASA-GRADE v4.0 LIBRARIES (Consistent with all optimized files)
-import ahocorasick  # Replaces flashtext (2x faster, async-ready)
+import ahocorasick
 # REMOVED: Direct easyocr import - lazy-loaded via inference_service (line 200)
 # import easyocr  # 92% OCR accuracy vs 60% tesseract
-import structlog  # Structured JSON logging
-import numpy as np  # For entropy calculation
+import structlog
+import numpy as np
 from pydantic import BaseModel, Field, validator
 from pydantic_settings import BaseSettings
 from aiocache import cached, Cache
 from aiocache.serializers import JsonSerializer
-import yaml  # For external document type config
-from sentence_transformers import SentenceTransformer  # Zero-shot classification
-from sklearn.feature_extraction.text import TfidfVectorizer  # Smart indicator weighting
+import yaml
+from sentence_transformers import SentenceTransformer
+from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 
 logger = structlog.get_logger(__name__)
-
-# Import debug logger for capturing AI reasoning
 try:
     from debug_logger import get_debug_logger
     DEBUG_LOGGER_AVAILABLE = True

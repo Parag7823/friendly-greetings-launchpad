@@ -1,39 +1,19 @@
-"""
-Production-Grade Universal Platform Detector - NASA v4.0.0
-===========================================================
+"""Universal Platform Detector v4.0.0
 
-GENIUS UPGRADES (v3.0 → v4.0):
-- ❌ REMOVED: flashtext (deprecated, not async)
-- ❌ REMOVED: cachetools (replaced with aiocache + Redis)
-- ❌ REMOVED: Manual JSON parsing (replaced with instructor)
-- ✅ ADDED: pyahocorasick (2x faster, async-ready)
-- ✅ ADDED: aiocache + Redis (10x faster, persistent)
-- ✅ ADDED: instructor for AI parsing (40% more reliable)
-- ✅ ADDED: presidio for PII detection (30% better accuracy)
-- ✅ ADDED: entropy-based confidence (35% more accurate)
-
-Libraries Used:
-- pyahocorasick: Aho-Corasick algorithm (2x faster than flashtext, async)
-- aiocache: Redis-backed async cache (persistent, visualizable)
-- instructor: Structured AI output (zero JSON hallucinations)
-- presidio-analyzer: PII detection
-- structlog: Structured JSON logging
-- pydantic-settings: Type-safe configuration
-
-Features PRESERVED:
-- AI-powered detection with Groq Llama-3.3-70B
-- Comprehensive platform database (50+ platforms)
-- Confidence scoring and validation
+Multi-method platform detection using:
+- Pattern matching (pyahocorasick)
+- AI classification (Groq Llama-3.3-70B)
+- Confidence scoring with entropy calculation
+- Redis-backed caching (aiocache)
+- PII detection (presidio-analyzer)
 - Learning system with database persistence
-- Async processing for high concurrency
 
 Author: Senior Full-Stack Engineer
-Version: 4.0.0 (NASA-GRADE v4.0)
+Version: 4.0.0
 """
 
 import asyncio
 import hashlib
-import json
 import re
 import time
 import os
@@ -44,7 +24,7 @@ from dataclasses import dataclass
 # NASA-GRADE v4.0 LIBRARIES (Consistent with all optimized files)
 import ahocorasick  # Replaces flashtext (2x faster, async-ready)
 import structlog
-import numpy as np  # For entropy calculation
+from scipy.stats import entropy  # LIBRARY FIX: Replace manual entropy calculation
 from pydantic import BaseModel, Field, validator
 from pydantic_settings import BaseSettings
 from aiocache import cached, Cache
@@ -710,16 +690,12 @@ class UniversalPlatformDetectorOptimized:
             # GENIUS v4.0: Entropy-based confidence (35% more accurate)
             total_indicators = sum(platform_counts.values())
             if total_indicators > 0:
-                # Calculate Shannon entropy
-                entropy_parts = []
-                for count in platform_counts.values():
-                    p = count / total_indicators
-                    if p > 0:
-                        entropy_parts.append(-p * np.log2(p))
-                entropy = sum(entropy_parts)
+                # LIBRARY FIX: Use scipy.stats.entropy for Shannon entropy calculation
+                probabilities = [count / total_indicators for count in platform_counts.values()]
+                shannon_entropy = entropy(probabilities, base=2)
                 # Normalize to confidence (lower entropy = higher confidence)
-                max_entropy = np.log2(len(platform_counts)) if len(platform_counts) > 1 else 1.0
-                base_confidence = 1.0 - (entropy / max_entropy) if max_entropy > 0 else 0.5
+                max_entropy = len(platform_counts) if len(platform_counts) > 1 else 1.0
+                base_confidence = 1.0 - (shannon_entropy / max_entropy) if max_entropy > 0 else 0.5
                 # Boost by indicator count
                 confidence_score = min(base_confidence + (indicator_count * 0.1), 0.95)
             else:

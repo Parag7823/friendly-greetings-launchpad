@@ -1,29 +1,21 @@
-"""
-Enhanced Relationship Detector - REFACTORED WITH GENIUS LIBRARIES
+"""Enhanced Relationship Detector v2.0
 
-REFACTORING (Nov 2025):
-- Replaced custom code with industry-standard libraries
-- 60% code complexity reduction
-- 25% accuracy improvement
-- 10-100x speed improvement on specific operations
+Multi-method relationship detection using:
+- Graph analysis (igraph)
+- Fuzzy string matching (rapidfuzz)
+- Semantic similarity (sentence-transformers)
+- Date parsing (pendulum)
+- Named Entity Recognition (spaCy)
+- Machine learning scoring (scikit-learn)
 
-GENIUS LIBRARIES USED:
-1. igraph (13-32x faster than networkx) - Graph analysis
-2. RapidFuzz (100x faster than difflib) - Fuzzy string matching
-3. Sentence-Transformers (90% vs 60% accuracy) - Semantic similarity
-4. Pendulum (handles 100+ date formats) - Date parsing
-5. spaCy (95% vs 40% accuracy) - Named Entity Recognition
-6. Scikit-learn (adaptive weights) - Machine learning scoring
+Features:
+- Cross-file relationship detection
+- Within-file relationship detection
+- Comprehensive scoring system
+- Validation and deduplication
 
-ORIGINAL FEATURES:
-1. Actually finds relationships between events
-2. Cross-file relationship detection
-3. Within-file relationship detection
-4. Comprehensive scoring system
-5. Proper validation and deduplication
-
-DATABASE CHANGES: NONE (uses existing schema)
-COST: $0 (all libraries are free and open-source)
+Author: Senior Full-Stack Engineer
+Version: 2.0.0
 """
 
 import os
@@ -35,13 +27,12 @@ from typing import Dict, List, Optional, Any, Tuple
 from anthropic import AsyncAnthropic
 from supabase import create_client, Client
 
-# REFACTORED: Genius libraries replacing custom code
-import igraph as ig  # 13-32x faster than networkx
-import pendulum  # Better date parsing
-import spacy  # NER for entity extraction
-from rapidfuzz import fuzz, process  # Already in dependencies, 100x faster than difflib
-from sentence_transformers import SentenceTransformer, util  # Semantic similarity
-from sklearn.ensemble import RandomForestClassifier  # ML for adaptive weights
+import igraph as ig
+import pendulum
+import spacy
+from rapidfuzz import fuzz, process
+from sentence_transformers import SentenceTransformer, util
+from sklearn.ensemble import RandomForestClassifier
 import numpy as np
 from provenance_tracker import normalize_business_logic, normalize_temporal_causality
 

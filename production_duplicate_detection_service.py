@@ -1,38 +1,24 @@
-"""
-Production-Grade Duplicate Detection Service - NASA v4.0.0
-=============================================================
+"""Production Duplicate Detection Service v4.0.0
 
-GENIUS UPGRADES (v3.0 → v4.0):
-- REMOVED: sqlalchemy (redundant - supabase only)
-- REMOVED: cachetools (replaced with aiocache + Redis)
-- ADDED: aiocache + Redis (10x faster, persistent, visualizable)
-- ADDED: polars for delta analysis (50x faster than deepdiff)
-- ADDED: entropy + scored_labels confidence (40% more accurate)
-- ADDED: presidio for PII security validation
+4-phase duplicate detection pipeline:
+- MinHash LSH (datasketch)
+- Fuzzy string matching (rapidfuzz)
+- Delta analysis (polars)
+- PII security validation (presidio-analyzer)
 
-Libraries Used:
-- datasketch: MinHash LSH (1M files in 0.01s)
-- polars: Delta analysis via hash joins (50x faster than deepdiff) ✅ ACTIVELY USED
-- rapidfuzz: Advanced string similarity
-- aiocache: Redis-backed async cache (persistent, visualizable)
-- structlog: Structured logging
-- pydantic-settings: Type-safe config
-- presidio-analyzer: PII security validation
-
-Features PRESERVED:
+Features:
 - Learning ecosystem with confidence scoring
-- 4-phase detection pipeline
-- Delta analysis for intelligent merging
-- Security validation
-- Async/await performance
+- Redis-backed caching (aiocache)
+- Structured logging (structlog)
+- Intelligent merging with delta analysis
 
 Author: Senior Full-Stack Engineer
-Version: 4.0.0 (NASA-GRADE v4.0)
+Version: 4.0.0
 """
 
 import asyncio
-import xxhash  # LIBRARY REPLACEMENT: xxhash for 5-10x faster hashing
-import orjson as json  # LIBRARY REPLACEMENT: orjson for 3-5x faster JSON parsing
+import xxhash
+import orjson as json
 import os
 import re
 import time
@@ -41,10 +27,9 @@ from datetime import datetime, timedelta
 from enum import Enum
 from typing import Any, Dict, List, Optional, Set
 
-# NASA-GRADE v4.0 LIBRARIES (Consistent with all optimized files)
 from datasketch import MinHash
 # MinHashLSH removed - using PersistentLSHService only to avoid dual systems
-import polars as pl  # NOW USED: Delta analysis via hash joins (50x faster than deepdiff)
+import polars as pl
 from rapidfuzz import fuzz
 import structlog
 from pydantic_settings import BaseSettings
@@ -52,9 +37,8 @@ from supabase import Client
 from aiocache import cached, Cache
 from aiocache.serializers import JsonSerializer
 from presidio_analyzer import AnalyzerEngine
-import numpy as np  # For entropy calculation
+import numpy as np
 
-# GENIUS v4.0: presidio for PII security validation (consistent with other files)
 try:
     from presidio_analyzer import AnalyzerEngine
     presidio_analyzer = AnalyzerEngine()

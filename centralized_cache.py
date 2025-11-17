@@ -21,7 +21,7 @@ import logging
 import asyncio
 from typing import Optional, Any
 from aiocache import Cache
-from aiocache.serializers import JsonSerializer
+from aiocache.serializers import PickleSerializer
 import structlog
 
 logger = structlog.get_logger(__name__)
@@ -79,7 +79,7 @@ class CentralizedCache:
             'endpoint': endpoint,
             'port': port,
             'db': db,
-            'serializer': JsonSerializer(),
+            'serializer': PickleSerializer(),
             'namespace': "finely_ai",
             'timeout': 5,
             'pool_min_size': int(os.environ.get('REDIS_POOL_MIN', '10')),
@@ -515,31 +515,42 @@ async def health_check() -> dict:
         }
 
 
-async def validate_redis_connection(redis_url: str) -> bool:
+async def validate_redis_connection(redis_url: str, max_retries: int = 3, retry_delay: float = 1.0) -> bool:
     """
-    Validate Redis connection before initializing cache.
+    Validate Redis connection before initializing cache with retry logic.
     
     Args:
         redis_url: Redis connection URL
+        max_retries: Maximum number of retry attempts (default 3)
+        retry_delay: Delay between retries in seconds (default 1.0)
         
     Returns:
         True if connection successful, False otherwise
     """
-    try:
-        import redis.asyncio as redis
-        
-        # Parse Redis URL
-        client = redis.from_url(redis_url, decode_responses=True)
-        
-        # Test connection with ping
-        await client.ping()
-        await client.close()
-        
-        logger.info("redis_connection_validated", url=redis_url)
-        return True
-    except Exception as e:
-        logger.error("redis_connection_failed", url=redis_url, error=str(e))
-        return False
+    import redis.asyncio as redis
+    
+    for attempt in range(max_retries):
+        try:
+            # Parse Redis URL
+            client = redis.from_url(redis_url, decode_responses=True, socket_connect_timeout=5)
+            
+            # Test connection with ping
+            await client.ping()
+            await client.close()
+            
+            logger.info("redis_connection_validated", url=redis_url, attempt=attempt + 1)
+            return True
+        except Exception as e:
+            if attempt < max_retries - 1:
+                logger.warning("redis_connection_failed_retrying", 
+                             url=redis_url, attempt=attempt + 1, 
+                             max_retries=max_retries, error=str(e))
+                await asyncio.sleep(retry_delay * (attempt + 1))  # Exponential backoff
+            else:
+                logger.error("redis_connection_failed_exhausted_retries", 
+                           url=redis_url, max_retries=max_retries, error=str(e))
+    
+    return False
 
 
 def require_redis_cache() -> bool:
