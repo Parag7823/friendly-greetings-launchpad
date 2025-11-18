@@ -10,7 +10,7 @@ Version: 1.0.0
 """
 
 import asyncio
-import logging
+import structlog
 import time
 import uuid
 from datetime import datetime, timedelta
@@ -20,7 +20,7 @@ from enum import Enum
 import json
 from supabase import Client
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 class RecoveryAction(Enum):
     """Types of recovery actions"""

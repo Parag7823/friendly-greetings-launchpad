@@ -22,7 +22,7 @@ Version: 2.0.0
 Date: 2025-11-05
 """
 
-import logging
+import structlog
 import asyncio
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any, Tuple, Set
@@ -47,7 +47,7 @@ import pandas as pd
 from provenance_tracker import normalize_business_logic, normalize_temporal_causality
 import numpy as np
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 class CausalDirection(Enum):
     """Direction of causal relationship"""
@@ -791,6 +791,26 @@ class CausalInferenceEngine:
             }
             
             self.supabase.table('causal_relationships').upsert(data).execute()
+            
+            # CRITICAL FIX #3: Update normalized_events with causal metadata
+            try:
+                self.supabase.table('normalized_events').update({
+                    'causal_weight': causal_rel.bradford_hill_scores.causal_score,
+                    'causal_links': [
+                        {
+                            'relationship_id': causal_rel.relationship_id,
+                            'is_causal': causal_rel.is_causal,
+                            'causal_direction': causal_rel.causal_direction.value,
+                            'causal_score': causal_rel.bradford_hill_scores.causal_score
+                        }
+                    ],
+                    'causal_reasoning': causal_rel.criteria_details.get('reasoning', ''),
+                    'updated_at': datetime.utcnow().isoformat()
+                }).eq('user_id', user_id).execute()
+                
+                logger.debug(f"Updated normalized_events with causal metadata for relationship {causal_rel.relationship_id}")
+            except Exception as norm_update_err:
+                logger.warning(f"Failed to update normalized_events with causal metadata: {norm_update_err}")
             
         except Exception as e:
             logger.error(f"Failed to store causal relationship: {e}")

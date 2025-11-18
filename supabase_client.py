@@ -14,13 +14,13 @@ Key Features:
 """
 
 import os
-import logging
+import structlog
 from typing import Optional
 from supabase import create_client, Client
 from functools import lru_cache
 import threading
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 # Global lock for thread-safe singleton
 _client_lock = threading.Lock()

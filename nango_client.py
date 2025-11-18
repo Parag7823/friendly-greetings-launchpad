@@ -7,6 +7,9 @@ import time
 import asyncio
 import random
 from prometheus_client import Counter, Histogram
+import structlog
+
+logger = structlog.get_logger(__name__)
 
 
 class NangoClient:
@@ -23,9 +26,6 @@ class NangoClient:
             raise ValueError("NANGO_SECRET_KEY env var not set")
 
     def _headers(self, provider_config_key: Optional[str] = None, connection_id: Optional[str] = None) -> Dict[str, str]:
-        import logging
-        logger = logging.getLogger(__name__)
-        
         if not self.secret_key:
             logger.error("❌ NANGO_SECRET_KEY is not set!")
         else:

@@ -15,7 +15,7 @@ Version: 2.0.0
 
 import asyncio
 import hashlib
-import logging
+import structlog
 import os
 from datetime import datetime
 from typing import Dict, List, Optional, Any, Tuple
@@ -37,7 +37,7 @@ import aiometer
 # Embeddings
 from embedding_service import get_embedding_service
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 # ============================================
 # PROMETHEUS METRICS (Industry Standard)
@@ -497,6 +497,31 @@ Determine:
             ).execute()
             
             logger.debug(f"Stored: {semantic_rel.source_event_id} → {semantic_rel.target_event_id}")
+            
+            # CRITICAL FIX #3: Update normalized_events with semantic metadata
+            try:
+                # Update source event's normalized_events record
+                self.supabase.table('normalized_events').update({
+                    'semantic_links': [
+                        {
+                            'target_event_id': semantic_rel.target_event_id,
+                            'relationship_type': semantic_rel.relationship_type,
+                            'confidence': semantic_rel.confidence,
+                            'temporal_causality': semantic_rel.temporal_causality.value
+                        }
+                    ],
+                    'relationship_evidence': {
+                        'key_factors': semantic_rel.key_factors,
+                        'reasoning': semantic_rel.reasoning,
+                        'business_logic': semantic_rel.business_logic.value
+                    },
+                    'semantic_confidence': semantic_rel.confidence,
+                    'updated_at': datetime.utcnow().isoformat()
+                }).eq('raw_event_id', semantic_rel.source_event_id).execute()
+                
+                logger.debug(f"Updated normalized_events for source event: {semantic_rel.source_event_id}")
+            except Exception as norm_update_err:
+                logger.warning(f"Failed to update normalized_events with semantic metadata: {norm_update_err}")
             
         except Exception as e:
             logger.error(f"Database store failed: {e}")

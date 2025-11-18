@@ -11,7 +11,7 @@ Version: 1.0.0
 """
 
 import asyncio
-import logging
+import structlog
 import tempfile
 import os
 import gc
@@ -22,7 +22,7 @@ import psutil
 from concurrent.futures import ThreadPoolExecutor
 import io
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 @dataclass
 class StreamingConfig:

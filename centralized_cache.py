@@ -17,12 +17,11 @@ Usage:
 """
 
 import os
-import logging
+import structlog
 import asyncio
 from typing import Optional, Any
 from aiocache import Cache
 from aiocache.serializers import PickleSerializer
-import structlog
 
 logger = structlog.get_logger(__name__)
 

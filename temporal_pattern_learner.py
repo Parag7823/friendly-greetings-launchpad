@@ -23,7 +23,7 @@ Version: 2.0.0
 Date: 2025-11-05
 """
 
-import logging
+import structlog
 import numpy as np
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any, Tuple
@@ -55,7 +55,7 @@ import pandas as pd
 # CRITICAL FIX: Import shared normalization functions
 from provenance_tracker import normalize_business_logic, normalize_temporal_causality
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 
 class PatternConfidence(Enum):
@@ -718,6 +718,38 @@ class TemporalPatternLearner:
             }
             
             self.supabase.table('temporal_patterns').upsert(data).execute()
+            
+            # CRITICAL FIX #3: Update normalized_events with temporal metadata
+            try:
+                # Find all events matching this relationship type and update them
+                events_result = self.supabase.table('relationship_instances').select(
+                    'source_event_id, target_event_id'
+                ).eq('user_id', user_id).eq('relationship_type', pattern.relationship_type).execute()
+                
+                if events_result.data:
+                    for rel in events_result.data:
+                        self.supabase.table('normalized_events').update({
+                            'temporal_patterns': [
+                                {
+                                    'relationship_type': pattern.relationship_type,
+                                    'avg_days_between': pattern.avg_days_between,
+                                    'confidence': pattern.confidence_score,
+                                    'has_seasonal': pattern.has_seasonal_pattern
+                                }
+                            ],
+                            'temporal_cycle_metadata': {
+                                'std_dev_days': pattern.std_dev_days,
+                                'seasonal_period_days': pattern.seasonal_period_days,
+                                'seasonal_amplitude': pattern.seasonal_amplitude
+                            },
+                            'temporal_confidence': pattern.confidence_score,
+                            'pattern_used_for_prediction': pattern.relationship_type,
+                            'updated_at': datetime.utcnow().isoformat()
+                        }).eq('raw_event_id', rel['source_event_id']).execute()
+                
+                logger.debug(f"Updated normalized_events with temporal patterns for {pattern.relationship_type}")
+            except Exception as norm_update_err:
+                logger.warning(f"Failed to update normalized_events with temporal metadata: {norm_update_err}")
             
         except Exception as e:
             logger.error(f"Failed to store temporal pattern: {e}")

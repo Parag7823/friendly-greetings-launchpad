@@ -4,6 +4,7 @@ import { useToast } from '@/hooks/use-toast';
 import { FileProcessingEvent } from '@/types/database';
 import { config } from '@/config';
 import { UnifiedErrorHandler, ErrorSeverity, ErrorSource } from '@/utils/errorHandler';
+import { useFastProcessorHook } from '@/hooks/useFastProcessorHook';
 
 interface SheetMetadata {
   name: string;
@@ -57,6 +58,7 @@ interface FastAPIProcessingProgress {
 export class FastAPIProcessor {
   private apiUrl: string;
   private progressCallback?: (progress: FastAPIProcessingProgress) => void;
+  private hookInstance: ReturnType<typeof useFastProcessorHook> | null = null;
 
   constructor() {
     // Use centralized config for API URL
@@ -65,6 +67,14 @@ export class FastAPIProcessor {
 
   setProgressCallback(callback: (progress: FastAPIProcessingProgress) => void) {
     this.progressCallback = callback;
+  }
+
+  /**
+   * CRITICAL FIX: Initialize hook instance for processing
+   * This must be called from a React component context
+   */
+  setHookInstance(hookInstance: ReturnType<typeof useFastProcessorHook>) {
+    this.hookInstance = hookInstance;
   }
 
   private updateProgress(step: string, message: string, progress: number, sheetProgress?: any, extra?: any) {
@@ -229,51 +239,17 @@ export class FastAPIProcessor {
     }
   }
 
+  /**
+   * CRITICAL FIX: Polling now delegated to useFastProcessorHook
+   * This consolidates polling logic and prevents direct API calls from component
+   */
   private async pollForResults(jobId: string, initialResponse: any): Promise<any> {
-    // CRITICAL FIX: Account for queue time + processing time
-    // ARQ worker function_timeout = 900 seconds (15 minutes for processing)
-    // But jobs can wait in queue before processing starts
-    // Increased to 25 minutes total (15 min processing + 10 min queue buffer)
-    const maxAttempts = 1000; // 25 minutes max (1.5 seconds * 1000 = 1500 seconds)
-    let attempts = 0;
-    
-    while (attempts < maxAttempts) {
-      try {
-        // Check job status
-        const statusResponse = await fetch(`${this.apiUrl}/job-status/${jobId}`);
-        if (statusResponse.ok) {
-          const statusData = await statusResponse.json();
-          
-          if (statusData.status === 'completed') {
-            this.updateProgress('complete', 'Processing completed!', 100);
-            return statusData.result || statusData;
-          } else if (statusData.status === 'failed') {
-            throw new Error(statusData.error || 'Processing failed');
-          } else if (statusData.status === 'cancelled') {
-            throw new Error('Processing was cancelled');
-          }
-          
-          // FIX ISSUE #15: Show progress indication during polling
-          if (statusData.progress !== undefined) {
-            const timeElapsed = Math.floor((attempts * config.websocket.pollingInterval) / 1000);
-            const progressMessage = statusData.message || `Processing... (${timeElapsed}s elapsed)`;
-            this.updateProgress('processing', progressMessage, statusData.progress);
-          }
-        }
-        
-        // CRITICAL FIX: Use configurable polling interval from config
-        await new Promise(resolve => setTimeout(resolve, config.websocket.pollingInterval));
-        attempts++;
-        
-      } catch (error) {
-        console.error('Polling error:', error);
-        attempts++;
-        await new Promise(resolve => setTimeout(resolve, 2000)); // Wait 2 seconds on error
-      }
+    if (!this.hookInstance) {
+      throw new Error('Hook instance not initialized - cannot poll for results');
     }
     
-    // FIX ISSUE #15: Better timeout message with suggestion
-    throw new Error('Processing is taking longer than expected. The job may still be running in the background. Please refresh the page or try again later.');
+    const result = await this.hookInstance.pollForResults(jobId, this.apiUrl);
+    return result;
   }
 
   async processFile(

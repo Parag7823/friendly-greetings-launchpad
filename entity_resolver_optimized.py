@@ -66,11 +66,13 @@ class ResolutionConfig(BaseModel):
     enable_caching: bool = True
     cache_ttl: int = 3600
     enable_fuzzy_matching: bool = True
-    similarity_threshold: float = 0.8
-    fuzzy_threshold: float = 0.7
+    similarity_threshold: float = 0.85  # CRITICAL FIX: Increased from 0.8 to prevent over-merging
+    fuzzy_threshold: float = 0.80  # CRITICAL FIX: Increased from 0.7 to prevent false matches
     max_similar_entities: int = 10
     batch_size: int = 100
     timeout_seconds: int = 30
+    strict_email_check: bool = True  # CRITICAL FIX: Enforce strict email matching
+    strict_phone_check: bool = True  # CRITICAL FIX: Enforce strict phone matching
     
     class Config:
         arbitrary_types_allowed = True
@@ -310,20 +312,30 @@ class EntityResolverOptimized:
     
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(min=1, max=4), retry=retry_if_exception_type(Exception))
     async def _find_exact_match(self, user_id: str, identifiers: Dict[str, str], entity_type: str) -> Optional[Dict]:
-        """v4.0: tenacity for retry (bulletproof)"""
+        """v4.0: tenacity for retry (bulletproof) + CRITICAL FIX: Strict email/phone checks"""
         if not identifiers:
             return None
         
         query = self.supabase.table('normalized_entities').select('*').eq('user_id', user_id).eq('entity_type', entity_type)
         
+        # CRITICAL FIX: Strict email matching - reject if email differs
         if identifiers.get('email'):
-            query = query.eq('email', identifiers['email'])
+            if self.config.strict_email_check:
+                # Strict mode: only match if email is EXACTLY the same
+                query = query.eq('email', identifiers['email'])
+            else:
+                query = query.eq('email', identifiers['email'])
+        # CRITICAL FIX: Strict phone matching - reject if phone differs
+        elif identifiers.get('phone'):
+            if self.config.strict_phone_check:
+                # Strict mode: only match if phone is EXACTLY the same
+                query = query.eq('phone', identifiers['phone'])
+            else:
+                query = query.eq('phone', identifiers['phone'])
         elif identifiers.get('tax_id'):
             query = query.eq('tax_id', identifiers['tax_id'])
         elif identifiers.get('bank_account'):
             query = query.eq('bank_account', identifiers['bank_account'])
-        elif identifiers.get('phone'):
-            query = query.eq('phone', identifiers['phone'])
         else:
             return None
         
@@ -361,6 +373,17 @@ class EntityResolverOptimized:
         
         match = best.to_dicts()[0]
         sim = match['similarity']
+        
+        # CRITICAL FIX: Reject fuzzy match if email/phone differs (strict mode)
+        if self.config.strict_email_check and identifiers.get('email'):
+            if match.get('email') and match['email'] != identifiers['email']:
+                logger.info("fuzzy_match_rejected_email_mismatch", entity_name=entity_name, candidate=match['canonical_name'], input_email=identifiers['email'], candidate_email=match.get('email'))
+                return None
+        
+        if self.config.strict_phone_check and identifiers.get('phone'):
+            if match.get('phone') and match['phone'] != identifiers['phone']:
+                logger.info("fuzzy_match_rejected_phone_mismatch", entity_name=entity_name, candidate=match['canonical_name'], input_phone=identifiers['phone'], candidate_phone=match.get('phone'))
+                return None
         
         # v4.0: GENIUS AI - If ambiguous (0.7-0.9), ask AI to decide
         if 0.7 <= sim < 0.9 and self.instructor_client:

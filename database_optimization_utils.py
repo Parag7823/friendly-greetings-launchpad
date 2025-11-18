@@ -21,7 +21,7 @@ All critical inefficient queries have been replaced with optimized versions.
 """
 
 import os
-import logging
+import structlog
 from typing import Dict, List, Any, Optional, Tuple
 from datetime import datetime, date
 from supabase import Client
@@ -35,7 +35,7 @@ except ModuleNotFoundError:
 import asyncio
 from dataclasses import dataclass
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 if not _HAS_SUPABASE_HELPER:
     _FALLBACK_SUPABASE_CLIENTS: Dict[bool, Optional[Client]] = {True: None, False: None}

@@ -35,14 +35,6 @@ from groq import AsyncGroq
 
 logger = structlog.get_logger(__name__)
 
-# Import debug logger for capturing AI reasoning
-try:
-    from debug_logger import get_debug_logger
-    DEBUG_LOGGER_AVAILABLE = True
-except ImportError:
-    DEBUG_LOGGER_AVAILABLE = False
-    logger.warning("Debug logger not available - skipping detailed logging")
-
 # OPTIMIZED: Type-safe configuration with pydantic-settings
 class PlatformDetectorConfig(BaseSettings):
     """Type-safe configuration with auto-validation"""
@@ -515,27 +507,8 @@ class UniversalPlatformDetectorOptimized:
             await self._log_detection_audit(detection_id, final_result, user_id)
             
             # 9. Debug logging for developer console
-            if DEBUG_LOGGER_AVAILABLE and user_id:
-                try:
-                    debug_logger = get_debug_logger(self.supabase, None)
-                    # CRITICAL FIX: Generate valid UUID if job_id is missing to enable debug_logs persistence
-                    job_id_for_debug = final_result.get('metadata', {}).get('job_id')
-                    if not job_id_for_debug or job_id_for_debug == 'unknown':
-                        job_id_for_debug = str(__import__('uuid').uuid4())
-                    await debug_logger.log_platform_detection(
-                        job_id=job_id_for_debug,
-                        user_id=user_id,
-                        platform=final_result['platform'],
-                        confidence=final_result['confidence'],
-                        method=final_result['method'],
-                        indicators=final_result['indicators'],
-                        reasoning=final_result['reasoning'],
-                        ai_prompt=final_result.get('metadata', {}).get('ai_prompt'),
-                        ai_response=final_result.get('metadata', {}).get('ai_response'),
-                        processing_time_ms=final_result['processing_time'] * 1000
-                    )
-                except Exception as debug_err:
-                    logger.warning("Debug logging failed", error=str(debug_err))
+            # Log platform detection result via structlog
+            logger.info("platform_detected", platform=final_result['platform'], confidence=final_result['confidence'], method=final_result['method'])
             
             return final_result
             

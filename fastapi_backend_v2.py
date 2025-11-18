@@ -72,7 +72,6 @@ from universal_document_classifier_optimized import UniversalDocumentClassifierO
 from universal_extractors_optimized import UniversalExtractorsOptimized as UniversalExtractors
 from entity_resolver_optimized import EntityResolverOptimized as EntityResolver
 from enhanced_relationship_detector import EnhancedRelationshipDetector
-from debug_logger import get_debug_logger
 from provenance_tracker import normalize_business_logic, normalize_temporal_causality
 
 from streaming_source import StreamedFile
@@ -295,9 +294,6 @@ safe_get_ai_cache = safe_get_cache
 
 import polars as pl
 
-# Import observability system for production monitoring
-from observability_system import StructuredLogger, MetricsCollector, ObservabilitySystem
-
 # Import security system for input validation and protection
 from security_system import SecurityValidator, InputSanitizer, SecurityContext
 
@@ -332,26 +328,8 @@ structlog.configure(
 logger = structlog.get_logger(__name__)
 
 # Declare global variables
-observability_system = None
 security_validator = None
-structured_logger = logger  # Use structlog
-metrics_collector = None
-performance_monitor = None
-health_checker = None
-
-# Try to initialize observability system for metrics only
-try:
-    from observability_system import get_global_observability_system
-    obs_system = get_global_observability_system()
-    metrics_collector = obs_system.metrics
-    performance_monitor = obs_system.performance_monitor
-    health_checker = obs_system.health_checker
-    logger.info("observability_integrated", status="success")
-except Exception as obs_error:
-    logger.warning("observability_unavailable", error=str(obs_error))
-    metrics_collector = None
-    performance_monitor = None
-    health_checker = None
+structured_logger = logger  # Use structlog for all logging
 
 # ----------------------------------------------------------------------------
 # Metrics (Prometheus) - Comprehensive business metrics
@@ -870,14 +848,7 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"Inference warmup skipped: {e}")
     
-    # Start observability if available
-    try:
-        from observability_system import get_observability_system
-        obs = get_observability_system()
-        await obs.start()
-        logger.info("✅ Observability system started")
-    except Exception as e:
-        logger.warning(f"Observability system not available: {e}")
+    # REMOVED: Observability system - using structlog for all logging
     
     # Start periodic WebSocket cleanup task
     import asyncio
@@ -948,13 +919,7 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"WebSocket Pub/Sub cleanup failed: {e}")
     
-    try:
-        from observability_system import get_observability_system
-        obs = get_observability_system()
-        await obs.stop()
-        logger.info("✅ Observability system stopped")
-    except Exception:
-        pass
+    # REMOVED: Observability system - using structlog for all logging
     
     # Close Redis client if available (handled in finally block above)
 
@@ -1080,11 +1045,8 @@ try:
     ))
     initialize_error_recovery_system(supabase)
     
-    # Initialize observability and security systems (module-level variables already declared)
-    observability_system = ObservabilitySystem()
+    # Initialize security system (observability removed - using structlog)
     security_validator = SecurityValidator()
-    structured_logger = StructuredLogger("finley_backend")
-    metrics_collector = MetricsCollector()
     
     # CRITICAL FIX: Initialize optimized database queries
     optimized_db = OptimizedDatabaseQueries(supabase)
@@ -1111,14 +1073,11 @@ except Exception as e:
     logger.critical(f"🚨 DATABASE CONNECTION FAILED - System running in degraded mode: {e}")
     # Initialize minimal observability/logging to prevent NameError in endpoints
     try:
-        # Fallback lightweight initialization so code paths can still log
-        structured_logger = StructuredLogger("finley_backend_degraded")
-        metrics_collector = MetricsCollector()
-        observability_system = ObservabilitySystem()
+        # Fallback lightweight initialization (observability removed - using structlog)
         security_validator = SecurityValidator()
-        logger.info("✅ Degraded mode observability initialized (no database)")
+        logger.info("✅ Degraded mode security initialized (no database)")
     except Exception as init_err:
-        logger.warning(f"⚠️ Failed to initialize degraded observability systems: {init_err}")
+        logger.warning(f"⚠️ Failed to initialize degraded security systems: {init_err}")
 
 # Database health check function
 def check_database_health():
@@ -1846,8 +1805,6 @@ class DataEnrichmentProcessor:
         # Initialize API/WebSocket integration
         self._integration_system_initialized = False
         
-        # Initialize observability system
-        self._observability_system_initialized = False
         
         # Initialize components with error handling
         try:
@@ -3245,10 +3202,6 @@ class DataEnrichmentProcessor:
             logger.error(f"Security validation failed: {e}")
             return True  # Allow processing on validation error
     
-    async def _initialize_observability(self):
-        """Initialize observability system"""
-        if not self._observability_system_initialized:
-            self._observability_system_initialized = True
     
     async def _log_operation_start(self, operation: str, enrichment_id: str, file_context: Dict):
         """Log operation start"""
@@ -5619,6 +5572,11 @@ class ExcelProcessor:
                     upload_timestamp=datetime.utcnow()
                 )
 
+                # CRITICAL FIX: Convert streaming file to bytes for extractors
+                # Extractors expect complete file content, not chunks
+                file_bytes = await convert_stream_to_bytes(streamed_file)
+                logger.info(f"Converted streamed file to bytes: {len(file_bytes)} bytes")
+                
                 # CRITICAL FIX: Load sheets data for comprehensive duplicate detection
                 # This enables delta analysis and content-level duplicate detection
                 sheets_data = {}
@@ -5791,7 +5749,7 @@ class ExcelProcessor:
                     error_id=str(uuid.uuid4()),
                     user_id=user_id,
                     job_id=job_id,
-                    transaction_id=None,
+                    transaction_id=transaction_id,  # CRITICAL FIX #4: Use transaction_id instead of None
                     operation_type="duplicate_detection",
                     error_message=str(e),
                     error_details={"filename": streamed_file.filename},
@@ -6408,29 +6366,44 @@ class ExcelProcessor:
                         else:
                             resolved_events_batch = normalized_events_batch
                         
-                        # CRITICAL FIX: Row-by-row duplicate detection after normalization and entity resolution
+                        # CRITICAL FIX: Row-by-row duplicate detection using ProductionDuplicateDetectionService
                         # This ensures each row is checked for duplicates with normalized data
                         dedupe_events_batch = []
                         for event in resolved_events_batch:
                             try:
-                                # Create row hash for duplicate detection
+                                # Use ProductionDuplicateDetectionService for row-level duplicate detection
                                 row_payload = event.get('payload', {})
                                 row_str = json.dumps(row_payload, sort_keys=True, default=str)
-                                row_hash = xxhash.xxh64(row_str.encode()).hexdigest()
                                 
-                                # Store hash and dedupe metadata in event
-                                event['row_hash'] = row_hash
+                                # Call duplicate service for this row
+                                dedupe_result = await duplicate_service.detect_for_event(
+                                    event_data=row_payload,
+                                    user_id=user_id,
+                                    file_id=file_id,
+                                    row_index=event.get('row_index')
+                                )
+                                
+                                # Store dedupe result in event
+                                event['dedupe'] = dedupe_result
+                                event['row_hash'] = dedupe_result.get('row_hash', xxhash.xxh64(row_str.encode()).hexdigest())
                                 event['dedupe_metadata'] = {
-                                    'hash_algorithm': 'xxhash64',
+                                    'hash_algorithm': dedupe_result.get('hash_algorithm', 'xxhash64'),
                                     'hash_timestamp': datetime.utcnow().isoformat(),
                                     'normalized': True,
-                                    'entity_resolved': bool(event.get('entity_resolution'))
+                                    'entity_resolved': bool(event.get('entity_resolution')),
+                                    'is_duplicate': dedupe_result.get('is_duplicate', False),
+                                    'duplicate_type': dedupe_result.get('duplicate_type'),
+                                    'confidence': dedupe_result.get('confidence', 0.0)
                                 }
                                 
                                 dedupe_events_batch.append(event)
                             except Exception as dedupe_err:
-                                logger.warning(f"Dedupe hash generation failed for row {event.get('row_index')}: {dedupe_err}, storing without hash")
-                                event['dedupe_metadata'] = {'error': str(dedupe_err)}
+                                logger.warning(f"Dedupe detection failed for row {event.get('row_index')}: {dedupe_err}, using fallback hash")
+                                # Fallback: use manual hash if service fails
+                                row_payload = event.get('payload', {})
+                                row_str = json.dumps(row_payload, sort_keys=True, default=str)
+                                event['row_hash'] = xxhash.xxh64(row_str.encode()).hexdigest()
+                                event['dedupe_metadata'] = {'error': str(dedupe_err), 'fallback': True}
                                 dedupe_events_batch.append(event)
                         
                         # Insert batch of events using transaction
@@ -6439,6 +6412,45 @@ class ExcelProcessor:
                                 batch_result = await tx.insert_batch('raw_events', dedupe_events_batch)
                                 events_created += len(batch_result)
                                 events_batch = []  # Clear batch
+                                
+                                # CRITICAL FIX #2: Write normalized events to normalized_events table
+                                # This ensures normalized data is persisted separately for analytics
+                                normalized_events_for_insert = []
+                                for event in dedupe_events_batch:
+                                    if batch_result and len(batch_result) > 0:
+                                        # Get the inserted event ID
+                                        raw_event_id = event.get('id')
+                                        if raw_event_id:
+                                            normalized_event = {
+                                                'user_id': user_id,
+                                                'raw_event_id': raw_event_id,
+                                                'normalized_payload': event.get('payload', {}),
+                                                'resolved_entities': event.get('entity_resolution', {}),
+                                                'final_platform': platform_info,
+                                                'confidence_scores': {
+                                                    'normalization': event.get('confidence_score', 0.0),
+                                                    'entity_resolution': event.get('entity_resolution', {}).get('avg_entropy', 0.0),
+                                                    'platform_detection': platform_info.get('confidence', 0.0)
+                                                },
+                                                'duplicate_group_id': event.get('duplicate_group_id'),
+                                                'duplicate_hash': event.get('row_hash'),
+                                                'document_type': doc_analysis.get('document_type', 'unknown'),
+                                                'merge_strategy': 'replace',
+                                                'platform_label': platform_info.get('platform', 'unknown'),
+                                                'semantic_confidence': 0.0,  # Will be updated by semantic engine
+                                                'transaction_id': transaction_id,
+                                                'normalization_confidence': event.get('confidence_score', 0.0),
+                                                'requires_review': False
+                                            }
+                                            normalized_events_for_insert.append(normalized_event)
+                                
+                                # Batch insert normalized events
+                                if normalized_events_for_insert:
+                                    try:
+                                        await tx.insert_batch('normalized_events', normalized_events_for_insert)
+                                        logger.info(f"✅ Inserted {len(normalized_events_for_insert)} normalized events")
+                                    except Exception as norm_insert_err:
+                                        logger.warning(f"Failed to insert normalized events: {norm_insert_err}")
                                 
                                 # CRITICAL FIX: Create relationship_instances during ingestion
                                 # Generate simple relationship candidates for ARQ to process
@@ -6528,6 +6540,10 @@ class ExcelProcessor:
                                     # Batch insert relationship candidates
                                     if relationship_candidates:
                                         try:
+                                            # CRITICAL FIX #4: Add transaction_id to all relationship candidates
+                                            for rel_candidate in relationship_candidates:
+                                                rel_candidate['transaction_id'] = transaction_id
+                                            
                                             await tx.insert_batch('relationship_instances', relationship_candidates)
                                             logger.info(f"✅ Created {len(relationship_candidates)} relationship candidates during ingestion")
                                         except Exception as rel_err:
@@ -12921,25 +12937,12 @@ monitoring_system = UniversalComponentMonitoringSystem()
 
 @app.get("/api/monitoring/observability")
 async def get_observability_metrics():
-    """Get observability metrics from integrated system"""
+    """Get observability metrics (Prometheus metrics endpoint)"""
     try:
-        # Get metrics from the observability system
-        metrics_data = {
-            "structured_logs": observability_system.get_recent_logs(limit=100),
-            "metrics": {
-                "counters": dict(metrics_collector.counters),
-                "gauges": dict(metrics_collector.gauges),
-                "timers": {name: metrics_collector.get_timer_stats(name) 
-                          for name in metrics_collector.timers.keys()},
-                "histograms": {name: metrics_collector.get_histogram_stats(name) 
-                              for name in metrics_collector.histograms.keys()}
-            },
-            "system_stats": observability_system.get_system_metrics()
-        }
-        
+        # Return Prometheus metrics via /metrics endpoint instead
         return {
             "status": "success",
-            "observability": metrics_data,
+            "message": "Use /metrics endpoint for Prometheus metrics",
             "timestamp": datetime.utcnow().isoformat()
         }
     except Exception as e:

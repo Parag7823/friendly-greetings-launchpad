@@ -39,12 +39,6 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 
 logger = structlog.get_logger(__name__)
-try:
-    from debug_logger import get_debug_logger
-    DEBUG_LOGGER_AVAILABLE = True
-except ImportError:
-    DEBUG_LOGGER_AVAILABLE = False
-    logger.warning("Debug logger not available - skipping detailed logging")
 
 # OPTIMIZED: Type-safe configuration with pydantic-settings
 class DocumentClassifierConfig(BaseSettings):
@@ -609,28 +603,8 @@ class UniversalDocumentClassifierOptimized:
             # 9. Audit logging
             await self._log_classification_audit(classification_id, final_result, user_id)
             
-            # 10. Debug logging for developer console
-            if DEBUG_LOGGER_AVAILABLE and user_id:
-                try:
-                    debug_logger = get_debug_logger(self.supabase, None)
-                    # CRITICAL FIX: Generate valid UUID if job_id is missing to enable debug_logs persistence
-                    job_id_for_debug = final_result.get('metadata', {}).get('job_id')
-                    if not job_id_for_debug or job_id_for_debug == 'unknown':
-                        job_id_for_debug = str(__import__('uuid').uuid4())
-                    await debug_logger.log_document_classification(
-                        job_id=job_id_for_debug,
-                        user_id=user_id,
-                        document_type=final_result['document_type'],
-                        confidence=final_result['confidence'],
-                        method=final_result['method'],
-                        indicators=final_result['indicators'],
-                        reasoning=final_result['reasoning'],
-                        ai_prompt=final_result.get('metadata', {}).get('ai_prompt'),
-                        ai_response=final_result.get('metadata', {}).get('ai_response'),
-                        processing_time_ms=final_result['processing_time'] * 1000
-                    )
-                except Exception as debug_err:
-                    logger.warning(f"Debug logging failed: {debug_err}")
+            # 10. Audit logging via structlog
+            logger.info("document_classified", document_type=final_result['document_type'], confidence=final_result['confidence'], method=final_result['method'])
             
             return final_result
             

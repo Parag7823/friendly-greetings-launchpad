@@ -55,13 +55,7 @@ except ImportError:
     GROQ_AVAILABLE = False
     logger.warning("⚠️ Groq package not installed - semantic analysis disabled")
 
-# Import debug logger for capturing relationship detection reasoning
-try:
-    from debug_logger import get_debug_logger
-    DEBUG_LOGGER_AVAILABLE = True
-except ImportError:
-    DEBUG_LOGGER_AVAILABLE = False
-    logger.warning("Debug logger not available - skipping detailed logging")
+# Debug logging now handled via structlog
 
 # Import semantic relationship extractor for AI-powered semantic analysis
 try:
@@ -208,28 +202,6 @@ class EnhancedRelationshipDetector:
             temporal_learning_stats = await self._learn_temporal_patterns(user_id)
             
             logger.info(f"Relationship detection completed: {len(all_relationships)} relationships found")
-            
-            # Debug logging for developer console
-            if DEBUG_LOGGER_AVAILABLE and user_id:
-                try:
-                    debug_logger = get_debug_logger(self.supabase, None)
-                    # Log top 10 relationships with details
-                    relationships_sample = all_relationships[:10] if len(all_relationships) > 10 else all_relationships
-                    await debug_logger.log_relationship_detection(
-                        job_id=file_id or 'batch_processing',
-                        user_id=user_id,
-                        relationships=[{
-                            "from_event": r.get('from_event_id'),
-                            "to_event": r.get('to_event_id'),
-                            "type": r.get('relationship_type'),
-                            "confidence": r.get('confidence_score', 0),
-                            "evidence": r.get('evidence', []),
-                            "reasoning": r.get('reasoning', '')
-                        } for r in relationships_sample],
-                        total_found=len(all_relationships)
-                    )
-                except Exception as debug_err:
-                    logger.warning(f"Debug logging failed: {debug_err}")
             
             # ✅ CRITICAL FIX: Return stored_relationships (with enrichment) instead of all_relationships
             return {

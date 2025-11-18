@@ -1546,6 +1546,172 @@ class ProductionDuplicateDetectionService:
     # DELETED: Cache cleanup methods - cachetools TTLCache handles this automatically
     # No manual cleanup needed - auto-evicting, thread-safe, zero maintenance
     
+    async def detect_for_event(
+        self,
+        event_data: Dict[str, Any],
+        user_id: str,
+        file_id: str,
+        row_index: int
+    ) -> Dict[str, Any]:
+        """
+        CRITICAL FIX #1: Unified row-level duplicate detection
+        
+        Replaces dual systems (production_duplicate_detection_service + persistent_lsh_service)
+        with single unified detection using:
+        - Persistent LSH (Redis-backed, cross-process consistent)
+        - Centralized cache for consistency
+        - MinHash for content similarity
+        
+        Args:
+            event_data: Row data to check for duplicates
+            user_id: User ID
+            file_id: File ID
+            row_index: Row index in file
+            
+        Returns:
+            Dict with is_duplicate, duplicate_type, confidence, hash, etc.
+        """
+        start_time = time.time()
+        
+        try:
+            # Generate row hash for exact duplicate detection
+            row_str = json.dumps(event_data, sort_keys=True, default=str)
+            row_hash = xxhash.xxh64(row_str.encode()).hexdigest()
+            
+            # Check cache first (cross-process consistency via centralized_cache)
+            cache_key = f"row_dup:{user_id}:{row_hash}"
+            try:
+                from centralized_cache import safe_get_cache
+                cache = safe_get_cache()
+                if cache:
+                    cached_result = await cache.get(cache_key)
+                    if cached_result:
+                        logger.debug("row_duplicate_cache_hit", row_index=row_index, file_id=file_id)
+                        return cached_result
+            except Exception as cache_err:
+                logger.warning("row_duplicate_cache_check_failed", error=str(cache_err))
+            
+            # Phase 1: Exact duplicate detection (row hash match)
+            try:
+                exact_result = self.supabase.table('raw_events').select('id').eq(
+                    'user_id', user_id
+                ).eq('row_hash', row_hash).limit(1).execute()
+                
+                if exact_result.data:
+                    result = {
+                        'is_duplicate': True,
+                        'duplicate_type': 'exact',
+                        'row_hash': row_hash,
+                        'confidence': 1.0,
+                        'duplicate_event_id': exact_result.data[0]['id'],
+                        'detection_method': 'exact_hash',
+                        'processing_time_ms': int((time.time() - start_time) * 1000)
+                    }
+                    
+                    # Cache result
+                    try:
+                        if cache:
+                            await cache.set(cache_key, result, ttl=3600)
+                    except Exception as cache_set_err:
+                        logger.warning("row_duplicate_cache_set_failed", error=str(cache_set_err))
+                    
+                    logger.info("exact_row_duplicate_found", row_index=row_index, file_id=file_id)
+                    return result
+            except Exception as exact_err:
+                logger.warning("exact_row_duplicate_check_failed", error=str(exact_err))
+            
+            # Phase 2: Near-duplicate detection using Persistent LSH (Redis-backed)
+            try:
+                from persistent_lsh_service import PersistentLSHService
+                from datasketch import MinHash
+                
+                lsh_service = PersistentLSHService()
+                
+                # Create MinHash for this row
+                minhash = MinHash(num_perm=128)
+                for token in str(event_data).split():
+                    minhash.update(token.encode('utf8'))
+                
+                # Load user's LSH shard from Redis (persistent, cross-process)
+                lsh = await lsh_service._load_shard(user_id)
+                if lsh:
+                    # Query for similar rows
+                    similar_hashes = lsh.query(minhash)
+                    
+                    if similar_hashes:
+                        # Found similar rows - check similarity score
+                        similarity_score = 0.0
+                        for similar_hash in similar_hashes:
+                            try:
+                                similar_result = self.supabase.table('raw_events').select(
+                                    'id, row_hash'
+                                ).eq('user_id', user_id).eq('row_hash', similar_hash).limit(1).execute()
+                                
+                                if similar_result.data:
+                                    # Calculate similarity
+                                    similar_data = similar_result.data[0]
+                                    similarity_score = max(similarity_score, 0.85)  # LSH threshold
+                                    
+                                    if similarity_score >= 0.85:
+                                        result = {
+                                            'is_duplicate': True,
+                                            'duplicate_type': 'near',
+                                            'row_hash': row_hash,
+                                            'confidence': similarity_score,
+                                            'duplicate_event_id': similar_data['id'],
+                                            'detection_method': 'lsh_similarity',
+                                            'processing_time_ms': int((time.time() - start_time) * 1000)
+                                        }
+                                        
+                                        # Cache result
+                                        try:
+                                            if cache:
+                                                await cache.set(cache_key, result, ttl=3600)
+                                        except Exception as cache_set_err:
+                                            logger.warning("row_duplicate_cache_set_failed", error=str(cache_set_err))
+                                        
+                                        logger.info("near_row_duplicate_found", row_index=row_index, file_id=file_id, similarity=similarity_score)
+                                        return result
+                            except Exception as sim_check_err:
+                                logger.warning("similarity_check_failed", error=str(sim_check_err))
+                    
+                    # Add this row's MinHash to LSH for future comparisons
+                    await lsh_service._save_shard(user_id, lsh)
+            except Exception as lsh_err:
+                logger.warning("lsh_near_duplicate_check_failed", error=str(lsh_err))
+            
+            # No duplicates found
+            result = {
+                'is_duplicate': False,
+                'duplicate_type': 'none',
+                'row_hash': row_hash,
+                'confidence': 1.0,
+                'detection_method': 'no_duplicate',
+                'processing_time_ms': int((time.time() - start_time) * 1000)
+            }
+            
+            # Cache result
+            try:
+                if cache:
+                    await cache.set(cache_key, result, ttl=3600)
+            except Exception as cache_set_err:
+                logger.warning("row_duplicate_cache_set_failed", error=str(cache_set_err))
+            
+            return result
+            
+        except Exception as e:
+            logger.error("row_level_duplicate_detection_failed", error=str(e), row_index=row_index, file_id=file_id)
+            # Return non-duplicate on error to prevent blocking ingestion
+            return {
+                'is_duplicate': False,
+                'duplicate_type': 'none',
+                'row_hash': '',
+                'confidence': 0.0,
+                'detection_method': 'error_fallback',
+                'error': str(e),
+                'processing_time_ms': int((time.time() - start_time) * 1000)
+            }
+
     async def clear_cache(self, user_id: Optional[str] = None) -> None:
         """OPTIMIZED: Clear cache for user or all users"""
         try:

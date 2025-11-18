@@ -13,14 +13,14 @@ Date: 2025
 """
 
 import asyncio
-import logging
+import structlog
 from typing import Dict, List, Optional, Any
 from dataclasses import dataclass
 from datetime import datetime
 from supabase import Client
 from collections import defaultdict
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 
 @dataclass

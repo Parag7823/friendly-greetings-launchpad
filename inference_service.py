@@ -16,11 +16,10 @@ Architecture:
 import os
 import pickle
 import asyncio
-import logging
+import structlog
 from typing import Optional, Dict, Any, List
 from concurrent.futures import ThreadPoolExecutor
 from functools import lru_cache
-import structlog
 
 logger = structlog.get_logger(__name__)
 

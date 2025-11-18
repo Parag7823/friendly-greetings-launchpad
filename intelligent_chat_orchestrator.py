@@ -17,7 +17,7 @@ Version: 1.0.0
 Date: 2025-01-22
 """
 
-import logging
+import structlog
 import json
 import os
 from datetime import datetime, timedelta
@@ -31,7 +31,7 @@ from temporal_pattern_learner import TemporalPatternLearner
 from enhanced_relationship_detector import EnhancedRelationshipDetector
 from entity_resolver_optimized import EntityResolverOptimized as EntityResolver
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 
 class QuestionType(Enum):

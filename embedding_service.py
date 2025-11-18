@@ -25,13 +25,13 @@ Usage:
     similarity = service.similarity(embedding1, embedding2)
 """
 
-import logging
+import structlog
 import numpy as np
 from typing import List, Optional
 import asyncio
 from functools import lru_cache
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 # Global embedding model cache
 _embedding_model = None

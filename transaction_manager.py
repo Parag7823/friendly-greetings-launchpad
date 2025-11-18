@@ -10,7 +10,7 @@ Version: 1.0.0
 """
 
 import asyncio
-import logging
+import structlog
 import uuid
 import math
 from datetime import datetime
@@ -20,7 +20,7 @@ from contextlib import asynccontextmanager
 from supabase import Client
 import pandas as pd
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 def _sanitize_for_json(obj):
     """Recursively sanitize NaN/Inf values for JSON serialization"""
