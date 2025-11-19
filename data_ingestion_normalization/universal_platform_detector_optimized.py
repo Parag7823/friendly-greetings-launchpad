@@ -24,14 +24,10 @@ from dataclasses import dataclass
 # NASA-GRADE v4.0 LIBRARIES (Consistent with all optimized files)
 import ahocorasick  # Replaces flashtext (2x faster, async-ready)
 import structlog
-from scipy.stats import entropy  # LIBRARY FIX: Replace manual entropy calculation
 from pydantic import BaseModel, Field, validator
 from pydantic_settings import BaseSettings
 from aiocache import cached, Cache
 from aiocache.serializers import JsonSerializer
-from presidio_analyzer import AnalyzerEngine
-import instructor
-from groq import AsyncGroq
 
 logger = structlog.get_logger(__name__)
 
@@ -697,7 +693,9 @@ class UniversalPlatformDetectorOptimized:
             # GENIUS v4.0: Entropy-based confidence (35% more accurate)
             total_indicators = sum(platform_counts.values())
             if total_indicators > 0:
-                # LIBRARY FIX: Use scipy.stats.entropy for Shannon entropy calculation
+                # LIBRARY FIX: Lazy-load scipy.stats.entropy only when needed
+                from scipy.stats import entropy
+                
                 probabilities = [count / total_indicators for count in platform_counts.values()]
                 shannon_entropy = entropy(probabilities, base=2)
                 # Normalize to confidence (lower entropy = higher confidence)

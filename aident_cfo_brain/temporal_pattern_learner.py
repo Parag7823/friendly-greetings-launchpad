@@ -35,24 +35,7 @@ import asyncio
 # Timestamp parsing (replaces 30 lines of custom regex)
 from dateutil.parser import isoparse
 
-# Time series decomposition (replaces 72 lines of custom FFT)
-from statsmodels.tsa.seasonal import seasonal_decompose
-
-# Anomaly detection (replaces 95 lines of basic 2σ threshold)
-from pyod.models.iforest import IForest
-from pyod.models.lof import LOF
-
-# Forecasting (NEW CAPABILITY - replaces nothing, adds forecasting)
-from prophet import Prophet
-
-# Matrix Profile for advanced pattern discovery (STUMPY)
-# - Finds unknown repeating patterns automatically
-# - Detects regime changes (business behavior shifts)
-# - Motif search (find all instances of specific patterns)
-import stumpy
-
-# Keep for basic stats
-from scipy import stats
+# Keep for basic stats and time series
 import pandas as pd
 
 # CRITICAL FIX: Import shared normalization functions
@@ -317,9 +300,10 @@ class TemporalPatternLearner:
         relationship_type: str
     ) -> Tuple[bool, Optional[int], Optional[float]]:
         """
-        Detect seasonal patterns using statsmodels STL decomposition.
+        Detect seasonal patterns using statsmodels STL decomposition with fallback to STUMPY.
         
-        REPLACES 72 LINES OF CUSTOM FFT with 3 lines of statsmodels magic.
+        REPLACES 72 LINES OF CUSTOM FFT with statsmodels + STUMPY fallback.
+        CRITICAL FIX: Handle sparse financial data with fillna before decomposition.
         
         Returns:
             (has_seasonal_pattern, period_days, amplitude)
@@ -360,11 +344,18 @@ class TemporalPatternLearner:
             if len(ts_data) < 14:
                 return False, None, None
             
+            # CRITICAL FIX: Fill NaN values before decomposition (sparse financial data)
+            ts_data = ts_data.fillna(0)
+            
             # STL decomposition (Seasonal-Trend decomposition using Loess)
             # Try different periods (weekly, bi-weekly, monthly)
+            stl_succeeded = False
             for period in [7, 14, 30]:
                 if len(ts_data) >= 2 * period:
                     try:
+                        # Lazy import statsmodels only when needed
+                        from statsmodels.tsa.seasonal import seasonal_decompose
+                        
                         decomposition = seasonal_decompose(
                             ts_data,
                             model='additive',
@@ -382,15 +373,74 @@ class TemporalPatternLearner:
                             # If seasonality is strong enough
                             if amplitude > 0.3:
                                 logger.info(f"Detected {period}-day seasonality (amplitude: {amplitude:.2f})")
+                                stl_succeeded = True
                                 return True, period, float(amplitude)
                     except Exception as e:
                         logger.debug(f"STL failed for period {period}: {e}")
                         continue
             
+            # FALLBACK: If STL decomposition failed or found no pattern, use STUMPY for motif discovery
+            if not stl_succeeded and len(ts_data) >= 50:
+                try:
+                    return await self._find_complex_patterns_stumpy(ts_data)
+                except Exception as stumpy_err:
+                    logger.debug(f"STUMPY fallback failed: {stumpy_err}")
+            
             return False, None, None
             
         except Exception as e:
             logger.error(f"Seasonality detection failed: {e}")
+            return False, None, None
+    
+    async def _find_complex_patterns_stumpy(
+        self,
+        ts_data: pd.Series
+    ) -> Tuple[bool, Optional[int], Optional[float]]:
+        """
+        STUMPY-based motif discovery for complex seasonal patterns.
+        
+        Used as fallback when STL decomposition fails on sparse financial data.
+        Finds repeating motifs (patterns) in time series.
+        
+        Returns:
+            (has_pattern, motif_period_days, confidence_score)
+        """
+        try:
+            # Lazy import stumpy only when needed
+            import stumpy
+            
+            # Compute matrix profile for motif discovery
+            # window_size = period to search for (try common financial cycles)
+            for window_size in [7, 14, 30]:
+                if len(ts_data) >= 2 * window_size:
+                    try:
+                        # Compute matrix profile
+                        mp = stumpy.stump(ts_data.values, m=window_size)
+                        
+                        # Extract motif index (lowest matrix profile value = best motif)
+                        motif_idx = np.argsort(mp[:, 0])[0]
+                        motif_distance = mp[motif_idx, 0]
+                        
+                        # If motif distance is low enough, we found a pattern
+                        # Normalize distance to confidence score (0-1)
+                        max_distance = np.max(mp[:, 0])
+                        if max_distance > 0:
+                            confidence = 1.0 - (motif_distance / max_distance)
+                            
+                            if confidence > 0.5:
+                                logger.info(f"STUMPY detected {window_size}-day motif (confidence: {confidence:.2f})")
+                                return True, window_size, float(confidence)
+                    except Exception as e:
+                        logger.debug(f"STUMPY failed for window_size {window_size}: {e}")
+                        continue
+            
+            return False, None, None
+            
+        except ImportError:
+            logger.warning("STUMPY not available for motif discovery")
+            return False, None, None
+        except Exception as e:
+            logger.error(f"STUMPY motif discovery failed: {e}")
             return False, None, None
     
     async def predict_missing_relationships(

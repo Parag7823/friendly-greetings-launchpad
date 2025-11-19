@@ -17,8 +17,6 @@ from typing import Dict, List, Optional, Any, Tuple, Set
 from dataclasses import dataclass, asdict
 from enum import Enum
 
-import igraph as ig
-
 logger = structlog.get_logger(__name__)
 
 class CausalDirection(Enum):
@@ -511,6 +509,9 @@ class CausalInferenceEngine:
     async def _build_causal_graph(self, user_id: str):
         """Build directed causal graph from causal relationships"""
         try:
+            # Lazy import igraph only when needed (heavy library)
+            import igraph as ig
+            
             # Fetch all causal relationships
             result = self.supabase.table('causal_relationships').select(
                 'relationship_id, causal_score, is_causal, causal_direction'
@@ -557,6 +558,8 @@ class CausalInferenceEngine:
             
         except Exception as e:
             logger.error(f"Failed to build causal graph: {e}")
+            # Lazy import igraph for error fallback
+            import igraph as ig
             self.causal_graph = ig.Graph(directed=True)
     
     async def _propagate_counterfactual(

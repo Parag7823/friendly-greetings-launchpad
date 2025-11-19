@@ -35,8 +35,6 @@ from aiocache import cached, Cache
 from aiocache.serializers import JsonSerializer
 import yaml
 from sentence_transformers import SentenceTransformer
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.metrics.pairwise import cosine_similarity
 
 logger = structlog.get_logger(__name__)
 
@@ -216,8 +214,11 @@ class UniversalDocumentClassifierOptimized:
                    lazy_loading=True)
     
     def _initialize_tfidf(self):
-        """OPTIMIZED: Initialize TF-IDF vectorizer for smart indicator weighting"""
+        """OPTIMIZED: Initialize TF-IDF vectorizer for smart indicator weighting (lazy-loaded)"""
         try:
+            # Lazy import sklearn only when needed
+            from sklearn.feature_extraction.text import TfidfVectorizer
+            
             # Build corpus from all document type indicators
             corpus = []
             self.doc_types_list = []
@@ -844,6 +845,9 @@ class UniversalDocumentClassifierOptimized:
             # OPTIMIZED: Use TF-IDF for smart indicator weighting
             if self.tfidf_vectorizer and self.doc_type_vectors is not None:
                 try:
+                    # Lazy import sklearn only when needed
+                    from sklearn.metrics.pairwise import cosine_similarity
+                    
                     # Transform combined text to TF-IDF vector
                     text_vector = self.tfidf_vectorizer.transform([combined_text])
                     
