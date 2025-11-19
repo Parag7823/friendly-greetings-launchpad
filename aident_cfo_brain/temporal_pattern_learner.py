@@ -805,7 +805,9 @@ class TemporalPatternLearner:
     async def _store_temporal_anomaly(
         self,
         anomaly: TemporalAnomaly,
-        user_id: str
+        user_id: str,
+        job_id: Optional[str] = None,
+        temporal_pattern_id: Optional[str] = None
     ):
         """Store temporal anomaly in database"""
         try:
@@ -819,8 +821,12 @@ class TemporalPatternLearner:
                 'deviation_percentage': anomaly.deviation_percentage,
                 'severity': anomaly.severity.value,
                 'anomaly_score': anomaly.anomaly_score,
-                'anomaly_description': anomaly.anomaly_description
+                'anomaly_description': anomaly.anomaly_description,
+                'temporal_pattern_id': temporal_pattern_id or anomaly.temporal_pattern_id
             }
+            
+            if job_id:
+                data['job_id'] = job_id
             
             self.supabase.table('temporal_anomalies').insert(data).execute()
             
