@@ -25,7 +25,12 @@ from fastapi_backend_v2 import (
 
 # FIX #1: CENTRALIZED SUPABASE CLIENT - Remove duplicate fallback logic
 # Use the pooled client from supabase_client.py for all Supabase operations
-from core_infrastructure.supabase_client import get_supabase_client
+# NOTE: In container, files are copied flat to /app/, so absolute import is used
+try:
+    from supabase_client import get_supabase_client
+except ImportError:
+    # Fallback for local development with package structure
+    from core_infrastructure.supabase_client import get_supabase_client
 
 supabase = get_supabase_client()
 
