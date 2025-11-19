@@ -203,12 +203,18 @@ def check_environment_variables() -> bool:
     
     return all_set
 
-    # SKIP IMPORT CHECK - Let Uvicorn handle it
-    # The import check was hanging because fastapi_backend_v2 imports modules
-    # that try to connect to external services (Redis, Supabase, etc.)
-    # during module initialization. This is fine for Uvicorn but causes
-    # the validator to hang.
+def check_critical_imports() -> bool:
+    """
+    Skip import check - Let Uvicorn handle it.
     
+    The import check was hanging because fastapi_backend_v2 imports modules
+    that try to connect to external services (Redis, Supabase, etc.)
+    during module initialization. This is fine for Uvicorn but causes
+    the validator to hang.
+    
+    Returns:
+        True (always passes)
+    """
     print_header("STEP 4: Skipping Application Import Check")
     print("ℹ️  Import check skipped - Uvicorn will handle module loading")
     print("ℹ️  If there are import errors, they will appear in Uvicorn logs")
