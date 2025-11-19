@@ -1,5 +1,6 @@
 import { Send, FileSpreadsheet, Paperclip, Loader2, X } from 'lucide-react';
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
+import { useDropzone } from 'react-dropzone';
 import { MarkdownMessage } from './MarkdownMessage';
 import { useAuth } from './AuthProvider';
 import { supabase } from '@/integrations/supabase/client';
@@ -34,12 +35,12 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
   const [configConnId, setConfigConnId] = useState<string | null>(null);
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
   const [pastedImages, setPastedImages] = useState<File[]>([]);
-  
+
   // IMPROVEMENT: Cleanup Object URLs to prevent memory leaks
   useEffect(() => {
     // Create URLs for preview
     const urls = pastedImages.map(f => URL.createObjectURL(f));
-    
+
     // Cleanup function to revoke URLs when component unmounts or files change
     return () => {
       urls.forEach(url => URL.revokeObjectURL(url));
@@ -58,7 +59,7 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
   // Initialize chat ID from URL or create new one
   useEffect(() => {
     if (!user?.id) return;
-    
+
     const chatIdFromUrl = searchParams.get('chat_id');
     if (chatIdFromUrl) {
       setCurrentChatId(chatIdFromUrl);
@@ -76,7 +77,7 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
   useEffect(() => {
     const loadChatHistory = async () => {
       if (!user?.id || !currentChatId) return;
-      
+
       try {
         // Load chat messages from backend
         const { data, error } = await supabase
@@ -315,37 +316,37 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
           timestamp: new Date()
         };
         setMessages(prev => [...prev, attachmentMessage]);
-        
+
         // Upload pasted images immediately
         await processFiles(pastedImages);
         setPastedImages([]); // Clear pasted images after processing
       }
-      
+
       // Only send text message if there's text content
       if (!message.trim()) {
         return; // Images are already being processed, no need to send empty message
       }
-      
+
       const userMessage = {
         id: `msg-${Date.now()}`,
         text: message,
         isUser: true,
         timestamp: new Date()
       };
-      
+
       setMessages(prev => [...prev, userMessage]);
       const currentMessage = message;
       setMessage('');
-      
+
       try {
         let chatId = currentChatId;
-        
+
         // If this is a new chat, generate a title and create chat entry
         if (isNewChat) {
           try {
             const { data: sessionData } = await supabase.auth.getSession();
             const sessionToken = sessionData?.session?.access_token;
-            
+
             const titleResponse = await fetch(`${config.apiUrl}/generate-chat-title`, {
               method: 'POST',
               headers: {
@@ -358,16 +359,16 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
                 session_token: sessionToken
               })
             });
-            
+
             if (titleResponse.ok) {
               const titleData = await titleResponse.json();
               chatId = titleData.chat_id;
               setCurrentChatId(chatId);
               setIsNewChat(false);
-              
+
               // Update URL with the chat ID from backend
               setSearchParams({ chat_id: chatId }, { replace: true });
-              
+
               // Notify parent component about new chat
               if (onNavigate) {
                 // Trigger a custom event to update sidebar
@@ -388,11 +389,11 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
             setIsNewChat(false);
           }
         }
-        
+
         // Send message to backend
         const { data: sessionData } = await supabase.auth.getSession();
         const sessionToken = sessionData?.session?.access_token;
-        
+
         const response = await fetch(`${config.apiUrl}/chat`, {
           method: 'POST',
           headers: {
@@ -406,17 +407,17 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
             session_token: sessionToken
           })
         });
-        
+
         if (response.ok) {
           const data = await response.json();
-          
+
           const aiMessage = {
             id: `msg-${Date.now()}-ai`,
             text: data.response,
             isUser: false,
             timestamp: new Date(data.timestamp)
           };
-          
+
           setMessages(prev => [...prev, aiMessage]);
         } else {
           // Get error details from backend
@@ -432,21 +433,44 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
         }
       } catch (error) {
         console.error('Chat error:', error);
-        
+
         // Show actual error message from backend
         const errorText = error instanceof Error ? error.message : 'Sorry, I encountered an error. Please try again.';
-        
+
         const errorMessage = {
           id: `msg-${Date.now()}-error`,
           text: errorText,
           isUser: false,
           timestamp: new Date()
         };
-        
+
         setMessages(prev => [...prev, errorMessage]);
       }
     }
   };
+
+  const onDrop = useCallback((acceptedFiles: File[]) => {
+    if (acceptedFiles.length > 0) {
+      setPastedImages(prev => [...prev, ...acceptedFiles]);
+      toast({
+        title: 'Files Attached',
+        description: `${acceptedFiles.length} file(s) ready to send`
+      });
+    }
+  }, []);
+
+  const { getRootProps, getInputProps, isDragActive, open } = useDropzone({
+    onDrop,
+    noClick: true,
+    noKeyboard: true,
+    accept: {
+      'image/*': [],
+      'application/pdf': ['.pdf'],
+      'text/csv': ['.csv'],
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'],
+      'application/vnd.ms-excel': ['.xls']
+    }
+  });
 
   const handleInlineFilesSelected = (files: File[]) => {
     // Trigger file upload event for Data Sources panel to handle
@@ -454,10 +478,6 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
     window.dispatchEvent(new CustomEvent('files-selected-for-upload', {
       detail: { files }
     }));
-  };
-
-  const handleFileUploadClick = () => {
-    fileInputRef.current?.click();
   };
 
   const processFiles = async (files: File[]) => {
@@ -474,7 +494,7 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
     const uploadPromises = files.map(async (file) => {
       try {
         await processFileWithFastAPI(file);
-        
+
         // Add a system message to chat
         const systemMessage = {
           id: `msg-${Date.now()}-${Math.random()}-${file.name}`,
@@ -483,7 +503,7 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
           timestamp: new Date()
         };
         setMessages(prev => [...prev, systemMessage]);
-        
+
         return { status: 'success', file: file.name };
       } catch (error) {
         console.error('File upload failed:', error);
@@ -492,18 +512,18 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
           description: `Failed to upload ${file.name}`,
           variant: 'destructive'
         });
-        
+
         return { status: 'failed', file: file.name, error };
       }
     });
 
     // Wait for all uploads to complete
     const results = await Promise.allSettled(uploadPromises);
-    
+
     // Count successes and failures
     const successful = results.filter(r => r.status === 'fulfilled').length;
     const failed = results.filter(r => r.status === 'rejected').length;
-    
+
     // Show final toast
     toast({
       title: 'Upload Complete',
@@ -514,36 +534,17 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
     setUploadingFile(false);
   };
 
-  const handleFileSelect = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const files = event.target.files;
-    if (!files || files.length === 0) return;
 
-    const fileArray = Array.from(files);
-    
-    // CRITICAL FIX: Attach files to chat input instead of uploading immediately
-    // This matches the paste behavior - files are shown as preview and uploaded on send
-    setPastedImages(prev => [...prev, ...fileArray]);
-    
-    toast({
-      title: 'Files Attached',
-      description: `${fileArray.length} file(s) ready to send`
-    });
-    
-    // Reset input
-    if (fileInputRef.current) {
-      fileInputRef.current.value = '';
-    }
-  };
 
   const handlePaste = async (event: React.ClipboardEvent) => {
     const items = event.clipboardData?.items;
     if (!items) return;
 
     const files: File[] = [];
-    
+
     for (let i = 0; i < items.length; i++) {
       const item = items[i];
-      
+
       // Handle images from clipboard
       if (item.type.indexOf('image') !== -1) {
         const file = item.getAsFile();
@@ -573,20 +574,7 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
     }
   };
 
-  const handleDragOver = (event: React.DragEvent) => {
-    event.preventDefault();
-    event.stopPropagation();
-  };
 
-  const handleDrop = async (event: React.DragEvent) => {
-    event.preventDefault();
-    event.stopPropagation();
-
-    const files = Array.from(event.dataTransfer.files);
-    if (files.length > 0) {
-      await processFiles(files);
-    }
-  };
 
   const renderCurrentView = () => {
     switch (currentView) {
@@ -617,11 +605,10 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
                       className={`flex ${msg.isUser ? 'justify-end' : 'justify-start'}`}
                     >
                       <div
-                        className={`max-w-[80%] rounded-md px-3 py-2 border ${
-                          msg.isUser
+                        className={`max-w-[80%] rounded-md px-3 py-2 border ${msg.isUser
                             ? 'bg-gradient-to-b from-background via-background to-muted/50 border-border/60 dark:from-zinc-900 dark:via-zinc-900 dark:to-zinc-800 dark:border-zinc-700 text-foreground'
                             : 'bg-[#1a1a1a]/90 backdrop-blur-sm text-white border-white/10'
-                        }`}
+                          }`}
                       >
                         {msg.isUser ? (
                           <p className="text-xs">{msg.text}</p>
@@ -637,137 +624,138 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
                 </div>
               )}
             </div>
-            
-              {/* Chat Input Area - Rounded with animated questions */}
-              <div className="border-t border-border/50 p-4 finley-dynamic-bg">
-                <div className="max-w-4xl mx-auto">
-                  <div className="relative rounded-[20px]">
-                    {/* Animated gradient border line */}
-                    <div
-                      className="absolute inset-0 opacity-75 animate-border-slide pointer-events-none z-0"
-                      style={{
-                        background: `linear-gradient(90deg, 
+
+            {/* Chat Input Area - Rounded with animated questions */}
+            <div className="border-t border-border/50 p-4 finley-dynamic-bg">
+              <div className="max-w-4xl mx-auto">
+                <div className="relative rounded-[20px]">
+                  {/* Animated gradient border line */}
+                  <div
+                    className="absolute inset-0 opacity-75 animate-border-slide pointer-events-none z-0"
+                    style={{
+                      background: `linear-gradient(90deg, 
                           transparent 0%, 
                           transparent 40%, 
                           hsl(var(--foreground)) 50%, 
                           transparent 60%, 
                           transparent 100%)`,
-                        backgroundSize: '200% 100%',
-                        animationDuration: '5s',
-                        padding: '1px',
-                        borderRadius: '20px',
-                        WebkitMask: 'linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0)',
-                        WebkitMaskComposite: 'xor',
-                        maskComposite: 'exclude',
-                      }}
-                    />
-                    
-                    {/* Attached Files Preview - Above input */}
-                    {pastedImages.length > 0 && (
-                      <div className="mb-2 flex flex-wrap gap-2 p-2 bg-muted/30 rounded-lg border border-border/50">
-                        {pastedImages.map((file, index) => {
-                          const isImage = file.type.startsWith('image/');
-                          return (
-                            <div key={index} className="relative group">
-                              {isImage ? (
-                                <img
-                                  src={URL.createObjectURL(file)}
-                                  alt={file.name}
-                                  className="w-16 h-16 object-cover rounded border border-border"
-                                />
-                              ) : (
-                                <div className="w-16 h-16 flex flex-col items-center justify-center rounded border border-border bg-muted text-center p-1">
-                                  <FileSpreadsheet className="w-6 h-6 text-muted-foreground mb-1" />
-                                  <span className="text-[8px] text-muted-foreground truncate w-full px-1">
-                                    {file.name.split('.').pop()?.toUpperCase()}
-                                  </span>
-                                </div>
-                              )}
-                              <button
-                                onClick={() => setPastedImages(prev => prev.filter((_, i) => i !== index))}
-                                className="absolute -top-1 -right-1 w-5 h-5 bg-destructive text-destructive-foreground rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
-                                title={`Remove ${file.name}`}
-                              >
-                                <X className="w-3 h-3" />
-                              </button>
-                            </div>
-                          );
-                        })}
-                        <div className="flex items-center text-xs text-muted-foreground px-2">
-                          {pastedImages.length} file(s) ready to send
+                      backgroundSize: '200% 100%',
+                      animationDuration: '5s',
+                      padding: '1px',
+                      borderRadius: '20px',
+                      WebkitMask: 'linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0)',
+                      WebkitMaskComposite: 'xor',
+                      maskComposite: 'exclude',
+                    }}
+                  />
+
+                  {/* Attached Files Preview - Above input */}
+                  {pastedImages.length > 0 && (
+                    <div className="mb-2 flex flex-wrap gap-2 p-2 bg-muted/30 rounded-lg border border-border/50">
+                      {pastedImages.map((file, index) => {
+                        const isImage = file.type.startsWith('image/');
+                        return (
+                          <div key={index} className="relative group">
+                            {isImage ? (
+                              <img
+                                src={URL.createObjectURL(file)}
+                                alt={file.name}
+                                className="w-16 h-16 object-cover rounded border border-border"
+                              />
+                            ) : (
+                              <div className="w-16 h-16 flex flex-col items-center justify-center rounded border border-border bg-muted text-center p-1">
+                                <FileSpreadsheet className="w-6 h-6 text-muted-foreground mb-1" />
+                                <span className="text-[8px] text-muted-foreground truncate w-full px-1">
+                                  {file.name.split('.').pop()?.toUpperCase()}
+                                </span>
+                              </div>
+                            )}
+                            <button
+                              onClick={() => setPastedImages(prev => prev.filter((_, i) => i !== index))}
+                              className="absolute -top-1 -right-1 w-5 h-5 bg-destructive text-destructive-foreground rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                              title={`Remove ${file.name}`}
+                            >
+                              <X className="w-3 h-3" />
+                            </button>
+                          </div>
+                        );
+                      })}
+                      <div className="flex items-center text-xs text-muted-foreground px-2">
+                        {pastedImages.length} file(s) ready to send
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Input wrapper with background */}
+                  <div
+                    {...getRootProps()}
+                    className={`relative z-10 border rounded-[20px] bg-black/40 backdrop-blur-sm border-white/10 shadow-lg transition-colors duration-200 ${isDragActive ? 'border-primary/50 bg-primary/5' : ''}`}
+                  >
+                    <input {...getInputProps()} />
+
+                    {/* Drag Overlay */}
+                    {isDragActive && (
+                      <div className="absolute inset-0 z-50 rounded-[20px] bg-primary/10 backdrop-blur-sm flex items-center justify-center border-2 border-dashed border-primary">
+                        <div className="text-center">
+                          <Paperclip className="w-8 h-8 text-primary mx-auto mb-2 animate-bounce" />
+                          <p className="text-sm font-medium text-primary">Drop files here</p>
                         </div>
                       </div>
                     )}
-                    
-                    {/* Input wrapper with background */}
-                    <div 
-                      className="relative z-10 border rounded-[20px] bg-black/40 backdrop-blur-sm border-white/10 shadow-lg"
-                      onDragOver={handleDragOver}
-                      onDrop={handleDrop}
-                    >
-                      <div className="relative">
-                        <input
-                          type="text"
-                          value={message}
-                          onChange={(e) => setMessage(e.target.value)}
-                          onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter') {
-                              e.preventDefault();
-                              handleSendMessage();
-                            }
-                          }}
-                          onPaste={handlePaste}
-                          placeholder={sampleQuestions[currentQuestionIndex]}
-                          className="w-full bg-transparent border-none pl-14 pr-14 py-4 text-sm text-white placeholder-white/50 focus:outline-none focus:ring-0"
-                          autoComplete="off"
-                          spellCheck="false"
-                        />
-                        
-                        {/* File Upload Button - Left side */}
-                        <button
-                          onClick={handleFileUploadClick}
-                          disabled={uploadingFile}
-                          className="absolute left-4 top-1/2 -translate-y-1/2 w-9 h-9 text-muted-foreground hover:text-foreground rounded-full flex items-center justify-center transition-all duration-200 hover:bg-muted/50 disabled:opacity-50 disabled:cursor-not-allowed relative"
-                          title="Upload files or images"
-                        >
-                          {uploadingFile ? (
-                            <Loader2 className="w-5 h-5 animate-spin" />
-                          ) : (
-                            <>
-                              <Paperclip className="w-5 h-5" />
-                              {pastedImages.length > 0 && (
-                                <span className="absolute -top-1 -right-1 w-4 h-4 bg-primary text-primary-foreground text-[10px] font-bold rounded-full flex items-center justify-center">
-                                  {pastedImages.length}
-                                </span>
-                              )}
-                            </>
-                          )}
-                        </button>
-                        
-                        {/* Hidden file input */}
-                        <input
-                          ref={fileInputRef}
-                          type="file"
-                          accept=".xlsx,.xls,.csv,.pdf,image/*"
-                          multiple
-                          onChange={handleFileSelect}
-                          className="hidden"
-                        />
-                        
-                        {/* Send Button - Right side */}
-                        <button
-                          onClick={handleSendMessage}
-                          disabled={!message.trim() && pastedImages.length === 0}
-                          className="absolute right-4 top-1/2 -translate-y-1/2 w-9 h-9 bg-primary text-primary-foreground rounded-full flex items-center justify-center transition-all duration-200 hover:bg-primary/90 hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
-                        >
-                          <Send className="w-4 h-4" />
-                        </button>
-                      </div>
+
+                    <div className="relative">
+                      <input
+                        type="text"
+                        value={message}
+                        onChange={(e) => setMessage(e.target.value)}
+                        onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            handleSendMessage();
+                          }
+                        }}
+                        onPaste={handlePaste}
+                        placeholder={isDragActive ? "Drop files to attach..." : sampleQuestions[currentQuestionIndex]}
+                        className="w-full bg-transparent border-none pl-14 pr-14 py-4 text-sm text-white placeholder-white/50 focus:outline-none focus:ring-0"
+                        autoComplete="off"
+                        spellCheck="false"
+                      />
+
+                      {/* File Upload Button - Left side */}
+                      <button
+                        onClick={open}
+                        disabled={uploadingFile}
+                        className="absolute left-4 top-1/2 -translate-y-1/2 w-9 h-9 text-muted-foreground hover:text-foreground rounded-full flex items-center justify-center transition-all duration-200 hover:bg-muted/50 disabled:opacity-50 disabled:cursor-not-allowed relative"
+                        title="Upload files or images"
+                      >
+                        {uploadingFile ? (
+                          <Loader2 className="w-5 h-5 animate-spin" />
+                        ) : (
+                          <>
+                            <Paperclip className="w-5 h-5" />
+                            {pastedImages.length > 0 && (
+                              <span className="absolute -top-1 -right-1 w-4 h-4 bg-primary text-primary-foreground text-[10px] font-bold rounded-full flex items-center justify-center">
+                                {pastedImages.length}
+                              </span>
+                            )}
+                          </>
+                        )}
+                      </button>
+
+                      {/* Send Button - Right side */}
+                      <button
+                        onClick={handleSendMessage}
+                        disabled={!message.trim() && pastedImages.length === 0}
+                        className="absolute right-4 top-1/2 -translate-y-1/2 w-9 h-9 bg-primary text-primary-foreground rounded-full flex items-center justify-center transition-all duration-200 hover:bg-primary/90 hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
+                      >
+                        <Send className="w-4 h-4" />
+                      </button>
                     </div>
                   </div>
                 </div>
               </div>
+            </div>
           </div>
         );
     }

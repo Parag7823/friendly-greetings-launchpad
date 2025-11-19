@@ -1,14 +1,23 @@
-import { useState, useEffect } from 'react';
-import { X, FileSpreadsheet, FileText, File, Info, Download, Loader2, CheckCircle2, AlertCircle } from 'lucide-react';
+import { useState, useEffect, useMemo } from 'react';
+import { X, FileSpreadsheet, FileText, File, Info, Loader2, CheckCircle2, AlertCircle } from 'lucide-react';
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
 import { Card } from './ui/card';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from './ui/tooltip';
 import { motion, AnimatePresence } from 'framer-motion';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from './AuthProvider';
 import { cn } from '@/lib/utils';
+
+// Ag-Grid Imports
+import { AgGridReact } from 'ag-grid-react';
+import { ColDef, ModuleRegistry } from 'ag-grid-community';
+import { ClientSideRowModelModule } from 'ag-grid-community';
+import 'ag-grid-community/styles/ag-grid.css';
+import 'ag-grid-community/styles/ag-theme-quartz.css';
+
+// Register Ag-Grid modules
+ModuleRegistry.registerModules([ClientSideRowModelModule]);
 
 interface OpenFile {
   id: string;
@@ -56,7 +65,7 @@ export const TabbedFilePreview = ({
           .select('*')
           .eq('file_id', activeFileId)
           .order('source_ts', { ascending: true })
-          .limit(100);
+          .limit(1000); // Increased limit for Ag-Grid capability
 
         if (error) {
           console.error('Failed to load events:', error);
@@ -74,7 +83,7 @@ export const TabbedFilePreview = ({
           // Extract key fields for display
           if (event.source_ts) row['Date'] = new Date(event.source_ts).toLocaleDateString();
           if (event.vendor_standard) row['Vendor'] = event.vendor_standard;
-          if (event.amount_usd !== null) row['Amount'] = `$${Number(event.amount_usd).toFixed(2)}`;
+          if (event.amount_usd !== null) row['Amount'] = Number(event.amount_usd); // Keep as number for sorting
           if (event.kind) row['Type'] = event.kind;
           if (event.source_platform) row['Platform'] = event.source_platform;
           
@@ -100,6 +109,41 @@ export const TabbedFilePreview = ({
 
     loadFileContent();
   }, [activeFileId]);
+
+  // Dynamic Column Definitions
+  const columnDefs = useMemo<ColDef[]>(() => {
+    if (!activeFileId || !fileContent[activeFileId] || fileContent[activeFileId].length === 0) {
+      return [];
+    }
+
+    const firstRow = fileContent[activeFileId][0];
+    return Object.keys(firstRow).map(key => {
+      const isAmount = key === 'Amount';
+      const isDate = key === 'Date';
+      
+      return {
+        field: key,
+        headerName: key,
+        sortable: true,
+        filter: true,
+        resizable: true,
+        flex: 1,
+        minWidth: 100,
+        // Specific formatting
+        valueFormatter: isAmount ? (params: any) => {
+          return params.value ? `$${params.value.toFixed(2)}` : '';
+        } : undefined,
+        cellClass: isAmount ? 'text-right font-mono' : undefined,
+        headerClass: isAmount ? 'ag-right-aligned-header' : undefined,
+      };
+    });
+  }, [activeFileId, fileContent]);
+
+  const defaultColDef = useMemo(() => ({
+    sortable: true,
+    filter: true,
+    resizable: true,
+  }), []);
 
   const getFileIcon = (filename: string) => {
     if (!filename) return File;
@@ -245,7 +289,7 @@ export const TabbedFilePreview = ({
       </div>
 
       {/* File Content */}
-      <div className="flex-1 overflow-hidden">
+      <div className="flex-1 overflow-hidden bg-black/20">
         <AnimatePresence mode="wait">
           {activeFile && (
             <motion.div
@@ -254,59 +298,65 @@ export const TabbedFilePreview = ({
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, x: -20 }}
               transition={{ duration: 0.2 }}
-              className="h-full overflow-y-auto p-4"
+              className="h-full flex flex-col"
             >
               {/* Error Message */}
               {activeFile.status === 'failed' && activeFile.error_message && (
-                <Card className="p-4 bg-destructive/10 border-destructive/20 mb-4">
-                  <div className="flex items-start gap-3">
-                    <AlertCircle className="w-5 h-5 text-destructive flex-shrink-0 mt-0.5" />
-                    <div>
-                      <p className="text-sm font-medium text-destructive mb-1">Processing Failed</p>
-                      <p className="text-xs text-destructive/80">{activeFile.error_message}</p>
+                <div className="p-4">
+                  <Card className="p-4 bg-destructive/10 border-destructive/20">
+                    <div className="flex items-start gap-3">
+                      <AlertCircle className="w-5 h-5 text-destructive flex-shrink-0 mt-0.5" />
+                      <div>
+                        <p className="text-sm font-medium text-destructive mb-1">Processing Failed</p>
+                        <p className="text-xs text-destructive/80">{activeFile.error_message}</p>
+                      </div>
                     </div>
-                  </div>
-                </Card>
+                  </Card>
+                </div>
               )}
 
-              {/* File Content Table */}
+              {/* Ag-Grid Table */}
               {loadingContent[activeFile.id] ? (
-                  <div className="flex items-center justify-center py-12">
+                  <div className="flex items-center justify-center h-full">
                     <Loader2 className="w-8 h-8 animate-spin text-primary" />
                   </div>
                 ) : fileContent[activeFile.id] && fileContent[activeFile.id].length > 0 ? (
-                  <div className="border border-border rounded-lg overflow-auto max-h-[600px]">
-                    <table className="w-full text-[10px]">
-                      <thead className="bg-muted/50 sticky top-0">
-                        <tr>
-                          <th className="px-2 py-1.5 text-left font-medium text-muted-foreground border-r border-border w-10">#</th>
-                          {Object.keys(fileContent[activeFile.id][0] || {}).map((header) => (
-                            <th key={header} className="px-2 py-1.5 text-left font-medium border-r border-border whitespace-nowrap">
-                              {header}
-                            </th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody className="font-mono text-[9px]">
-                        {fileContent[activeFile.id].map((row, index) => (
-                          <tr key={index} className="border-t border-border hover:bg-muted/20">
-                            <td className="px-2 py-1 text-muted-foreground border-r border-border text-right">{index + 1}</td>
-                            {Object.values(row).map((value: any, colIndex) => (
-                              <td key={colIndex} className="px-2 py-1 border-r border-border whitespace-nowrap">
-                                {value}
-                              </td>
-                            ))}
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                  <div className="h-full w-full ag-theme-quartz-dark">
+                    <style>{`
+                      .ag-theme-quartz-dark {
+                        --ag-background-color: #0A0A0A;
+                        --ag-header-background-color: #111111;
+                        --ag-row-hover-color: #1a1a1a;
+                        --ag-border-color: #222;
+                        --ag-font-family: 'Inter', sans-serif;
+                        --ag-font-size: 12px;
+                      }
+                      .ag-header-cell-label {
+                        font-weight: 600;
+                        color: #a1a1aa;
+                      }
+                      .ag-right-aligned-header .ag-header-cell-label {
+                        justify-content: flex-end;
+                      }
+                    `}</style>
+                    <AgGridReact
+                      rowData={fileContent[activeFile.id]}
+                      columnDefs={columnDefs}
+                      defaultColDef={defaultColDef}
+                      pagination={true}
+                      paginationPageSize={50}
+                      rowSelection="multiple"
+                      animateRows={true}
+                    />
                   </div>
                 ) : (
-                  <Card className="p-12 text-center">
-                    <FileSpreadsheet className="w-16 h-16 mx-auto text-muted-foreground/30 mb-4" />
-                    <h3 className="text-[10px] font-semibold mb-2">No file content</h3>
-                    <p className="text-[8px] text-muted-foreground">Unable to load file content</p>
-                  </Card>
+                  <div className="flex items-center justify-center h-full p-12">
+                    <Card className="p-12 text-center bg-transparent border-none shadow-none">
+                      <FileSpreadsheet className="w-16 h-16 mx-auto text-muted-foreground/30 mb-4" />
+                      <h3 className="text-sm font-semibold mb-2">No file content</h3>
+                      <p className="text-xs text-muted-foreground">Unable to load file content</p>
+                    </Card>
+                  </div>
                 )
               }
             </motion.div>

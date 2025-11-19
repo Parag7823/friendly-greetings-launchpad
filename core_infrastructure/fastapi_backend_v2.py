@@ -196,7 +196,7 @@ class DocumentClassificationRequest(BaseModel):
 # Database and external services
 # FIX #1: CENTRALIZED SUPABASE CLIENT - Remove duplicate fallback logic
 # Use the pooled client from supabase_client.py for all Supabase operations
-from supabase_client import get_supabase_client  # type: ignore
+from .supabase_client import get_supabase_client  # type: ignore
 from prometheus_client import Counter, Histogram, Gauge, generate_latest, CONTENT_TYPE_LATEST
 
 # CLEANUP: Removed Celery support - Using ARQ only for async task queue
