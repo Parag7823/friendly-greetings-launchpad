@@ -6988,6 +6988,8 @@ class ExcelProcessor:
                         'pattern_id': relationship.get('pattern_id'),
                         'reasoning': relationship.get('reasoning', 'Detected based on matching criteria'),
                         'transaction_id': transaction_id,
+                        # ✅ FIX #1: Add job_id for job tracking
+                        'job_id': relationship.get('job_id'),
                         # ✅ FIX: Add ALL enriched semantic fields
                         'metadata': relationship.get('metadata', {}),
                         'key_factors': relationship.get('key_factors', []),
@@ -7000,12 +7002,6 @@ class ExcelProcessor:
                 
                 # Batch insert all relationships atomically (100x faster than single inserts)
                 if relationships_batch:
-                    # FIX #1: Add job_id to relationship_instances batch
-                    for rel in relationships_batch:
-                        if 'job_id' not in rel or rel['job_id'] is None:
-                            # Extract job_id from transaction_id if available
-                            rel['job_id'] = None  # Will be populated from context if needed
-                    
                     result = await tx.insert_batch('relationship_instances', relationships_batch)
                     logger.info(f"✅ Stored {len(result)} relationships atomically in batch")
                     
@@ -7388,7 +7384,8 @@ class ExcelProcessor:
                                     'occurrences': len(dates),
                                     'intervals': intervals,
                                     'avg_interval_days': avg_interval
-                                }
+                                },
+                                'job_id': file_id  # ✅ FIX #2: Add job_id for tracking
                             })
                         elif 28 <= avg_interval <= 32:  # Monthly pattern
                             temporal_patterns.append({
