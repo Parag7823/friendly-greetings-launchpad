@@ -23,37 +23,11 @@ from fastapi_backend_v2 import (
     NANGO_ZOHO_MAIL_INTEGRATION_ID,
 )
 
-try:
-    from fastapi_backend_v2 import supabase
-except ModuleNotFoundError:
-    from supabase import Client, create_client
+# FIX #1: CENTRALIZED SUPABASE CLIENT - Remove duplicate fallback logic
+# Use the pooled client from supabase_client.py for all Supabase operations
+from core_infrastructure.supabase_client import get_supabase_client
 
-    _FALLBACK_SUPABASE_CLIENTS: Dict[bool, Optional[Client]] = {True: None, False: None}
-
-    def _get_supabase_client(use_service_role: bool = True) -> Client:
-        client = _FALLBACK_SUPABASE_CLIENTS[use_service_role]
-        if client is not None:
-            return client
-
-        supabase_url = os.getenv('SUPABASE_URL')
-        service_role_key = os.getenv('SUPABASE_SERVICE_ROLE_KEY')
-        anon_key = os.getenv('SUPABASE_ANON_KEY')
-        key = service_role_key if use_service_role else anon_key
-
-        if not supabase_url or not key:
-            raise RuntimeError(
-                "Supabase client fallback requires SUPABASE_URL and the appropriate API key environment variables."
-            )
-
-        logger.warning(
-            "Supabase client fallback activated in arq_worker: using direct create_client due to missing supabase_client module."
-        )
-
-        client = create_client(supabase_url, key)
-        _FALLBACK_SUPABASE_CLIENTS[use_service_role] = client
-        return client
-
-    supabase = _get_supabase_client()
+supabase = get_supabase_client()
 
 
 # --------------- ARQ Task Functions ---------------

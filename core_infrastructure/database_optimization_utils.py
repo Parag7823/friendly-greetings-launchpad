@@ -22,9 +22,10 @@ All critical inefficient queries have been replaced with optimized versions.
 
 import os
 import structlog
-from typing import Dict, List, Any, Optional, Tuple
+from typing import Dict, List, Any, Optional, Tuple, Set
 from datetime import datetime, date
 from supabase import Client
+import xxhash  # CENTRALIZED HASHING: Standard algorithm for all row hashing
 try:
     from supabase_client import get_supabase_client  # type: ignore
     _HAS_SUPABASE_HELPER = True
@@ -36,6 +37,144 @@ import asyncio
 from dataclasses import dataclass
 
 logger = structlog.get_logger(__name__)
+
+
+# ============================================================================
+# CENTRALIZED ROW HASHING - FIX #3: Unified Algorithm
+# ============================================================================
+# CRITICAL: All modules must use these functions for consistent hashing
+# This ensures provenance_tracker and production_duplicate_detection_service
+# produce compatible hashes for data integrity verification.
+
+def get_normalized_tokens(payload: Dict[str, Any]) -> Set[str]:
+    """
+    Extract normalized tokens from row data for hashing.
+    
+    CRITICAL: This must match the tokenization used by duplicate detection
+    to ensure hash compatibility across modules.
+    
+    Args:
+        payload: Row data dictionary
+        
+    Returns:
+        Set of normalized tokens (lowercase, stripped)
+    """
+    tokens = set()
+    
+    def extract_tokens(obj: Any) -> None:
+        """Recursively extract tokens from nested structures"""
+        if isinstance(obj, dict):
+            for v in obj.values():
+                extract_tokens(v)
+        elif isinstance(obj, (list, tuple)):
+            for item in obj:
+                extract_tokens(item)
+        elif isinstance(obj, str):
+            # Normalize: lowercase, strip whitespace, split on common delimiters
+            normalized = obj.lower().strip()
+            if normalized:
+                # Split on whitespace and punctuation
+                for token in normalized.replace(',', ' ').replace(';', ' ').split():
+                    if token and len(token) > 1:  # Skip single chars
+                        tokens.add(token)
+        elif obj is not None:
+            # Convert numbers and other types to string
+            normalized = str(obj).lower().strip()
+            if normalized and normalized not in ('none', 'null', 'nan'):
+                tokens.add(normalized)
+    
+    extract_tokens(payload)
+    return tokens
+
+
+def calculate_row_hash(
+    source_filename: str,
+    row_index: int,
+    payload: Dict[str, Any]
+) -> str:
+    """
+    Calculate standardized row hash using xxh3_128.
+    
+    CRITICAL FIX #3: Unified hashing algorithm for all modules.
+    - Uses xxh3_128 (128-bit) for better collision resistance
+    - Consistent input normalization across all services
+    - Enables cross-module hash verification
+    
+    Args:
+        source_filename: Name of source file
+        row_index: Row number in source file
+        payload: Row data dictionary
+        
+    Returns:
+        Hex string hash (32 characters for xxh3_128)
+        
+    Example:
+        >>> hash1 = calculate_row_hash("invoice.xlsx", 42, {"vendor": "Acme", "amount": 1500})
+        >>> hash2 = calculate_row_hash("invoice.xlsx", 42, {"vendor": "Acme", "amount": 1500})
+        >>> assert hash1 == hash2  # Same input = same hash
+    """
+    try:
+        # Use unified normalization function
+        tokens = get_normalized_tokens(payload)
+        
+        # Create canonical representation with sorted tokens
+        sorted_tokens = sorted(list(tokens))
+        hash_input = f"{source_filename}||{row_index}||{'||'.join(sorted_tokens)}"
+        
+        # Use xxh3_128 for consistency across all modules
+        row_hash = xxhash.xxh3_128(hash_input.encode('utf-8')).hexdigest()
+        
+        logger.debug(f"Calculated row hash for {source_filename}:{row_index} = {row_hash[:16]}...")
+        return row_hash
+        
+    except Exception as e:
+        logger.error(f"Failed to calculate row hash: {e}")
+        return ""
+
+
+def verify_row_hash(
+    stored_hash: str,
+    source_filename: str,
+    row_index: int,
+    payload: Dict[str, Any]
+) -> tuple:
+    """
+    Verify row integrity by comparing stored hash with recalculated hash.
+    
+    CRITICAL: This enables tamper detection across all modules.
+    
+    Args:
+        stored_hash: Hash stored in database
+        source_filename: Name of source file
+        row_index: Row index in source file
+        payload: Current row data
+        
+    Returns:
+        Tuple of (is_valid: bool, message: str)
+    """
+    try:
+        recalculated_hash = calculate_row_hash(source_filename, row_index, payload)
+        
+        if not recalculated_hash:
+            return False, "Failed to calculate hash for verification"
+        
+        is_valid = stored_hash == recalculated_hash
+        
+        if is_valid:
+            logger.debug(f"✅ Row hash verified for {source_filename}:{row_index}")
+            return True, "Row hash verified - no tampering detected"
+        else:
+            logger.warning(
+                f"⚠️ TAMPERING DETECTED: Hash mismatch for {source_filename}:{row_index}\n"
+                f"Stored: {stored_hash[:16]}...\n"
+                f"Calculated: {recalculated_hash[:16]}..."
+            )
+            return False, f"Row hash mismatch - possible tampering detected"
+            
+    except Exception as e:
+        logger.error(f"Hash verification failed: {e}")
+        return False, f"Hash verification error: {str(e)}"
+
 
 if not _HAS_SUPABASE_HELPER:
     # PRODUCTION FIX #4: Enforce supabase_client.py in production

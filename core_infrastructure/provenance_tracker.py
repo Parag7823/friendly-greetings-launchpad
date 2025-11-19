@@ -6,21 +6,28 @@ This module provides comprehensive provenance tracking for Finley's financial da
 enabling "Google Maps for your financial data" - every number can explain itself.
 
 Features:
-- Row-level tamper detection via SHA256 hashing
+- Row-level tamper detection via centralized hashing (xxh3_128)
 - Full transformation chain tracking (lineage path)
 - Audit trail with created_by/modified_by
 - "Ask Why" explainability support
 
 Author: Finley AI Team
 Date: 2025-10-16
+
+FIX #4: Uses centralized hashing from database_optimization_utils.py
+to ensure compatibility with production_duplicate_detection_service.py
 """
 
-import xxhash  # LIBRARY REPLACEMENT: xxhash for 5-10x faster hashing
 import orjson as json  # LIBRARY REPLACEMENT: orjson for 3-5x faster JSON parsing
 from datetime import datetime
 from typing import Dict, Any, List, Optional
 from dataclasses import dataclass, asdict
 import structlog
+
+# FIX #4: CENTRALIZED HASHING - Import from database_optimization_utils
+# This ensures provenance_tracker and production_duplicate_detection_service
+# use the same hashing algorithm (xxh3_128) for data integrity verification
+from database_optimization_utils import calculate_row_hash, verify_row_hash, get_normalized_tokens
 
 logger = structlog.get_logger(__name__)
 
@@ -59,6 +66,8 @@ class ProvenanceTracker:
     # ========================================================================
     # ROW HASH CALCULATION (Tamper Detection)
     # ========================================================================
+    # FIX #4: These methods now delegate to centralized functions in database_optimization_utils
+    # to ensure consistency with production_duplicate_detection_service
     
     def calculate_row_hash(
         self,
@@ -69,13 +78,8 @@ class ProvenanceTracker:
         """
         Calculate normalized hash of row data for duplicate detection alignment.
         
-        CRITICAL: Uses token normalization matching duplicate detection's MinHash algorithm.
-        This ensures same row produces same hash across provenance and duplicate detection.
-        
-        The hash is calculated from:
-        - source_filename: Original file name
-        - row_index: Row number in source file
-        - payload: Normalized tokens from row data
+        CRITICAL FIX #4: Delegates to centralized calculate_row_hash() function
+        to ensure consistency with production_duplicate_detection_service.
         
         Args:
             source_filename: Name of source file
@@ -83,37 +87,10 @@ class ProvenanceTracker:
             payload: Original row data as dictionary
             
         Returns:
-            xxh3_128 hash as hex string
-            
-        Example:
-            >>> tracker = ProvenanceTracker()
-            >>> hash_val = tracker.calculate_row_hash(
-            ...     "invoice_2025.xlsx",
-            ...     42,
-            ...     {"vendor": "Acme Corp", "amount": 1500.00}
-            ... )
-            >>> print(hash_val)
-            'a3f5b8c9d2e1f4a7b6c5d8e9f2a1b4c7'
+            xxh3_128 hash as hex string (32 characters)
         """
-        try:
-            # Use unified normalization function for consistency with duplicate detection
-            tokens = get_normalized_tokens(payload)
-            
-            # Create canonical representation with sorted tokens
-            sorted_tokens = sorted(list(tokens))
-            hash_input = f"{source_filename}||{row_index}||{'||'.join(sorted_tokens)}"
-            
-            # Use xxh3_128 for consistency with duplicate detection
-            from xxhash import xxh3_128
-            row_hash = xxh3_128(hash_input.encode('utf-8')).hexdigest()
-            
-            self.logger.debug(f"Calculated normalized row hash for {source_filename}:{row_index} = {row_hash[:16]}...")
-            return row_hash
-            
-        except Exception as e:
-            self.logger.error(f"Failed to calculate row hash: {e}")
-            # Return empty hash on error - better than crashing
-            return ""
+        # Delegate to centralized function
+        return calculate_row_hash(source_filename, row_index, payload)
     
     def verify_row_hash(
         self,
@@ -121,9 +98,12 @@ class ProvenanceTracker:
         source_filename: str,
         row_index: int,
         payload: Dict[str, Any]
-    ) -> tuple[bool, str]:
+    ) -> tuple:
         """
         Verify row integrity by comparing stored hash with recalculated hash.
+        
+        CRITICAL FIX #4: Delegates to centralized verify_row_hash() function
+        to ensure consistency with production_duplicate_detection_service.
         
         Args:
             stored_hash: Hash stored in database
@@ -132,31 +112,10 @@ class ProvenanceTracker:
             payload: Current row data
             
         Returns:
-            Tuple of (is_valid, message)
-            
-        Example:
-            >>> is_valid, msg = tracker.verify_row_hash(
-            ...     stored_hash="a3f5b8c9...",
-            ...     source_filename="invoice_2025.xlsx",
-            ...     row_index=42,
-            ...     payload={"vendor": "Acme Corp", "amount": 1500.00}
-            ... )
-            >>> if not is_valid:
-            ...     print(f"TAMPERING DETECTED: {msg}")
+            Tuple of (is_valid: bool, message: str)
         """
-        try:
-            # Recalculate hash
-            recalculated_hash = self.calculate_row_hash(source_filename, row_index, payload)
-            
-            # Compare
-            if stored_hash == recalculated_hash:
-                return True, "Row integrity verified - no tampering detected"
-            else:
-                return False, f"CRITICAL: Row data has been modified - tampering detected (stored: {stored_hash[:16]}..., calculated: {recalculated_hash[:16]}...)"
-                
-        except Exception as e:
-            self.logger.error(f"Failed to verify row hash: {e}")
-            return False, f"Hash verification failed: {str(e)}"
+        # Delegate to centralized function
+        return verify_row_hash(stored_hash, source_filename, row_index, payload)
     
     # ========================================================================
     # LINEAGE PATH CONSTRUCTION (Transformation Tracking)

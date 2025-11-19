@@ -17,7 +17,6 @@ Version: 4.0.0
 """
 
 import asyncio
-import xxhash
 import orjson as json
 import os
 import re
@@ -38,6 +37,17 @@ from aiocache import cached, Cache
 from aiocache.serializers import JsonSerializer
 from presidio_analyzer import AnalyzerEngine
 import numpy as np
+
+# FIX #5: CENTRALIZED HASHING - Import from database_optimization_utils
+# This ensures production_duplicate_detection_service uses xxh3_128 (same as provenance_tracker)
+# for data integrity verification across modules
+try:
+    from core_infrastructure.database_optimization_utils import calculate_row_hash, get_normalized_tokens
+    _HAS_CENTRALIZED_HASHING = True
+except ImportError:
+    # Fallback if running in different context
+    import xxhash
+    _HAS_CENTRALIZED_HASHING = False
 
 try:
     from presidio_analyzer import AnalyzerEngine
@@ -1148,9 +1158,18 @@ class ProductionDuplicateDetectionService:
                     try:
                         import polars as pl
                         df = pl.DataFrame(rows)
-                        # Create content hash for this specific sheet
+                        # FIX #5: Use centralized hashing for consistency with provenance_tracker
                         sheet_content = df.to_pandas().to_json(orient='records', sort_keys=True)
-                        sheet_hash = xxhash.xxh64(sheet_content.encode()).hexdigest()
+                        if _HAS_CENTRALIZED_HASHING:
+                            # Use centralized xxh3_128 for consistency
+                            sheet_hash = calculate_row_hash(
+                                source_filename=filename or "unknown",
+                                row_index=0,  # Sheet-level hash
+                                payload={"sheet_name": sheet_name, "content": sheet_content[:1000]}  # Sample
+                            )
+                        else:
+                            # Fallback to xxh64 if centralized not available
+                            sheet_hash = xxhash.xxh64(sheet_content.encode()).hexdigest()
                         sheet_fingerprints[sheet_name] = {
                             'hash': sheet_hash,
                             'row_count': len(rows),
@@ -1516,12 +1535,28 @@ class ProductionDuplicateDetectionService:
     # is now mandatory and guaranteed by ExcelProcessor.process_file.
     
     def _hash_event_payload(self, payload: Dict[str, Any]) -> str:
+        """
+        FIX #5: Hash event payload using centralized hashing for consistency.
+        Uses xxh3_128 (via centralized function) for compatibility with provenance_tracker.
+        """
         try:
-            normalized = json.dumps(payload, sort_keys=True, default=str)
+            if _HAS_CENTRALIZED_HASHING:
+                # Use centralized xxh3_128 for consistency with provenance_tracker
+                return calculate_row_hash(
+                    source_filename="event_payload",
+                    row_index=0,
+                    payload=payload
+                )
+            else:
+                # Fallback to xxh64 if centralized not available
+                normalized = json.dumps(payload, sort_keys=True, default=str)
+                return xxhash.xxh64(normalized.encode('utf-8')).hexdigest()
         except Exception:
-            normalized = str(payload)
-        # LIBRARY REPLACEMENT: xxhash for 5-10x faster hashing
-        return xxhash.xxh64(normalized.encode('utf-8')).hexdigest()
+            # Emergency fallback
+            if _HAS_CENTRALIZED_HASHING:
+                return calculate_row_hash("event_payload", 0, {"error": "hash_failed"})
+            else:
+                return xxhash.xxh64(str(payload).encode('utf-8')).hexdigest()
     
     async def get_metrics(self) -> Dict[str, Any]:
         """OPTIMIZED: Get service metrics for monitoring"""
@@ -1574,9 +1609,18 @@ class ProductionDuplicateDetectionService:
         start_time = time.time()
         
         try:
-            # Generate row hash for exact duplicate detection
-            row_str = json.dumps(event_data, sort_keys=True, default=str)
-            row_hash = xxhash.xxh64(row_str.encode()).hexdigest()
+            # FIX #5: Generate row hash using centralized function for consistency
+            if _HAS_CENTRALIZED_HASHING:
+                # Use centralized xxh3_128 for consistency with provenance_tracker
+                row_hash = calculate_row_hash(
+                    source_filename=file_id or "unknown",
+                    row_index=row_index,
+                    payload=event_data
+                )
+            else:
+                # Fallback to xxh64 if centralized not available
+                row_str = json.dumps(event_data, sort_keys=True, default=str)
+                row_hash = xxhash.xxh64(row_str.encode()).hexdigest()
             
             # Check cache first (cross-process consistency via centralized_cache)
             cache_key = f"row_dup:{user_id}:{row_hash}"

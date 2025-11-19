@@ -36,13 +36,12 @@ try:
             # Error filtering
             before_send=lambda event, hint: event if event.get("level") in ["error", "fatal"] else None,
         )
-        logger.info("sentry_initialized", status="success")
-    else:
-        logger.warning("sentry_disabled", reason="SENTRY_DSN not set")
+        print("✓ Sentry initialized successfully")
 except ImportError:
-    logger.warning("sentry_unavailable", reason="sentry-sdk not installed")
+    # Sentry SDK not installed - this is optional, continue without it
+    pass
 except Exception as e:
-    logger.error("sentry_init_failed", error=str(e))
+    print(f"⚠ Sentry initialization failed: {e}")
 import orjson
 import json as stdlib_json  # Keep standard json for JSONEncoder compatibility
 try:
@@ -195,44 +194,9 @@ class DocumentClassificationRequest(BaseModel):
     platform: Optional[str] = None
 
 # Database and external services
-from supabase import Client
-try:
-    from supabase_client import get_supabase_client  # type: ignore
-    _HAS_SUPABASE_HELPER = True
-except ModuleNotFoundError:
-    from supabase import create_client
-
-    _HAS_SUPABASE_HELPER = False
-    _FALLBACK_SUPABASE_CLIENTS: Dict[bool, Optional[Client]] = {True: None, False: None}
-
-    def get_supabase_client(use_service_role: bool = True) -> Client:  # type: ignore
-        """Fallback Supabase client creator when supabase_client module is unavailable."""
-        client = _FALLBACK_SUPABASE_CLIENTS[use_service_role]
-        if client is not None:
-            return client
-
-        supabase_url = os.getenv('SUPABASE_URL')
-        # Check multiple possible environment variable names for Railway/Render compatibility
-        service_role_key = (
-            os.getenv('SUPABASE_SERVICE_ROLE_KEY') or 
-            os.getenv('SUPABASE_SERVICE_KEY') or  # Railway uses this
-            os.getenv('SUPABASE_KEY')
-        )
-        anon_key = os.getenv('SUPABASE_ANON_KEY')
-        key = service_role_key if use_service_role else anon_key
-
-        if not supabase_url or not key:
-            raise RuntimeError(
-                "Supabase client fallback requires SUPABASE_URL and the appropriate API key environment variables."
-            )
-
-        logger.warning(
-            "Supabase client fallback activated: using direct create_client due to missing supabase_client module."
-        )
-
-        client = create_client(supabase_url, key)
-        _FALLBACK_SUPABASE_CLIENTS[use_service_role] = client
-        return client
+# FIX #1: CENTRALIZED SUPABASE CLIENT - Remove duplicate fallback logic
+# Use the pooled client from supabase_client.py for all Supabase operations
+from supabase_client import get_supabase_client  # type: ignore
 from prometheus_client import Counter, Histogram, Gauge, generate_latest, CONTENT_TYPE_LATEST
 
 # CLEANUP: Removed Celery support - Using ARQ only for async task queue
