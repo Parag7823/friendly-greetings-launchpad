@@ -81,6 +81,9 @@ RUN echo "Copying Python files with cache bust: $CACHEBUST"
 # Delete any existing __pycache__ directories to force fresh imports
 RUN find /app -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
 
+# Copy startup validator (runs before main app to catch errors early)
+COPY startup_validator.py .
+
 # Copy all necessary Python files and modules from subdirectories
 COPY core_infrastructure/fastapi_backend_v2.py .
 COPY core_infrastructure/supabase_client.py .
