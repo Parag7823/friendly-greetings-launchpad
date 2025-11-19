@@ -87,21 +87,22 @@ def check_critical_files() -> bool:
     """
     print_header("STEP 1: Validating Python File Syntax")
     
+    # In Docker, all files are copied to /app/ root (see Dockerfile COPY commands)
     critical_files = [
-        "core_infrastructure/fastapi_backend_v2.py",
-        "core_infrastructure/supabase_client.py",
-        "core_infrastructure/database_optimization_utils.py",
-        "aident_cfo_brain/temporal_pattern_learner.py",
-        "aident_cfo_brain/causal_inference_engine.py",
-        "aident_cfo_brain/semantic_relationship_extractor.py",
-        "aident_cfo_brain/enhanced_relationship_detector.py",
-        "aident_cfo_brain/intelligent_chat_orchestrator.py",
-        "data_ingestion_normalization/universal_document_classifier_optimized.py",
-        "data_ingestion_normalization/universal_platform_detector_optimized.py",
-        "data_ingestion_normalization/universal_extractors_optimized.py",
-        "data_ingestion_normalization/universal_field_detector.py",
-        "data_ingestion_normalization/entity_resolver_optimized.py",
-        "duplicate_detection_fraud/production_duplicate_detection_service.py",
+        "fastapi_backend_v2.py",
+        "supabase_client.py",
+        "database_optimization_utils.py",
+        "temporal_pattern_learner.py",
+        "causal_inference_engine.py",
+        "semantic_relationship_extractor.py",
+        "enhanced_relationship_detector.py",
+        "intelligent_chat_orchestrator.py",
+        "universal_document_classifier_optimized.py",
+        "universal_platform_detector_optimized.py",
+        "universal_extractors_optimized.py",
+        "universal_field_detector.py",
+        "entity_resolver_optimized.py",
+        "production_duplicate_detection_service.py",
     ]
     
     all_valid = True
@@ -213,10 +214,18 @@ def check_critical_imports() -> bool:
     
     try:
         # Try to import the main FastAPI app
-        print("Attempting to import: core_infrastructure.fastapi_backend_v2")
-        from core_infrastructure.fastapi_backend_v2 import app, socketio_app
-        print_success("Successfully imported FastAPI app")
-        print_success("Successfully imported Socket.IO app")
+        # In Docker, all files are copied to /app/ root, so import directly
+        print("Attempting to import: fastapi_backend_v2")
+        import fastapi_backend_v2
+        print_success("Successfully imported fastapi_backend_v2 module")
+        
+        # Check if socketio_app exists
+        if hasattr(fastapi_backend_v2, 'socketio_app'):
+            print_success("Successfully found socketio_app")
+        else:
+            print_error("socketio_app not found in module!")
+            return False
+        
         return True
     except Exception as e:
         print_error("FAILED to import main application!")
