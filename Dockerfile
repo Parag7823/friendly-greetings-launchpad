@@ -101,13 +101,11 @@ COPY core_infrastructure/transaction_manager.py .
 COPY data_ingestion_normalization/streaming_processor.py .
 COPY core_infrastructure/error_recovery_system.py .
 COPY core_infrastructure/centralized_cache.py .
-COPY core_infrastructure/observability_system.py .
 COPY core_infrastructure/security_system.py .
 COPY data_ingestion_normalization/nango_client.py .
 COPY background_jobs/arq_worker.py .
 COPY background_jobs/worker_entry.py .
 COPY core_infrastructure/provenance_tracker.py .
-COPY core_infrastructure/debug_logger.py .
 COPY duplicate_detection_fraud/inference_service.py .
 COPY duplicate_detection_fraud/persistent_lsh_service.py .
 COPY data_ingestion_normalization/streaming_source.py .
