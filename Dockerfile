@@ -81,36 +81,36 @@ RUN echo "Copying Python files with cache bust: $CACHEBUST"
 # Delete any existing __pycache__ directories to force fresh imports
 RUN find /app -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
 
-# Copy all necessary Python files and modules
-COPY fastapi_backend_v2.py .
-COPY universal_field_detector.py .
-COPY universal_document_classifier_optimized.py .
-COPY universal_platform_detector_optimized.py .
-COPY universal_extractors_optimized.py .
-COPY entity_resolver_optimized.py .
-COPY enhanced_relationship_detector.py .
-COPY semantic_relationship_extractor.py .
-COPY field_mapping_learner.py .
-COPY embedding_service.py .
-COPY causal_inference_engine.py .
-COPY temporal_pattern_learner.py .
-COPY intelligent_chat_orchestrator.py .
-COPY database_optimization_utils.py .
-COPY production_duplicate_detection_service.py .
-COPY transaction_manager.py .
-COPY streaming_processor.py .
-COPY error_recovery_system.py .
-COPY centralized_cache.py .
-COPY observability_system.py .
-COPY security_system.py .
-COPY nango_client.py .
-COPY arq_worker.py .
-COPY worker_entry.py .
-COPY provenance_tracker.py .
-COPY debug_logger.py .
-COPY inference_service.py .
-COPY persistent_lsh_service.py .
-COPY streaming_source.py .
+# Copy all necessary Python files and modules from subdirectories
+COPY core_infrastructure/fastapi_backend_v2.py .
+COPY data_ingestion_normalization/universal_field_detector.py .
+COPY data_ingestion_normalization/universal_document_classifier_optimized.py .
+COPY data_ingestion_normalization/universal_platform_detector_optimized.py .
+COPY data_ingestion_normalization/universal_extractors_optimized.py .
+COPY data_ingestion_normalization/entity_resolver_optimized.py .
+COPY aident_cfo_brain/enhanced_relationship_detector.py .
+COPY aident_cfo_brain/semantic_relationship_extractor.py .
+COPY data_ingestion_normalization/field_mapping_learner.py .
+COPY data_ingestion_normalization/embedding_service.py .
+COPY aident_cfo_brain/causal_inference_engine.py .
+COPY aident_cfo_brain/temporal_pattern_learner.py .
+COPY aident_cfo_brain/intelligent_chat_orchestrator.py .
+COPY core_infrastructure/database_optimization_utils.py .
+COPY duplicate_detection_fraud/production_duplicate_detection_service.py .
+COPY core_infrastructure/transaction_manager.py .
+COPY data_ingestion_normalization/streaming_processor.py .
+COPY core_infrastructure/error_recovery_system.py .
+COPY core_infrastructure/centralized_cache.py .
+COPY core_infrastructure/observability_system.py .
+COPY core_infrastructure/security_system.py .
+COPY data_ingestion_normalization/nango_client.py .
+COPY background_jobs/arq_worker.py .
+COPY background_jobs/worker_entry.py .
+COPY core_infrastructure/provenance_tracker.py .
+COPY core_infrastructure/debug_logger.py .
+COPY duplicate_detection_fraud/inference_service.py .
+COPY duplicate_detection_fraud/persistent_lsh_service.py .
+COPY data_ingestion_normalization/streaming_source.py .
 COPY start.sh .
  
 # Copy built frontend from frontend stage
