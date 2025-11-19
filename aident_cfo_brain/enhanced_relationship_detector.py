@@ -24,7 +24,7 @@ import re
 import json
 from datetime import datetime
 from typing import Dict, List, Optional, Any, Tuple
-from anthropic import AsyncAnthropic
+from groq import AsyncGroq
 from supabase import create_client, Client
 
 import igraph as ig
@@ -117,7 +117,7 @@ class EnhancedRelationshipDetector:
     
     def __init__(
         self,
-        anthropic_client: AsyncAnthropic = None,
+        anthropic_client: AsyncGroq = None,
         openai_client: Any = None,  # backward-compatible alias used in older code
         supabase_client: Client = None,
         cache_client=None,

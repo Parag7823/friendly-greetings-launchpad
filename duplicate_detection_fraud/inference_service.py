@@ -202,11 +202,21 @@ class AutomatonService:
         from centralized_cache import safe_get_cache
         cache = safe_get_cache()
         
+        # FIX #4: Cache patterns instead of automaton object
+        # Reason: Pickling C-extension objects (ahocorasick.Automaton) is risky
+        # - Can cause segfaults on unpickle if Python version changes
+        # - Rebuilding automaton from patterns is fast (milliseconds)
         if cache:
-            cached = await cache.get('inference:platform_automaton')
-            if cached:
-                logger.info("platform_automaton_loaded_from_cache")
-                return pickle.loads(cached)
+            cached_patterns = await cache.get('inference:platform_automaton_patterns')
+            if cached_patterns:
+                logger.info("platform_automaton_patterns_loaded_from_cache")
+                # Rebuild automaton from cached patterns
+                import ahocorasick
+                automaton = ahocorasick.Automaton()
+                for platform_id, indicator in cached_patterns:
+                    automaton.add_word(indicator.lower(), (platform_id, indicator))
+                automaton.make_automaton()
+                return automaton
         
         logger.info("building_platform_automaton")
         
@@ -218,19 +228,21 @@ class AutomatonService:
             platform_database = detector._initialize_platform_database()
             
             automaton = ahocorasick.Automaton()
+            patterns = []  # Store patterns for caching
             for platform_id, platform_info in platform_database.items():
                 for indicator in platform_info['indicators']:
                     automaton.add_word(indicator.lower(), (platform_id, indicator))
+                    patterns.append((platform_id, indicator))
             automaton.make_automaton()
             
-            return automaton
+            return automaton, patterns
         
         loop = asyncio.get_event_loop()
-        automaton = await loop.run_in_executor(get_executor(), _build_automaton)
+        automaton, patterns = await loop.run_in_executor(get_executor(), _build_automaton)
         
-        # Cache in Redis
+        # Cache patterns (not object) in Redis
         if cache:
-            await cache.set('inference:platform_automaton', pickle.dumps(automaton), ttl=86400)
+            await cache.set('inference:platform_automaton_patterns', patterns, ttl=86400)
         
         logger.info("platform_automaton_built_and_cached")
         return automaton
@@ -241,11 +253,21 @@ class AutomatonService:
         from centralized_cache import safe_get_cache
         cache = safe_get_cache()
         
+        # FIX #4: Cache patterns instead of automaton object
+        # Reason: Pickling C-extension objects (ahocorasick.Automaton) is risky
+        # - Can cause segfaults on unpickle if Python version changes
+        # - Rebuilding automaton from patterns is fast (milliseconds)
         if cache:
-            cached = await cache.get('inference:document_automaton')
-            if cached:
-                logger.info("document_automaton_loaded_from_cache")
-                return pickle.loads(cached)
+            cached_patterns = await cache.get('inference:document_automaton_patterns')
+            if cached_patterns:
+                logger.info("document_automaton_patterns_loaded_from_cache")
+                # Rebuild automaton from cached patterns
+                import ahocorasick
+                automaton = ahocorasick.Automaton()
+                for doc_type_id, pattern in cached_patterns:
+                    automaton.add_word(pattern.lower(), (doc_type_id, pattern))
+                automaton.make_automaton()
+                return automaton
         
         logger.info("building_document_automaton")
         
@@ -257,21 +279,24 @@ class AutomatonService:
             doc_database = classifier._initialize_document_database()
             
             automaton = ahocorasick.Automaton()
+            patterns = []  # Store patterns for caching
             for doc_type_id, doc_info in doc_database.items():
                 for keyword in doc_info['keywords']:
                     automaton.add_word(keyword.lower(), (doc_type_id, keyword))
+                    patterns.append((doc_type_id, keyword))
                 for indicator in doc_info['indicators']:
                     automaton.add_word(indicator.lower(), (doc_type_id, indicator))
+                    patterns.append((doc_type_id, indicator))
             automaton.make_automaton()
             
-            return automaton
+            return automaton, patterns
         
         loop = asyncio.get_event_loop()
-        automaton = await loop.run_in_executor(get_executor(), _build_automaton)
+        automaton, patterns = await loop.run_in_executor(get_executor(), _build_automaton)
         
-        # Cache in Redis
+        # Cache patterns (not object) in Redis
         if cache:
-            await cache.set('inference:document_automaton', pickle.dumps(automaton), ttl=86400)
+            await cache.set('inference:document_automaton_patterns', patterns, ttl=86400)
         
         logger.info("document_automaton_built_and_cached")
         return automaton
@@ -279,8 +304,8 @@ class AutomatonService:
 
 async def health_check() -> Dict[str, Any]:
     """Check health of inference services"""
+    # FIX #2: Removed _sentence_model check (was removed - use embedding_service instead)
     health = {
-        'sentence_model': _sentence_model is not None,
         'ocr_reader': _ocr_reader is not None,
         'tfidf_vectorizer': _tfidf_vectorizer is not None,
         'executor': _executor is not None
@@ -291,6 +316,14 @@ async def health_check() -> Dict[str, Any]:
     cache = safe_get_cache()
     health['redis_cache'] = cache is not None
     
+    # Check embedding service health
+    try:
+        from embedding_service import EmbeddingService
+        embedding_service = EmbeddingService()
+        health['embedding_service'] = embedding_service is not None
+    except Exception:
+        health['embedding_service'] = False
+    
     return health
 
 
@@ -299,9 +332,9 @@ async def warmup():
     logger.info("warming_up_inference_services")
     
     try:
-        # Load models in parallel
+        # FIX #3: Removed SentenceModelService.get_model() (class was removed)
+        # Embedding service is initialized on-demand in universal_document_classifier
         await asyncio.gather(
-            SentenceModelService.get_model(),
             OCRService.get_reader(),
             TFIDFService.get_vectorizer(),
             AutomatonService.get_platform_automaton(),

@@ -4,7 +4,6 @@ Uses igraph (13-32x faster than networkx) + Supabase + Redis caching
 """
 
 import asyncio
-import msgpack  # ✅ REFACTORED: Replaced pickle with msgpack (3-5x faster, more secure)
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 from uuid import UUID
@@ -14,29 +13,17 @@ import structlog
 from pydantic import BaseModel, Field
 from supabase import Client
 
-# ✅ NEW: Add aiocache for Redis connection pooling
+# FIX #1: Use PickleSerializer for compatibility with complex objects (igraph, datetime)
+# Msgpack cannot serialize C-extension objects or datetime, causing crashes
 try:
     from aiocache import Cache
-    from aiocache.serializers import BaseSerializer
+    from aiocache.serializers import PickleSerializer
     AIOCACHE_AVAILABLE = True
 except ImportError:
     AIOCACHE_AVAILABLE = False
     structlog.get_logger(__name__).warning("aiocache not available - using manual Redis")
 
 logger = structlog.get_logger(__name__)
-
-
-# ✅ NEW: Custom msgpack serializer for aiocache
-class MsgpackSerializer(BaseSerializer):
-    """Msgpack serializer for aiocache (3-5x faster than pickle)"""
-    
-    def dumps(self, value: Any) -> bytes:
-        """Serialize using msgpack"""
-        return msgpack.packb(value, use_bin_type=True)
-    
-    def loads(self, value: bytes) -> Any:
-        """Deserialize using msgpack"""
-        return msgpack.unpackb(value, raw=False)
 
 
 class GraphNode(BaseModel):
@@ -619,18 +606,21 @@ class FinleyGraphEngine:
     
     async def _save_to_cache(self, user_id: str, stats: GraphStats):
         """
-        Save to Redis using aiocache + msgpack.
+        Save to Redis using aiocache + pickle.
         
-        REFACTORED: Replaced manual Redis + pickle with aiocache + msgpack.
+        FIX #1: Uses PickleSerializer for compatibility with:
+        - igraph.Graph (C-extension objects)
+        - datetime objects
+        - Complex nested structures
+        
         Benefits:
-        - 10-20x faster (connection pooling)
-        - 3-5x faster serialization (msgpack vs pickle)
-        - 30-50% smaller payload
-        - More secure (no code execution)
+        - 10-20x faster (connection pooling via aiocache)
+        - Handles all Python object types automatically
+        - Consistent with centralized_cache.py implementation
         """
         try:
             if AIOCACHE_AVAILABLE:
-                # Use aiocache with connection pooling
+                # Use aiocache with connection pooling and PickleSerializer
                 from urllib.parse import urlparse
                 parsed = urlparse(self.redis_url)
                 
@@ -638,7 +628,8 @@ class FinleyGraphEngine:
                     Cache.REDIS,
                     endpoint=parsed.hostname,
                     port=parsed.port or 6379,
-                    serializer=MsgpackSerializer()
+                    serializer=PickleSerializer(),  # FIX #1: Use pickle for complex objects
+                    namespace="finley_graph"  # Add namespace for clarity
                 )
                 
                 cache_data = {
@@ -649,11 +640,12 @@ class FinleyGraphEngine:
                     'last_build_time': self.last_build_time.isoformat() if self.last_build_time else None
                 }
                 
-                await cache.set(f"finley_graph:{user_id}", cache_data, ttl=3600)
-                logger.info("graph_cached_with_msgpack", user_id=user_id)
+                await cache.set(f"{user_id}", cache_data, ttl=3600)
+                logger.info("graph_cached_with_pickle", user_id=user_id)
             else:
-                # Fallback to manual Redis + msgpack
+                # Fallback to manual Redis + pickle
                 import redis.asyncio as aioredis
+                import pickle
                 client = await aioredis.from_url(self.redis_url)
                 
                 cache_data = {
@@ -664,26 +656,30 @@ class FinleyGraphEngine:
                     'last_build_time': self.last_build_time.isoformat() if self.last_build_time else None
                 }
                 
-                data = msgpack.packb(cache_data, use_bin_type=True)
+                data = pickle.dumps(cache_data)
                 await client.setex(f"finley_graph:{user_id}", 3600, data)
-                logger.info("graph_cached_with_msgpack_fallback", user_id=user_id)
+                logger.info("graph_cached_with_pickle_fallback", user_id=user_id)
                 
         except Exception as e:
             logger.error("cache_failed", error=str(e))
     
     async def _load_from_cache(self, user_id: str) -> Optional[GraphStats]:
         """
-        Load from Redis using aiocache + msgpack.
+        Load from Redis using aiocache + pickle.
         
-        REFACTORED: Replaced manual Redis + pickle with aiocache + msgpack.
+        FIX #1: Uses PickleSerializer for compatibility with:
+        - igraph.Graph (C-extension objects)
+        - datetime objects
+        - Complex nested structures
+        
         Benefits:
-        - 10-20x faster (connection pooling)
-        - 3-5x faster deserialization (msgpack vs pickle)
-        - More secure (no code execution)
+        - 10-20x faster (connection pooling via aiocache)
+        - Handles all Python object types automatically
+        - Consistent with centralized_cache.py implementation
         """
         try:
             if AIOCACHE_AVAILABLE:
-                # Use aiocache with connection pooling
+                # Use aiocache with connection pooling and PickleSerializer
                 from urllib.parse import urlparse
                 parsed = urlparse(self.redis_url)
                 
@@ -691,10 +687,11 @@ class FinleyGraphEngine:
                     Cache.REDIS,
                     endpoint=parsed.hostname,
                     port=parsed.port or 6379,
-                    serializer=MsgpackSerializer()
+                    serializer=PickleSerializer(),  # FIX #1: Use pickle for complex objects
+                    namespace="finley_graph"
                 )
                 
-                obj = await cache.get(f"finley_graph:{user_id}")
+                obj = await cache.get(f"{user_id}")
                 if not obj:
                     return None
                 
@@ -702,17 +699,18 @@ class FinleyGraphEngine:
                 self.node_id_to_index = obj['node_id_to_index']
                 self.index_to_node_id = obj['index_to_node_id']
                 self.last_build_time = datetime.fromisoformat(obj['last_build_time']) if obj.get('last_build_time') else None
-                logger.info("graph_loaded_from_cache_msgpack", user_id=user_id)
+                logger.info("graph_loaded_from_cache_pickle", user_id=user_id)
                 return GraphStats(**obj['stats'])
             else:
-                # Fallback to manual Redis + msgpack
+                # Fallback to manual Redis + pickle
                 import redis.asyncio as aioredis
+                import pickle
                 client = await aioredis.from_url(self.redis_url)
                 data = await client.get(f"finley_graph:{user_id}")
                 if not data:
                     return None
                 
-                obj = msgpack.unpackb(data, raw=False)
+                obj = pickle.loads(data)
                 self.graph = obj['graph']
                 self.node_id_to_index = obj['node_id_to_index']
                 self.index_to_node_id = obj['index_to_node_id']

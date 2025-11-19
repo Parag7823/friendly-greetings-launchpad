@@ -45,7 +45,10 @@ from pyod.models.lof import LOF
 # Forecasting (NEW CAPABILITY - replaces nothing, adds forecasting)
 from prophet import Prophet
 
-# Matrix Profile (NEW CAPABILITY - pattern discovery)
+# Matrix Profile for advanced pattern discovery (STUMPY)
+# - Finds unknown repeating patterns automatically
+# - Detects regime changes (business behavior shifts)
+# - Motif search (find all instances of specific patterns)
 import stumpy
 
 # Keep for basic stats
@@ -1035,9 +1038,291 @@ class TemporalPatternLearner:
         except Exception as e:
             logger.error(f"Prophet forecasting failed: {e}", exc_info=True)
             return {
-                'forecast': [],
+            }
+    
+    async def discover_unknown_patterns(
+        self,
+        user_id: str,
+        relationship_type: str,
+        window_size: int = 7
+    ) -> Dict[str, Any]:
+        """
+        Discover unknown repeating patterns using STUMPY Matrix Profile.
+        
+        Automatically finds the top repeating patterns without you specifying what to look for.
+        Example: Discovers that customers pay in clusters of 3 invoices every 90 days.
+        
+        Args:
+            user_id: User ID
+            relationship_type: Type of relationship to analyze
+            window_size: Pattern window size in days (default: 7)
+        
+        Returns:
+            Dictionary with discovered motifs (repeating patterns)
+        """
+        try:
+            logger.info(f"Discovering unknown patterns for {relationship_type}, window={window_size}")
+            
+            # Fetch relationship timing data
+            response = await asyncio.to_thread(
+                self.supabase.table('relationship_instances')
+                .select('created_at, source_event_id, target_event_id')
+                .eq('user_id', user_id)
+                .eq('relationship_type', relationship_type)
+                .order('created_at')
+                .execute
+            )
+            
+            if not response.data or len(response.data) < window_size * 3:
+                return {
+                    'motifs': [],
+                    'message': f'Insufficient data (need at least {window_size * 3} relationships)'
+                }
+            
+            # Extract time series of days between relationships
+            timestamps = [self._parse_iso_timestamp(r['created_at']) for r in response.data]
+            days_between = [(timestamps[i+1] - timestamps[i]).days for i in range(len(timestamps)-1)]
+            
+            if len(days_between) < window_size * 2:
+                return {'motifs': [], 'message': 'Insufficient data for pattern discovery'}
+            
+            # Compute Matrix Profile using STUMPY
+            time_series = np.array(days_between, dtype=float)
+            matrix_profile = stumpy.stump(time_series, m=window_size)
+            
+            # Find top 3 motifs (most common repeating patterns)
+            motifs_idx, motifs_distances = stumpy.motifs(
+                time_series,
+                matrix_profile[:, 0],  # Matrix profile values
+                max_motifs=3,
+                max_distance=np.inf
+            )
+            
+            discovered_motifs = []
+            for i, (motif_indices, distance) in enumerate(zip(motifs_idx, motifs_distances)):
+                if len(motif_indices) < 2:
+                    continue
+                
+                # Extract the pattern
+                pattern_values = time_series[motif_indices[0]:motif_indices[0]+window_size]
+                
+                discovered_motifs.append({
+                    'motif_rank': i + 1,
+                    'pattern': pattern_values.tolist(),
+                    'pattern_description': f"Repeating {window_size}-day pattern: {pattern_values.mean():.1f}±{pattern_values.std():.1f} days",
+                    'occurrences': len(motif_indices),
+                    'occurrence_indices': motif_indices.tolist(),
+                    'average_distance': float(distance),
+                    'confidence_score': 1.0 - (distance / time_series.std())
+                })
+            
+            logger.info(f"✅ Discovered {len(discovered_motifs)} unknown patterns")
+            
+            return {
+                'motifs': discovered_motifs,
+                'relationship_type': relationship_type,
+                'window_size': window_size,
+                'total_data_points': len(days_between),
+                'message': f'Discovered {len(discovered_motifs)} repeating patterns automatically'
+            }
+            
+        except Exception as e:
+            logger.error(f"Pattern discovery failed: {e}", exc_info=True)
+            return {
+                'motifs': [],
                 'error': str(e),
-                'message': 'Prophet forecasting failed'
+                'message': 'Pattern discovery failed'
+            }
+    
+    async def detect_regime_changes(
+        self,
+        user_id: str,
+        relationship_type: str,
+        window_size: int = 7
+    ) -> Dict[str, Any]:
+        """
+        Detect regime changes (fundamental business behavior shifts) using STUMPY FLUSS.
+        
+        Example: Detects when payment behavior changed from monthly to bi-weekly.
+        
+        Args:
+            user_id: User ID
+            relationship_type: Type of relationship to analyze
+            window_size: Analysis window size in days
+        
+        Returns:
+            Dictionary with detected regime changes
+        """
+        try:
+            logger.info(f"Detecting regime changes for {relationship_type}")
+            
+            # Fetch relationship timing data
+            response = await asyncio.to_thread(
+                self.supabase.table('relationship_instances')
+                .select('created_at')
+                .eq('user_id', user_id)
+                .eq('relationship_type', relationship_type)
+                .order('created_at')
+                .execute
+            )
+            
+            if not response.data or len(response.data) < window_size * 4:
+                return {
+                    'regime_changes': [],
+                    'message': f'Insufficient data (need at least {window_size * 4} relationships)'
+                }
+            
+            # Extract time series
+            timestamps = [self._parse_iso_timestamp(r['created_at']) for r in response.data]
+            days_between = [(timestamps[i+1] - timestamps[i]).days for i in range(len(timestamps)-1)]
+            time_series = np.array(days_between, dtype=float)
+            
+            # Compute Matrix Profile
+            matrix_profile = stumpy.stump(time_series, m=window_size)
+            
+            # Detect regime changes using FLUSS (Fast Low-cost Unipotent Semantic Segmentation)
+            cac, regime_locations = stumpy.fluss(
+                matrix_profile[:, 1],  # Matrix profile indices
+                L=window_size,
+                n_regimes=5,  # Look for up to 5 regime changes
+                excl_factor=1
+            )
+            
+            # Analyze each regime
+            regime_changes = []
+            for i, change_idx in enumerate(regime_locations):
+                if change_idx <= 0 or change_idx >= len(time_series):
+                    continue
+                
+                # Get behavior before and after change
+                before = time_series[max(0, change_idx-window_size):change_idx]
+                after = time_series[change_idx:min(len(time_series), change_idx+window_size)]
+                
+                if len(before) < 3 or len(after) < 3:
+                    continue
+                
+                change_date = timestamps[change_idx]
+                
+                regime_changes.append({
+                    'change_rank': i + 1,
+                    'change_date': change_date.isoformat(),
+                    'change_index': int(change_idx),
+                    'behavior_before': {
+                        'avg_days': float(before.mean()),
+                        'std_dev': float(before.std())
+                    },
+                    'behavior_after': {
+                        'avg_days': float(after.mean()),
+                        'std_dev': float(after.std())
+                    },
+                    'magnitude_of_change': float(abs(after.mean() - before.mean())),
+                    'description': f"Behavior shifted from {before.mean():.1f}±{before.std():.1f} to {after.mean():.1f}±{after.std():.1f} days"
+                })
+            
+            logger.info(f"✅ Detected {len(regime_changes)} regime changes")
+            
+            return {
+                'regime_changes': regime_changes,
+                'relationship_type': relationship_type,
+                'total_changes_detected': len(regime_changes),
+                'message': f'Detected {len(regime_changes)} fundamental behavior shifts'
+            }
+            
+        except Exception as e:
+            logger.error(f"Regime change detection failed: {e}", exc_info=True)
+            return {
+                'regime_changes': [],
+                'error': str(e),
+                'message': 'Regime change detection failed'
+            }
+    
+    async def find_pattern_motifs(
+        self,
+        user_id: str,
+        relationship_type: str,
+        target_pattern: List[float],
+        tolerance: float = 0.2
+    ) -> Dict[str, Any]:
+        """
+        Find all instances of a specific payment pattern using STUMPY.
+        
+        Example: "Find all times when we had 3 invoices paid 30, 35, 32 days apart"
+        
+        Args:
+            user_id: User ID
+            relationship_type: Type of relationship
+            target_pattern: The pattern to search for (e.g., [30, 35, 32])
+            tolerance: Match tolerance (0.0-1.0, default: 0.2 = 20% variation allowed)
+        
+        Returns:
+            Dictionary with all matching pattern instances
+        """
+        try:
+            logger.info(f"Searching for pattern motifs: {target_pattern}")
+            
+            # Fetch data
+            response = await asyncio.to_thread(
+                self.supabase.table('relationship_instances')
+                .select('created_at, source_event_id, target_event_id')
+                .eq('user_id', user_id)
+                .eq('relationship_type', relationship_type)
+                .order('created_at')
+                .execute
+            )
+            
+            if not response.data or len(response.data) < len(target_pattern) * 2:
+                return {
+                    'matches': [],
+                    'message': 'Insufficient data for pattern search'
+                }
+            
+            # Extract time series
+            timestamps = [self._parse_iso_timestamp(r['created_at']) for r in response.data]
+            days_between = [(timestamps[i+1] - timestamps[i]).days for i in range(len(timestamps)-1)]
+            time_series = np.array(days_between, dtype=float)
+            
+            # Use STUMPY to find matches
+            target = np.array(target_pattern, dtype=float)
+            distances = stumpy.mass(target, time_series)
+            
+            # Find matches within tolerance
+            threshold = np.std(time_series) * tolerance
+            match_indices = np.where(distances < threshold)[0]
+            
+            matches = []
+            for idx in match_indices:
+                if idx + len(target_pattern) > len(time_series):
+                    continue
+                
+                matched_pattern = time_series[idx:idx+len(target_pattern)]
+                
+                matches.append({
+                    'match_index': int(idx),
+                    'start_date': timestamps[idx].isoformat(),
+                    'end_date': timestamps[idx+len(target_pattern)].isoformat(),
+                    'matched_pattern': matched_pattern.tolist(),
+                    'target_pattern': target_pattern,
+                    'distance': float(distances[idx]),
+                    'similarity_score': 1.0 - (distances[idx] / threshold),
+                    'event_ids': [response.data[i]['source_event_id'] for i in range(idx, min(idx+len(target_pattern), len(response.data)))]
+                })
+            
+            logger.info(f"✅ Found {len(matches)} pattern matches")
+            
+            return {
+                'matches': matches,
+                'target_pattern': target_pattern,
+                'total_matches': len(matches),
+                'tolerance': tolerance,
+                'message': f'Found {len(matches)} instances of the target pattern'
+            }
+            
+        except Exception as e:
+            logger.error(f"Pattern motif search failed: {e}", exc_info=True)
+            return {
+                'matches': [],
+                'error': str(e),
+                'message': 'Pattern motif search failed'
             }
     
     def get_metrics(self) -> Dict[str, Any]:
