@@ -37,7 +37,7 @@ CREATE INDEX IF NOT EXISTS idx_raw_records_classification_status ON public.raw_r
 
 -- Composite indexes for common queries
 CREATE INDEX IF NOT EXISTS idx_raw_records_user_duplicate ON public.raw_records(user_id, is_duplicate) WHERE is_duplicate = TRUE;
-CREATE INDEX IF NOT EXISTS idx_raw_records_file_duplicate ON public.raw_records(file_id, duplicate_decision) WHERE duplicate_decision IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_raw_records_source_duplicate ON public.raw_records(source, duplicate_decision) WHERE duplicate_decision IS NOT NULL;
 
 -- Add comments for documentation
 COMMENT ON COLUMN public.raw_records.duplicate_decision IS 'Decision made for duplicate handling (skip, merge, replace, keep_both)';
