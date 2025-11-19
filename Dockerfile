@@ -73,6 +73,26 @@ RUN echo "Installing pandas with Python $(python --version)" && \
 
 # Install remaining dependencies (torch/torchvision already installed above)
 RUN pip install --no-cache-dir -r backend-requirements.txt
+
+# CRITICAL FIX: Force cache invalidation for Python file copies
+ARG CACHEBUST=20251107-v22-SECURITY-INTEGRATION-FIXES
+RUN echo "Copying Python files with cache bust: $CACHEBUST"
+
+# Delete any existing __pycache__ directories to force fresh imports
+RUN find /app -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
+
+# Copy startup validator (runs before main app to catch errors early)
+COPY startup_validator.py .
+
+# Copy all necessary Python files and modules from subdirectories
+COPY core_infrastructure/fastapi_backend_v2.py .
+COPY core_infrastructure/supabase_client.py .
+COPY data_ingestion_normalization/universal_field_detector.py .
+COPY data_ingestion_normalization/universal_document_classifier_optimized.py .
+COPY data_ingestion_normalization/universal_platform_detector_optimized.py .
+COPY data_ingestion_normalization/universal_extractors_optimized.py .
+COPY data_ingestion_normalization/entity_resolver_optimized.py .
+COPY aident_cfo_brain/enhanced_relationship_detector.py .
 COPY aident_cfo_brain/semantic_relationship_extractor.py .
 COPY data_ingestion_normalization/field_mapping_learner.py .
 COPY data_ingestion_normalization/embedding_service.py .
