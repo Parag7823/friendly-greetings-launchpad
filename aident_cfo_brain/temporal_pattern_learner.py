@@ -35,7 +35,24 @@ import asyncio
 # Timestamp parsing (replaces 30 lines of custom regex)
 from dateutil.parser import isoparse
 
+# Time series decomposition (replaces 72 lines of custom FFT)
+from statsmodels.tsa.seasonal import seasonal_decompose
+
+# Anomaly detection (replaces 95 lines of basic 2σ threshold)
+from pyod.models.iforest import IForest
+from pyod.models.lof import LOF
+
+# Forecasting (NEW CAPABILITY - replaces nothing, adds forecasting)
+from prophet import Prophet
+
+# Matrix Profile for advanced pattern discovery (STUMPY)
+# - Finds unknown repeating patterns automatically
+# - Detects regime changes (business behavior shifts)
+# - Motif search (find all instances of specific patterns)
+import stumpy
+
 # Keep for basic stats and time series
+from scipy import stats
 import pandas as pd
 
 # CRITICAL FIX: Import shared normalization functions
@@ -353,9 +370,6 @@ class TemporalPatternLearner:
             for period in [7, 14, 30]:
                 if len(ts_data) >= 2 * period:
                     try:
-                        # Lazy import statsmodels only when needed
-                        from statsmodels.tsa.seasonal import seasonal_decompose
-                        
                         decomposition = seasonal_decompose(
                             ts_data,
                             model='additive',
@@ -407,7 +421,6 @@ class TemporalPatternLearner:
         """
         try:
             # Lazy import stumpy only when needed
-            import stumpy
             
             # Compute matrix profile for motif discovery
             # window_size = period to search for (try common financial cycles)

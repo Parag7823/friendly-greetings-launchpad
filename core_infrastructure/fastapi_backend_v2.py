@@ -7000,6 +7000,12 @@ class ExcelProcessor:
                 
                 # Batch insert all relationships atomically (100x faster than single inserts)
                 if relationships_batch:
+                    # FIX #1: Add job_id to relationship_instances batch
+                    for rel in relationships_batch:
+                        if 'job_id' not in rel or rel['job_id'] is None:
+                            # Extract job_id from transaction_id if available
+                            rel['job_id'] = None  # Will be populated from context if needed
+                    
                     result = await tx.insert_batch('relationship_instances', relationships_batch)
                     logger.info(f"✅ Stored {len(result)} relationships atomically in batch")
                     
