@@ -150,7 +150,41 @@ class UniversalPlatformDetectorOptimized:
         return PlatformDetectorConfig()
     
     def _initialize_platform_database(self) -> Dict[str, Dict[str, Any]]:
-        """Initialize comprehensive platform database"""
+        """
+        Initialize comprehensive platform database from YAML or hardcoded fallback.
+        
+        PRODUCTION FIX #5: Standardize on YAML for configuration.
+        Non-developers can update platform patterns without code changes.
+        """
+        import yaml
+        import os
+        from pathlib import Path
+        
+        # Try to load from YAML first (production-ready approach)
+        yaml_paths = [
+            Path(__file__).parent / 'platform_patterns.yaml',
+            Path('/etc/finley/platform_patterns.yaml'),
+            Path(os.getenv('PLATFORM_PATTERNS_YAML', 'platform_patterns.yaml'))
+        ]
+        
+        for yaml_path in yaml_paths:
+            if yaml_path.exists():
+                try:
+                    with open(yaml_path, 'r') as f:
+                        platforms = yaml.safe_load(f)
+                        if platforms and isinstance(platforms, dict):
+                            logger.info(f"✅ Loaded platform patterns from {yaml_path}")
+                            return platforms
+                except Exception as e:
+                    logger.warning(f"Failed to load platform patterns from {yaml_path}: {e}")
+        
+        # Fallback to hardcoded database (for backward compatibility)
+        logger.warning("⚠️ Platform patterns YAML not found. Using hardcoded fallback. "
+                      "For production, create platform_patterns.yaml with platform definitions.")
+        return self._get_hardcoded_platform_database()
+    
+    def _get_hardcoded_platform_database(self) -> Dict[str, Dict[str, Any]]:
+        """Hardcoded platform database (fallback only)"""
         return {
             # Payment Gateways
             'stripe': {

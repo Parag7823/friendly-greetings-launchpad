@@ -38,10 +38,30 @@ from dataclasses import dataclass
 logger = structlog.get_logger(__name__)
 
 if not _HAS_SUPABASE_HELPER:
+    # PRODUCTION FIX #4: Enforce supabase_client.py in production
+    # Fallback is for development only - production MUST use pooled client
+    import os as _os_check
+    environment = _os_check.getenv('ENVIRONMENT', 'development').lower()
+    
+    if environment == 'production':
+        raise RuntimeError(
+            "🚨 CRITICAL: supabase_client.py module not found in PRODUCTION environment.\n"
+            "Production deployments MUST use the pooled Supabase client from supabase_client.py\n"
+            "to ensure connection pooling and prevent connection exhaustion.\n"
+            "Fallback un-pooled clients are for development only.\n"
+            "Action: Ensure supabase_client.py is deployed with the application."
+        )
+    
+    # Development fallback (with warning)
     _FALLBACK_SUPABASE_CLIENTS: Dict[bool, Optional[Client]] = {True: None, False: None}
 
     def get_supabase_client(use_service_role: bool = True) -> Client:  # type: ignore
-        """Fallback Supabase client creator when supabase_client module is unavailable."""
+        """
+        Fallback Supabase client creator (DEVELOPMENT ONLY).
+        
+        WARNING: This creates un-pooled clients. Each worker gets its own connection.
+        For production, use supabase_client.py which provides proper connection pooling.
+        """
         client = _FALLBACK_SUPABASE_CLIENTS[use_service_role]
         if client is not None:
             return client
@@ -57,7 +77,8 @@ if not _HAS_SUPABASE_HELPER:
             )
 
         logger.warning(
-            "Supabase client fallback activated: using direct create_client due to missing supabase_client module."
+            "⚠️ DEVELOPMENT MODE: Using un-pooled Supabase client fallback. "
+            "This is NOT suitable for production. Deploy supabase_client.py for connection pooling."
         )
 
         client = create_client(supabase_url, key)

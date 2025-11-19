@@ -21,6 +21,7 @@ from datetime import datetime
 from typing import Dict, List, Optional, Any, Tuple
 from dataclasses import dataclass, asdict
 from enum import Enum
+from urllib.parse import urlparse  # ✅ NEW: For robust URL parsing
 
 # AI & Structured Output
 from groq import AsyncGroq
@@ -378,9 +379,14 @@ class SemanticRelationshipExtractor:
             return None
         
         try:
-            cache = Cache(Cache.REDIS, endpoint=self.config['redis_url'].split('//')[1].split('/')[0].split(':')[0],
-                         port=int(self.config['redis_url'].split(':')[-1].split('/')[0]),
-                         serializer=PickleSerializer())
+            # ✅ REFACTORED: Use urllib.parse instead of brittle string splitting
+            parsed = urlparse(self.config['redis_url'])
+            cache = Cache(
+                Cache.REDIS,
+                endpoint=parsed.hostname,
+                port=parsed.port or 6379,
+                serializer=PickleSerializer()
+            )
             result = await cache.get(cache_key)
             return result
         except Exception as e:
@@ -393,9 +399,14 @@ class SemanticRelationshipExtractor:
             return
         
         try:
-            cache = Cache(Cache.REDIS, endpoint=self.config['redis_url'].split('//')[1].split('/')[0].split(':')[0],
-                         port=int(self.config['redis_url'].split(':')[-1].split('/')[0]),
-                         serializer=PickleSerializer())
+            # ✅ REFACTORED: Use urllib.parse instead of brittle string splitting
+            parsed = urlparse(self.config['redis_url'])
+            cache = Cache(
+                Cache.REDIS,
+                endpoint=parsed.hostname,
+                port=parsed.port or 6379,
+                serializer=PickleSerializer()
+            )
             await cache.set(cache_key, semantic_rel, ttl=self.config['cache_ttl_seconds'])
         except Exception as e:
             logger.debug(f"Cache set failed: {e}")

@@ -674,20 +674,12 @@ class TemporalPatternLearner:
     async def _store_temporal_pattern(
         self,
         pattern: TemporalPattern,
-        user_id: str
+        user_id: str,
+        job_id: Optional[str] = None,
+        transaction_id: Optional[str] = None
     ):
         """Store temporal pattern in database"""
         try:
-            # Generate semantic description
-            semantic_desc = f"{pattern.relationship_type} occurs every {pattern.avg_days_between:.1f} days on average"
-            if pattern.has_seasonal_pattern:
-                semantic_desc += f" with seasonal pattern (period: {pattern.seasonal_period_days} days)"
-            
-            # Generate temporal causality explanation
-            temporal_causality = f"Time-based pattern with {pattern.confidence_score:.0%} confidence"
-            if pattern.std_dev_days > 0:
-                temporal_causality += f", variability: ±{pattern.std_dev_days:.1f} days"
-            
             # Generate business logic (raw text)
             business_logic_raw = f"Predictable pattern based on {pattern.sample_count} historical occurrences"
             if pattern.confidence_score >= 0.8:
@@ -711,11 +703,14 @@ class TemporalPatternLearner:
                 'has_seasonal_pattern': pattern.has_seasonal_pattern,
                 'seasonal_period_days': pattern.seasonal_period_days,
                 'seasonal_amplitude': pattern.seasonal_amplitude,
-                # CRITICAL FIX: Normalize before storing to database
-                'semantic_description': semantic_desc,
-                'temporal_causality': normalize_temporal_causality(temporal_causality),
+                'learned_from_relationship_ids': pattern.learned_from_relationship_ids if hasattr(pattern, 'learned_from_relationship_ids') else [],
                 'business_logic': normalize_business_logic(business_logic_raw)
             }
+            
+            if job_id:
+                data['job_id'] = job_id
+            if transaction_id:
+                data['transaction_id'] = transaction_id
             
             self.supabase.table('temporal_patterns').upsert(data).execute()
             
@@ -757,11 +752,15 @@ class TemporalPatternLearner:
     async def _store_predicted_relationship(
         self,
         prediction: PredictedRelationship,
-        user_id: str
+        user_id: str,
+        job_id: Optional[str] = None,
+        transaction_id: Optional[str] = None,
+        pattern_id: Optional[str] = None,
+        source_entity_id: Optional[str] = None,
+        target_entity_id: Optional[str] = None
     ):
         """Store predicted relationship in database"""
         try:
-            # Determine status
             status = 'overdue' if prediction.days_until_expected < 0 else 'pending'
             
             data = {
@@ -777,8 +776,26 @@ class TemporalPatternLearner:
                 'prediction_reasoning': prediction.prediction_reasoning,
                 'temporal_pattern_id': prediction.temporal_pattern_id,
                 'status': status,
-                'prediction_method': 'temporal_pattern_learning'
+                'prediction_method': 'temporal_pattern_learning',
+                'predicted_at': datetime.utcnow().isoformat(),
+                'metadata': {},
+                'prediction_basis': {
+                    'pattern_id': pattern_id,
+                    'temporal_pattern_id': prediction.temporal_pattern_id,
+                    'confidence_score': prediction.confidence_score
+                }
             }
+            
+            if job_id:
+                data['job_id'] = job_id
+            if transaction_id:
+                data['transaction_id'] = transaction_id
+            if pattern_id:
+                data['pattern_id'] = pattern_id
+            if source_entity_id:
+                data['source_entity_id'] = source_entity_id
+            if target_entity_id:
+                data['target_entity_id'] = target_entity_id
             
             self.supabase.table('predicted_relationships').insert(data).execute()
             

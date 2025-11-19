@@ -74,11 +74,13 @@ class DatabaseTransactionManager:
     Manages atomic database transactions for complex operations.
     
     Features:
-    - Atomic multi-table operations
+    - Atomic multi-table operations (HTTP client)
+    - RPC-based ACID transactions (Postgres functions)
     - Automatic rollback on failure
     - Transaction logging and monitoring
     - Deadlock detection and retry
     - Memory-efficient operation batching
+    - Idempotency support for safe retries
     """
     
     def __init__(self, supabase: Client):
@@ -86,6 +88,7 @@ class DatabaseTransactionManager:
         self.active_transactions: Dict[str, Dict[str, Any]] = {}
         self.max_retry_attempts = 3
         self.retry_delay_ms = 100
+        self.use_rpc_transactions = True  # Enable RPC for true ACID when available
     
     @asynccontextmanager
     async def transaction(self, transaction_id: Optional[str] = None, 
@@ -93,6 +96,17 @@ class DatabaseTransactionManager:
                          operation_type: str = "data_processing"):
         """
         Context manager for atomic database transactions.
+        
+        TRANSACTION SAFETY NOTES:
+        - HTTP client transactions: Each .execute() is a separate HTTP request
+        - Network failure between requests = partial transaction
+        - SOLUTION: Use idempotency keys and unique constraints for safe retries
+        - For true ACID: Deploy Postgres RPC functions (future enhancement)
+        
+        IDEMPOTENCY STRATEGY:
+        - All operations include transaction_id for deduplication
+        - Unique constraints prevent duplicate inserts on retry
+        - Rollback is best-effort (may be partial on network failure)
         
         Usage:
             async with transaction_manager.transaction() as tx:

@@ -30,6 +30,7 @@ from causal_inference_engine import CausalInferenceEngine
 from temporal_pattern_learner import TemporalPatternLearner
 from enhanced_relationship_detector import EnhancedRelationshipDetector
 from entity_resolver_optimized import EntityResolverOptimized as EntityResolver
+from finley_graph_engine import FinleyGraphEngine  # NEW: Graph intelligence
 
 logger = structlog.get_logger(__name__)
 
@@ -115,7 +116,13 @@ class IntelligentChatOrchestrator:
             cache_client=cache_client
         )
         
-        logger.info("✅ IntelligentChatOrchestrator initialized with all engines")
+        # NEW: Initialize FinleyGraph engine for intelligence queries
+        self.graph_engine = FinleyGraphEngine(
+            supabase=supabase_client,
+            redis_url=os.getenv('ARQ_REDIS_URL') or os.getenv('REDIS_URL')
+        )
+        
+        logger.info("✅ IntelligentChatOrchestrator initialized with all engines including FinleyGraph")
     
     async def _parallel_query(self, queries: List[Tuple[str, callable]]) -> Dict[str, Any]:
         """
@@ -1376,6 +1383,266 @@ DATA STATUS: {'Rich data available - provide specific, quantified insights!' if 
             return f"User discussed: {', '.join(topics)}"
         else:
             return f"User asked {len(user_questions)} questions about their finances"
+    
+    # ========================================================================
+    # NEW PHASE 3: FINLEY GRAPH INTELLIGENCE INTEGRATION
+    # ========================================================================
+    
+    async def _get_temporal_insights(self, user_id: str, source_id: str, target_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Get temporal pattern insights from FinleyGraph.
+        
+        Returns recurring patterns, frequency, and next predicted occurrences.
+        """
+        try:
+            # Build graph if not already built
+            if not self.graph_engine.graph:
+                await self.graph_engine.build_graph(user_id)
+            
+            # Find path between entities
+            path = self.graph_engine.find_path(source_id, target_id)
+            if not path:
+                return None
+            
+            # Extract temporal patterns
+            temporal_patterns = []
+            for edge_data in path.path_edges:
+                if edge_data.get('recurrence_frequency') and edge_data.get('recurrence_frequency') != 'none':
+                    temporal_patterns.append({
+                        'frequency': edge_data.get('recurrence_frequency'),
+                        'score': edge_data.get('recurrence_score', 0.0),
+                        'next_occurrence': edge_data.get('next_predicted_occurrence'),
+                        'relationship': edge_data.get('relationship_type')
+                    })
+            
+            if temporal_patterns:
+                return {
+                    'patterns': temporal_patterns,
+                    'count': len(temporal_patterns),
+                    'confidence': sum(p['score'] for p in temporal_patterns) / max(1, len(temporal_patterns))
+                }
+            return None
+        except Exception as e:
+            logger.warning("temporal_insights_failed", error=str(e))
+            return None
+    
+    async def _get_seasonal_insights(self, user_id: str, source_id: str, target_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Get seasonal pattern insights from FinleyGraph.
+        
+        Returns seasonal months, strength, and cycles.
+        """
+        try:
+            if not self.graph_engine.graph:
+                await self.graph_engine.build_graph(user_id)
+            
+            path = self.graph_engine.find_path(source_id, target_id)
+            if not path:
+                return None
+            
+            seasonal_cycles = []
+            for edge_data in path.path_edges:
+                if edge_data.get('seasonal_months'):
+                    seasonal_cycles.append({
+                        'months': edge_data.get('seasonal_months'),
+                        'strength': edge_data.get('seasonal_strength', 0.0),
+                        'relationship': edge_data.get('relationship_type')
+                    })
+            
+            if seasonal_cycles:
+                month_names = {1: 'Jan', 2: 'Feb', 3: 'Mar', 4: 'Apr', 5: 'May', 6: 'Jun',
+                              7: 'Jul', 8: 'Aug', 9: 'Sep', 10: 'Oct', 11: 'Nov', 12: 'Dec'}
+                return {
+                    'cycles': seasonal_cycles,
+                    'count': len(seasonal_cycles),
+                    'peak_months': [month_names.get(m, str(m)) for cycle in seasonal_cycles for m in cycle['months']],
+                    'confidence': sum(c['strength'] for c in seasonal_cycles) / max(1, len(seasonal_cycles))
+                }
+            return None
+        except Exception as e:
+            logger.warning("seasonal_insights_failed", error=str(e))
+            return None
+    
+    async def _get_fraud_warnings(self, user_id: str, source_id: str, target_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Get fraud detection warnings from FinleyGraph.
+        
+        Returns duplicate transactions and fraud risk score.
+        """
+        try:
+            if not self.graph_engine.graph:
+                await self.graph_engine.build_graph(user_id)
+            
+            path = self.graph_engine.find_path(source_id, target_id)
+            if not path:
+                return None
+            
+            fraud_alerts = []
+            total_fraud_score = 0.0
+            for edge_data in path.path_edges:
+                if edge_data.get('is_duplicate'):
+                    duplicate_confidence = edge_data.get('duplicate_confidence', 0.0)
+                    fraud_alerts.append({
+                        'relationship': edge_data.get('relationship_type'),
+                        'confidence': duplicate_confidence,
+                        'reasoning': edge_data.get('reasoning', 'Duplicate detected')
+                    })
+                    total_fraud_score += duplicate_confidence
+            
+            if fraud_alerts:
+                fraud_risk = total_fraud_score / max(1, len(path.path_edges))
+                return {
+                    'alerts': fraud_alerts,
+                    'count': len(fraud_alerts),
+                    'risk_score': fraud_risk,
+                    'severity': 'HIGH' if fraud_risk > 0.7 else 'MEDIUM' if fraud_risk > 0.4 else 'LOW'
+                }
+            return None
+        except Exception as e:
+            logger.warning("fraud_detection_failed", error=str(e))
+            return None
+    
+    async def _get_root_cause_analysis(self, user_id: str, source_id: str, target_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Get root cause analysis from FinleyGraph.
+        
+        Returns causal chain and root cause explanations.
+        """
+        try:
+            if not self.graph_engine.graph:
+                await self.graph_engine.build_graph(user_id)
+            
+            path = self.graph_engine.find_path(source_id, target_id)
+            if not path:
+                return None
+            
+            root_causes = []
+            causal_chain = []
+            total_causal_strength = 0.0
+            
+            for i, edge_data in enumerate(path.path_edges):
+                if edge_data.get('root_cause_analysis'):
+                    root_causes.append(edge_data['root_cause_analysis'])
+                
+                causal_strength = edge_data.get('causal_strength', 0.0)
+                total_causal_strength += causal_strength
+                causal_chain.append({
+                    'step': i + 1,
+                    'relationship': edge_data.get('relationship_type'),
+                    'strength': causal_strength,
+                    'direction': edge_data.get('causal_direction', 'unknown'),
+                    'reasoning': edge_data.get('reasoning', '')
+                })
+            
+            if root_causes or causal_chain:
+                return {
+                    'root_causes': root_causes,
+                    'causal_chain': causal_chain,
+                    'chain_length': len(causal_chain),
+                    'total_causal_strength': total_causal_strength,
+                    'avg_causal_strength': total_causal_strength / max(1, len(causal_chain))
+                }
+            return None
+        except Exception as e:
+            logger.warning("root_cause_analysis_failed", error=str(e))
+            return None
+    
+    async def _get_predictions(self, user_id: str, source_id: str, target_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Get future predictions from FinleyGraph.
+        
+        Returns predicted relationships and confidence scores.
+        """
+        try:
+            if not self.graph_engine.graph:
+                await self.graph_engine.build_graph(user_id)
+            
+            path = self.graph_engine.find_path(source_id, target_id)
+            if not path:
+                return None
+            
+            predictions = []
+            for edge_data in path.path_edges:
+                if edge_data.get('prediction_confidence'):
+                    prediction_confidence = edge_data.get('prediction_confidence', 0.0)
+                    predictions.append({
+                        'relationship': edge_data.get('relationship_type'),
+                        'confidence': prediction_confidence,
+                        'reason': edge_data.get('prediction_reason', 'Pattern-based prediction'),
+                        'next_occurrence': edge_data.get('next_predicted_occurrence')
+                    })
+            
+            if predictions:
+                return {
+                    'predictions': predictions,
+                    'count': len(predictions),
+                    'avg_confidence': sum(p['confidence'] for p in predictions) / max(1, len(predictions))
+                }
+            return None
+        except Exception as e:
+            logger.warning("predictions_failed", error=str(e))
+            return None
+    
+    async def _enrich_response_with_graph_intelligence(
+        self,
+        response: ChatResponse,
+        user_id: str,
+        source_id: Optional[str] = None,
+        target_id: Optional[str] = None
+    ) -> ChatResponse:
+        """
+        Enrich chat response with FinleyGraph intelligence insights.
+        
+        Adds temporal patterns, seasonal insights, fraud warnings, root causes, and predictions.
+        """
+        if not source_id or not target_id:
+            return response
+        
+        try:
+            # Fetch all intelligence insights in parallel
+            temporal = await self._get_temporal_insights(user_id, source_id, target_id)
+            seasonal = await self._get_seasonal_insights(user_id, source_id, target_id)
+            fraud = await self._get_fraud_warnings(user_id, source_id, target_id)
+            root_cause = await self._get_root_cause_analysis(user_id, source_id, target_id)
+            predictions = await self._get_predictions(user_id, source_id, target_id)
+            
+            # Build enriched answer with insights
+            insights = []
+            
+            if temporal:
+                freq = temporal['patterns'][0]['frequency'] if temporal['patterns'] else 'unknown'
+                insights.append(f"📊 **Temporal Pattern**: This occurs {freq} with {temporal['confidence']:.0%} confidence")
+            
+            if seasonal:
+                months = ', '.join(seasonal['peak_months'][:3])
+                insights.append(f"📅 **Seasonal Peak**: Strongest in {months}")
+            
+            if fraud and fraud['risk_score'] > 0.4:
+                insights.append(f"⚠️ **Fraud Risk**: {fraud['severity']} risk detected ({fraud['risk_score']:.0%})")
+            
+            if root_cause:
+                insights.append(f"🔍 **Root Cause**: {len(root_cause['root_causes'])} root causes identified in {root_cause['chain_length']}-step chain")
+            
+            if predictions:
+                insights.append(f"🔮 **Prediction**: {predictions['count']} future connections predicted ({predictions['avg_confidence']:.0%} confidence)")
+            
+            # Append insights to answer
+            if insights:
+                response.answer += "\n\n" + "\n".join(insights)
+                response.data = response.data or {}
+                response.data['intelligence_insights'] = {
+                    'temporal': temporal,
+                    'seasonal': seasonal,
+                    'fraud': fraud,
+                    'root_cause': root_cause,
+                    'predictions': predictions
+                }
+                logger.info("response_enriched_with_graph_intelligence", insight_count=len(insights))
+            
+            return response
+        except Exception as e:
+            logger.warning("graph_intelligence_enrichment_failed", error=str(e))
+            return response
     
     async def _store_chat_message(
         self,

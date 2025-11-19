@@ -1,21 +1,9 @@
 """
-Production-Grade Causal Inference Engine v2.0
-==============================================
+Production-Grade Causal Inference Engine
+=========================================
 
-COMPLETE REWRITE using genius libraries for research-grade causal inference.
-
-REPLACED:
-- 260 lines of custom Bradford Hill → DoWhy automatic causal discovery
-- Simple proportional counterfactuals → EconML heterogeneous treatment effects
-- Basic graph traversal → Advanced causal graph algorithms
-
-NEW CAPABILITIES:
-- Automatic causal graph discovery (DoWhy)
-- Heterogeneous treatment effects (EconML)
-- Causal effect estimation with confidence intervals
-- Instrumental variables support
-- Confounding adjustment
-- Policy learning (optimal interventions)
+Implements Bradford Hill criteria for causal relationship detection.
+Uses PostgreSQL RPC functions for efficient score calculation.
 
 Author: Senior Full-Stack Engineer
 Version: 2.0.0
@@ -29,23 +17,7 @@ from typing import Dict, List, Optional, Any, Tuple, Set
 from dataclasses import dataclass, asdict
 from enum import Enum
 
-# Keep igraph for fast graph operations (already optimal)
 import igraph as ig
-
-# Causal inference (replaces 260 lines of custom Bradford Hill)
-from dowhy import CausalModel
-import dowhy.datasets
-
-# Causal ML (replaces simple counterfactuals)
-from econml.dml import CausalForestDML
-from sklearn.ensemble import GradientBoostingRegressor, GradientBoostingClassifier
-
-# For data manipulation
-import pandas as pd
-
-# CRITICAL FIX: Import shared normalization functions for future use
-from provenance_tracker import normalize_business_logic, normalize_temporal_causality
-import numpy as np
 
 logger = structlog.get_logger(__name__)
 
@@ -150,7 +122,8 @@ class CausalInferenceEngine:
     async def analyze_causal_relationships(
         self,
         user_id: str,
-        relationship_ids: Optional[List[str]] = None
+        relationship_ids: Optional[List[str]] = None,
+        job_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Analyze relationships to determine causality using Bradford Hill criteria.
@@ -158,6 +131,7 @@ class CausalInferenceEngine:
         Args:
             user_id: User ID
             relationship_ids: Optional list of specific relationship IDs to analyze
+            job_id: Optional job ID for tracking
         
         Returns:
             Dictionary with causal analysis results and statistics
@@ -188,7 +162,7 @@ class CausalInferenceEngine:
                         causal_relationships.append(causal_rel)
                         
                         # Store in database
-                        await self._store_causal_relationship(causal_rel, user_id)
+                        await self._store_causal_relationship(causal_rel, user_id, job_id)
                         
                         if causal_rel.is_causal:
                             causal_count += 1
@@ -771,7 +745,8 @@ class CausalInferenceEngine:
     async def _store_causal_relationship(
         self,
         causal_rel: CausalRelationship,
-        user_id: str
+        user_id: str,
+        job_id: Optional[str] = None
     ):
         """Store causal relationship in database"""
         try:
@@ -789,6 +764,9 @@ class CausalInferenceEngine:
                 'causal_direction': causal_rel.causal_direction.value,
                 'criteria_details': causal_rel.criteria_details
             }
+            
+            if job_id:
+                data['job_id'] = job_id
             
             self.supabase.table('causal_relationships').upsert(data).execute()
             
@@ -844,10 +822,13 @@ class CausalInferenceEngine:
         self,
         counterfactual: CounterfactualAnalysis,
         user_id: str,
-        scenario_name: Optional[str] = None
+        scenario_name: Optional[str] = None,
+        job_id: Optional[str] = None
     ):
         """Store counterfactual analysis in database"""
         try:
+            affected_event_count = len(counterfactual.affected_events) if counterfactual.affected_events else 0
+            
             data = {
                 'user_id': user_id,
                 'intervention_event_id': counterfactual.intervention_event_id,
@@ -856,9 +837,13 @@ class CausalInferenceEngine:
                 'counterfactual_value': counterfactual.counterfactual_value,
                 'affected_events': counterfactual.affected_events,
                 'total_impact_delta_usd': counterfactual.total_impact_delta_usd,
+                'affected_event_count': affected_event_count,
                 'scenario_description': counterfactual.scenario_description,
                 'scenario_name': scenario_name or f"Scenario {datetime.utcnow().isoformat()}"
             }
+            
+            if job_id:
+                data['job_id'] = job_id
             
             self.supabase.table('counterfactual_analyses').insert(data).execute()
             

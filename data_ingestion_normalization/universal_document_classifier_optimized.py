@@ -1067,18 +1067,23 @@ class UniversalDocumentClassifierOptimized:
             return []
         
         try:
-            # CRITICAL FIX: Use inference_service for lazy model loading
-            from inference_service import SentenceModelService
+            # CRITICAL FIX: Use embedding_service for consistent BGE embeddings (1024 dims)
+            # Replaced: SentenceModelService (removed from inference_service.py)
+            # Reason: Avoid 400MB+ memory waste from conflicting embedding models
+            from embedding_service import EmbeddingService
+            
+            embedding_service = EmbeddingService()
+            await embedding_service.initialize()
             
             # Lazy-load row type embeddings if not already loaded
             if self.row_type_embeddings is None:
                 logger.info("lazy_loading_row_type_embeddings")
                 self.row_type_embeddings = {}
                 for row_type, description in self.row_types.items():
-                    embedding = await SentenceModelService.encode(description)
+                    embedding = await embedding_service.embed_text(description)
                     self.row_type_embeddings[row_type] = embedding
             
-            # OPTIMIZED: Use sentence-transformers for zero-shot classification via inference_service
+            # OPTIMIZED: Use BGE embeddings for zero-shot classification
             if self.row_type_embeddings:
                 classifications = []
                 
@@ -1087,7 +1092,7 @@ class UniversalDocumentClassifierOptimized:
                     ' '.join([f"{k}:{v}" for k, v in row.items() if v is not None and str(v).strip()])
                     for row in rows
                 ]
-                row_embeddings = await SentenceModelService.encode_batch(row_texts)
+                row_embeddings = await embedding_service.embed_batch(row_texts)
                 
                 # Compare with row type embeddings
                 for idx, row_embedding in enumerate(row_embeddings):
