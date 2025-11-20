@@ -804,8 +804,9 @@ class SocketIOWebSocketManager:
         
         await self.send_update(job_id, payload)
 
-# Initialize Socket.IO WebSocket manager
-websocket_manager = SocketIOWebSocketManager()
+# CRITICAL FIX: Initialize as None to prevent race condition during double import
+# Will be initialized in app_lifespan to avoid crash when Uvicorn + ARQ worker both import
+websocket_manager = None
 
 # CRITICAL FIX: Define lifespan before creating app so we can pass it to FastAPI constructor
 # This ensures proper startup/shutdown lifecycle management
@@ -813,9 +814,14 @@ websocket_manager = SocketIOWebSocketManager()
 async def app_lifespan(app: FastAPI):
     """Application lifespan context manager - handles startup and shutdown"""
     # Startup
-    global supabase, optimized_db, security_validator, centralized_cache
+    global supabase, optimized_db, security_validator, centralized_cache, websocket_manager
     
     logger.info("🚀 Starting service initialization...")
+    
+    # CRITICAL FIX: Initialize WebSocket manager here to avoid race condition
+    # This prevents crash when both Uvicorn and ARQ worker import the module simultaneously
+    websocket_manager = SocketIOWebSocketManager()
+    logger.info("✅ WebSocket manager initialized")
     
     try:
         # Try multiple possible environment variable names for Render compatibility

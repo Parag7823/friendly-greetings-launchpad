@@ -35,21 +35,22 @@ import asyncio
 # Timestamp parsing (replaces 30 lines of custom regex)
 from dateutil.parser import isoparse
 
+# ✅ LAZY LOADING: Heavy imports moved inside functions to prevent startup blocking
 # Time series decomposition (replaces 72 lines of custom FFT)
-from statsmodels.tsa.seasonal import seasonal_decompose
+# from statsmodels.tsa.seasonal import seasonal_decompose
 
 # Anomaly detection (replaces 95 lines of basic 2σ threshold)
-from pyod.models.iforest import IForest
-from pyod.models.lof import LOF
+# from pyod.models.iforest import IForest
+# from pyod.models.lof import LOF
 
 # Forecasting (NEW CAPABILITY - replaces nothing, adds forecasting)
-from prophet import Prophet
+# from prophet import Prophet
 
 # Matrix Profile for advanced pattern discovery (STUMPY)
 # - Finds unknown repeating patterns automatically
 # - Detects regime changes (business behavior shifts)
 # - Motif search (find all instances of specific patterns)
-import stumpy
+# import stumpy
 
 # Keep for basic stats and time series
 from scipy import stats
@@ -370,6 +371,9 @@ class TemporalPatternLearner:
             for period in [7, 14, 30]:
                 if len(ts_data) >= 2 * period:
                     try:
+                        # ✅ LAZY LOADING: Import statsmodels only when needed
+                        from statsmodels.tsa.seasonal import seasonal_decompose
+                        
                         decomposition = seasonal_decompose(
                             ts_data,
                             model='additive',
@@ -420,7 +424,8 @@ class TemporalPatternLearner:
             (has_pattern, motif_period_days, confidence_score)
         """
         try:
-            # Lazy import stumpy only when needed
+            # ✅ LAZY LOADING: Import stumpy only when needed
+            import stumpy
             
             # Compute matrix profile for motif discovery
             # window_size = period to search for (try common financial cycles)
@@ -962,6 +967,10 @@ class TemporalPatternLearner:
             # Prepare data for PyOD (reshape to 2D array)
             X = np.array([d['days_between'] for d in timing_data]).reshape(-1, 1)
             
+            # ✅ LAZY LOADING: Import PyOD only when needed
+            from pyod.models.iforest import IForest
+            from pyod.models.lof import LOF
+            
             # Choose algorithm
             if algorithm == 'iforest':
                 clf = IForest(contamination=0.1, random_state=42)
@@ -1061,6 +1070,9 @@ class TemporalPatternLearner:
                 'ds': sorted(event_dates),
                 'y': range(len(event_dates))  # Count of events
             })
+            
+            # ✅ LAZY LOADING: Import Prophet only when needed
+            from prophet import Prophet
             
             # Create and fit Prophet model
             model = Prophet(
