@@ -260,11 +260,14 @@ from transaction_manager import initialize_transaction_manager, get_transaction_
 from streaming_processor import initialize_streaming_processor, get_streaming_processor, StreamingConfig, StreamingFileProcessor
 from error_recovery_system import initialize_error_recovery_system, get_error_recovery_system, ErrorContext, ErrorSeverity
 
-# Import optimization goldmine - FINALLY USING THIS!
-from database_optimization_utils import OptimizedDatabaseQueries, create_optimized_db_client, performance_monitor
+# CRITICAL FIX: Defer database_optimization_utils import to startup event
+# This import was blocking module load - moved to startup event where it's used
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from database_optimization_utils import OptimizedDatabaseQueries
 
 # Global optimized database client reference (set during startup)
-optimized_db: Optional[OptimizedDatabaseQueries] = None
+optimized_db: Optional["OptimizedDatabaseQueries"] = None
 
 from centralized_cache import initialize_cache, get_cache, safe_get_cache
 
