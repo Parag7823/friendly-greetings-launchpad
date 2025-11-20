@@ -807,14 +807,110 @@ class SocketIOWebSocketManager:
 # Initialize Socket.IO WebSocket manager
 websocket_manager = SocketIOWebSocketManager()
 
-# Initialize FastAPI app with enhanced configuration
+# CRITICAL FIX: Define lifespan before creating app so we can pass it to FastAPI constructor
+# This ensures proper startup/shutdown lifecycle management
+@asynccontextmanager
+async def app_lifespan(app: FastAPI):
+    """Application lifespan context manager - handles startup and shutdown"""
+    # Startup
+    global supabase, optimized_db, security_validator, centralized_cache
+    
+    logger.info("🚀 Starting service initialization...")
+    
+    try:
+        # Try multiple possible environment variable names for Render compatibility
+        supabase_url = (
+            os.environ.get("SUPABASE_URL") or 
+            os.environ.get("SUPABASE_PROJECT_URL") or
+            os.environ.get("DATABASE_URL")  # Sometimes Render uses this
+        )
+        supabase_key = (
+            os.environ.get("SUPABASE_SERVICE_ROLE_KEY") or 
+            os.environ.get("SUPABASE_SERVICE_KEY") or  # This is what's in Render!
+            os.environ.get("SUPABASE_KEY") or
+            os.environ.get("SUPABASE_ANON_KEY")  # Fallback to anon key if service role not available
+        )
+        
+        # Enhanced diagnostics for deployment debugging
+        logger.info(f"🔍 Environment diagnostics:")
+        logger.info(f"   SUPABASE_URL present: {'✅' if supabase_url else '❌'}")
+        logger.info(f"   SUPABASE_SERVICE_ROLE_KEY present: {'✅' if supabase_key else '❌'}")
+        logger.info(f"   Available env vars: {sorted([k for k in os.environ.keys() if 'SUPABASE' in k.upper()])}")
+        
+        if supabase_key:
+            supabase_key = clean_jwt_token(supabase_key)
+        
+        if not supabase_url or not supabase_key:
+            missing_vars = []
+            if not supabase_url:
+                missing_vars.append("SUPABASE_URL")
+            if not supabase_key:
+                missing_vars.append("SUPABASE_SERVICE_KEY (or SUPABASE_SERVICE_ROLE_KEY)")
+            raise ValueError(f"Missing required environment variables: {', '.join(missing_vars)}. Please check your deployment configuration.")
+        
+        # CRITICAL FIX: Use pooled Supabase client to prevent connection exhaustion
+        supabase = get_supabase_client()
+        logger.info("✅ Supabase pooled client initialized successfully")
+        
+        # Initialize critical systems
+        initialize_transaction_manager(supabase)
+        initialize_streaming_processor(StreamingConfig(
+            chunk_size=1000,
+            memory_limit_mb=1600,  # Increased from 800MB to handle larger files safely
+            max_file_size_gb=10
+        ))
+        initialize_error_recovery_system(supabase)
+        
+        # Initialize security system (observability removed - using structlog)
+        security_validator = SecurityValidator()
+        
+        # CRITICAL FIX: Initialize optimized database queries
+        # Import here to avoid blocking module load
+        from database_optimization_utils import OptimizedDatabaseQueries
+        optimized_db = OptimizedDatabaseQueries(supabase)
+        logger.info("✅ Optimized database queries initialized")
+        
+        logger.info("✅ Observability and security systems initialized")
+        
+        # REFACTORED: Initialize centralized Redis cache (replaces ai_cache_system.py)
+        # This provides distributed caching across all workers and instances for true scalability
+        centralized_cache = initialize_cache(
+            redis_url=os.environ.get('ARQ_REDIS_URL') or os.environ.get('REDIS_URL'),
+            default_ttl=7200  # 2 hours default TTL
+        )
+        logger.info("✅ Centralized Redis cache initialized - distributed caching across all workers!")
+        
+        logger.info("✅ All critical systems and optimizations initialized successfully")
+        
+    except Exception as e:
+        logger.error(f"❌ Failed to initialize critical systems: {e}")
+        supabase = None
+        optimized_db = None
+        # Log critical database failure for monitoring
+        logger.critical(f"🚨 DATABASE CONNECTION FAILED - System running in degraded mode: {e}")
+        # Initialize minimal observability/logging to prevent NameError in endpoints
+        try:
+            # Fallback lightweight initialization (observability removed - using structlog)
+            security_validator = SecurityValidator()
+            logger.info("✅ Degraded mode security initialized (no database)")
+        except Exception as init_err:
+            logger.warning(f"⚠️ Failed to initialize degraded security systems: {init_err}")
+    
+    yield
+    
+    # Shutdown
+    logger.info("🛑 Application shutting down...")
+    # Cleanup happens here if needed
+
+# Initialize FastAPI app with enhanced configuration and lifespan
 app = FastAPI(
     title="Finley AI Backend",
     version="1.0.0",
     description="Advanced financial data processing and AI-powered analysis platform",
     docs_url="/docs",
     redoc_url="/redoc",
-    openapi_url="/openapi.json"
+    openapi_url="/openapi.json",
+    lifespan=app_lifespan  # Use lifespan context manager for startup/shutdown
 )
 
 # IMPROVEMENT: Global exception handler for consistent error responses
@@ -887,100 +983,8 @@ app.add_middleware(
     max_age=3600,  # Cache preflight requests for 1 hour
 )
 
-# CRITICAL FIX: Startup event handler to initialize services after Uvicorn starts
-# This prevents blocking during module import and allows quick startup
-@app.on_event("startup")
-async def startup_event():
-    """
-    Initialize all external service connections after Uvicorn starts.
-    This prevents blocking during module import.
-    """
-    global supabase, optimized_db, security_validator, centralized_cache
-    
-    logger.info("🚀 Starting service initialization...")
-    
-    try:
-        # Try multiple possible environment variable names for Render compatibility
-        supabase_url = (
-            os.environ.get("SUPABASE_URL") or 
-            os.environ.get("SUPABASE_PROJECT_URL") or
-            os.environ.get("DATABASE_URL")  # Sometimes Render uses this
-        )
-        supabase_key = (
-            os.environ.get("SUPABASE_SERVICE_ROLE_KEY") or 
-            os.environ.get("SUPABASE_SERVICE_KEY") or  # This is what's in Render!
-            os.environ.get("SUPABASE_KEY") or
-            os.environ.get("SUPABASE_ANON_KEY")  # Fallback to anon key if service role not available
-        )
-        
-        # Enhanced diagnostics for deployment debugging
-        logger.info(f"🔍 Environment diagnostics:")
-        logger.info(f"   SUPABASE_URL present: {'✅' if supabase_url else '❌'}")
-        logger.info(f"   SUPABASE_SERVICE_ROLE_KEY present: {'✅' if supabase_key else '❌'}")
-        logger.info(f"   Available env vars: {sorted([k for k in os.environ.keys() if 'SUPABASE' in k.upper()])}")
-        
-        if supabase_key:
-            supabase_key = clean_jwt_token(supabase_key)
-        
-        if not supabase_url or not supabase_key:
-            missing_vars = []
-            if not supabase_url:
-                missing_vars.append("SUPABASE_URL")
-            if not supabase_key:
-                missing_vars.append("SUPABASE_SERVICE_KEY (or SUPABASE_SERVICE_ROLE_KEY)")
-            raise ValueError(f"Missing required environment variables: {', '.join(missing_vars)}. Please check your deployment configuration.")
-        
-        # CRITICAL FIX: Use pooled Supabase client to prevent connection exhaustion
-        supabase = get_supabase_client()
-        logger.info("✅ Supabase pooled client initialized successfully")
-        
-        # Initialize critical systems
-        initialize_transaction_manager(supabase)
-        initialize_streaming_processor(StreamingConfig(
-            chunk_size=1000,
-            memory_limit_mb=1600,  # Increased from 800MB to handle larger files safely
-            max_file_size_gb=10
-        ))
-        initialize_error_recovery_system(supabase)
-        
-        # Initialize security system (observability removed - using structlog)
-        global security_validator
-        security_validator = SecurityValidator()
-        
-        # CRITICAL FIX: Initialize optimized database queries
-        # Import here to avoid blocking module load
-        from database_optimization_utils import OptimizedDatabaseQueries
-        global optimized_db
-        optimized_db = OptimizedDatabaseQueries(supabase)
-        logger.info("✅ Optimized database queries initialized")
-        
-        logger.info("✅ Observability and security systems initialized")
-        
-        
-        # REFACTORED: Initialize centralized Redis cache (replaces ai_cache_system.py)
-        # This provides distributed caching across all workers and instances for true scalability
-        global centralized_cache
-        centralized_cache = initialize_cache(
-            redis_url=os.environ.get('ARQ_REDIS_URL') or os.environ.get('REDIS_URL'),
-            default_ttl=7200  # 2 hours default TTL
-        )
-        logger.info("✅ Centralized Redis cache initialized - distributed caching across all workers!")
-        
-        logger.info("✅ All critical systems and optimizations initialized successfully")
-        
-    except Exception as e:
-        logger.error(f"❌ Failed to initialize critical systems: {e}")
-        supabase = None
-        optimized_db = None
-        # Log critical database failure for monitoring
-        logger.critical(f"🚨 DATABASE CONNECTION FAILED - System running in degraded mode: {e}")
-        # Initialize minimal observability/logging to prevent NameError in endpoints
-        try:
-            # Fallback lightweight initialization (observability removed - using structlog)
-            security_validator = SecurityValidator()
-            logger.info("✅ Degraded mode security initialized (no database)")
-        except Exception as init_err:
-            logger.warning(f"⚠️ Failed to initialize degraded security systems: {init_err}")
+# REMOVED: Old startup event - now using lifespan context manager in FastAPI constructor
+# The app_lifespan function handles all initialization
 
 # Initialize global config with pydantic-settings
 try:
@@ -1008,134 +1012,8 @@ async def validate_critical_environment():
     
     logger.info("✅ All required environment variables present and valid")
 
-# Application lifespan: startup/shutdown hooks for env validation and observability
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    # Validate environment
-    await validate_critical_environment()
-    
-    # Validate and initialize Redis cache
-    from centralized_cache import validate_redis_connection, require_redis_cache, start_health_check_monitor
-    redis_url = app_config.redis_url_resolved
-    
-    if require_redis_cache():
-        if not redis_url:
-            raise RuntimeError("REDIS_URL or ARQ_REDIS_URL required in production. Set REQUIRE_REDIS_CACHE=false to disable.")
-        
-        is_valid = await validate_redis_connection(redis_url)
-        if not is_valid:
-            raise RuntimeError(f"Redis connection failed: {redis_url}. Cannot start without cache in production.")
-        
-        logger.info("✅ Redis cache validated and ready")
-    
-    # Start cache health monitoring (only if Redis is available)
-    if redis_url:
-        try:
-            await start_health_check_monitor(interval=60)
-            logger.info("✅ Cache health monitor started")
-        except Exception as e:
-            logger.warning(f"Failed to start cache health monitor: {e}")
-    
-    # Initialize Redis client for WebSocket manager (Pub/Sub support)
-    if redis_url:
-        try:
-            redis_client = await aioredis.from_url(
-                redis_url,
-                encoding="utf-8",
-                decode_responses=True
-            )
-            websocket_manager.set_redis(redis_client)
-            logger.info("✅ WebSocket manager initialized with Redis Pub/Sub")
-        except Exception as e:
-            logger.warning(f"Failed to initialize Redis for WebSocket manager: {e}")
-    else:
-        logger.warning("⚠️  Redis URL not configured - WebSocket manager running in memory-only mode")
-    
-    # Warm up inference services (optional, async)
-    try:
-        from inference_service import warmup
-        asyncio.create_task(warmup())
-        logger.info("🔄 Inference services warming up in background...")
-    except Exception as e:
-        logger.warning(f"Inference warmup skipped: {e}")
-    
-    # REMOVED: Observability system - using structlog for all logging
-    
-    # Start periodic WebSocket cleanup task
-    import asyncio
-    cleanup_task = None
-    try:
-        async def periodic_websocket_cleanup():
-            """Periodic cleanup of stale WebSocket connections every 60 seconds"""
-            from error_recovery_system import get_error_recovery_system
-            while True:
-                try:
-                    await asyncio.sleep(60)  # Run every 60 seconds
-                    error_recovery = get_error_recovery_system()
-                    result = await error_recovery.cleanup_websocket_connections(manager)
-                    if result.success:
-                        logger.info(f"✅ WebSocket cleanup: {len(result.cleaned_records)} connections cleaned")
-                except Exception as e:
-                    logger.error(f"❌ WebSocket cleanup failed: {e}")
-        
-        cleanup_task = asyncio.create_task(periodic_websocket_cleanup())
-        logger.info("✅ Periodic WebSocket cleanup task started (every 60s)")
-    except Exception as e:
-        logger.warning(f"Failed to start WebSocket cleanup task: {e}")
-    
-    yield
-    
-    # Shutdown
-    logger.info("🛑 Application shutting down...")
-    
-    # Stop cache health monitor
-    try:
-        from centralized_cache import stop_health_check_monitor
-        await stop_health_check_monitor()
-        logger.info("✅ Cache health monitor stopped")
-    except Exception as e:
-        logger.warning(f"Cache monitor stop failed: {e}")
-    
-    # Shutdown inference services
-    try:
-        from inference_service import shutdown
-        await shutdown()
-        logger.info("✅ Inference services shutdown")
-    except Exception as e:
-        logger.warning(f"Inference shutdown failed: {e}")
-    
-    # Cancel cleanup task
-    if cleanup_task:
-        cleanup_task.cancel()
-        try:
-            await cleanup_task
-        except asyncio.CancelledError:
-            pass
-        logger.info("✅ WebSocket cleanup task stopped")
-    
-    # Cleanup Redis Pub/Sub for WebSocket manager
-    try:
-        if websocket_manager.pubsub_task:
-            websocket_manager.pubsub_task.cancel()
-            try:
-                await websocket_manager.pubsub_task
-            except asyncio.CancelledError:
-                pass
-        if websocket_manager.pubsub:
-            await websocket_manager.pubsub.unsubscribe()
-            await websocket_manager.pubsub.close()
-        if websocket_manager.redis:
-            await websocket_manager.redis.close()
-        logger.info("✅ WebSocket Redis Pub/Sub cleaned up")
-    except Exception as e:
-        logger.warning(f"WebSocket Pub/Sub cleanup failed: {e}")
-    
-    # REMOVED: Observability system - using structlog for all logging
-    
-    # Close Redis client if available (handled in finally block above)
-
-# Register lifespan with the app
-app.router.lifespan_context = lifespan
+# REMOVED: Duplicate lifespan function - now using app_lifespan in FastAPI constructor
+# The app_lifespan function (defined earlier) handles all startup/shutdown logic
 
 # Expose Prometheus metrics
 @app.get("/metrics")
