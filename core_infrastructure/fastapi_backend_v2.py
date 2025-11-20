@@ -12765,13 +12765,16 @@ async def delete_file_completely(job_id: str, user_id: str):
         deletion_stats['deleted_records']['raw_events'] = len(event_ids)
         logger.info(f"Found {len(event_ids)} events to delete")
         
-        # Step 2: Delete relationship_instances involving these events
+        # Step 2: Soft-delete relationship_instances involving these events (FIX #3)
         if event_ids:
-            # Delete relationships where source or target is from this file
-            rel_delete_1 = supabase.table('relationship_instances').delete().in_('source_event_id', event_ids).eq('user_id', user_id).execute()
-            rel_delete_2 = supabase.table('relationship_instances').delete().in_('target_event_id', event_ids).eq('user_id', user_id).execute()
-            deletion_stats['deleted_records']['relationship_instances'] = len(rel_delete_1.data or []) + len(rel_delete_2.data or [])
-            logger.info(f"Deleted {deletion_stats['deleted_records']['relationship_instances']} relationships")
+            # FIX #3: Use soft-delete instead of hard-delete to support graph cache invalidation
+            # Mark relationships as deleted instead of physically removing them
+            rel_update_1 = supabase.table('relationship_instances').update({'is_deleted': True})\
+                .in_('source_event_id', event_ids).eq('user_id', user_id).execute()
+            rel_update_2 = supabase.table('relationship_instances').update({'is_deleted': True})\
+                .in_('target_event_id', event_ids).eq('user_id', user_id).execute()
+            deletion_stats['deleted_records']['relationship_instances'] = len(rel_update_1.data or []) + len(rel_update_2.data or [])
+            logger.info(f"Soft-deleted {deletion_stats['deleted_records']['relationship_instances']} relationships")
         
         # Step 3: Delete entity_matches for events from this file
         if event_ids:
@@ -12893,11 +12896,40 @@ async def delete_file_completely(job_id: str, user_id: str):
         except Exception as e:
             logger.warning(f"Failed to clear duplicate flags: {e}")
         
-        # Step 20: Delete raw_events (CASCADE will handle some related tables)
-        raw_events_result = supabase.table('raw_events').delete().eq('job_id', job_id).eq('user_id', user_id).execute()
-        logger.info(f"Deleted {len(raw_events_result.data or [])} raw events")
+        # Step 20: Soft-delete raw_events (FIX #3)
+        # FIX #3: Use soft-delete instead of hard-delete to support graph cache invalidation
+        raw_events_result = supabase.table('raw_events').update({'is_deleted': True})\
+            .eq('job_id', job_id).eq('user_id', user_id).execute()
+        logger.info(f"Soft-deleted {len(raw_events_result.data or [])} raw events")
+        
+        # Step 20.5: Soft-delete normalized_entities for this file (FIX #3)
+        # FIX #3: Mark entities as deleted to support graph cache invalidation
+        try:
+            entity_ids_result = supabase.table('normalized_entities').select('id')\
+                .eq('job_id', job_id).eq('user_id', user_id).execute()
+            entity_ids = [e['id'] for e in entity_ids_result.data] if entity_ids_result.data else []
+            
+            if entity_ids:
+                entities_update = supabase.table('normalized_entities').update({'is_deleted': True})\
+                    .in_('id', entity_ids).eq('user_id', user_id).execute()
+                logger.info(f"Soft-deleted {len(entities_update.data or [])} normalized entities")
+        except Exception as e:
+            logger.warning(f"Failed to soft-delete normalized_entities: {e}")
+        
+        # Step 20.6: Clear graph cache for this user (FIX #3)
+        # FIX #3: Invalidate graph cache to prevent ghost nodes after file deletion
+        try:
+            from aident_cfo_brain.finley_graph_engine import FinleyGraphEngine
+            redis_url = os.getenv('REDIS_URL')
+            if redis_url:
+                engine = FinleyGraphEngine(None, redis_url)
+                await engine._clear_redis_cache(user_id)
+                logger.info(f"✅ Cleared graph cache for user {user_id}")
+        except Exception as e:
+            logger.warning(f"Failed to clear graph cache: {e}")
         
         # Step 21: Finally, delete the ingestion_job record (CASCADE will delete remaining linked records)
+        # Note: ingestion_jobs is still hard-deleted as it's a job tracking table
         job_delete_result = supabase.table('ingestion_jobs').delete().eq('id', job_id).eq('user_id', user_id).execute()
         deletion_stats['deleted_records']['ingestion_jobs'] = len(job_delete_result.data or [])
         logger.info(f"Deleted ingestion job record")
@@ -12905,7 +12937,8 @@ async def delete_file_completely(job_id: str, user_id: str):
         # Calculate total deleted records
         total_deleted = sum(deletion_stats['deleted_records'].values())
         
-        logger.info(f"✅ File deletion completed: {filename} - {total_deleted} total records deleted")
+        logger.info(f"✅ File deletion completed: {filename} - {total_deleted} total records marked for deletion (soft-delete)")
+        logger.info(f"📊 FIX #3: Used soft-delete for data integrity and graph cache invalidation")
         
         return {
             "status": "deleted",

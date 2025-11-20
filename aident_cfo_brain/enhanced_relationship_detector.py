@@ -667,28 +667,10 @@ Return ONLY valid JSON, no markdown blocks or explanations."""
                 total_attempted=len(relationship_instances)
             )
             return stored_relationships
-            
-            now = datetime.utcnow().isoformat()
-            relationship_instances.append({
-                'user_id': user_id,
-                'source_event_id': rel['source_event_id'],
-                'target_event_id': rel['target_event_id'],
-                'relationship_type': rel['relationship_type'],
-                'confidence_score': rel['confidence_score'],
-                'detection_method': rel.get('detection_method', 'unknown'),
-                'pattern_id': pattern_id,
-                'transaction_id': transaction_id if transaction_id else None,
-                'relationship_embedding': relationship_embedding,
-                'metadata': metadata,
-                'key_factors': key_factors,
-                'semantic_description': semantic_description,
-                'reasoning': reasoning or 'Detected based on matching criteria',
-                'temporal_causality': normalize_temporal_causality(temporal_causality),
-                'business_logic': normalize_business_logic(business_logic),
-                'created_at': now,
-                'updated_at': now,
-                'job_id': job_id
-            })
+    
+    async def _generate_relationship_embedding(self, text: str) -> Optional[List[float]]:
+        """
+        Generate embedding for relationship text using BGE model.
         This enables similarity-based relationship discovery and duplicate detection.
         """
         try:
