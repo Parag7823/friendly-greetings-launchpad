@@ -747,6 +747,96 @@ app.add_middleware(
     max_age=3600,  # Cache preflight requests for 1 hour
 )
 
+# CRITICAL FIX: Startup event handler to initialize services after Uvicorn starts
+# This prevents blocking during module import and allows quick startup
+@app.on_event("startup")
+async def startup_event():
+    """
+    Initialize all external service connections after Uvicorn starts.
+    This prevents blocking during module import.
+    """
+    global supabase, optimized_db, security_validator, centralized_cache
+    
+    logger.info("🚀 Starting service initialization...")
+    
+    try:
+        # Try multiple possible environment variable names for Render compatibility
+        supabase_url = (
+            os.environ.get("SUPABASE_URL") or 
+            os.environ.get("SUPABASE_PROJECT_URL") or
+            os.environ.get("DATABASE_URL")  # Sometimes Render uses this
+        )
+        supabase_key = (
+            os.environ.get("SUPABASE_SERVICE_ROLE_KEY") or 
+            os.environ.get("SUPABASE_SERVICE_KEY") or  # This is what's in Render!
+            os.environ.get("SUPABASE_KEY") or
+            os.environ.get("SUPABASE_ANON_KEY")  # Fallback to anon key if service role not available
+        )
+        
+        # Enhanced diagnostics for deployment debugging
+        logger.info(f"🔍 Environment diagnostics:")
+        logger.info(f"   SUPABASE_URL present: {'✅' if supabase_url else '❌'}")
+        logger.info(f"   SUPABASE_SERVICE_ROLE_KEY present: {'✅' if supabase_key else '❌'}")
+        logger.info(f"   Available env vars: {sorted([k for k in os.environ.keys() if 'SUPABASE' in k.upper()])}")
+        
+        if supabase_key:
+            supabase_key = clean_jwt_token(supabase_key)
+        
+        if not supabase_url or not supabase_key:
+            missing_vars = []
+            if not supabase_url:
+                missing_vars.append("SUPABASE_URL")
+            if not supabase_key:
+                missing_vars.append("SUPABASE_SERVICE_KEY (or SUPABASE_SERVICE_ROLE_KEY)")
+            raise ValueError(f"Missing required environment variables: {', '.join(missing_vars)}. Please check your deployment configuration.")
+        
+        # CRITICAL FIX: Use pooled Supabase client to prevent connection exhaustion
+        supabase = get_supabase_client()
+        logger.info("✅ Supabase pooled client initialized successfully")
+        
+        # Initialize critical systems
+        initialize_transaction_manager(supabase)
+        initialize_streaming_processor(StreamingConfig(
+            chunk_size=1000,
+            memory_limit_mb=1600,  # Increased from 800MB to handle larger files safely
+            max_file_size_gb=10
+        ))
+        initialize_error_recovery_system(supabase)
+        
+        # Initialize security system (observability removed - using structlog)
+        security_validator = SecurityValidator()
+        
+        # CRITICAL FIX: Initialize optimized database queries
+        optimized_db = OptimizedDatabaseQueries(supabase)
+        logger.info("✅ Optimized database queries initialized")
+        
+        logger.info("✅ Observability and security systems initialized")
+        
+        
+        # REFACTORED: Initialize centralized Redis cache (replaces ai_cache_system.py)
+        # This provides distributed caching across all workers and instances for true scalability
+        centralized_cache = initialize_cache(
+            redis_url=os.environ.get('ARQ_REDIS_URL') or os.environ.get('REDIS_URL'),
+            default_ttl=7200  # 2 hours default TTL
+        )
+        logger.info("✅ Centralized Redis cache initialized - distributed caching across all workers!")
+        
+        logger.info("✅ All critical systems and optimizations initialized successfully")
+        
+    except Exception as e:
+        logger.error(f"❌ Failed to initialize critical systems: {e}")
+        supabase = None
+        optimized_db = None
+        # Log critical database failure for monitoring
+        logger.critical(f"🚨 DATABASE CONNECTION FAILED - System running in degraded mode: {e}")
+        # Initialize minimal observability/logging to prevent NameError in endpoints
+        try:
+            # Fallback lightweight initialization (observability removed - using structlog)
+            security_validator = SecurityValidator()
+            logger.info("✅ Degraded mode security initialized (no database)")
+        except Exception as init_err:
+            logger.warning(f"⚠️ Failed to initialize degraded security systems: {init_err}")
+
 # Initialize global config with pydantic-settings
 try:
     app_config = AppConfig()
@@ -969,84 +1059,89 @@ except Exception as e:
     logger.error(f"❌ Failed to initialize Groq client: {e}")
     groq_client = None
 
+# CRITICAL FIX: Moved initialization to startup event to prevent blocking during module import
+# This allows Uvicorn to start quickly without waiting for external service connections
+# The initialization will happen asynchronously after the server starts
+
 # Initialize Supabase client and critical systems
-try:
-    # Try multiple possible environment variable names for Render compatibility
-    supabase_url = (
-        os.environ.get("SUPABASE_URL") or 
-        os.environ.get("SUPABASE_PROJECT_URL") or
-        os.environ.get("DATABASE_URL")  # Sometimes Render uses this
-    )
-    supabase_key = (
-        os.environ.get("SUPABASE_SERVICE_ROLE_KEY") or 
-        os.environ.get("SUPABASE_SERVICE_KEY") or  # This is what's in Render!
-        os.environ.get("SUPABASE_KEY") or
-        os.environ.get("SUPABASE_ANON_KEY")  # Fallback to anon key if service role not available
-    )
-    
-    # Enhanced diagnostics for deployment debugging
-    logger.info(f"🔍 Environment diagnostics:")
-    logger.info(f"   SUPABASE_URL present: {'✅' if supabase_url else '❌'}")
-    logger.info(f"   SUPABASE_SERVICE_ROLE_KEY present: {'✅' if supabase_key else '❌'}")
-    logger.info(f"   Available env vars: {sorted([k for k in os.environ.keys() if 'SUPABASE' in k.upper()])}")
-    
-    if supabase_key:
-        supabase_key = clean_jwt_token(supabase_key)
-    
-    if not supabase_url or not supabase_key:
-        missing_vars = []
-        if not supabase_url:
-            missing_vars.append("SUPABASE_URL")
-        if not supabase_key:
-            missing_vars.append("SUPABASE_SERVICE_KEY (or SUPABASE_SERVICE_ROLE_KEY)")
-        raise ValueError(f"Missing required environment variables: {', '.join(missing_vars)}. Please check your deployment configuration.")
-    
-    # CRITICAL FIX: Use pooled Supabase client to prevent connection exhaustion
-    supabase = get_supabase_client()
-    logger.info("✅ Supabase pooled client initialized successfully")
-    
-    # Initialize critical systems
-    initialize_transaction_manager(supabase)
-    initialize_streaming_processor(StreamingConfig(
-        chunk_size=1000,
-        memory_limit_mb=1600,  # Increased from 800MB to handle larger files safely
-        max_file_size_gb=10
-    ))
-    initialize_error_recovery_system(supabase)
-    
-    # Initialize security system (observability removed - using structlog)
-    security_validator = SecurityValidator()
-    
-    # CRITICAL FIX: Initialize optimized database queries
-    optimized_db = OptimizedDatabaseQueries(supabase)
-    logger.info("✅ Optimized database queries initialized")
-    
-    logger.info("✅ Observability and security systems initialized")
-    
-    
-    # REFACTORED: Initialize centralized Redis cache (replaces ai_cache_system.py)
-    # This provides distributed caching across all workers and instances for true scalability
-    centralized_cache = initialize_cache(
-        redis_url=os.environ.get('ARQ_REDIS_URL') or os.environ.get('REDIS_URL'),
-        default_ttl=7200  # 2 hours default TTL
-    )
-    logger.info("✅ Centralized Redis cache initialized - distributed caching across all workers!")
-    
-    logger.info("✅ All critical systems and optimizations initialized successfully")
-    
-except Exception as e:
-    logger.error(f"❌ Failed to initialize critical systems: {e}")
-    supabase = None
-    optimized_db = None
-    # Log critical database failure for monitoring
-    logger.critical(f"🚨 DATABASE CONNECTION FAILED - System running in degraded mode: {e}")
-    # Initialize minimal observability/logging to prevent NameError in endpoints
-    try:
-        # Fallback lightweight initialization (observability removed - using structlog)
-        security_validator = SecurityValidator()
-        logger.info("✅ Degraded mode security initialized (no database)")
-    except Exception as init_err:
-        logger.warning(f"⚠️ Failed to initialize degraded security systems: {init_err}")
+# MOVED TO STARTUP EVENT - See @app.on_event("startup") below
+# try:
+#     # Try multiple possible environment variable names for Render compatibility
+#     supabase_url = (
+#         os.environ.get("SUPABASE_URL") or 
+#         os.environ.get("SUPABASE_PROJECT_URL") or
+#         os.environ.get("DATABASE_URL")  # Sometimes Render uses this
+#     )
+#     supabase_key = (
+#         os.environ.get("SUPABASE_SERVICE_ROLE_KEY") or 
+#         os.environ.get("SUPABASE_SERVICE_KEY") or  # This is what's in Render!
+#         os.environ.get("SUPABASE_KEY") or
+#         os.environ.get("SUPABASE_ANON_KEY")  # Fallback to anon key if service role not available
+#     )
+#     
+#     # Enhanced diagnostics for deployment debugging
+#     logger.info(f"🔍 Environment diagnostics:")
+#     logger.info(f"   SUPABASE_URL present: {'✅' if supabase_url else '❌'}")
+#     logger.info(f"   SUPABASE_SERVICE_ROLE_KEY present: {'✅' if supabase_key else '❌'}")
+#     logger.info(f"   Available env vars: {sorted([k for k in os.environ.keys() if 'SUPABASE' in k.upper()])}")
+#     
+#     if supabase_key:
+#         supabase_key = clean_jwt_token(supabase_key)
+#     
+#     if not supabase_url or not supabase_key:
+#         missing_vars = []
+#         if not supabase_url:
+#             missing_vars.append("SUPABASE_URL")
+#         if not supabase_key:
+#             missing_vars.append("SUPABASE_SERVICE_KEY (or SUPABASE_SERVICE_ROLE_KEY)")
+#         raise ValueError(f"Missing required environment variables: {', '.join(missing_vars)}. Please check your deployment configuration.")
+#     
+#     # CRITICAL FIX: Use pooled Supabase client to prevent connection exhaustion
+#     supabase = get_supabase_client()
+#     logger.info("✅ Supabase pooled client initialized successfully")
+#     
+#     # Initialize critical systems
+#     initialize_transaction_manager(supabase)
+#     initialize_streaming_processor(StreamingConfig(
+#         chunk_size=1000,
+#         memory_limit_mb=1600,  # Increased from 800MB to handle larger files safely
+#         max_file_size_gb=10
+#     ))
+#     initialize_error_recovery_system(supabase)
+#     
+#     # Initialize security system (observability removed - using structlog)
+#     security_validator = SecurityValidator()
+#     
+#     # CRITICAL FIX: Initialize optimized database queries
+#     optimized_db = OptimizedDatabaseQueries(supabase)
+#     logger.info("✅ Optimized database queries initialized")
+#     
+#     logger.info("✅ Observability and security systems initialized")
+#     
+#     
+#     # REFACTORED: Initialize centralized Redis cache (replaces ai_cache_system.py)
+#     # This provides distributed caching across all workers and instances for true scalability
+#     centralized_cache = initialize_cache(
+#         redis_url=os.environ.get('ARQ_REDIS_URL') or os.environ.get('REDIS_URL'),
+#         default_ttl=7200  # 2 hours default TTL
+#     )
+#     logger.info("✅ Centralized Redis cache initialized - distributed caching across all workers!")
+#     
+#     logger.info("✅ All critical systems and optimizations initialized successfully")
+#     
+# except Exception as e:
+#     logger.error(f"❌ Failed to initialize critical systems: {e}")
+#     supabase = None
+#     optimized_db = None
+#     # Log critical database failure for monitoring
+#     logger.critical(f"🚨 DATABASE CONNECTION FAILED - System running in degraded mode: {e}")
+#     # Initialize minimal observability/logging to prevent NameError in endpoints
+#     try:
+#         # Fallback lightweight initialization (observability removed - using structlog)
+#         security_validator = SecurityValidator()
+#         logger.info("✅ Degraded mode security initialized (no database)")
+#     except Exception as init_err:
+#         logger.warning(f"⚠️ Failed to initialize degraded security systems: {init_err}")
 
 # Database health check function
 def check_database_health():
