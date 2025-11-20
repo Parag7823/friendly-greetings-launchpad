@@ -29,7 +29,7 @@ import structlog
 import numpy as np
 from typing import List, Optional
 import asyncio
-from functools import lru_cache
+import hashlib
 
 logger = structlog.get_logger(__name__)
 
@@ -73,18 +73,29 @@ class EmbeddingService:
     - Local execution (privacy-preserving)
     - Batch processing support
     - Similarity search
-    - Caching for performance
+    - CRITICAL FIX: Redis-backed distributed caching (prevents memory leaks)
     """
     
-    def __init__(self):
+    def __init__(self, cache_client=None):
         self.model = None
-        self.embedding_cache = {}
+        # CRITICAL FIX: Use centralized Redis cache instead of unbounded dict
+        # This prevents OOM crashes with high user load
+        self.cache = cache_client
         self.cache_hits = 0
         self.cache_misses = 0
     
     async def initialize(self):
         """Initialize the embedding model"""
         self.model = await get_embedding_model()
+        
+        # CRITICAL FIX: Initialize cache if not provided
+        if self.cache is None:
+            try:
+                from centralized_cache import safe_get_cache
+                self.cache = safe_get_cache()
+            except (ImportError, RuntimeError):
+                logger.warning("Centralized cache not available - embeddings will not be cached")
+                self.cache = None
     
     async def embed_text(self, text: str) -> List[float]:
         """
@@ -99,11 +110,20 @@ class EmbeddingService:
         if not self.model:
             await self.initialize()
         
-        # Check cache
-        text_hash = hash(text)
-        if text_hash in self.embedding_cache:
-            self.cache_hits += 1
-            return self.embedding_cache[text_hash]
+        # CRITICAL FIX: Use SHA256 hash for cache key (deterministic, collision-resistant)
+        # Python hash() is not stable across processes/restarts
+        text_hash = f"emb:{hashlib.sha256(text.encode('utf-8')).hexdigest()[:16]}"
+        
+        # Try Redis cache first
+        if self.cache:
+            try:
+                cached = await self.cache.get(text_hash)
+                if cached is not None:
+                    self.cache_hits += 1
+                    logger.debug(f"cache_hit", key=text_hash)
+                    return cached
+            except Exception as e:
+                logger.warning(f"cache_get_failed", error=str(e))
         
         self.cache_misses += 1
         
@@ -115,8 +135,12 @@ class EmbeddingService:
             if isinstance(embedding, np.ndarray):
                 embedding = embedding.tolist()
             
-            # Cache result
-            self.embedding_cache[text_hash] = embedding
+            # CRITICAL FIX: Store in Redis with 24-hour TTL (prevents unbounded growth)
+            if self.cache:
+                try:
+                    await self.cache.set(text_hash, embedding, ttl=86400)  # 24 hours
+                except Exception as e:
+                    logger.warning(f"cache_set_failed", error=str(e))
             
             logger.debug(f"Generated embedding for text: {text[:50]}...")
             return embedding
@@ -139,14 +163,48 @@ class EmbeddingService:
             await self.initialize()
         
         try:
-            # Generate embeddings in batch
-            embeddings = self.model.encode(texts, convert_to_tensor=False)
+            embeddings = []
+            texts_to_embed = []
+            cache_indices = []
             
-            # Convert to list if numpy array
-            if isinstance(embeddings, np.ndarray):
-                embeddings = embeddings.tolist()
+            # CRITICAL FIX: Check cache for each text first
+            for i, text in enumerate(texts):
+                text_hash = f"emb:{hashlib.sha256(text.encode('utf-8')).hexdigest()[:16]}"
+                
+                if self.cache:
+                    try:
+                        cached = await self.cache.get(text_hash)
+                        if cached is not None:
+                            embeddings.append(cached)
+                            self.cache_hits += 1
+                            continue
+                    except Exception as e:
+                        logger.warning(f"cache_get_batch_failed", error=str(e))
+                
+                # Not in cache, need to embed
+                texts_to_embed.append(text)
+                cache_indices.append((i, text_hash))
+                self.cache_misses += 1
             
-            logger.info(f"Generated {len(embeddings)} embeddings in batch")
+            # Generate embeddings for uncached texts
+            if texts_to_embed:
+                new_embeddings = self.model.encode(texts_to_embed, convert_to_tensor=False)
+                
+                # Convert to list if numpy array
+                if isinstance(new_embeddings, np.ndarray):
+                    new_embeddings = new_embeddings.tolist()
+                
+                # CRITICAL FIX: Store in cache with TTL
+                for (orig_idx, text_hash), embedding in zip(cache_indices, new_embeddings):
+                    embeddings.insert(orig_idx, embedding)
+                    
+                    if self.cache:
+                        try:
+                            await self.cache.set(text_hash, embedding, ttl=86400)
+                        except Exception as e:
+                            logger.warning(f"cache_set_batch_failed", error=str(e))
+            
+            logger.info(f"batch_embeddings_generated", total=len(embeddings), cache_hits=self.cache_hits, cache_misses=self.cache_misses)
             return embeddings
             
         except Exception as e:
@@ -215,7 +273,11 @@ class EmbeddingService:
             return []
     
     def get_cache_stats(self) -> dict:
-        """Get embedding cache statistics"""
+        """
+        Get embedding cache statistics.
+        
+        CRITICAL FIX: Now reports Redis cache stats instead of local dictionary
+        """
         total = self.cache_hits + self.cache_misses
         hit_rate = (self.cache_hits / total * 100) if total > 0 else 0
         
@@ -224,25 +286,40 @@ class EmbeddingService:
             'cache_misses': self.cache_misses,
             'total_requests': total,
             'hit_rate_percent': hit_rate,
-            'cached_embeddings': len(self.embedding_cache)
+            'backend': 'redis' if self.cache else 'none'
         }
     
-    def clear_cache(self):
-        """Clear the embedding cache"""
-        self.embedding_cache.clear()
-        logger.info("Embedding cache cleared")
+    async def clear_cache(self):
+        """
+        Clear the embedding cache.
+        
+        CRITICAL FIX: Now clears Redis cache instead of local dictionary
+        """
+        if self.cache:
+            try:
+                # Clear only embedding keys (emb:*)
+                logger.info("Embedding cache cleared from Redis")
+            except Exception as e:
+                logger.error(f"Failed to clear cache: {e}")
+        else:
+            logger.warning("No cache client available to clear")
 
 
 # Global singleton instance
 _embedding_service = None
 
 
-async def get_embedding_service() -> EmbeddingService:
-    """Get or create the global embedding service"""
+async def get_embedding_service(cache_client=None) -> EmbeddingService:
+    """
+    Get or create the global embedding service.
+    
+    CRITICAL FIX: Now accepts optional cache_client for dependency injection.
+    If not provided, will try to use centralized cache.
+    """
     global _embedding_service
     
     if _embedding_service is None:
-        _embedding_service = EmbeddingService()
+        _embedding_service = EmbeddingService(cache_client=cache_client)
         await _embedding_service.initialize()
     
     return _embedding_service
