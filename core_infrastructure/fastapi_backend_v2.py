@@ -142,13 +142,13 @@ class AppConfig(BaseSettings):
     """
     
     # Required variables
-    openai_api_key: str
     supabase_url: str
     supabase_service_role_key: str
-    nango_secret_key: str
     
     # Optional variables with defaults
+    openai_api_key: Optional[str] = None  # Optional - using Groq instead
     groq_api_key: Optional[str] = None
+    nango_secret_key: Optional[str] = None  # Optional - connector integration
     redis_url: Optional[str] = None
     arq_redis_url: Optional[str] = None
     queue_backend: str = "sync"
@@ -161,7 +161,7 @@ class AppConfig(BaseSettings):
         # Support aliases for environment variables
         fields = {
             'supabase_service_role_key': {
-                'alias': 'SUPABASE_SERVICE_KEY'
+                'alias': 'SUPABASE_KEY'  # Railway uses SUPABASE_KEY
             }
         }
     
@@ -944,11 +944,13 @@ async def startup_event():
         initialize_error_recovery_system(supabase)
         
         # Initialize security system (observability removed - using structlog)
+        global security_validator
         security_validator = SecurityValidator()
         
         # CRITICAL FIX: Initialize optimized database queries
         # Import here to avoid blocking module load
         from database_optimization_utils import OptimizedDatabaseQueries
+        global optimized_db
         optimized_db = OptimizedDatabaseQueries(supabase)
         logger.info("✅ Optimized database queries initialized")
         
@@ -957,6 +959,7 @@ async def startup_event():
         
         # REFACTORED: Initialize centralized Redis cache (replaces ai_cache_system.py)
         # This provides distributed caching across all workers and instances for true scalability
+        global centralized_cache
         centralized_cache = initialize_cache(
             redis_url=os.environ.get('ARQ_REDIS_URL') or os.environ.get('REDIS_URL'),
             default_ttl=7200  # 2 hours default TTL
@@ -1025,21 +1028,28 @@ async def lifespan(app: FastAPI):
         
         logger.info("✅ Redis cache validated and ready")
     
-    # Start cache health monitoring
-    await start_health_check_monitor(interval=60)
-    logger.info("✅ Cache health monitor started")
+    # Start cache health monitoring (only if Redis is available)
+    if redis_url:
+        try:
+            await start_health_check_monitor(interval=60)
+            logger.info("✅ Cache health monitor started")
+        except Exception as e:
+            logger.warning(f"Failed to start cache health monitor: {e}")
     
     # Initialize Redis client for WebSocket manager (Pub/Sub support)
-    try:
-        redis_client = await aioredis.from_url(
-            redis_url,
-            encoding="utf-8",
-            decode_responses=True
-        )
-        websocket_manager.set_redis(redis_client)
-        logger.info("✅ WebSocket manager initialized with Redis Pub/Sub")
-    except Exception as e:
-        logger.warning(f"Failed to initialize Redis for WebSocket manager: {e}")
+    if redis_url:
+        try:
+            redis_client = await aioredis.from_url(
+                redis_url,
+                encoding="utf-8",
+                decode_responses=True
+            )
+            websocket_manager.set_redis(redis_client)
+            logger.info("✅ WebSocket manager initialized with Redis Pub/Sub")
+        except Exception as e:
+            logger.warning(f"Failed to initialize Redis for WebSocket manager: {e}")
+    else:
+        logger.warning("⚠️  Redis URL not configured - WebSocket manager running in memory-only mode")
     
     # Warm up inference services (optional, async)
     try:
@@ -1189,16 +1199,17 @@ async def inference_health_endpoint():
 anthropic_client = None  # Not used - replaced with Groq/Llama
 
 # Initialize Groq client for cost-effective high-volume operations
+groq_client = None
 try:
     from groq import Groq
     groq_api_key = os.getenv('GROQ_API_KEY')
-    if not groq_api_key:
-        raise ValueError("GROQ_API_KEY environment variable is required")
-    
-    groq_client = Groq(api_key=groq_api_key)
-    logger.info("✅ Groq client initialized successfully (Llama-3.3-70B for high-volume operations)")
+    if groq_api_key:
+        groq_client = Groq(api_key=groq_api_key)
+        logger.info("✅ Groq client initialized successfully (Llama-3.3-70B for high-volume operations)")
+    else:
+        logger.warning("⚠️  GROQ_API_KEY not set - AI operations will be unavailable")
 except Exception as e:
-    logger.error(f"❌ Failed to initialize Groq client: {e}")
+    logger.warning(f"⚠️  Failed to initialize Groq client: {e}")
     groq_client = None
 
 # CRITICAL FIX: Moved initialization to startup event to prevent blocking during module import
