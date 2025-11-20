@@ -667,6 +667,13 @@ def format_progress_message(stage: str, action: str, details: str = None, count:
     
     return message
 
+# CRITICAL: Declare global variables that will be initialized in startup event
+# These must be declared at module level before the startup event can modify them
+supabase = None
+optimized_db = None
+security_validator = None
+centralized_cache = None
+
 # Initialize FastAPI app with enhanced configuration
 app = FastAPI(
     title="Finley AI Backend",
