@@ -899,7 +899,24 @@ class TemporalPatternLearner:
             if job_id:
                 data['job_id'] = job_id
             
-            self.supabase.table('temporal_anomalies').insert(data).execute()
+            # FIX #14: Store anomaly in temporal_patterns as nested JSONB
+            # temporal_anomalies merged into temporal_patterns.anomalies array
+            pattern_id = data.get('temporal_pattern_id')
+            if pattern_id:
+                # Fetch existing anomalies
+                pattern_resp = self.supabase.table('temporal_patterns').select('anomalies')\
+                    .eq('id', pattern_id).execute()
+                
+                if pattern_resp.data:
+                    anomalies = pattern_resp.data[0].get('anomalies', [])
+                    anomalies.append(data)
+                    
+                    # Update with new anomalies array
+                    self.supabase.table('temporal_patterns').update({'anomalies': anomalies})\
+                        .eq('id', pattern_id).execute()
+                    logger.debug(f"Stored anomaly in temporal_patterns.anomalies for pattern {pattern_id}")
+            else:
+                logger.warning(f"Cannot store anomaly: temporal_pattern_id not provided")
             
         except Exception as e:
             logger.error(f"Failed to store temporal anomaly: {e}")
@@ -1074,16 +1091,27 @@ class TemporalPatternLearner:
             # ✅ LAZY LOADING: Import Prophet only when needed
             from prophet import Prophet
             
-            # Create and fit Prophet model
-            model = Prophet(
-                seasonality_mode='multiplicative',
-                yearly_seasonality=True,
-                weekly_seasonality=True,
-                daily_seasonality=False
-            )
-            model.fit(df)
+            # FIX #12: Wrap blocking Prophet.fit() in executor to prevent event loop blocking
+            # Prophet.fit() is C++ code that blocks the thread, so we run it in ThreadPoolExecutor
+            loop = asyncio.get_event_loop()
             
-            # Make future dataframe
+            def _fit_prophet_model():
+                """Blocking operation: fit Prophet model"""
+                model = Prophet(
+                    seasonality_mode='multiplicative',
+                    yearly_seasonality=True,
+                    weekly_seasonality=True,
+                    daily_seasonality=False,
+                    interval_width=0.95
+                )
+                model.fit(df)
+                return model
+            
+            # Run blocking fit in thread pool (non-blocking for event loop)
+            model = await loop.run_in_executor(None, _fit_prophet_model)
+            logger.debug("Prophet model fitted in thread pool (non-blocking)")
+            
+            # Make future dataframe and predict (these are fast, can run in main thread)
             future = model.make_future_dataframe(periods=forecast_days)
             forecast = model.predict(future)
             

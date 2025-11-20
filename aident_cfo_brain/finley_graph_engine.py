@@ -449,14 +449,30 @@ class FinleyGraphEngine:
             return {}
     
     async def _fetch_seasonal_enrichments(self, user_id: str, rel_ids: List[str]) -> Dict[str, Dict]:
-        """Fetch seasonal_patterns - Layer 3: Does this follow seasonal patterns?"""
+        """
+        Fetch seasonal_patterns - Layer 3: Does this follow seasonal patterns?
+        
+        FIX #14: Merged seasonal_patterns into temporal_patterns table.
+        Now queries temporal_patterns.seasonal_data JSONB instead of separate table.
+        """
         if not rel_ids:
             return {}
         try:
-            resp = self.supabase.table('seasonal_patterns').select(
-                'relationship_id, seasonal_strength, seasonal_months'
-            ).eq('user_id', user_id).in_('relationship_id', rel_ids).execute()
-            return {row['relationship_id']: row for row in resp.data}
+            # FIX #14: Query temporal_patterns instead of seasonal_patterns
+            resp = self.supabase.table('temporal_patterns').select(
+                'id as relationship_id, seasonal_data'
+            ).eq('user_id', user_id).in_('id', rel_ids)\
+             .not_('seasonal_data', 'is', None).execute()
+            
+            # Extract seasonal data from JSONB
+            result = {}
+            for row in resp.data:
+                if row.get('seasonal_data'):
+                    result[row['relationship_id']] = {
+                        'seasonal_strength': row['seasonal_data'].get('amplitude', 0.0),
+                        'seasonal_months': row['seasonal_data'].get('detected_cycles', [])
+                    }
+            return result
         except Exception as e:
             logger.warning("seasonal_enrichment_failed", error=str(e))
             return {}
@@ -581,13 +597,19 @@ class FinleyGraphEngine:
             return {}
     
     async def _fetch_duplicate_enrichments(self, user_id: str, rel_ids: List[str]) -> Dict[str, Dict]:
-        """Fetch duplicate_transactions - Layer 9: Is this duplicate/fraudulent?"""
+        """
+        Fetch duplicate/fraud detection - Layer 9: Is this duplicate/fraudulent?
+        
+        FIX #14: Merged duplicate_transactions into relationship_instances table.
+        Now queries relationship_instances with is_duplicate flag instead of separate table.
+        """
         if not rel_ids:
             return {}
         try:
-            resp = self.supabase.table('duplicate_transactions').select(
-                'relationship_id, is_duplicate, duplicate_confidence'
-            ).eq('user_id', user_id).in_('relationship_id', rel_ids).execute()
+            # FIX #14: Query relationship_instances instead of duplicate_transactions
+            resp = self.supabase.table('relationship_instances').select(
+                'id as relationship_id, is_duplicate, duplicate_confidence'
+            ).eq('user_id', user_id).in_('id', rel_ids).eq('is_duplicate', True).execute()
             return {row['relationship_id']: row for row in resp.data}
         except Exception as e:
             logger.warning("duplicate_enrichment_failed", error=str(e))

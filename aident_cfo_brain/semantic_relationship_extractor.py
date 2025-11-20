@@ -208,9 +208,19 @@ class SemanticRelationshipExtractor:
         if not groq_api_key:
             raise ValueError("GROQ_API_KEY environment variable required")
         
-        # Patch Groq client with instructor for structured outputs
+        # FIX #10: Use client as-is (already patched by enhanced_relationship_detector)
+        # Avoid double patching which causes response validation conflicts
         base_client = openai_client or AsyncGroq(api_key=groq_api_key)
-        self.groq = instructor.patch(base_client)
+        
+        # Only patch if not already patched (check for instructor wrapper)
+        if hasattr(base_client, 'create_with_validation'):
+            # Already patched by instructor
+            self.groq = base_client
+            logger.debug("Using pre-patched Groq client (instructor already applied)")
+        else:
+            # Not patched yet, apply instructor
+            self.groq = instructor.patch(base_client)
+            logger.debug("Applied instructor patch to Groq client")
         
         self.supabase = supabase_client
         self.config = config or self._get_default_config()

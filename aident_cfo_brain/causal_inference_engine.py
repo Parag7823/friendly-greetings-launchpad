@@ -642,7 +642,12 @@ class CausalInferenceEngine:
         counterfactual_value: Any,
         affected_event: Dict[str, Any]
     ) -> float:
-        """Calculate impact of counterfactual on downstream event"""
+        """
+        Calculate impact of counterfactual on downstream event.
+        
+        FIX #13: Implements date_change impact calculation including late fees,
+        interest charges, and cash flow timing effects.
+        """
         
         if intervention_type == 'amount_change':
             # Simple proportional impact
@@ -652,9 +657,74 @@ class CausalInferenceEngine:
                 return event_amount * delta_ratio
         
         elif intervention_type == 'date_change':
-            # Date changes might affect interest, penalties, etc.
-            # Simplified calculation
-            return 0.0
+            # FIX #13: Calculate impact of date changes (late fees, interest, cash flow timing)
+            try:
+                from datetime import datetime
+                
+                # Parse dates
+                if isinstance(original_value, str):
+                    original_date = datetime.fromisoformat(original_value.replace('Z', '+00:00'))
+                else:
+                    original_date = original_value
+                
+                if isinstance(counterfactual_value, str):
+                    counterfactual_date = datetime.fromisoformat(counterfactual_value.replace('Z', '+00:00'))
+                else:
+                    counterfactual_date = counterfactual_value
+                
+                # Calculate days difference
+                days_diff = (counterfactual_date - original_date).days
+                
+                if days_diff <= 0:
+                    # Earlier payment = no penalty
+                    return 0.0
+                
+                # Get event amount and type
+                event_amount = affected_event.get('amount_usd', 0.0)
+                event_type = affected_event.get('document_type', '').lower()
+                
+                # Calculate late fees and interest
+                total_impact = 0.0
+                
+                # 1. Late fees (typically 1-2% per month after due date)
+                # Assume 30-day payment terms, 1.5% monthly late fee
+                if days_diff > 30:
+                    months_late = (days_diff - 30) / 30.0
+                    late_fee_rate = 0.015  # 1.5% per month
+                    late_fees = event_amount * late_fee_rate * months_late
+                    total_impact += late_fees
+                    logger.debug(f"Late fees: ${late_fees:.2f} for {months_late:.1f} months")
+                
+                # 2. Interest charges (assume 8% annual interest for cash flow timing)
+                if days_diff > 0:
+                    annual_rate = 0.08
+                    daily_rate = annual_rate / 365.0
+                    interest = event_amount * daily_rate * days_diff
+                    total_impact += interest
+                    logger.debug(f"Interest: ${interest:.2f} for {days_diff} days")
+                
+                # 3. Cash flow impact (opportunity cost at 5% annual)
+                # Delayed cash inflow = lost investment opportunity
+                if 'payment' in event_type or 'invoice' in event_type:
+                    opportunity_cost_rate = 0.05 / 365.0
+                    opportunity_cost = event_amount * opportunity_cost_rate * days_diff
+                    total_impact += opportunity_cost
+                    logger.debug(f"Opportunity cost: ${opportunity_cost:.2f}")
+                
+                # 4. Covenant violation risk (if payment is critical)
+                # If this is a loan payment and delayed, risk of covenant breach
+                if 'loan' in event_type or 'debt' in event_type:
+                    if days_diff > 15:
+                        # Risk penalty: 2% of amount for covenant risk
+                        covenant_risk = event_amount * 0.02
+                        total_impact += covenant_risk
+                        logger.debug(f"Covenant risk penalty: ${covenant_risk:.2f}")
+                
+                return total_impact
+                
+            except Exception as e:
+                logger.error(f"Failed to calculate date_change impact: {e}")
+                return 0.0
         
         return 0.0
     

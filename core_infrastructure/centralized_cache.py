@@ -336,7 +336,7 @@ class CentralizedCache:
             Cached classification result or None
         """
         import hashlib
-        import json
+        import orjson as json  # LIBRARY REPLACEMENT: orjson for 3-5x faster JSON parsing
         
         # Generate cache key from content
         content_str = json.dumps(content, sort_keys=True) if isinstance(content, dict) else str(content)
@@ -359,7 +359,7 @@ class CentralizedCache:
             True if successful, False otherwise
         """
         import hashlib
-        import json
+        import orjson as json  # LIBRARY REPLACEMENT: orjson for 3-5x faster JSON parsing
         
         # Generate cache key from content
         content_str = json.dumps(content, sort_keys=True) if isinstance(content, dict) else str(content)

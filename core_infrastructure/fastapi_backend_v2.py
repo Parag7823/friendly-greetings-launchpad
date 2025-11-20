@@ -204,14 +204,21 @@ class DocumentClassificationRequest(BaseModel):
     platform: Optional[str] = None
 
 # Database and external services
-# FIX #1: CENTRALIZED SUPABASE CLIENT - Remove duplicate fallback logic
+# FIX #7: CENTRALIZED SUPABASE CLIENT - Strict dependency on supabase_client.py
 # Use the pooled client from supabase_client.py for all Supabase operations
 # NOTE: In container, files are copied flat to /app/, so absolute import is used
 try:
     from supabase_client import get_supabase_client  # type: ignore
 except ImportError:
     # Fallback for local development with package structure
-    from .supabase_client import get_supabase_client  # type: ignore
+    try:
+        from .supabase_client import get_supabase_client  # type: ignore
+    except ImportError as e:
+        raise RuntimeError(
+            "FATAL: supabase_client module not found. FastAPI backend requires centralized Supabase client. "
+            "Ensure supabase_client.py exists in core_infrastructure/ and SUPABASE_URL, "
+            "SUPABASE_SERVICE_ROLE_KEY environment variables are set."
+        ) from e
 from prometheus_client import Counter, Histogram, Gauge, generate_latest, CONTENT_TYPE_LATEST
 
 # CLEANUP: Removed Celery support - Using ARQ only for async task queue
@@ -12813,13 +12820,15 @@ async def delete_file_completely(job_id: str, user_id: str):
         except Exception as e:
             logger.warning(f"Failed to delete predicted_relationships: {e}")
         
-        # Step 11: Delete temporal_anomalies
+        # Step 11: Clear anomalies from temporal_patterns (FIX #14: merged table)
         try:
-            temporal_anomalies_result = supabase.table('temporal_anomalies').delete().eq('job_id', job_id).eq('user_id', user_id).execute()
-            deletion_stats['deleted_records']['temporal_anomalies'] = len(temporal_anomalies_result.data or [])
-            logger.info(f"Deleted {deletion_stats['deleted_records']['temporal_anomalies']} temporal anomalies")
+            # FIX #14: temporal_anomalies merged into temporal_patterns
+            supabase.table('temporal_patterns').update({'anomalies': '[]'::jsonb})\
+                .eq('job_id', job_id).eq('user_id', user_id).execute()
+            deletion_stats['deleted_records']['temporal_anomalies'] = 0  # Tracked as update, not delete
+            logger.info(f"Cleared anomalies from temporal_patterns")
         except Exception as e:
-            logger.warning(f"Failed to delete temporal_anomalies: {e}")
+            logger.warning(f"Failed to clear anomalies: {e}")
         
         # Step 12: Delete causal_relationships
         try:
@@ -12845,13 +12854,15 @@ async def delete_file_completely(job_id: str, user_id: str):
         except Exception as e:
             logger.warning(f"Failed to delete counterfactual_analyses: {e}")
         
-        # Step 15: Delete seasonal_patterns
+        # Step 15: Clear seasonal data from temporal_patterns (FIX #14: merged table)
         try:
-            seasonal_patterns_result = supabase.table('seasonal_patterns').delete().eq('job_id', job_id).eq('user_id', user_id).execute()
-            deletion_stats['deleted_records']['seasonal_patterns'] = len(seasonal_patterns_result.data or [])
-            logger.info(f"Deleted {deletion_stats['deleted_records']['seasonal_patterns']} seasonal patterns")
+            # FIX #14: seasonal_patterns merged into temporal_patterns
+            supabase.table('temporal_patterns').update({'seasonal_data': None})\
+                .eq('job_id', job_id).eq('user_id', user_id).execute()
+            deletion_stats['deleted_records']['seasonal_patterns'] = 0  # Tracked as update, not delete
+            logger.info(f"Cleared seasonal data from temporal_patterns")
         except Exception as e:
-            logger.warning(f"Failed to delete seasonal_patterns: {e}")
+            logger.warning(f"Failed to clear seasonal data: {e}")
         
         # Step 16: Delete cross_platform_relationships
         try:
@@ -12872,13 +12883,15 @@ async def delete_file_completely(job_id: str, user_id: str):
         # Step 18: REMOVED - metrics table deleted
         # Metrics deletion no longer needed as table was removed
         
-        # Step 19: Delete duplicate_transactions
+        # Step 19: Clear duplicate flags from relationship_instances (FIX #14: merged table)
         try:
-            duplicate_transactions_result = supabase.table('duplicate_transactions').delete().eq('job_id', job_id).eq('user_id', user_id).execute()
-            deletion_stats['deleted_records']['duplicate_transactions'] = len(duplicate_transactions_result.data or [])
-            logger.info(f"Deleted {deletion_stats['deleted_records']['duplicate_transactions']} duplicate transactions")
+            # FIX #14: duplicate_transactions merged into relationship_instances
+            supabase.table('relationship_instances').update({'is_duplicate': False, 'duplicate_confidence': 0.0})\
+                .eq('job_id', job_id).eq('user_id', user_id).execute()
+            deletion_stats['deleted_records']['duplicate_transactions'] = 0  # Tracked as update, not delete
+            logger.info(f"Cleared duplicate flags from relationship_instances")
         except Exception as e:
-            logger.warning(f"Failed to delete duplicate_transactions: {e}")
+            logger.warning(f"Failed to clear duplicate flags: {e}")
         
         # Step 20: Delete raw_events (CASCADE will handle some related tables)
         raw_events_result = supabase.table('raw_events').delete().eq('job_id', job_id).eq('user_id', user_id).execute()

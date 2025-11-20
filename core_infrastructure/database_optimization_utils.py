@@ -26,13 +26,23 @@ from typing import Dict, List, Any, Optional, Tuple, Set
 from datetime import datetime, date
 from supabase import Client
 import xxhash  # CENTRALIZED HASHING: Standard algorithm for all row hashing
+
+# FIX #7: Strict dependency on centralized supabase_client.py
+# Fail hard in production if supabase_client module is missing
 try:
     from supabase_client import get_supabase_client  # type: ignore
     _HAS_SUPABASE_HELPER = True
-except ModuleNotFoundError:
-    from supabase import create_client
-    get_supabase_client = None  # type: ignore
-    _HAS_SUPABASE_HELPER = False
+    logger_temp = structlog.get_logger(__name__)
+    logger_temp.info("✅ database_optimization_utils using centralized Supabase client")
+except ImportError as e:
+    logger_temp = structlog.get_logger(__name__)
+    logger_temp.critical(f"❌ FATAL: supabase_client.py not found. database_optimization_utils cannot initialize: {e}")
+    raise RuntimeError(
+        "database_optimization_utils requires supabase_client module for connection pooling. "
+        "Ensure supabase_client.py is in core_infrastructure/ and SUPABASE_URL, "
+        "SUPABASE_SERVICE_ROLE_KEY environment variables are set."
+    ) from e
+
 import asyncio
 from dataclasses import dataclass
 
