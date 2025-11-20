@@ -944,6 +944,8 @@ async def startup_event():
         security_validator = SecurityValidator()
         
         # CRITICAL FIX: Initialize optimized database queries
+        # Import here to avoid blocking module load
+        from database_optimization_utils import OptimizedDatabaseQueries
         optimized_db = OptimizedDatabaseQueries(supabase)
         logger.info("✅ Optimized database queries initialized")
         
