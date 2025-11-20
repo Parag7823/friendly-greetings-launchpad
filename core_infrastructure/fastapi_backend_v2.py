@@ -12823,7 +12823,7 @@ async def delete_file_completely(job_id: str, user_id: str):
         # Step 11: Clear anomalies from temporal_patterns (FIX #14: merged table)
         try:
             # FIX #14: temporal_anomalies merged into temporal_patterns
-            supabase.table('temporal_patterns').update({'anomalies': '[]'::jsonb})\
+            supabase.table('temporal_patterns').update({'anomalies': []})\
                 .eq('job_id', job_id).eq('user_id', user_id).execute()
             deletion_stats['deleted_records']['temporal_anomalies'] = 0  # Tracked as update, not delete
             logger.info(f"Cleared anomalies from temporal_patterns")
