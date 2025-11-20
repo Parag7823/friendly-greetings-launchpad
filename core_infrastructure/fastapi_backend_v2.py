@@ -8,7 +8,6 @@ print("🔍 DEBUG: Starting fastapi_backend_v2.py import...", flush=True)
 import os
 import sys
 import logging
-import xxhash
 import uuid
 import secrets
 import time
@@ -52,14 +51,19 @@ except ImportError:
     pass
 except Exception as e:
     print(f"⚠ Sentry initialization failed: {e}")
-import orjson
+
+try:
+    import orjson
+except ImportError:
+    orjson = None
 import json as stdlib_json  # Keep standard json for JSONEncoder compatibility
 try:
     import tiktoken
     TIKTOKEN_AVAILABLE = True
 except ImportError:
     TIKTOKEN_AVAILABLE = False
-    logger.warning("tiktoken_unavailable", reason="tiktoken not installed")
+    # logger is not initialized yet here; use print to avoid NameError at import time
+    print("tiktoken_unavailable: tiktoken not installed", flush=True)
 import re
 import asyncio
 import io
@@ -75,19 +79,32 @@ import redis.asyncio as aioredis
 from dataclasses import dataclass
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
-from universal_field_detector import UniversalFieldDetector
-from universal_platform_detector_optimized import UniversalPlatformDetectorOptimized as UniversalPlatformDetector
-from universal_document_classifier_optimized import UniversalDocumentClassifierOptimized as UniversalDocumentClassifier
-from universal_extractors_optimized import UniversalExtractorsOptimized as UniversalExtractors
-from entity_resolver_optimized import EntityResolverOptimized as EntityResolver
-from enhanced_relationship_detector import EnhancedRelationshipDetector
+
+# Shared data_ingestion_normalization modules
+from data_ingestion_normalization.universal_field_detector import UniversalFieldDetector
+from data_ingestion_normalization.universal_platform_detector_optimized import (
+    UniversalPlatformDetectorOptimized as UniversalPlatformDetector,
+)
+from data_ingestion_normalization.universal_document_classifier_optimized import (
+    UniversalDocumentClassifierOptimized as UniversalDocumentClassifier,
+)
+from data_ingestion_normalization.universal_extractors_optimized import (
+    UniversalExtractorsOptimized as UniversalExtractors,
+)
+from data_ingestion_normalization.entity_resolver_optimized import (
+    EntityResolverOptimized as EntityResolver,
+)
+from aident_cfo_brain.enhanced_relationship_detector import EnhancedRelationshipDetector
 from provenance_tracker import normalize_business_logic, normalize_temporal_causality
 
-from streaming_source import StreamedFile
+from data_ingestion_normalization.streaming_source import StreamedFile
 
 # Lazy import for field_mapping_learner to avoid circular dependencies
 try:
-    from field_mapping_learner import learn_field_mapping, get_learned_mappings
+    from data_ingestion_normalization.field_mapping_learner import (
+        learn_field_mapping,
+        get_learned_mappings,
+    )
 except ImportError:
     logger.warning("field_mapping_learner_unavailable", reason="module not found")
     learn_field_mapping = None
@@ -260,12 +277,22 @@ async def get_arq_pool():
         return _arq_pool
 
 # Using Groq/Llama exclusively for all AI operations
-from nango_client import NangoClient
+from data_ingestion_normalization.nango_client import NangoClient
 
 # Import critical fixes systems
 from transaction_manager import initialize_transaction_manager, get_transaction_manager
-from streaming_processor import initialize_streaming_processor, get_streaming_processor, StreamingConfig, StreamingFileProcessor
-from error_recovery_system import initialize_error_recovery_system, get_error_recovery_system, ErrorContext, ErrorSeverity
+from data_ingestion_normalization.streaming_processor import (
+    initialize_streaming_processor,
+    get_streaming_processor,
+    StreamingConfig,
+    StreamingFileProcessor,
+)
+from error_recovery_system import (
+    initialize_error_recovery_system,
+    get_error_recovery_system,
+    ErrorContext,
+    ErrorSeverity,
+)
 
 # CRITICAL FIX: Defer database_optimization_utils import to startup event
 # This import was blocking module load - moved to startup event where it's used
