@@ -682,6 +682,126 @@ optimized_db = None
 security_validator = None
 centralized_cache = None
 
+# CRITICAL FIX: Define SocketIOWebSocketManager class before lifespan function
+# This was previously at line 11665 but needs to be here to avoid forward reference error
+class SocketIOWebSocketManager:
+    """Socket.IO-based WebSocket manager - simplified with library handling"""
+    
+    def __init__(self):
+        self.redis = None
+        self.job_status: Dict[str, Dict[str, Any]] = {}  # In-memory cache
+        
+    def set_redis(self, redis_client):
+        """Set Redis client for job state persistence"""
+        self.redis = redis_client
+        try:
+            redis_manager = socketio.AsyncRedisManager(
+                f"redis://{redis_client.connection_pool.connection_kwargs.get('host', 'localhost')}:"
+                f"{redis_client.connection_pool.connection_kwargs.get('port', 6379)}"
+            )
+            sio.manager = redis_manager
+            logger.info("✅ Socket.IO Redis adapter initialized")
+        except Exception as e:
+            logger.warning(f"Socket.IO Redis adapter failed: {e}")
+
+    def _key(self, job_id: str) -> str:
+        return f"finley:job:{job_id}"
+
+    async def _get_state(self, job_id: str) -> Optional[Dict[str, Any]]:
+        try:
+            # FIX #44: Use centralized cache instead of direct Redis
+            cache = safe_get_cache()
+            if cache is not None:
+                raw = await cache.get(self._key(job_id))
+                if raw:
+                    # Cache already handles JSON serialization
+                    state = raw if isinstance(raw, dict) else orjson.loads(raw)
+                    self.job_status[job_id] = state
+                    return state
+            return self.job_status.get(job_id)
+        except Exception:
+            return self.job_status.get(job_id)
+
+    async def _save_state(self, job_id: str, state: Dict[str, Any]):
+        self.job_status[job_id] = state
+        # FIX #44: Use centralized cache instead of direct Redis
+        cache = safe_get_cache()
+        if cache is not None:
+            try:
+                # Cache handles JSON serialization automatically, TTL in seconds
+                await cache.set(self._key(job_id), state, ttl=21600)  # 6 hours
+            except Exception:
+                pass
+
+    async def merge_job_state(self, job_id: str, patch: Dict[str, Any]) -> Dict[str, Any]:
+        base = await self._get_state(job_id) or {}
+        base.update(patch)
+        await self._save_state(job_id, base)
+        return base
+
+    async def send_update(self, job_id: str, data: Dict[str, Any]):
+        """Send update via Socket.IO to job room"""
+        try:
+            await self.merge_job_state(job_id, data)
+            await sio.emit('job_update', data, room=job_id)
+            return True
+        except Exception as e:
+            logger.error(f"Failed to send update for job {job_id}: {e}")
+            return False
+
+    async def send_error(self, job_id: str, error_message: str, component: str = None):
+        """Send error via Socket.IO"""
+        try:
+            payload = {
+                "type": "error",
+                "job_id": job_id,
+                "error": error_message,
+                "component": component,
+                "timestamp": datetime.utcnow().isoformat()
+            }
+            await self.merge_job_state(job_id, {"status": "failed", "error": error_message})
+            await sio.emit('job_error', payload, room=job_id)
+            return True
+        except Exception as e:
+            logger.error(f"Failed to send error for job {job_id}: {e}")
+            return False
+
+    async def get_job_status(self, job_id: str) -> Optional[Dict[str, Any]]:
+        """Get current job status"""
+        return await self._get_state(job_id)
+    
+    async def send_overall_update(self, job_id: str, status: str, message: str, progress: Optional[int] = None, results: Optional[Dict[str, Any]] = None):
+        """Send overall job update - wrapper for send_update with standardized payload"""
+        payload = {
+            "status": status,
+            "message": message,
+            "timestamp": datetime.utcnow().isoformat()
+        }
+        if progress is not None:
+            payload["progress"] = progress
+        if results is not None:
+            payload["results"] = results
+        
+        await self.send_update(job_id, payload)
+    
+    async def send_component_update(self, job_id: str, component: str, status: str, message: str, progress: Optional[int] = None, data: Optional[Dict[str, Any]] = None):
+        """Send component-specific update"""
+        payload = {
+            "component": component,
+            "status": status,
+            "message": message,
+            "timestamp": datetime.utcnow().isoformat()
+        }
+        if progress is not None:
+            payload["progress"] = progress
+        if data is not None:
+            payload["data"] = data
+        
+        await self.send_update(job_id, payload)
+
+# Initialize Socket.IO WebSocket manager
+websocket_manager = SocketIOWebSocketManager()
+
 # Initialize FastAPI app with enhanced configuration
 app = FastAPI(
     title="Finley AI Backend",
@@ -7124,17 +7244,23 @@ class ExcelProcessor:
                     # Update relationship counts in raw_events
                     for event_id in event_ids_to_update:
                         try:
-                            # Count relationships for this event
-                            count_result = supabase.table('relationship_instances').select('id', count='exact').or_(
-                                f"source_event_id.eq.{event_id},target_event_id.eq.{event_id}"
-                            ).execute()
-                            rel_count = count_result.count or 0
+                            # ✅ FIX #4: Use two separate queries instead of broken OR syntax
+                            # Count relationships where this event is source
+                            source_count_result = supabase.table('relationship_instances').select('id', count='exact').eq('source_event_id', event_id).execute()
+                            source_count = source_count_result.count or 0
                             
-                            # Update raw_events.relationships
+                            # Count relationships where this event is target
+                            target_count_result = supabase.table('relationship_instances').select('id', count='exact').eq('target_event_id', event_id).execute()
+                            target_count = target_count_result.count or 0
+                            
+                            # Total relationship count
+                            rel_count = source_count + target_count
+                            
+                            # Update raw_events.relationship_count
                             supabase.table('raw_events').update({
                                 'relationship_count': rel_count,
                                 'last_relationship_check': datetime.utcnow().isoformat()
-                            }).eq('id', event_id).execute()
+                            }).eq('id', event_id).eq('user_id', user_id).execute()
                         except Exception as update_err:
                             logger.warning(f"Failed to update relationship count for event {event_id}: {update_err}")
                     
@@ -7511,7 +7637,8 @@ class ExcelProcessor:
                                     'occurrences': len(dates),
                                     'intervals': intervals,
                                     'avg_interval_days': avg_interval
-                                }
+                                },
+                                'job_id': file_id  # ✅ FIX #2: Add job_id for tracking
                             })
                         
                         # Detect seasonal patterns (quarterly)
@@ -7526,7 +7653,8 @@ class ExcelProcessor:
                                 'pattern_data': {
                                     'occurrences': len(dates),
                                     'avg_interval_days': avg_interval
-                                }
+                                },
+                                'job_id': file_id  # ✅ FIX #3: Add job_id for tracking
                             })
             
             # Insert temporal patterns
@@ -11654,123 +11782,8 @@ async def handle_get_status(sid, data):
         return status or {'status': 'unknown'}
 
 # LIBRARY REPLACEMENT: Socket.IO-based WebSocket manager (replaces 368-line custom implementation)
-class SocketIOWebSocketManager:
-    """Socket.IO-based WebSocket manager - simplified with library handling"""
-    
-    def __init__(self):
-        self.redis = None
-        self.job_status: Dict[str, Dict[str, Any]] = {}  # In-memory cache
-        
-    def set_redis(self, redis_client):
-        """Set Redis client for job state persistence"""
-        self.redis = redis_client
-        try:
-            redis_manager = socketio.AsyncRedisManager(
-                f"redis://{redis_client.connection_pool.connection_kwargs.get('host', 'localhost')}:"
-                f"{redis_client.connection_pool.connection_kwargs.get('port', 6379)}"
-            )
-            sio.manager = redis_manager
-            logger.info("✅ Socket.IO Redis adapter initialized")
-        except Exception as e:
-            logger.warning(f"Socket.IO Redis adapter failed: {e}")
-
-    def _key(self, job_id: str) -> str:
-        return f"finley:job:{job_id}"
-
-    async def _get_state(self, job_id: str) -> Optional[Dict[str, Any]]:
-        try:
-            # FIX #44: Use centralized cache instead of direct Redis
-            cache = safe_get_cache()
-            if cache is not None:
-                raw = await cache.get(self._key(job_id))
-                if raw:
-                    # Cache already handles JSON serialization
-                    state = raw if isinstance(raw, dict) else orjson.loads(raw)
-                    self.job_status[job_id] = state
-                    return state
-            return self.job_status.get(job_id)
-        except Exception:
-            return self.job_status.get(job_id)
-
-    async def _save_state(self, job_id: str, state: Dict[str, Any]):
-        self.job_status[job_id] = state
-        # FIX #44: Use centralized cache instead of direct Redis
-        cache = safe_get_cache()
-        if cache is not None:
-            try:
-                # Cache handles JSON serialization automatically, TTL in seconds
-                await cache.set(self._key(job_id), state, ttl=21600)  # 6 hours
-            except Exception:
-                pass
-
-    async def merge_job_state(self, job_id: str, patch: Dict[str, Any]) -> Dict[str, Any]:
-        base = await self._get_state(job_id) or {}
-        base.update(patch)
-        await self._save_state(job_id, base)
-        return base
-
-    async def send_update(self, job_id: str, data: Dict[str, Any]):
-        """Send update via Socket.IO to job room"""
-        try:
-            await self.merge_job_state(job_id, data)
-            await sio.emit('job_update', data, room=job_id)
-            return True
-        except Exception as e:
-            logger.error(f"Failed to send update for job {job_id}: {e}")
-            return False
-
-    async def send_error(self, job_id: str, error_message: str, component: str = None):
-        """Send error via Socket.IO"""
-        try:
-            payload = {
-                "type": "error",
-                "job_id": job_id,
-                "error": error_message,
-                "component": component,
-                "timestamp": datetime.utcnow().isoformat()
-            }
-            await self.merge_job_state(job_id, {"status": "failed", "error": error_message})
-            await sio.emit('job_error', payload, room=job_id)
-            return True
-        except Exception as e:
-            logger.error(f"Failed to send error for job {job_id}: {e}")
-            return False
-
-    async def get_job_status(self, job_id: str) -> Optional[Dict[str, Any]]:
-        """Get current job status"""
-        return await self._get_state(job_id)
-    
-    async def send_overall_update(self, job_id: str, status: str, message: str, progress: Optional[int] = None, results: Optional[Dict[str, Any]] = None):
-        """Send overall job update - wrapper for send_update with standardized payload"""
-        payload = {
-            "status": status,
-            "message": message,
-            "timestamp": datetime.utcnow().isoformat()
-        }
-        if progress is not None:
-            payload["progress"] = progress
-        if results is not None:
-            payload["results"] = results
-        
-        await self.send_update(job_id, payload)
-    
-    async def send_component_update(self, job_id: str, component: str, status: str, message: str, progress: Optional[int] = None, data: Optional[Dict[str, Any]] = None):
-        """Send component-specific update"""
-        payload = {
-            "component": component,
-            "status": status,
-            "message": message,
-            "timestamp": datetime.utcnow().isoformat()
-        }
-        if progress is not None:
-            payload["progress"] = progress
-        if data is not None:
-            payload["data"] = data
-        
-        await self.send_update(job_id, payload)
-
-# Initialize Socket.IO WebSocket manager
-websocket_manager = SocketIOWebSocketManager()
+# NOTE: Class definition moved to line 685 to fix forward reference error
+# The class was previously here but is now defined before the lifespan function
 
 
 async def start_processing_job(user_id: str, job_id: str, storage_path: str, filename: str,
