@@ -570,7 +570,11 @@ class CausalInferenceEngine:
         counterfactual_value: Any,
         user_id: str
     ) -> List[Dict[str, Any]]:
-        """Propagate counterfactual changes through causal graph"""
+        """
+        Propagate counterfactual changes through causal graph.
+        
+        FIX #5: Now includes conditional logic filters (e.g., transaction status).
+        """
         try:
             if not self.causal_graph or intervention_event_id not in self.causal_graph:
                 return []
@@ -592,6 +596,22 @@ class CausalInferenceEngine:
                 if not event:
                     continue
                 
+                # FIX #5: Add conditional logic - skip failed transactions
+                event_status = event.get('status', 'unknown').lower()
+                if event_status == 'failed':
+                    logger.debug(f"Skipping failed transaction {event_id} in counterfactual propagation")
+                    continue
+                
+                # FIX #5: Skip cancelled or voided transactions
+                if event_status in ('cancelled', 'voided', 'reversed'):
+                    logger.debug(f"Skipping {event_status} transaction {event_id} in counterfactual propagation")
+                    continue
+                
+                # FIX #5: Check if event is marked as deleted
+                if event.get('is_deleted', False):
+                    logger.debug(f"Skipping deleted transaction {event_id} in counterfactual propagation")
+                    continue
+                
                 # Calculate impact based on intervention type
                 impact_delta = self._calculate_counterfactual_impact(
                     intervention_type,
@@ -605,7 +625,8 @@ class CausalInferenceEngine:
                     'document_type': event.get('document_type'),
                     'amount_usd': event.get('amount_usd'),
                     'impact_delta_usd': impact_delta,
-                    'vendor': event.get('vendor_standard')
+                    'vendor': event.get('vendor_standard'),
+                    'status': event_status  # FIX #5: Include status for transparency
                 })
             
             return affected_events

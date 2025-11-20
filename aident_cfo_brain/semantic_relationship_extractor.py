@@ -35,10 +35,21 @@ from prometheus_client import Counter, Histogram, Gauge
 
 import aiometer
 
+# ✅ NEW: Jinja2 for template-based prompt generation
+from jinja2 import Environment, BaseLoader, select_autoescape
+
 # Embeddings
 from embedding_service import get_embedding_service
 
 logger = structlog.get_logger(__name__)
+
+# ✅ NEW: Jinja2 Environment for prompt templates
+jinja_env = Environment(
+    loader=BaseLoader(),
+    autoescape=select_autoescape(['html', 'xml']),
+    trim_blocks=True,
+    lstrip_blocks=True
+)
 
 # ============================================
 # PROMETHEUS METRICS (Industry Standard)
@@ -227,6 +238,99 @@ class SemanticRelationshipExtractor:
             'redis_url': os.getenv('REDIS_URL', 'redis://localhost:6379/0')
         }
     
+    def _get_prompt_templates(self) -> Dict[str, str]:
+        """Get all Jinja2 prompt templates for semantic extraction"""
+        return {
+            'base_extraction': """You are a financial analyst AI specializing in semantic relationship extraction.
+
+Analyze the semantic relationship between these two financial events and provide structured insights.
+
+## SOURCE EVENT
+- Document Type: {{ source.document_type | default('Unknown') }}
+- Platform: {{ source.source_platform | default('Unknown') }}
+- Amount: ${{ source.amount_usd | default(0) | round(2) }}
+- Date: {{ source.source_ts | default('Unknown') }}
+- Vendor/Entity: {{ source.vendor_standard | default('Unknown') }}
+
+## TARGET EVENT
+- Document Type: {{ target.document_type | default('Unknown') }}
+- Platform: {{ target.source_platform | default('Unknown') }}
+- Amount: ${{ target.amount_usd | default(0) | round(2) }}
+- Date: {{ target.source_ts | default('Unknown') }}
+- Vendor/Entity: {{ target.vendor_standard | default('Unknown') }}
+
+{% if existing_relationship %}
+## EXISTING RELATIONSHIP CONTEXT
+- Type: {{ existing_relationship.relationship_type }}
+- Confidence: {{ existing_relationship.confidence_score | round(2) }}
+- Key Factors: {{ existing_relationship.key_factors | join(', ') }}
+{% endif %}
+
+{% if context_events %}
+## SURROUNDING CONTEXT ({{ context_events | length }} events)
+{% for event in context_events[:3] %}
+- {{ event.document_type }}: ${{ event.amount_usd | round(2) }} on {{ event.source_ts }}
+{% endfor %}
+{% endif %}
+
+## ANALYSIS REQUIREMENTS
+
+Provide a JSON response with EXACTLY these fields:
+
+1. **relationship_type**: Classification of the relationship (e.g., 'invoice_payment', 'expense_reimbursement', 'revenue_recognition')
+
+2. **semantic_description**: Clear, business-friendly explanation (2-3 sentences). What happened in plain language?
+
+3. **confidence**: Confidence score (0.0-1.0). How certain are you about this relationship?
+
+4. **temporal_causality**: Causal direction. Choose ONE:
+   - "source_causes_target": Source event directly caused the target event
+   - "target_causes_source": Target event caused the source event
+   - "bidirectional": Both events influence each other
+   - "correlation_only": Events are correlated but no clear causation
+
+5. **business_logic**: Business process pattern. Choose the MOST SPECIFIC:
+   - "standard_payment_flow": Generic payment flow
+   - "revenue_recognition": Revenue recorded and cash collected
+   - "expense_reimbursement": Expense claim being reimbursed
+   - "payroll_processing": Salary/wage payment to employee
+   - "tax_withholding": Tax withholding or payment
+   - "asset_depreciation": Asset depreciation or amortization
+   - "loan_repayment": Loan or credit repayment
+   - "refund_processing": Refund or credit note processing
+   - "recurring_billing": Recurring subscription or membership
+   - "unknown": Unable to determine (avoid if possible)
+
+6. **reasoning**: Detailed explanation of WHY this relationship exists:
+   - What evidence supports this connection?
+   - What business process does this represent?
+   - Why are these two events related?
+
+7. **key_factors**: List of evidence supporting this relationship (minimum 1 factor):
+   - Examples: "amount_match", "date_proximity", "vendor_match", "document_type_sequence", "payment_pattern"
+
+## CRITICAL INSTRUCTIONS
+
+- Be specific and accurate in your analysis
+- Use "unknown" only when truly uncertain
+- Ensure all amounts are in USD for comparison
+- Consider temporal proximity (days between events)
+- Look for matching vendors or entities
+- Identify business process patterns
+- Return ONLY valid JSON, no markdown blocks or explanations
+""",
+            
+            'batch_context': """You are analyzing a batch of financial relationships.
+
+## BATCH CONTEXT
+Processing {{ batch_size }} relationship pairs from user {{ user_id }}.
+
+## CURRENT PAIR ({{ current_index }}/{{ batch_size }})
+
+{{ base_prompt }}
+"""
+        }
+    
     @extraction_duration_seconds.time()
     async def extract_semantic_relationships(
         self,
@@ -269,8 +373,16 @@ class SemanticRelationshipExtractor:
             self._cache_misses += 1
             cache_hit_rate.set(self._cache_hits / (self._cache_hits + self._cache_misses))
             
-            # Build prompt
-            prompt = self._build_prompt(source_event, target_event, context_events, existing_relationship)
+            # Build prompt using Jinja2 templates
+            prompt = self._build_prompt(
+                source_event,
+                target_event,
+                context_events,
+                existing_relationship,
+                user_id=source_event.get('user_id'),
+                batch_index=None,
+                batch_size=None
+            )
             
             # Call AI with instructor (auto-validates, auto-retries)
             ai_response = await self._call_ai_with_instructor(prompt)
@@ -415,26 +527,55 @@ class SemanticRelationshipExtractor:
         self,
         source_event: Dict,
         target_event: Dict,
-        context_events: Optional[List[Dict]],
-        existing_relationship: Optional[Dict]
+        context_events: Optional[List[Dict]] = None,
+        existing_relationship: Optional[Dict] = None,
+        user_id: Optional[str] = None,
+        batch_index: Optional[int] = None,
+        batch_size: Optional[int] = None
     ) -> str:
-        """Build concise prompt for instructor-validated extraction"""
-        source_summary = f"{source_event.get('document_type', 'Event')}: ${source_event.get('amount_usd', '?')} on {source_event.get('source_ts', '?')[:10]}"
-        target_summary = f"{target_event.get('document_type', 'Event')}: ${target_event.get('amount_usd', '?')} on {target_event.get('source_ts', '?')[:10]}"
+        """
+        Build prompt using Jinja2 templates for dynamic, maintainable prompt generation.
         
-        return f"""Analyze the semantic relationship between these financial events:
+        ✅ ADVANTAGES:
+        - Separation of concerns: Template logic vs. code logic
+        - Easy to modify prompts without code changes
+        - Reusable templates for different extraction scenarios
+        - Better variable interpolation with filters
+        - Easier testing and versioning
+        """
+        try:
+            templates = self._get_prompt_templates()
+            base_template = jinja_env.from_string(templates['base_extraction'])
+            
+            # Render base extraction prompt
+            base_prompt = base_template.render(
+                source=source_event,
+                target=target_event,
+                context_events=context_events or [],
+                existing_relationship=existing_relationship
+            )
+            
+            # If batch context provided, wrap with batch template
+            if batch_index is not None and batch_size is not None:
+                batch_template = jinja_env.from_string(templates['batch_context'])
+                return batch_template.render(
+                    base_prompt=base_prompt,
+                    batch_size=batch_size,
+                    current_index=batch_index + 1,
+                    user_id=user_id or 'unknown'
+                )
+            
+            return base_prompt
+            
+        except Exception as e:
+            logger.error("prompt_template_rendering_failed", error=str(e), exc_info=True)
+            # Fallback to minimal prompt if template fails
+            return f"""Analyze the semantic relationship between these financial events:
 
-SOURCE: {source_summary}
-TARGET: {target_summary}
+SOURCE: {source_event.get('document_type', 'Event')}: ${source_event.get('amount_usd', '?')}
+TARGET: {target_event.get('document_type', 'Event')}: ${target_event.get('amount_usd', '?')}
 
-Determine:
-1. relationship_type (e.g., 'invoice_payment', 'expense_reimbursement')
-2. semantic_description (1-2 sentences explaining the relationship)
-3. confidence (0.0-1.0)
-4. temporal_causality (source_causes_target | target_causes_source | bidirectional | correlation_only)
-5. business_logic (standard_payment_flow | revenue_recognition | expense_reimbursement | payroll_processing | tax_withholding | asset_depreciation | loan_repayment | refund_processing | recurring_billing | unknown)
-6. reasoning (why this relationship exists)
-7. key_factors (list of evidence)"""
+Provide: relationship_type, semantic_description, confidence (0.0-1.0), temporal_causality, business_logic, reasoning, key_factors."""
     
     @ai_call_duration_seconds.time()
     async def _call_ai_with_instructor(self, prompt: str) -> Optional[SemanticRelationshipResponse]:
@@ -445,6 +586,7 @@ Determine:
         - Auto-validates response against Pydantic model
         - Auto-retries on validation failure
         - Zero manual JSON parsing
+        - Template-based prompts ensure consistent formatting
         """
         try:
             response = await self.groq.chat.completions.create(
@@ -455,11 +597,15 @@ Determine:
                 temperature=self.config['temperature']
             )
             
-            logger.debug(f"AI response validated: {response.relationship_type}")
+            logger.info(
+                "ai_response_validated",
+                relationship_type=response.relationship_type,
+                confidence=response.confidence
+            )
             return response
             
         except Exception as e:
-            logger.error(f"AI call failed: {e}", exc_info=True)
+            logger.error("ai_call_failed", error=str(e), exc_info=True)
             return None
     
     async def _generate_embedding(self, ai_response: SemanticRelationshipResponse) -> Optional[List[float]]:

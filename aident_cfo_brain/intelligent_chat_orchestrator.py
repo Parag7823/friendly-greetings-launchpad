@@ -79,20 +79,24 @@ class IntelligentChatOrchestrator:
     This is the missing link between the chat interface and the backend intelligence.
     """
     
-    def __init__(self, supabase_client, cache_client=None):
+    def __init__(self, supabase_client, cache_client=None, groq_client=None):
         """
         Initialize the orchestrator with all intelligence engines.
         
         Args:
             supabase_client: Supabase client for database access
             cache_client: Optional cache client for performance
+            groq_client: Optional Groq client for LLM (for testing/mocking)
         """
-        # CHANGED: Initialize Groq client instead of using passed openai_client
-        groq_api_key = os.getenv('GROQ_API_KEY')
-        if not groq_api_key:
-            raise ValueError("GROQ_API_KEY environment variable is required")
+        # FIX #3: Accept groq_client for dependency injection (testing/mocking)
+        if groq_client:
+            self.groq = groq_client
+        else:
+            groq_api_key = os.getenv('GROQ_API_KEY')
+            if not groq_api_key:
+                raise ValueError("GROQ_API_KEY environment variable is required")
+            self.groq = AsyncGroq(api_key=groq_api_key)
         
-        self.groq = AsyncGroq(api_key=groq_api_key)
         self.openai = None  # Not used - using Groq internally
         self.supabase = supabase_client
         self.cache = cache_client

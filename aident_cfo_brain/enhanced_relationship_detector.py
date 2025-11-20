@@ -19,7 +19,6 @@ Version: 2.0.0
 """
 
 import os
-import logging
 import re
 import json
 from datetime import datetime
@@ -36,16 +35,26 @@ from sklearn.ensemble import RandomForestClassifier
 import numpy as np
 from provenance_tracker import normalize_business_logic, normalize_temporal_causality
 
+# ✅ NEW: Structured logging with structlog
+import structlog
+logger = structlog.get_logger(__name__)
+
 # ✅ NEW: Add instructor for auto-validated AI responses
 try:
     import instructor
-    from pydantic import BaseModel, Field
+    from pydantic import BaseModel, Field, ValidationError, validator
     INSTRUCTOR_AVAILABLE = True
 except ImportError:
     INSTRUCTOR_AVAILABLE = False
     logger.warning("instructor not available - AI responses won't be auto-validated")
 
-logger = logging.getLogger(__name__)
+# ✅ NEW: Add tenacity for retry logic
+try:
+    from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+    TENACITY_AVAILABLE = True
+except ImportError:
+    TENACITY_AVAILABLE = False
+    logger.warning("tenacity not available - retry logic disabled")
 
 # Initialize Groq client for semantic analysis
 try:
@@ -57,20 +66,20 @@ try:
         # ✅ NEW: Patch Groq client with instructor for auto-validated responses
         if INSTRUCTOR_AVAILABLE:
             groq_client = instructor.patch(groq_client)
-            logger.info("✅ Groq client patched with instructor for auto-validation")
+            logger.info("groq_client_patched_with_instructor", auto_validation=True)
         
         GROQ_AVAILABLE = True
-        logger.info("✅ Groq client initialized for semantic analysis")
+        logger.info("groq_client_initialized", model="llama-3.3-70b-versatile")
     else:
         groq_client = None
         GROQ_AVAILABLE = False
-        logger.warning("⚠️ GROQ_API_KEY not found - semantic analysis disabled")
+        logger.warning("groq_api_key_not_found")
 except ImportError:
     groq_client = None
     GROQ_AVAILABLE = False
-    logger.warning("⚠️ Groq package not installed - semantic analysis disabled")
+    logger.warning("groq_package_not_installed")
 
-# ✅ NEW: Pydantic model for AI response validation
+# ✅ NEW: Pydantic models for comprehensive data validation
 if INSTRUCTOR_AVAILABLE:
     class RelationshipEnrichment(BaseModel):
         """Auto-validated AI response for relationship enrichment"""
@@ -80,6 +89,40 @@ if INSTRUCTOR_AVAILABLE:
             pattern="^(source_causes_target|target_causes_source|bidirectional|correlation_only)$"
         )
         business_logic: str
+        
+        @validator('semantic_description')
+        def validate_description(cls, v):
+            if not v or len(v.strip()) < 10:
+                raise ValueError('semantic_description must be at least 10 characters')
+            return v.strip()
+        
+        @validator('reasoning')
+        def validate_reasoning(cls, v):
+            if not v or len(v.strip()) < 20:
+                raise ValueError('reasoning must be at least 20 characters')
+            return v.strip()
+    
+    class RelationshipRecord(BaseModel):
+        """Validated relationship record for database storage"""
+        source_event_id: str = Field(min_length=1)
+        target_event_id: str = Field(min_length=1)
+        relationship_type: str = Field(min_length=1)
+        confidence_score: float = Field(ge=0.0, le=1.0)
+        detection_method: str
+        metadata: Dict[str, Any] = Field(default_factory=dict)
+        key_factors: List[str] = Field(default_factory=list)
+        
+        @validator('source_event_id', 'target_event_id')
+        def validate_event_ids(cls, v):
+            if not v or not isinstance(v, str):
+                raise ValueError('Event IDs must be non-empty strings')
+            return v
+        
+        @validator('confidence_score')
+        def validate_confidence(cls, v):
+            if not (0.0 <= v <= 1.0):
+                raise ValueError('confidence_score must be between 0.0 and 1.0')
+            return v
 
 # Debug logging now handled via structlog
 
@@ -351,16 +394,24 @@ class EnhancedRelationshipDetector:
             logger.error(f"Within-file relationship detection failed: {e}")
             return []
     
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=2, max=10),
+        retry=retry_if_exception_type((Exception,)),
+        reraise=True
+    ) if TENACITY_AVAILABLE else lambda f: f
     async def _enrich_relationship_with_ai(self, rel: Dict, source_event: Dict, target_event: Dict) -> Dict:
         """
         Enrich a relationship with AI-generated semantic fields using Groq/Llama.
-        Falls back to rule-based enrichment if Groq is unavailable.
         
         Populates: semantic_description, reasoning, temporal_causality, business_logic
+        
+        Raises:
+            ValueError: If Groq is unavailable or enrichment fails
         """
         if not GROQ_AVAILABLE or not groq_client:
-            # ✅ FIX: Fallback to rule-based enrichment when Groq unavailable
-            return self._rule_based_enrichment(rel, source_event, target_event)
+            logger.error("groq_unavailable_cannot_enrich_relationship")
+            raise ValueError("Groq client not available for relationship enrichment")
         
         try:
             # Build context for AI with enhanced business logic classification
@@ -433,90 +484,37 @@ Return ONLY valid JSON, no markdown blocks or explanations."""
                     temperature=0.3
                 )
                 
-                # Convert Pydantic model to dict
-                enrichment = {
-                    'semantic_description': enrichment_obj.semantic_description,
-                    'reasoning': enrichment_obj.reasoning,
-                    'temporal_causality': enrichment_obj.temporal_causality,
-                    'business_logic': enrichment_obj.business_logic
-                }
-                return enrichment
-            else:
-                # Fallback to manual parsing if instructor not available
-                response = groq_client.chat.completions.create(
-                    model="llama-3.3-70b-versatile",
-                    messages=[{"role": "user", "content": prompt}],
-                    max_tokens=500,
-                    temperature=0.3
+                # Validate using Pydantic
+                validated = RelationshipEnrichment(
+                    semantic_description=enrichment_obj.semantic_description,
+                    reasoning=enrichment_obj.reasoning,
+                    temporal_causality=enrichment_obj.temporal_causality,
+                    business_logic=enrichment_obj.business_logic
                 )
                 
-                content = response.choices[0].message.content.strip()
-                # Remove markdown code blocks if present
-                if content.startswith('```'):
-                    content = content.split('```')[1]
-                    if content.startswith('json'):
-                        content = content[4::]
-                    content = content.strip()
+                logger.info(
+                    "relationship_enriched_with_ai",
+                    relationship_type=rel.get('relationship_type'),
+                    temporal_causality=validated.temporal_causality
+                )
                 
-                enrichment = json.loads(content)
-                return enrichment
+                return validated.dict()
+            else:
+                # No fallback - raise error if instructor not available
+                logger.error("instructor_not_available_cannot_validate_response")
+                raise ValueError("Instructor not available for response validation")
             
+        except ValidationError as ve:
+            logger.error("pydantic_validation_failed", errors=ve.errors())
+            raise ValueError(f"AI response validation failed: {ve}")
         except Exception as e:
-            logger.warning(f"AI enrichment failed: {e}")
-            # Fallback to rule-based enrichment
-            return self._rule_based_enrichment(rel, source_event, target_event)
+            logger.error("ai_enrichment_failed", error=str(e), exc_info=True)
+            raise
     
-    def _rule_based_enrichment(self, rel: Dict, source_event: Dict, target_event: Dict) -> Dict:
-        """
-        Rule-based enrichment fallback when AI is unavailable or fails.
-        Provides basic semantic fields based on heuristics.
-        """
-        relationship_type = rel.get('relationship_type', 'unknown')
-        source_doc = source_event.get('document_type', 'unknown')
-        target_doc = target_event.get('document_type', 'unknown')
-        source_amount = source_event.get('amount_usd', 0)
-        target_amount = target_event.get('amount_usd', 0)
-        vendor = source_event.get('vendor_standard') or target_event.get('vendor_standard', 'Unknown')
-        
-        # Generate semantic description
-        semantic_description = f"Relationship detected between {source_doc} and {target_doc} for {vendor}. "
-        if abs(source_amount - target_amount) < 1.0:
-            semantic_description += f"Matching amounts of ${source_amount:.2f}."
-        
-        # Generate reasoning
-        key_factors = rel.get('key_factors', [])
-        reasoning = f"Detected based on matching criteria: {', '.join(key_factors) if key_factors else 'pattern analysis'}. "
-        if 'amount_match' in key_factors:
-            reasoning += f"Amounts match within tolerance (${source_amount:.2f} vs ${target_amount:.2f}). "
-        if 'entity_match' in key_factors:
-            reasoning += f"Same vendor/entity ({vendor}). "
-        if 'date_match' in key_factors:
-            reasoning += "Events occurred within temporal proximity. "
-        
-        # Determine temporal causality
-        temporal_causality = "correlation_only"
-        if source_doc == 'invoice' and target_doc == 'bank_transaction':
-            temporal_causality = "source_causes_target"
-        elif source_doc == 'bank_transaction' and target_doc == 'invoice':
-            temporal_causality = "target_causes_source"
-        
-        # Determine business logic
-        business_logic_source = None
-        if 'invoice' in source_doc.lower() or 'invoice' in target_doc.lower():
-            business_logic_source = "invoice_payment"
-        elif 'payroll' in source_doc.lower() or 'payroll' in target_doc.lower():
-            business_logic_source = "payroll_processing"
-        elif 'expense' in source_doc.lower() or 'expense' in target_doc.lower():
-            business_logic_source = "expense_reimbursement"
-        elif 'revenue' in source_doc.lower():
-            business_logic_source = "revenue_collection"
-
-        return {
-            'semantic_description': semantic_description,
-            'reasoning': reasoning,
-            'temporal_causality': normalize_temporal_causality(temporal_causality),
-            'business_logic': normalize_business_logic(business_logic_source)
-        }
+    # REMOVED: Rule-based enrichment fallback
+    # Reason: Fallback logic is too simplistic and doesn't meet output expectations
+    # If AI enrichment fails, we now raise an error instead of returning degraded output
+    # This ensures data quality and makes failures visible for monitoring
 
     async def _store_relationships(self, relationships: List[Dict], user_id: str, transaction_id: Optional[str] = None, job_id: Optional[str] = None) -> List[Dict]:
         """
@@ -572,6 +570,26 @@ Return ONLY valid JSON, no markdown blocks or explanations."""
                 if rel.get('entity_match'):
                     key_factors.append('entity_match')
                 
+                # ✅ NEW: Validate relationship record before storage
+                try:
+                    if INSTRUCTOR_AVAILABLE:
+                        validated_rel = RelationshipRecord(
+                            source_event_id=rel['source_event_id'],
+                            target_event_id=rel['target_event_id'],
+                            relationship_type=rel['relationship_type'],
+                            confidence_score=rel['confidence_score'],
+                            detection_method=rel.get('detection_method', 'unknown'),
+                            metadata=metadata,
+                            key_factors=key_factors
+                        )
+                except ValidationError as ve:
+                    logger.error(
+                        "relationship_validation_failed",
+                        errors=ve.errors(),
+                        relationship_type=rel.get('relationship_type')
+                    )
+                    continue  # Skip invalid relationships
+                
                 # ✅ NEW: AI-powered semantic enrichment using Groq/Llama
                 semantic_description = None
                 reasoning = None
@@ -583,11 +601,20 @@ Return ONLY valid JSON, no markdown blocks or explanations."""
                     target_event = events_map.get(rel['target_event_id'])
                     
                     if source_event and target_event:
-                        enrichment = await self._enrich_relationship_with_ai(rel, source_event, target_event)
-                        semantic_description = enrichment.get('semantic_description')
-                        reasoning = enrichment.get('reasoning')
-                        temporal_causality = enrichment.get('temporal_causality')
-                        business_logic = enrichment.get('business_logic')
+                        try:
+                            enrichment = await self._enrich_relationship_with_ai(rel, source_event, target_event)
+                            semantic_description = enrichment.get('semantic_description')
+                            reasoning = enrichment.get('reasoning')
+                            temporal_causality = enrichment.get('temporal_causality')
+                            business_logic = enrichment.get('business_logic')
+                        except ValueError as e:
+                            logger.error(
+                                "ai_enrichment_failed_skipping_relationship",
+                                relationship_type=rel.get('relationship_type'),
+                                error=str(e)
+                            )
+                            # Skip this relationship if enrichment fails
+                            continue
                 
                 # Generate pattern_id based on relationship type and key factors
                 pattern_signature = f"{rel['relationship_type']}_{'-'.join(sorted(key_factors))}"
@@ -634,12 +661,16 @@ Return ONLY valid JSON, no markdown blocks or explanations."""
                 except Exception as e:
                     logger.warning(f"Failed to insert relationship batch: {e}")
             
-            logger.info(f"Stored {len(stored_relationships)} relationships in database with IDs")
+            logger.info(
+                "relationships_stored",
+                count=len(stored_relationships),
+                total_attempted=len(relationship_instances)
+            )
             return stored_relationships
             
         except Exception as e:
-            logger.error(f"Failed to store relationships: {e}")
-            return []
+            logger.error("store_relationships_failed", error=str(e), exc_info=True)
+            raise
     
     async def _get_or_create_pattern_id(self, pattern_signature: str, relationship_type: str, key_factors: List[str], user_id: str) -> Optional[str]:
         """Get existing pattern_id or create new pattern in relationship_patterns table
@@ -1328,14 +1359,8 @@ Return ONLY valid JSON, no markdown blocks or explanations."""
             }
             
         except Exception as e:
-            logger.error(f"Semantic enrichment failed: {e}")
-            return {
-                'enabled': True,
-                'total_relationships': len(relationships),
-                'enriched_count': 0,
-                'error': str(e),
-                'message': 'Semantic enrichment failed'
-            }
+            logger.error("semantic_enrichment_failed", error=str(e), exc_info=True)
+            raise
     
     async def _fetch_events_by_ids(self, event_ids: List[str], user_id: str) -> Dict[str, Dict]:
         """Fetch events by IDs and return as dictionary"""
@@ -1415,14 +1440,8 @@ Return ONLY valid JSON, no markdown blocks or explanations."""
             }
             
         except Exception as e:
-            logger.error(f"Causal analysis failed: {e}")
-            return {
-                'enabled': True,
-                'total_relationships': len(relationships),
-                'causal_count': 0,
-                'error': str(e),
-                'message': 'Causal analysis failed'
-            }
+            logger.error("causal_analysis_failed", error=str(e), exc_info=True)
+            raise
     
     async def _learn_temporal_patterns(self, user_id: str) -> Dict[str, Any]:
         """

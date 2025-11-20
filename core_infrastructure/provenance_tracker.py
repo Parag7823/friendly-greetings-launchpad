@@ -456,88 +456,15 @@ def append_lineage_step(
 # UNIFIED ROW NORMALIZATION - Shared across duplicate detection, provenance, entity resolver
 # ============================================================================
 
-def normalize_row_for_hashing(row: Dict[str, Any]) -> Dict[str, str]:
-    """
-    Unified row normalization for consistent hashing across all modules.
-    
-    Used by:
-    - provenance_tracker: Row hash calculation
-    - production_duplicate_detection_service: Content fingerprinting
-    - entity_resolver_optimized: Training data normalization
-    
-    Normalization rules:
-    1. Convert all values to lowercase strings
-    2. Strip whitespace
-    3. Remove special characters (keep only alphanumeric and spaces)
-    4. Collapse multiple spaces to single space
-    5. Skip None/empty values
-    
-    Args:
-        row: Dictionary with row data
-        
-    Returns:
-        Dictionary with normalized string values
-        
-    Example:
-        >>> row = {"vendor": "ACME Corp", "amount": 1500.00, "date": None}
-        >>> normalize_row_for_hashing(row)
-        {'vendor': 'acme corp', 'amount': '1500.0'}
-    """
-    import re
-    
-    normalized = {}
-    for key, value in row.items():
-        if value is None or (isinstance(value, str) and not value.strip()):
-            continue
-        
-        # Convert to string and normalize
-        val_str = str(value).lower().strip()
-        
-        # Remove special characters, keep only alphanumeric and spaces
-        val_str = re.sub(r'[^a-z0-9\s]', '', val_str)
-        
-        # Collapse multiple spaces
-        val_str = re.sub(r'\s+', ' ', val_str)
-        
-        if val_str:  # Only include non-empty values
-            normalized[key] = val_str
-    
-    return normalized
-
-
-def get_normalized_tokens(row: Dict[str, Any]) -> set:
-    """
-    Extract normalized tokens from row for MinHash-based duplicate detection.
-    
-    Used by:
-    - production_duplicate_detection_service: Content fingerprinting
-    - persistent_lsh_service: LSH indexing
-    
-    Args:
-        row: Dictionary with row data
-        
-    Returns:
-        Set of normalized tokens
-        
-    Example:
-        >>> row = {"vendor": "ACME Corp", "amount": 1500.00}
-        >>> get_normalized_tokens(row)
-        {'acme', 'corp', '1500', '0'}
-    """
-    import re
-    
-    tokens = set()
-    normalized = normalize_row_for_hashing(row)
-    
-    for key, value in normalized.items():
-        # Split on whitespace and special characters
-        key_tokens = re.findall(r'\w+', key)
-        val_tokens = re.findall(r'\w+', value)
-        
-        tokens.update(key_tokens)
-        tokens.update(val_tokens)
-    
-    return tokens
+# FIX #4: REMOVED duplicate implementations
+# These functions are now imported from database_optimization_utils (line 30)
+# to ensure consistency across all modules (provenance_tracker, production_duplicate_detection_service, etc.)
+# 
+# Previously defined locally:
+# - normalize_row_for_hashing() [REMOVED - use imported version]
+# - get_normalized_tokens() [REMOVED - use imported version]
+#
+# This prevents hash drift and maintains single source of truth
 
 
 # ============================================================================
