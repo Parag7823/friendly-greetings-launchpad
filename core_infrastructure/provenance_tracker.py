@@ -18,8 +18,7 @@ FIX #4: Uses centralized hashing from database_optimization_utils.py
 to ensure compatibility with production_duplicate_detection_service.py
 """
 
-# CLEANUP: Removed unused orjson import
-# This module only builds dictionaries - FastAPI and Supabase handle JSON serialization
+import orjson as json  # LIBRARY REPLACEMENT: orjson for 3-5x faster JSON parsing
 from datetime import datetime
 from typing import Dict, Any, List, Optional
 from dataclasses import dataclass, asdict
