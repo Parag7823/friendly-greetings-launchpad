@@ -977,3 +977,36 @@ class FinleyGraphEngine:
             await self._save_to_cache(user_id, stats)
         
         return {'nodes_added': nodes_added, 'edges_added': edges_added}
+    
+    async def _clear_redis_cache(self, user_id: str):
+        """
+        Clear cached graph from Redis for user.
+        
+        FIX #3: Called when file is deleted to invalidate stale graph data.
+        Prevents ghost nodes from appearing in graph queries.
+        """
+        if not self.redis_url:
+            logger.debug("Redis not configured, skipping cache clear")
+            return
+        
+        try:
+            if AIOCACHE_AVAILABLE:
+                from urllib.parse import urlparse
+                parsed = urlparse(self.redis_url)
+                
+                cache = Cache(
+                    Cache.REDIS,
+                    endpoint=parsed.hostname,
+                    port=parsed.port or 6379,
+                    namespace="graph",
+                    serializer=PickleSerializer()
+                )
+                
+                # Delete the cached graph for this user
+                cache_key = f"{user_id}"
+                await cache.delete(cache_key)
+                logger.info(f"✅ Cleared Redis cache for user {user_id}")
+            else:
+                logger.warning("aiocache not available, cannot clear Redis cache")
+        except Exception as e:
+            logger.warning(f"Failed to clear Redis cache for user {user_id}: {e}")

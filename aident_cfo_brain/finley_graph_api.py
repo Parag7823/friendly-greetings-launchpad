@@ -16,9 +16,6 @@ from finley_graph_engine import FinleyGraphEngine, PathResult, GraphStats
 
 logger = structlog.get_logger(__name__)
 
-# Global graph engine instance per user (cached)
-_graph_engines: Dict[str, FinleyGraphEngine] = {}
-
 router = APIRouter(prefix="/api/v1/graph", tags=["Knowledge Graph"])
 
 
@@ -176,26 +173,11 @@ class PredictionQueryResponse(BaseModel):
 
 
 # ============================================================================
-# HELPER FUNCTIONS
-# ============================================================================
-
-async def get_graph_engine(user_id: str, supabase: Client, redis_url: Optional[str] = None) -> FinleyGraphEngine:
-    """Get or create graph engine for user"""
-    if user_id not in _graph_engines:
-        _graph_engines[user_id] = FinleyGraphEngine(supabase, redis_url)
-    return _graph_engines[user_id]
-
-
-def clear_graph_cache(user_id: str):
-    """Clear cached graph engine for user"""
-    if user_id in _graph_engines:
-        del _graph_engines[user_id]
-        logger.info("graph_cache_cleared", user_id=user_id)
-
-
-# ============================================================================
 # API ENDPOINTS
 # ============================================================================
+# FIX #1: Removed global _graph_engines dict and helper functions.
+# Each request creates a new FinleyGraphEngine instance.
+# Redis caching is handled internally by FinleyGraphEngine._load_from_cache()
 
 @router.post("/build", response_model=GraphBuildResponse)
 async def build_graph(
@@ -212,7 +194,8 @@ async def build_graph(
     - Caches in Redis for fast reload
     """
     try:
-        engine = await get_graph_engine(request.user_id, supabase, redis_url)
+        # FIX #1: Create new engine instance per request (no global state)
+        engine = FinleyGraphEngine(supabase, redis_url)
         stats = await engine.build_graph(request.user_id, request.force_rebuild)
         
         return GraphBuildResponse(
@@ -240,7 +223,8 @@ async def incremental_update(
     - Much faster than full rebuild for small updates
     """
     try:
-        engine = await get_graph_engine(request.user_id, supabase, redis_url)
+        # FIX #1: Create new engine instance per request (no global state)
+        engine = FinleyGraphEngine(supabase, redis_url)
         
         since = datetime.now() - timedelta(minutes=request.since_minutes)
         result = await engine.incremental_update(request.user_id, since)
@@ -323,7 +307,8 @@ async def query_importance(
     - "Find key entities in the financial network"
     """
     try:
-        engine = await get_graph_engine(request.user_id, supabase, redis_url)
+        # FIX #1: Create new engine instance per request (no global state)
+        engine = FinleyGraphEngine(supabase, redis_url)
         
         if not engine.graph:
             raise HTTPException(status_code=400, detail="Graph not built. Call /build first.")
@@ -374,7 +359,8 @@ async def query_communities(
     - "Discover hidden entity relationships"
     """
     try:
-        engine = await get_graph_engine(request.user_id, supabase, redis_url)
+        # FIX #1: Create new engine instance per request (no global state)
+        engine = FinleyGraphEngine(supabase, redis_url)
         
         if not engine.graph:
             raise HTTPException(status_code=400, detail="Graph not built. Call /build first.")
@@ -403,7 +389,8 @@ async def get_graph_stats(
 ):
     """Get current graph statistics for user"""
     try:
-        engine = await get_graph_engine(user_id, supabase, redis_url)
+        # FIX #1: Create new engine instance per request (no global state)
+        engine = FinleyGraphEngine(supabase, redis_url)
         
         if not engine.graph:
             raise HTTPException(status_code=400, detail="Graph not built. Call /build first.")
@@ -441,7 +428,8 @@ async def query_temporal_patterns(
     - Pattern history
     """
     try:
-        engine = await get_graph_engine(request.user_id, supabase, redis_url)
+        # FIX #1: Create new engine instance per request (no global state)
+        engine = FinleyGraphEngine(supabase, redis_url)
         
         if not engine.graph:
             raise HTTPException(status_code=400, detail="Graph not built. Call /build first.")
@@ -497,7 +485,8 @@ async def query_seasonal_cycles(
     - Seasonal confidence
     """
     try:
-        engine = await get_graph_engine(request.user_id, supabase, redis_url)
+        # FIX #1: Create new engine instance per request (no global state)
+        engine = FinleyGraphEngine(supabase, redis_url)
         
         if not engine.graph:
             raise HTTPException(status_code=400, detail="Graph not built. Call /build first.")
@@ -552,7 +541,8 @@ async def query_fraud_detection(
     - Duplicate transaction details
     """
     try:
-        engine = await get_graph_engine(request.user_id, supabase, redis_url)
+        # FIX #1: Create new engine instance per request (no global state)
+        engine = FinleyGraphEngine(supabase, redis_url)
         
         if not engine.graph:
             raise HTTPException(status_code=400, detail="Graph not built. Call /build first.")
@@ -613,7 +603,8 @@ async def query_root_causes(
     - Causal strength scores
     """
     try:
-        engine = await get_graph_engine(request.user_id, supabase, redis_url)
+        # FIX #1: Create new engine instance per request (no global state)
+        engine = FinleyGraphEngine(supabase, redis_url)
         
         if not engine.graph:
             raise HTTPException(status_code=400, detail="Graph not built. Call /build first.")
@@ -672,7 +663,8 @@ async def query_predictions(
     - Next predicted entities/events
     """
     try:
-        engine = await get_graph_engine(request.user_id, supabase, redis_url)
+        # FIX #1: Create new engine instance per request (no global state)
+        engine = FinleyGraphEngine(supabase, redis_url)
         
         if not engine.graph:
             raise HTTPException(status_code=400, detail="Graph not built. Call /build first.")
@@ -714,7 +706,19 @@ async def query_predictions(
 
 
 @router.delete("/cache/{user_id}")
-async def clear_cache(user_id: str):
-    """Clear cached graph engine for user (force rebuild on next request)"""
-    clear_graph_cache(user_id)
-    return {"status": "success", "message": f"Cache cleared for user {user_id}"}
+async def clear_cache(user_id: str, redis_url: Optional[str] = None):
+    """
+    Clear cached graph from Redis for user (force rebuild on next request).
+    
+    FIX #1: No local cache to clear. This endpoint clears Redis cache only.
+    """
+    try:
+        if redis_url:
+            # Clear Redis cache for this user
+            engine = FinleyGraphEngine(None, redis_url)
+            await engine._clear_redis_cache(user_id)
+            logger.info("redis_cache_cleared", user_id=user_id)
+        return {"status": "success", "message": f"Cache cleared for user {user_id}"}
+    except Exception as e:
+        logger.warning("cache_clear_failed", user_id=user_id, error=str(e))
+        return {"status": "warning", "message": f"Cache clear partially failed: {str(e)}"}
