@@ -1,5 +1,9 @@
 # Standard library imports
 from __future__ import annotations
+
+# DEBUG: Print to see if module import starts
+print("🔍 DEBUG: Starting fastapi_backend_v2.py import...", flush=True)
+
 # Standard library imports
 import os
 import sys
@@ -10,7 +14,11 @@ import secrets
 import time
 import mmap
 
+print("🔍 DEBUG: Standard library imports complete", flush=True)
+
 from database_optimization_utils import OptimizedDatabaseQueries
+
+print("🔍 DEBUG: database_optimization_utils imported", flush=True)
 
 try:
     import sentry_sdk
