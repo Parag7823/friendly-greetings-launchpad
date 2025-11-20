@@ -887,11 +887,20 @@ async def app_lifespan(app: FastAPI):
         
         # REFACTORED: Initialize centralized Redis cache (replaces ai_cache_system.py)
         # This provides distributed caching across all workers and instances for true scalability
-        centralized_cache = initialize_cache(
-            redis_url=os.environ.get('ARQ_REDIS_URL') or os.environ.get('REDIS_URL'),
-            default_ttl=7200  # 2 hours default TTL
-        )
-        logger.info("✅ Centralized Redis cache initialized - distributed caching across all workers!")
+        redis_url = os.environ.get('ARQ_REDIS_URL') or os.environ.get('REDIS_URL')
+        if redis_url:
+            try:
+                centralized_cache = initialize_cache(
+                    redis_url=redis_url,
+                    default_ttl=7200  # 2 hours default TTL
+                )
+                logger.info("✅ Centralized Redis cache initialized - distributed caching across all workers!")
+            except Exception as cache_err:
+                logger.warning(f"⚠️ Failed to initialize Redis cache: {cache_err} - Running without distributed cache")
+                centralized_cache = None
+        else:
+            logger.warning("⚠️ REDIS_URL not set - Running without distributed cache")
+            centralized_cache = None
         
         logger.info("✅ All critical systems and optimizations initialized successfully")
         
@@ -12919,12 +12928,28 @@ async def delete_file_completely(job_id: str, user_id: str):
         # Step 20.6: Clear graph cache for this user (FIX #3)
         # FIX #3: Invalidate graph cache to prevent ghost nodes after file deletion
         try:
-            from aident_cfo_brain.finley_graph_engine import FinleyGraphEngine
             redis_url = os.getenv('REDIS_URL')
             if redis_url:
-                engine = FinleyGraphEngine(None, redis_url)
-                await engine._clear_redis_cache(user_id)
-                logger.info(f"✅ Cleared graph cache for user {user_id}")
+                # Clear Redis cache directly without importing FinleyGraphEngine
+                try:
+                    from aiocache import Cache
+                    from aiocache.serializers import PickleSerializer
+                    from urllib.parse import urlparse
+                    
+                    parsed = urlparse(redis_url)
+                    cache = Cache(
+                        Cache.REDIS,
+                        endpoint=parsed.hostname,
+                        port=parsed.port or 6379,
+                        namespace="graph",
+                        serializer=PickleSerializer()
+                    )
+                    
+                    cache_key = f"{user_id}"
+                    await cache.delete(cache_key)
+                    logger.info(f"✅ Cleared graph cache for user {user_id}")
+                except ImportError:
+                    logger.warning("aiocache not available, skipping graph cache clear")
         except Exception as e:
             logger.warning(f"Failed to clear graph cache: {e}")
         
