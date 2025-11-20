@@ -16,9 +16,11 @@ import mmap
 
 print("🔍 DEBUG: Standard library imports complete", flush=True)
 
-from database_optimization_utils import OptimizedDatabaseQueries
+# CRITICAL FIX: Defer database_optimization_utils import to startup event
+# This import was blocking module load - moved to startup event where it's used
+# from database_optimization_utils import OptimizedDatabaseQueries
 
-print("🔍 DEBUG: database_optimization_utils imported", flush=True)
+print("🔍 DEBUG: Skipped database_optimization_utils import (deferred to startup)", flush=True)
 
 try:
     import sentry_sdk
