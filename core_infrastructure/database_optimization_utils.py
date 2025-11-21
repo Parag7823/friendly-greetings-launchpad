@@ -25,7 +25,23 @@ import structlog
 from typing import Dict, List, Any, Optional, Tuple, Set
 from datetime import datetime, date
 from supabase import Client
-import xxhash  # CENTRALIZED HASHING: Standard algorithm for all row hashing
+
+# ✅ LAZY LOADING: xxhash is a C extension that can cause import-time crashes
+# Load it only when needed to prevent Railway deployment crashes
+xxhash = None  # Will be loaded on first use
+
+def _load_xxhash():
+    """Lazy load xxhash C extension on first use"""
+    global xxhash
+    if xxhash is None:
+        try:
+            import xxhash as xxhash_module
+            xxhash = xxhash_module
+            logger.info("✅ xxhash module loaded")
+        except ImportError:
+            logger.error("xxhash not installed - hashing features unavailable")
+            raise ImportError("xxhash is required. Install with: pip install xxhash")
+    return xxhash
 
 # FIX #7: Strict dependency on centralized supabase_client.py
 # Fail hard in production if supabase_client module is missing
@@ -124,6 +140,9 @@ def calculate_row_hash(
         >>> assert hash1 == hash2  # Same input = same hash
     """
     try:
+        # Lazy load xxhash on first use
+        xxh = _load_xxhash()
+        
         # Use unified normalization function
         tokens = get_normalized_tokens(payload)
         
@@ -132,7 +151,7 @@ def calculate_row_hash(
         hash_input = f"{source_filename}||{row_index}||{'||'.join(sorted_tokens)}"
         
         # Use xxh3_128 for consistency across all modules
-        row_hash = xxhash.xxh3_128(hash_input.encode('utf-8')).hexdigest()
+        row_hash = xxh.xxh3_128(hash_input.encode('utf-8')).hexdigest()
         
         logger.debug(f"Calculated row hash for {source_filename}:{row_index} = {row_hash[:16]}...")
         return row_hash
