@@ -133,13 +133,8 @@ if INSTRUCTOR_AVAILABLE:
 
 # Debug logging now handled via structlog
 
-# Import semantic relationship extractor for AI-powered semantic analysis
-try:
-    from semantic_relationship_extractor import SemanticRelationshipExtractor
-    SEMANTIC_EXTRACTOR_AVAILABLE = True
-except ImportError:
-    SEMANTIC_EXTRACTOR_AVAILABLE = False
-    logger.warning("SemanticRelationshipExtractor not available. Semantic analysis will be disabled.")
+SEMANTIC_EXTRACTOR_AVAILABLE = False  # Assume unavailable until lazy loaded
+SemanticRelationshipExtractor = None  # Will be loaded on demand
 
 # Import causal inference engine for Bradford Hill criteria and causal analysis
 try:
