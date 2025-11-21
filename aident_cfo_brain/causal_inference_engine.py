@@ -12,6 +12,27 @@ Date: 2025-11-05
 
 import structlog
 import asyncio
+import pickle
+import io
+import numpy as np
+import pandas as pd
+try:
+    import igraph as ig
+except ImportError:
+    ig = None
+try:
+    from dowhy import CausalModel
+except ImportError:
+    CausalModel = None
+try:
+    from econml.dml import CausalForestDML
+except ImportError:
+    CausalForestDML = None
+try:
+    from sklearn.ensemble import GradientBoostingRegressor, GradientBoostingClassifier
+except ImportError:
+    GradientBoostingRegressor = None
+    GradientBoostingClassifier = None
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any, Tuple, Set
 from dataclasses import dataclass, asdict
@@ -936,9 +957,47 @@ class CausalInferenceEngine:
         except Exception as e:
             logger.error(f"Failed to store counterfactual analysis: {e}")
     
+
+
+    async def _save_model(self, model: Any, path: str) -> bool:
+        """Save model to Supabase Storage using pickle"""
+        try:
+            # Serialize model
+            buffer = io.BytesIO()
+            pickle.dump(model, buffer)
+            buffer.seek(0)
+            
+            # Upload to storage
+            # Using 'models' folder in 'finely-upload' bucket
+            storage_path = f"models/{path}"
+            self.supabase.storage.from_("finely-upload").upload(
+                path=storage_path,
+                file=buffer.getvalue(),
+                file_options={"content-type": "application/octet-stream", "upsert": "true"}
+            )
+            logger.info(f"✅ Model saved to storage: {storage_path}")
+            return True
+        except Exception as e:
+            logger.warning(f"Failed to save model to storage: {e}")
+            return False
+
+    async def _load_model(self, path: str) -> Optional[Any]:
+        """Load model from Supabase Storage using pickle"""
+        try:
+            storage_path = f"models/{path}"
+            response = self.supabase.storage.from_("finely-upload").download(storage_path)
+            
+            if response:
+                return pickle.loads(response)
+            return None
+        except Exception as e:
+            logger.debug(f"Model not found or failed to load from {path}: {e}")
+            return None
+
     async def discover_causal_graph_with_dowhy(
         self,
-        user_id: str
+        user_id: str,
+        force_retrain: bool = False
     ) -> Dict[str, Any]:
         """
         Automatic causal graph discovery using DoWhy.
@@ -947,6 +1006,7 @@ class CausalInferenceEngine:
         
         Args:
             user_id: User ID
+            force_retrain: If True, ignore cached model and retrain
         
         Returns:
             Dictionary with discovered causal graph and relationships
@@ -954,6 +1014,35 @@ class CausalInferenceEngine:
         try:
             logger.info(f"Running DoWhy causal discovery for user_id={user_id}")
             
+            model_path = f"{user_id}/dowhy_causal_model.pkl"
+            
+            # Try to load cached model
+            if not force_retrain:
+                cached_model = await self._load_model(model_path)
+                if cached_model:
+                    logger.info("✅ Using cached DoWhy model")
+                    # Re-run estimation on cached model
+                    identified_estimand = cached_model.identify_effect(proceed_when_unidentifiable=True)
+                    estimate = cached_model.estimate_effect(
+                        identified_estimand,
+                        method_name="backdoor.linear_regression"
+                    )
+                    refutation = cached_model.refute_estimate(
+                        identified_estimand,
+                        estimate,
+                        method_name="random_common_cause"
+                    )
+                    return {
+                        'causal_effect': float(estimate.value),
+                        'confidence_intervals': {
+                            'lower': float(estimate.value - 1.96 * estimate.get_standard_error()) if hasattr(estimate, 'get_standard_error') else None,
+                            'upper': float(estimate.value + 1.96 * estimate.get_standard_error()) if hasattr(estimate, 'get_standard_error') else None
+                        },
+                        'identified_estimand': str(identified_estimand),
+                        'refutation_result': str(refutation),
+                        'message': f'DoWhy discovered causal effect (cached): {estimate.value:.4f}'
+                    }
+
             # Fetch relationship and event data
             relationships = await self._fetch_relationships(user_id)
             
@@ -1001,6 +1090,9 @@ class CausalInferenceEngine:
                 common_causes=['source_amount', 'confidence']
             )
             
+            # Save trained model
+            await self._save_model(model, model_path)
+            
             # Identify causal effect
             identified_estimand = model.identify_effect(proceed_when_unidentifiable=True)
             
@@ -1043,7 +1135,8 @@ class CausalInferenceEngine:
         self,
         user_id: str,
         treatment_type: str = 'invoice',
-        outcome_type: str = 'payment'
+        outcome_type: str = 'payment',
+        force_retrain: bool = False
     ) -> Dict[str, Any]:
         """
         Heterogeneous treatment effect estimation using EconML.
@@ -1054,6 +1147,7 @@ class CausalInferenceEngine:
             user_id: User ID
             treatment_type: Type of treatment event (e.g., 'invoice')
             outcome_type: Type of outcome event (e.g., 'payment')
+            force_retrain: If True, ignore cached model and retrain
         
         Returns:
             Dictionary with treatment effects and confidence intervals
@@ -1061,7 +1155,9 @@ class CausalInferenceEngine:
         try:
             logger.info(f"Running EconML treatment effect estimation for user_id={user_id}")
             
-            # Fetch events
+            model_path = f"{user_id}/econml_model_{treatment_type}_{outcome_type}.pkl"
+            
+            # Fetch events (needed for X feature generation even if model is cached)
             events_result = self.supabase.table('raw_events').select(
                 'id, document_type, amount_usd, source_ts, vendor_standard'
             ).eq('user_id', user_id).execute()
@@ -1114,14 +1210,26 @@ class CausalInferenceEngine:
             T = np.array(T)
             Y = np.array(Y)
             
-            # Train Causal Forest
-            est = CausalForestDML(
-                model_y=GradientBoostingRegressor(),
-                model_t=GradientBoostingClassifier(),
-                random_state=42
-            )
+            est = None
             
-            est.fit(Y=Y, T=T, X=X)
+            # Try to load cached model
+            if not force_retrain:
+                est = await self._load_model(model_path)
+                if est:
+                    logger.info("✅ Using cached EconML model")
+            
+            if not est:
+                # Train Causal Forest
+                est = CausalForestDML(
+                    model_y=GradientBoostingRegressor(),
+                    model_t=GradientBoostingClassifier(),
+                    random_state=42
+                )
+                
+                est.fit(Y=Y, T=T, X=X)
+                
+                # Save trained model
+                await self._save_model(est, model_path)
             
             # Estimate treatment effects
             treatment_effects = est.effect(X)
@@ -1164,3 +1272,4 @@ class CausalInferenceEngine:
     def get_metrics(self) -> Dict[str, Any]:
         """Get engine metrics"""
         return self.metrics.copy()
+

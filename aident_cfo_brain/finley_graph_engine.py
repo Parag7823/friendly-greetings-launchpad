@@ -663,6 +663,25 @@ class FinleyGraphEngine:
                 cache_data = {
                     'graph': self.graph,
                     'node_id_to_index': self.node_id_to_index,
+                    'index_to_node_id': self.index_to_node_id,
+                    'last_build_time': self.last_build_time.isoformat() if self.last_build_time else None,
+                    'stats': {
+                        'node_count': self.graph.vcount(),
+                        'edge_count': self.graph.ecount(),
+                        'avg_degree': 2 * self.graph.ecount() / max(1, self.graph.vcount()),
+                        'density': self.graph.density(),
+                        'connected_components': len(self.graph.connected_components(mode='weak')),
+                        'build_time_seconds': 0,
+                        'last_updated': self.last_build_time.isoformat() if self.last_build_time else None
+                    }
+                }
+                
+                await cache.set(f"{user_id}", cache_data, ttl=86400)  # 24-hour TTL
+                logger.info("graph_saved_to_cache_pickle", user_id=user_id)
+        except Exception as e:
+            logger.warning("cache_save_failed", error=str(e))
+    
+    async def _load_from_cache(self, user_id: str) -> Optional[GraphStats]:
         """
         Load from Redis using aiocache + pickle.
         
