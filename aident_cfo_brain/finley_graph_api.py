@@ -4,7 +4,7 @@ Production-ready graph query endpoints
 """
 
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -170,6 +170,33 @@ class PredictionQueryResponse(BaseModel):
     status: str
     predictions: List[Dict[str, Any]]  # prediction_confidence, prediction_reason, next_entity
     message: str
+
+
+# ============================================================================
+# HELPER FUNCTIONS
+# ============================================================================
+
+async def get_graph_engine(
+    user_id: str,
+    supabase: Client,
+    redis_url: Optional[str] = None
+) -> FinleyGraphEngine:
+    """
+    Create and return a FinleyGraphEngine instance for the given user.
+    
+    The engine will attempt to load from Redis cache if available,
+    otherwise it will be empty and ready for building.
+    
+    Args:
+        user_id: User ID to load graph for
+        supabase: Supabase client
+        redis_url: Optional Redis URL for caching
+        
+    Returns:
+        FinleyGraphEngine instance
+    """
+    engine = FinleyGraphEngine(supabase, redis_url)
+    return engine
 
 
 # ============================================================================

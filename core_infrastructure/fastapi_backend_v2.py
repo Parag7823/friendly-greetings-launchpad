@@ -83,35 +83,47 @@ from concurrent.futures import ThreadPoolExecutor
 # Shared ingestion/normalization modules
 try:
     # Local/package layout
+    print("🔍 DEBUG: Importing UniversalFieldDetector...", flush=True)
     from data_ingestion_normalization.universal_field_detector import UniversalFieldDetector
+    print("🔍 DEBUG: Importing UniversalPlatformDetector...", flush=True)
     from data_ingestion_normalization.universal_platform_detector_optimized import (
         UniversalPlatformDetectorOptimized as UniversalPlatformDetector,
     )
+    print("🔍 DEBUG: Importing UniversalDocumentClassifier...", flush=True)
     from data_ingestion_normalization.universal_document_classifier_optimized import (
         UniversalDocumentClassifierOptimized as UniversalDocumentClassifier,
     )
+    print("🔍 DEBUG: Importing UniversalExtractors...", flush=True)
     from data_ingestion_normalization.universal_extractors_optimized import (
         UniversalExtractorsOptimized as UniversalExtractors,
     )
+    print("🔍 DEBUG: Importing EntityResolver...", flush=True)
     from data_ingestion_normalization.entity_resolver_optimized import (
         EntityResolverOptimized as EntityResolver,
     )
+    print("🔍 DEBUG: Importing StreamedFile...", flush=True)
     from data_ingestion_normalization.streaming_source import StreamedFile
 except ImportError:
     # Railway/runtime layout: modules flattened to top level
+    print("🔍 DEBUG: Importing UniversalFieldDetector (flat)...", flush=True)
     from universal_field_detector import UniversalFieldDetector
+    print("🔍 DEBUG: Importing UniversalPlatformDetector (flat)...", flush=True)
     from universal_platform_detector_optimized import (
         UniversalPlatformDetectorOptimized as UniversalPlatformDetector,
     )
+    print("🔍 DEBUG: Importing UniversalDocumentClassifier (flat)...", flush=True)
     from universal_document_classifier_optimized import (
         UniversalDocumentClassifierOptimized as UniversalDocumentClassifier,
     )
+    print("🔍 DEBUG: Importing UniversalExtractors (flat)...", flush=True)
     from universal_extractors_optimized import (
         UniversalExtractorsOptimized as UniversalExtractors,
     )
+    print("🔍 DEBUG: Importing EntityResolver (flat)...", flush=True)
     from entity_resolver_optimized import (
         EntityResolverOptimized as EntityResolver,
     )
+    print("🔍 DEBUG: Importing StreamedFile (flat)...", flush=True)
     from streaming_source import StreamedFile
 
 from enhanced_relationship_detector import EnhancedRelationshipDetector
