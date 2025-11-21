@@ -96,7 +96,7 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
           const loadedMessages = data.map((msg: any) => ({
             id: msg.id,
             text: msg.message,
-            isUser: msg.is_user,
+            isUser: msg.role === 'user',
             timestamp: new Date(msg.created_at)
           }));
           setMessages(loadedMessages);
