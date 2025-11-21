@@ -711,7 +711,7 @@ class FinleyGraphEngine:
                 self.graph = obj['graph']
                 self.node_id_to_index = obj['node_id_to_index']
                 self.index_to_node_id = obj['index_to_node_id']
-                self.last_build_time = datetime.fromisoformat(obj['last_build_time']) if obj.get('last_build_time') else None
+                self.last_build_time = pendulum.parse(obj['last_build_time']).naive() if obj.get('last_build_time') else None
                 logger.info("graph_loaded_from_cache_pickle", user_id=user_id)
                 return GraphStats(**obj['stats'])
             else:
