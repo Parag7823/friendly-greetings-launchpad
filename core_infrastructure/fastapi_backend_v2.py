@@ -941,8 +941,8 @@ async def app_lifespan(app: FastAPI):
             raise ValueError(f"Missing required environment variables: {', '.join(missing_vars)}. Please check your deployment configuration.")
         
         # CRITICAL FIX: Use pooled Supabase client to prevent connection exhaustion
-        supabase = get_supabase_client()
-        logger.info("✅ Supabase pooled client initialized successfully")
+        # Don't actually connect during startup - just validate config
+        logger.info("✅ Supabase configuration validated (connection deferred to first request)")
         
         # Initialize critical systems
         initialize_transaction_manager(supabase)
