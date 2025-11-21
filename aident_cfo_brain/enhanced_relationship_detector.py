@@ -26,11 +26,18 @@ from typing import Dict, List, Optional, Any, Tuple
 from groq import AsyncGroq
 from supabase import create_client, Client
 
-import igraph as ig
 import pendulum
-from rapidfuzz import fuzz, process
-import numpy as np
 from provenance_tracker import normalize_business_logic, normalize_temporal_causality
+
+# ✅ LAZY LOADING: Heavy C extensions moved to lazy load
+# These are loaded inside methods to prevent startup delays
+# - igraph (C library for graph analysis, ~100MB)
+# - numpy (massive C extension with BLAS/LAPACK, ~50MB)
+# - rapidfuzz (C extension for fuzzy matching, ~20MB)
+ig = None        # igraph - graph analysis library
+fuzz = None      # rapidfuzz - fuzzy string matching
+process = None   # rapidfuzz process
+np = None        # numpy - numerical computing
 
 # ✅ LAZY LOADING: Heavy imports moved to be loaded only when needed
 # These are loaded inside methods to prevent startup delays
@@ -199,6 +206,46 @@ def _load_sklearn():
             raise ImportError("scikit-learn is required for ML features. Install with: pip install scikit-learn")
     return RandomForestClassifier
 
+def _load_igraph():
+    """Lazy load igraph on first use"""
+    global ig
+    if ig is None:
+        try:
+            import igraph as igraph_module
+            ig = igraph_module
+            logger.info("✅ igraph module loaded")
+        except ImportError:
+            logger.error("igraph not installed - graph features unavailable")
+            raise ImportError("igraph is required. Install with: pip install igraph")
+    return ig
+
+def _load_rapidfuzz():
+    """Lazy load rapidfuzz on first use"""
+    global fuzz, process
+    if fuzz is None:
+        try:
+            from rapidfuzz import fuzz as fuzz_module, process as process_module
+            fuzz = fuzz_module
+            process = process_module
+            logger.info("✅ rapidfuzz module loaded")
+        except ImportError:
+            logger.error("rapidfuzz not installed - fuzzy matching unavailable")
+            raise ImportError("rapidfuzz is required. Install with: pip install rapidfuzz")
+    return fuzz, process
+
+def _load_numpy():
+    """Lazy load numpy on first use"""
+    global np
+    if np is None:
+        try:
+            import numpy as numpy_module
+            np = numpy_module
+            logger.info("✅ numpy module loaded")
+        except ImportError:
+            logger.error("numpy not installed - numerical features unavailable")
+            raise ImportError("numpy is required. Install with: pip install numpy")
+    return np
+
 
 class EnhancedRelationshipDetector:
     """Enhanced relationship detector that actually finds relationships between events"""
@@ -239,9 +286,10 @@ class EnhancedRelationshipDetector:
         else:
             logger.warning("⚠️ EmbeddingService not available - semantic embeddings disabled")
         
-        # igraph for in-memory graph analysis
-        self.graph = ig.Graph(directed=True)
-        logger.info("✅ igraph initialized (13-32x faster than networkx)")
+        # LAZY LOADING: igraph will be loaded on first use, not at startup
+        # This prevents 100MB+ memory consumption during initialization
+        self.graph = None
+        self._igraph_loaded = False
         
         # Initialize semantic relationship extractor for AI-powered analysis
         if SEMANTIC_EXTRACTOR_AVAILABLE:
