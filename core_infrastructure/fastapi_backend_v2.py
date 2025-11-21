@@ -124,12 +124,30 @@ except ImportError:
         EntityResolverOptimized as EntityResolver,
     )
     print("🔍 DEBUG: Importing StreamedFile (flat)...", flush=True)
-    from streaming_source import StreamedFile
+    try:
+        from streaming_source import StreamedFile
+        print("🔍 DEBUG: StreamedFile imported successfully", flush=True)
+    except Exception as e:
+        print(f"❌ CRITICAL ERROR importing StreamedFile: {e}", flush=True)
+        raise e
 
 print("🔍 DEBUG: Importing EnhancedRelationshipDetector...", flush=True)
-from enhanced_relationship_detector import EnhancedRelationshipDetector
+try:
+    from enhanced_relationship_detector import EnhancedRelationshipDetector
+    print("🔍 DEBUG: EnhancedRelationshipDetector imported successfully", flush=True)
+except Exception as e:
+    print(f"❌ CRITICAL ERROR importing EnhancedRelationshipDetector: {e}", flush=True)
+    # Don't raise yet, let's see if other imports fail
+    EnhancedRelationshipDetector = None
+
 print("🔍 DEBUG: Importing ProvenanceTracker...", flush=True)
-from provenance_tracker import normalize_business_logic, normalize_temporal_causality
+try:
+    from provenance_tracker import normalize_business_logic, normalize_temporal_causality
+    print("🔍 DEBUG: ProvenanceTracker imported successfully", flush=True)
+except Exception as e:
+    print(f"❌ CRITICAL ERROR importing ProvenanceTracker: {e}", flush=True)
+    normalize_business_logic = None
+    normalize_temporal_causality = None
 
 # Lazy import for field_mapping_learner to avoid circular dependencies
 try:
@@ -139,12 +157,14 @@ try:
             learn_field_mapping,
             get_learned_mappings,
         )
+        print("🔍 DEBUG: FieldMappingLearner imported successfully (nested)", flush=True)
     except ImportError:
         print("🔍 DEBUG: Importing FieldMappingLearner (flat)...", flush=True)
         from field_mapping_learner import learn_field_mapping, get_learned_mappings
-except ImportError:
+        print("🔍 DEBUG: FieldMappingLearner imported successfully (flat)", flush=True)
+except Exception as e:
     # logger not initialized yet here; use print for diagnostics only
-    print("field_mapping_learner_unavailable: module not found", flush=True)
+    print(f"field_mapping_learner_unavailable: {e}", flush=True)
     learn_field_mapping = None
     get_learned_mappings = None
 import polars as pl
