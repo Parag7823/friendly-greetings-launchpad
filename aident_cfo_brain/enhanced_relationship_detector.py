@@ -807,8 +807,8 @@ Return ONLY valid JSON, no markdown blocks or explanations."""
     async def _calculate_relationship_score(self, source: Dict, target: Dict, relationship_type: str) -> float:
         """Calculate comprehensive relationship score
         
-        FIX #4: Consolidated duplicate detection logic using direct calculations
-        instead of separate _calculate_amount_score and _calculate_date_score methods.
+        FIX #4: COMPLETE CONSOLIDATION - Uses ProductionDuplicateDetectionService for amount/date comparison.
+        This eliminates duplicate logic and centralizes all duplicate detection in one service.
         """
         try:
             # Extract data from events
@@ -816,9 +816,21 @@ Return ONLY valid JSON, no markdown blocks or explanations."""
             target_payload = target.get('payload', {})
             
             # Calculate individual scores
-            # FIX #4: Inline amount and date scoring (consolidated from duplicate methods)
-            amount_score = self._calculate_amount_score_inline(source, target)
-            date_score = self._calculate_date_score_inline(source, target)
+            # FIX #4: Use duplicate_service for amount and date scoring (consolidated)
+            if self.duplicate_service:
+                source_amount = self._extract_amount(source)
+                target_amount = self._extract_amount(target)
+                amount_score = self.duplicate_service.compare_amounts(source_amount, target_amount)
+                
+                source_date = self._extract_date(source)
+                target_date = self._extract_date(target)
+                date_score = self.duplicate_service.compare_dates(source_date, target_date)
+            else:
+                # Fallback if service unavailable
+                logger.warning("duplicate_service not available, using fallback scoring")
+                amount_score = 0.0
+                date_score = 0.0
+            
             entity_score = self._calculate_entity_score(source_payload, target_payload)
             id_score = self._calculate_id_score(source_payload, target_payload)
             context_score = await self._calculate_context_score(source_payload, target_payload)
@@ -839,57 +851,6 @@ Return ONLY valid JSON, no markdown blocks or explanations."""
             
         except Exception as e:
             logger.error(f"Error calculating relationship score: {e}")
-            return 0.0
-    
-    def _calculate_amount_score_inline(self, source: Dict, target: Dict) -> float:
-        """CONSOLIDATED: Calculate amount similarity score using USD-normalized amounts
-        
-        FIX #4: Inlined from _calculate_amount_score to consolidate duplicate logic.
-        Uses extracted amounts from enriched columns for cross-currency matching.
-        """
-        try:
-            source_amount = self._extract_amount(source)
-            target_amount = self._extract_amount(target)
-            
-            if source_amount == 0 or target_amount == 0:
-                return 0.0
-            
-            # Calculate ratio
-            ratio = min(source_amount, target_amount) / max(source_amount, target_amount)
-            return ratio
-            
-        except:
-            return 0.0
-    
-    def _calculate_date_score_inline(self, source: Dict, target: Dict) -> float:
-        """CONSOLIDATED: Calculate date similarity score
-        
-        FIX #4: Inlined from _calculate_date_score to consolidate duplicate logic.
-        Scores based on temporal proximity between transactions.
-        """
-        try:
-            source_date = self._extract_date(source)
-            target_date = self._extract_date(target)
-            
-            if not source_date or not target_date:
-                return 0.0
-            
-            # Calculate days difference
-            date_diff = abs((source_date - target_date).days)
-            
-            # Score based on proximity
-            if date_diff == 0:
-                return 1.0
-            elif date_diff <= 1:
-                return 0.9
-            elif date_diff <= 7:
-                return 0.7
-            elif date_diff <= 30:
-                return 0.5
-            else:
-                return 0.2
-                
-        except:
             return 0.0
     
     def _calculate_entity_score(self, source_payload: Dict, target_payload: Dict) -> float:

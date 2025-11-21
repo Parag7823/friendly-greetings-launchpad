@@ -1756,6 +1756,75 @@ class ProductionDuplicateDetectionService:
                 'processing_time_ms': int((time.time() - start_time) * 1000)
             }
 
+    def compare_amounts(self, source_amount: float, target_amount: float) -> float:
+        """
+        Compare two amounts and return a similarity score [0.0, 1.0].
+        
+        FIX #4: Consolidated from EnhancedRelationshipDetector._calculate_amount_score_inline
+        Uses USD-normalized amounts for cross-currency matching.
+        
+        Args:
+            source_amount: First amount (typically in USD)
+            target_amount: Second amount (typically in USD)
+            
+        Returns:
+            Similarity score: 1.0 for exact match, 0.0 for no match
+        """
+        try:
+            if source_amount == 0 or target_amount == 0:
+                return 0.0
+            
+            # Calculate ratio (min/max ensures [0, 1] range)
+            ratio = min(source_amount, target_amount) / max(source_amount, target_amount)
+            return ratio
+            
+        except Exception as e:
+            logger.warning(f"Amount comparison failed: {e}")
+            return 0.0
+    
+    def compare_dates(self, source_date, target_date) -> float:
+        """
+        Compare two dates and return a similarity score [0.0, 1.0].
+        
+        FIX #4: Consolidated from EnhancedRelationshipDetector._calculate_date_score_inline
+        Scores based on temporal proximity between transactions.
+        
+        Args:
+            source_date: First date (datetime object or None)
+            target_date: Second date (datetime object or None)
+            
+        Returns:
+            Similarity score based on days difference:
+            - 1.0 for same day
+            - 0.9 for 1 day difference
+            - 0.7 for 2-7 days
+            - 0.5 for 8-30 days
+            - 0.2 for >30 days
+            - 0.0 if either date is None
+        """
+        try:
+            if not source_date or not target_date:
+                return 0.0
+            
+            # Calculate days difference
+            date_diff = abs((source_date - target_date).days)
+            
+            # Score based on proximity
+            if date_diff == 0:
+                return 1.0
+            elif date_diff <= 1:
+                return 0.9
+            elif date_diff <= 7:
+                return 0.7
+            elif date_diff <= 30:
+                return 0.5
+            else:
+                return 0.2
+                
+        except Exception as e:
+            logger.warning(f"Date comparison failed: {e}")
+            return 0.0
+    
     async def clear_cache(self, user_id: Optional[str] = None) -> None:
         """OPTIMIZED: Clear cache for user or all users"""
         try:
