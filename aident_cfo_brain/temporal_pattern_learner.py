@@ -1062,7 +1062,6 @@ class TemporalPatternLearner:
             Dictionary with forecast data and confidence intervals
         """
         try:
-        try:
             logger.info(f"Running Prophet forecast for {relationship_type} ({forecast_days} days)")
             
             # FIX #3: Check database for existing valid forecast first

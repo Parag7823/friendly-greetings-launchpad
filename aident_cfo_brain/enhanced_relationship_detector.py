@@ -654,20 +654,6 @@ Return ONLY valid JSON, no markdown blocks or explanations."""
                             total_attempted=len(relationship_instances)
                         )
                 except Exception as e:
-                    logger.error(f"Failed to insert relationships: {e}")
-                    raise
-            
-            return stored_relationships
-        
-        except Exception as e:
-            logger.error(f"Error storing relationships: {e}", exc_info=True)
-            raise
-    
-    async def _generate_relationship_embedding(self, text: str) -> Optional[List[float]]:
-        """
-        Generate embedding for relationship text using BGE model.
-        This enables similarity-based relationship discovery and duplicate detection.
-        """
         try:
             if not text:
                 return None
