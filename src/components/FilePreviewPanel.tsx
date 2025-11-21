@@ -46,7 +46,12 @@ export const FilePreviewPanel = ({ fileId, filename, isOpen, onClose }: FilePrev
           .single();
 
         if (fileError) throw fileError;
-        setFileDetails(fileData);
+        if (fileData) {
+          setFileDetails({
+            ...fileData,
+            filename: fileData.filename || filename || 'Unknown'
+          } as FileDetails);
+        }
 
         // Load events for this file
         const { data: eventsData, error: eventsError } = await supabase

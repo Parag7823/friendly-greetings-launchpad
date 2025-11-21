@@ -290,7 +290,7 @@ export const EnhancedFileUpload: React.FC<EnhancedFileUploadProps> = ({ initialF
       // CRITICAL FIX: Add to uploaded files immediately (not after delay)
       // This ensures files show up in "Uploaded Files" section right away
       const uploadedFile = {
-        id: result.file_id || `${file.name}-${Date.now()}`,
+        id: result.job_id || `${file.name}-${Date.now()}`,
         name: file.name,
         uploadedAt: new Date(),
         analysisResults: result,

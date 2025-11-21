@@ -82,7 +82,7 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
         // Load chat messages from backend
         const { data, error } = await supabase
           .from('chat_messages')
-          .select('*')
+          .select('id, message, response, role, created_at, metadata')
           .eq('user_id', user.id)
           .eq('chat_id', currentChatId)
           .order('created_at', { ascending: true });

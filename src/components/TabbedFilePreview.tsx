@@ -64,7 +64,7 @@ export const TabbedFilePreview = ({
           .from('raw_events')
           .select('*')
           .eq('file_id', activeFileId)
-          .order('source_ts', { ascending: true })
+          .order('created_at', { ascending: true })
           .limit(1000); // Increased limit for Ag-Grid capability
 
         if (error) {
@@ -81,7 +81,7 @@ export const TabbedFilePreview = ({
         const rows = events.map(event => {
           const row: any = {};
           // Extract key fields for display
-          if (event.source_ts) row['Date'] = new Date(event.source_ts).toLocaleDateString();
+          if (event.transaction_date) row['Date'] = new Date(event.transaction_date).toLocaleDateString();
           if (event.vendor_standard) row['Vendor'] = event.vendor_standard;
           if (event.amount_usd !== null) row['Amount'] = Number(event.amount_usd); // Keep as number for sorting
           if (event.kind) row['Type'] = event.kind;

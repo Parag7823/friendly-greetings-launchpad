@@ -874,15 +874,15 @@ export const DataSourcesPanel = ({ isOpen, onClose, onFilePreview }: DataSources
                                             </>
                                           )}
                                         </Button>
-                                        <Button
-                                          size="sm"
-                                          variant="ghost"
-                                          onClick={() => handleDisconnect(connection.connection_id, integration.name)}
-                                          className="text-xs h-9 w-9 p-0 hover:bg-destructive/10 hover:text-destructive"
-                                          title="Disconnect"
-                                        >
-                                          <X className="w-4 h-4" />
-                                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => handleDisconnect(connection.connection_id, integration.name, integration.provider)}
+                          className="text-xs h-9 w-9 p-0 hover:bg-destructive/10 hover:text-destructive"
+                          title="Disconnect"
+                        >
+                          <X className="w-4 h-4" />
+                        </Button>
                                       </>
                                     ) : verifying === integration.provider ? (
                                       <Button
