@@ -1,4 +1,4 @@
- """
+"""
 FinleyGraph Engine - Production Knowledge Graph for Financial Intelligence
 Uses igraph (13-32x faster than networkx) + Supabase + Redis caching
 """
