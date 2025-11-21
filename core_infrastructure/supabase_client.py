@@ -191,11 +191,18 @@ def get_pool_statistics() -> dict:
         return {'error': str(e)}
 
 
-# Backward compatibility: Export a default client
-# This allows existing code to work without changes
-try:
-    supabase = get_supabase_client()
-    logger.info("✅ Default Supabase client exported for backward compatibility")
-except Exception as e:
-    logger.warning(f"Failed to initialize default Supabase client: {e}")
-    supabase = None
+# Backward compatibility: Lazy-load default client
+# This allows existing code to work without changes, but defers connection until first use
+supabase = None  # Will be loaded on first access
+
+def _get_default_supabase_client():
+    """Lazy load default Supabase client on first use"""
+    global supabase
+    if supabase is None:
+        try:
+            supabase = get_supabase_client()
+            logger.info("✅ Default Supabase client initialized on first use")
+        except Exception as e:
+            logger.warning(f"Failed to initialize default Supabase client: {e}")
+            supabase = None
+    return supabase
