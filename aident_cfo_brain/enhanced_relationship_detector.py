@@ -511,11 +511,6 @@ Return ONLY valid JSON, no markdown blocks or explanations."""
             logger.error("ai_enrichment_failed", error=str(e), exc_info=True)
             raise
     
-    # REMOVED: Rule-based enrichment fallback
-    # Reason: Fallback logic is too simplistic and doesn't meet output expectations
-    # If AI enrichment fails, we now raise an error instead of returning degraded output
-    # This ensures data quality and makes failures visible for monitoring
-
     async def _store_relationships(self, relationships: List[Dict], user_id: str, transaction_id: Optional[str] = None, job_id: Optional[str] = None) -> List[Dict]:
         """
         Store detected relationships in the database and return stored records with IDs.
@@ -624,9 +619,44 @@ Return ONLY valid JSON, no markdown blocks or explanations."""
                 relationship_embedding = None
                 if self.semantic_extractor and semantic_description:
                     try:
-                count=len(stored_relationships),
-                total_attempted=len(relationship_instances)
-            )
+                        relationship_embedding = await self._generate_relationship_embedding(semantic_description)
+                    except Exception as e:
+                        logger.warning(f"Failed to generate embedding: {e}")
+                
+                # Prepare record for insertion
+                record = {
+                    'user_id': user_id,
+                    'source_event_id': rel['source_event_id'],
+                    'target_event_id': rel['target_event_id'],
+                    'relationship_type': rel['relationship_type'],
+                    'confidence_score': rel['confidence_score'],
+                    'detection_method': rel.get('detection_method', 'unknown'),
+                    'metadata': metadata,
+                    'pattern_id': pattern_id,
+                    'semantic_description': semantic_description,
+                    'reasoning': reasoning,
+                    'temporal_causality': temporal_causality,
+                    'business_logic': business_logic,
+                    'relationship_embedding': relationship_embedding
+                }
+                
+                relationship_instances.append(record)
+            
+            # Batch insert all relationships
+            if relationship_instances:
+                try:
+                    result = self.supabase.table('relationship_instances').insert(relationship_instances).execute()
+                    if result.data:
+                        stored_relationships = result.data
+                        logger.info(
+                            "relationships_stored",
+                            count=len(stored_relationships),
+                            total_attempted=len(relationship_instances)
+                        )
+                except Exception as e:
+                    logger.error(f"Failed to insert relationships: {e}")
+                    raise
+            
             return stored_relationships
         
         except Exception as e:
