@@ -28,12 +28,19 @@ from supabase import create_client, Client
 
 import igraph as ig
 import pendulum
-import spacy
 from rapidfuzz import fuzz, process
-from sentence_transformers import SentenceTransformer, util
-from sklearn.ensemble import RandomForestClassifier
 import numpy as np
 from provenance_tracker import normalize_business_logic, normalize_temporal_causality
+
+# ✅ LAZY LOADING: Heavy imports moved to be loaded only when needed
+# These are loaded inside methods to prevent startup delays
+# - spacy (loads NLP models, ~500MB)
+# - sentence_transformers (loads torch, ~2GB)
+# - sklearn (machine learning, ~200MB)
+spacy = None
+SentenceTransformer = None
+util = None
+RandomForestClassifier = None
 
 # ✅ NEW: Structured logging with structlog
 import structlog
@@ -171,6 +178,51 @@ except ImportError:
 # - Supabase stores all relationships persistently
 # - No need for separate graph database
 
+# ============================================================================
+# LAZY LOADING HELPERS - Load heavy libraries only when needed
+# ============================================================================
+
+def _load_spacy():
+    """Lazy load spaCy NLP model on first use"""
+    global spacy
+    if spacy is None:
+        try:
+            import spacy as spacy_module
+            spacy = spacy_module
+            logger.info("✅ spaCy module loaded")
+        except ImportError:
+            logger.error("spaCy not installed - NER features unavailable")
+            raise ImportError("spaCy is required for NER features. Install with: pip install spacy")
+    return spacy
+
+def _load_sentence_transformers():
+    """Lazy load sentence-transformers on first use"""
+    global SentenceTransformer, util
+    if SentenceTransformer is None:
+        try:
+            from sentence_transformers import SentenceTransformer as ST, util as st_util
+            SentenceTransformer = ST
+            util = st_util
+            logger.info("✅ sentence-transformers module loaded")
+        except ImportError:
+            logger.error("sentence-transformers not installed - semantic features unavailable")
+            raise ImportError("sentence-transformers is required for semantic features. Install with: pip install sentence-transformers")
+    return SentenceTransformer, util
+
+def _load_sklearn():
+    """Lazy load scikit-learn on first use"""
+    global RandomForestClassifier
+    if RandomForestClassifier is None:
+        try:
+            from sklearn.ensemble import RandomForestClassifier as RFC
+            RandomForestClassifier = RFC
+            logger.info("✅ scikit-learn module loaded")
+        except ImportError:
+            logger.error("scikit-learn not installed - ML features unavailable")
+            raise ImportError("scikit-learn is required for ML features. Install with: pip install scikit-learn")
+    return RandomForestClassifier
+
+
 class EnhancedRelationshipDetector:
     """Enhanced relationship detector that actually finds relationships between events"""
     
@@ -195,13 +247,10 @@ class EnhancedRelationshipDetector:
             self.embedding_service = EmbeddingService()
             logger.info("✅ EmbeddingService initialized via dependency injection")
         
-        # REFACTORED: Initialize genius libraries
-        try:
-            self.nlp = spacy.load("en_core_web_sm")  # NER for entity extraction
-            logger.info("✅ spaCy NER model loaded")
-        except:
-            self.nlp = None
-            logger.warning("⚠️ spaCy model not found, run: python -m spacy download en_core_web_sm")
+        # LAZY LOADING: spaCy will be loaded on first use, not at startup
+        # This prevents 500MB+ memory consumption during initialization
+        self.nlp = None
+        self._spacy_loaded = False
         
         # CRITICAL FIX: Use shared BGE embedding service instead of loading separate model
         # Old: Loaded all-MiniLM-L6-v2 (384 dims) separately

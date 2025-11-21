@@ -1225,6 +1225,16 @@ class TemporalPatternLearner:
         try:
             logger.info(f"Discovering unknown patterns for {relationship_type}, window={window_size}")
             
+            # LAZY LOADING: Import stumpy only when needed
+            try:
+                import stumpy
+            except ImportError:
+                logger.warning("stumpy library not installed - pattern discovery unavailable")
+                return {
+                    'motifs': [],
+                    'message': 'stumpy library not installed - pattern discovery unavailable'
+                }
+            
             # Fetch relationship timing data
             response = await asyncio.to_thread(
                 self.supabase.table('relationship_instances')
@@ -1317,6 +1327,16 @@ class TemporalPatternLearner:
         """
         try:
             logger.info(f"Detecting regime changes for {relationship_type}")
+            
+            # LAZY LOADING: Import stumpy only when needed
+            try:
+                import stumpy
+            except ImportError:
+                logger.warning("stumpy library not installed - regime change detection unavailable")
+                return {
+                    'regime_changes': [],
+                    'message': 'stumpy library not installed - regime change detection unavailable'
+                }
             
             # Fetch relationship timing data
             response = await asyncio.to_thread(
@@ -1421,6 +1441,16 @@ class TemporalPatternLearner:
         """
         try:
             logger.info(f"Searching for pattern motifs: {target_pattern}")
+            
+            # LAZY LOADING: Import stumpy only when needed
+            try:
+                import stumpy
+            except ImportError:
+                logger.warning("stumpy library not installed - pattern motif search unavailable")
+                return {
+                    'matches': [],
+                    'message': 'stumpy library not installed - pattern motif search unavailable'
+                }
             
             # Fetch data
             response = await asyncio.to_thread(
