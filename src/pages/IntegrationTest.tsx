@@ -19,9 +19,9 @@ const IntegrationTest = () => {
 
   const testSupabaseConnection = async () => {
     try {
-      // Test reading from integration_test_logs table (the new test table)
+      // Test reading from chat_messages table
       const { data, error } = await supabase
-        .from('integration_test_logs')
+        .from('chat_messages')
         .select('*')
         .limit(5);
 
