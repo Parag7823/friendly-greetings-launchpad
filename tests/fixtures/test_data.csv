@@ -1,6 +1,0 @@
-name,amount,date,category
-Transaction 1,100.50,2024-01-15,revenue
-Transaction 2,50.25,2024-01-16,expense
-Transaction 3,200.00,2024-01-17,revenue
-Transaction 4,75.80,2024-01-18,expense
-Transaction 5,150.00,2024-01-19,revenue

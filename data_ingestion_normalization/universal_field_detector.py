@@ -64,8 +64,8 @@ class FormatPattern(BaseModel):
 
 class FieldDetectorConfig(BaseSettings):
     """Type-safe configuration"""
-    field_patterns_yaml: str = "field_patterns.yaml"
-    format_patterns_yaml: str = "format_patterns.yaml"
+    field_patterns_yaml: str = "config/field_patterns.yaml"
+    format_patterns_yaml: str = "config/format_patterns.yaml"
     enable_caching: bool = True
     cache_ttl: int = 3600
     enable_pii_detection: bool = True
@@ -147,7 +147,7 @@ class UniversalFieldDetector:
                     category: {k: FieldPattern(**v) for k, v in types.items()}
                     for category, types in data.items()
                 }
-            logger.warning("field_patterns.yaml not found, using empty patterns")
+            logger.warning("config/field_patterns.yaml not found, using empty patterns")
         except Exception as e:
             logger.error("Failed to load field patterns", error=str(e))
         return {}
@@ -160,7 +160,7 @@ class UniversalFieldDetector:
                 with open(yaml_path, 'r') as f:
                     data = yaml.safe_load(f)
                 return {k: FormatPattern(**v) for k, v in data.items()}
-            logger.warning("format_patterns.yaml not found, using empty patterns")
+            logger.warning("config/format_patterns.yaml not found, using empty patterns")
         except Exception as e:
             logger.error("Failed to load format patterns", error=str(e))
         return {}

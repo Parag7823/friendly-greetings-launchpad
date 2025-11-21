@@ -54,7 +54,7 @@ class DocumentClassifierConfig(BaseSettings):
     ai_max_tokens: int = Field(ge=50, le=2000, default=300)
     learning_window: int = 1000
     update_frequency: int = 3600
-    document_types_yaml: str = 'document_types.yaml'  # External config file
+    document_types_yaml: str = 'config/document_types.yaml'  # External config file
     
     class Config:
         env_prefix = 'DOC_CLASSIFIER_'
