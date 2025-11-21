@@ -136,26 +136,43 @@ if INSTRUCTOR_AVAILABLE:
 SEMANTIC_EXTRACTOR_AVAILABLE = False  # Assume unavailable until lazy loaded
 SemanticRelationshipExtractor = None  # Will be loaded on demand
 
-# Import causal inference engine for Bradford Hill criteria and causal analysis
-try:
-    from causal_inference_engine import CausalInferenceEngine
-    CAUSAL_INFERENCE_AVAILABLE = True
-except ImportError:
-    CAUSAL_INFERENCE_AVAILABLE = False
-    logger.warning("CausalInferenceEngine not available. Causal analysis will be disabled.")
+# LAZY LOADING: CausalInferenceEngine imports numpy and pandas at module level
+# Load it only when needed to prevent Railway deployment crashes
+CausalInferenceEngine = None  # Will be loaded on demand
+CAUSAL_INFERENCE_AVAILABLE = False  # Assume unavailable until lazy loaded
 
-# Import temporal pattern learner for pattern learning and prediction
-try:
-    from temporal_pattern_learner import TemporalPatternLearner
-    TEMPORAL_PATTERN_LEARNER_AVAILABLE = True
-except ImportError:
-    TEMPORAL_PATTERN_LEARNER_AVAILABLE = False
-    logger.warning("TemporalPatternLearner not available. Temporal pattern learning will be disabled.")
+def _load_causal_inference_engine():
+    """Lazy load CausalInferenceEngine on first use"""
+    global CausalInferenceEngine, CAUSAL_INFERENCE_AVAILABLE
+    if CausalInferenceEngine is None:
+        try:
+            from causal_inference_engine import CausalInferenceEngine as CIE
+            CausalInferenceEngine = CIE
+            CAUSAL_INFERENCE_AVAILABLE = True
+            logger.info("✅ CausalInferenceEngine loaded")
+        except ImportError:
+            CAUSAL_INFERENCE_AVAILABLE = False
+            logger.warning("CausalInferenceEngine not available. Causal analysis will be disabled.")
+    return CausalInferenceEngine
 
-# Neo4j REMOVED (Nov 2025): Replaced by igraph + Supabase
-# - igraph handles in-memory graph analytics (13-32x faster)
-# - Supabase stores all relationships persistently
-# - No need for separate graph database
+# LAZY LOADING: TemporalPatternLearner imports numpy, pandas, scipy at module level
+# Load it only when needed to prevent Railway deployment crashes
+TemporalPatternLearner = None  # Will be loaded on demand
+TEMPORAL_PATTERN_LEARNER_AVAILABLE = False  # Assume unavailable until lazy loaded
+
+def _load_temporal_pattern_learner():
+    """Lazy load TemporalPatternLearner on first use"""
+    global TemporalPatternLearner, TEMPORAL_PATTERN_LEARNER_AVAILABLE
+    if TemporalPatternLearner is None:
+        try:
+            from temporal_pattern_learner import TemporalPatternLearner as TPL
+            TemporalPatternLearner = TPL
+            TEMPORAL_PATTERN_LEARNER_AVAILABLE = True
+            logger.info("✅ TemporalPatternLearner loaded")
+        except ImportError:
+            TEMPORAL_PATTERN_LEARNER_AVAILABLE = False
+            logger.warning("TemporalPatternLearner not available. Temporal pattern learning will be disabled.")
+    return TemporalPatternLearner
 
 # ============================================================================
 # LAZY LOADING HELPERS - Load heavy libraries only when needed
@@ -307,30 +324,46 @@ class EnhancedRelationshipDetector:
             self.duplicate_service = None
             logger.warning("⚠️ ProductionDuplicateDetectionService not available")
         
-        # Initialize causal inference engine for Bradford Hill criteria analysis
-        if CAUSAL_INFERENCE_AVAILABLE:
-            self.causal_engine = CausalInferenceEngine(
-                supabase_client=supabase_client
-            )
-            logger.info("✅ Causal inference engine initialized")
-        else:
-            self.causal_engine = None
-            logger.warning("⚠️ Causal inference engine not available")
+        # LAZY LOADING: Causal inference engine - defer initialization to prevent import-time crashes
+        # Will be loaded on first use via _ensure_causal_engine()
+        self.causal_engine = None
+        self._causal_engine_loaded = False
         
-        # Initialize temporal pattern learner for pattern learning and prediction
-        if TEMPORAL_PATTERN_LEARNER_AVAILABLE:
-            self.temporal_learner = TemporalPatternLearner(
-                supabase_client=supabase_client
-            )
-            logger.info("✅ Temporal pattern learner initialized")
-        else:
-            self.temporal_learner = None
-            logger.warning("⚠️ Temporal pattern learner not available")
+        # LAZY LOADING: Temporal pattern learner - defer initialization to prevent import-time crashes
+        # Will be loaded on first use via _ensure_temporal_learner()
+        self.temporal_learner = None
+        self._temporal_learner_loaded = False
         
         # ML model for adaptive relationship scoring (trained on-demand)
         self.ml_model = None
         self.ml_model_trained = False
-        
+    
+    def _ensure_causal_engine(self):
+        """Lazy load causal engine on first use"""
+        if not self._causal_engine_loaded:
+            CIE = _load_causal_inference_engine()
+            if CIE:
+                self.causal_engine = CIE(supabase_client=self.supabase)
+                logger.info("✅ Causal inference engine initialized")
+            else:
+                self.causal_engine = None
+                logger.warning("⚠️ Causal inference engine not available")
+            self._causal_engine_loaded = True
+        return self.causal_engine
+    
+    def _ensure_temporal_learner(self):
+        """Lazy load temporal learner on first use"""
+        if not self._temporal_learner_loaded:
+            TPL = _load_temporal_pattern_learner()
+            if TPL:
+                self.temporal_learner = TPL(supabase_client=self.supabase)
+                logger.info("✅ Temporal pattern learner initialized")
+            else:
+                self.temporal_learner = None
+                logger.warning("⚠️ Temporal pattern learner not available")
+            self._temporal_learner_loaded = True
+        return self.temporal_learner
+    
     async def detect_all_relationships(self, user_id: str, file_id: Optional[str] = None, transaction_id: Optional[str] = None) -> Dict[str, Any]:
         """
         CRITICAL FIX: Detect relationships using document_type classification and database-level JOINs.
@@ -391,8 +424,8 @@ class EnhancedRelationshipDetector:
                     "method": "database_joins",
                     "complexity": "O(N log N) instead of O(N²)",
                     "semantic_analysis_enabled": self.semantic_extractor is not None,
-                    "causal_analysis_enabled": self.causal_engine is not None,
-                    "temporal_learning_enabled": self.temporal_learner is not None
+                    "causal_analysis_enabled": self._ensure_causal_engine() is not None,
+                    "temporal_learning_enabled": self._ensure_temporal_learner() is not None
                 },
                 "message": "Relationship detection completed successfully using database-level optimization"
             }
@@ -1430,7 +1463,8 @@ Return ONLY valid JSON, no markdown blocks or explanations."""
         Returns:
             Statistics about causal analysis
         """
-        if not self.causal_engine or not relationships:
+        causal_engine = self._ensure_causal_engine()
+        if not causal_engine or not relationships:
             return {
                 'enabled': False,
                 'total_relationships': len(relationships),
@@ -1451,7 +1485,7 @@ Return ONLY valid JSON, no markdown blocks or explanations."""
                 }
             
             # Run causal analysis
-            result = await self.causal_engine.analyze_causal_relationships(
+            result = await causal_engine.analyze_causal_relationships(
                 user_id=user_id,
                 relationship_ids=relationship_ids
             )
@@ -1485,7 +1519,8 @@ Return ONLY valid JSON, no markdown blocks or explanations."""
         Returns:
             Statistics about temporal pattern learning
         """
-        if not self.temporal_learner:
+        temporal_learner = self._ensure_temporal_learner()
+        if not temporal_learner:
             return {
                 'enabled': False,
                 'patterns_learned': 0,
@@ -1496,13 +1531,13 @@ Return ONLY valid JSON, no markdown blocks or explanations."""
         
         try:
             # Learn all patterns
-            patterns_result = await self.temporal_learner.learn_all_patterns(user_id)
+            patterns_result = await temporal_learner.learn_all_patterns(user_id)
             
             # Predict missing relationships
-            predictions_result = await self.temporal_learner.predict_missing_relationships(user_id)
+            predictions_result = await temporal_learner.predict_missing_relationships(user_id)
             
             # Detect temporal anomalies
-            anomalies_result = await self.temporal_learner.detect_temporal_anomalies(user_id)
+            anomalies_result = await temporal_learner.detect_temporal_anomalies(user_id)
             
             return {
                 'enabled': True,
