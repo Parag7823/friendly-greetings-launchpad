@@ -7610,13 +7610,45 @@ class ExcelProcessor:
                     supabase.table('temporal_patterns').insert(batch).execute()
                 logger.info(f"✅ Populated {len(temporal_patterns)} temporal patterns")
             
-            # Insert seasonal patterns
+            # FIX #14: Store seasonal patterns in temporal_patterns.seasonal_data (MERGE #3)
+            # seasonal_patterns table is being deprecated - data now stored as JSONB
             if seasonal_patterns:
-                batch_size = 100
-                for i in range(0, len(seasonal_patterns), batch_size):
-                    batch = seasonal_patterns[i:i + batch_size]
-                    supabase.table('seasonal_patterns').insert(batch).execute()
-                logger.info(f"✅ Populated {len(seasonal_patterns)} seasonal patterns")
+                for pattern in seasonal_patterns:
+                    # Find or create corresponding temporal_pattern
+                    entity_name = pattern.get('entity_name')
+                    user_id = pattern.get('user_id')
+                    
+                    # Try to find existing temporal pattern for this entity
+                    existing_pattern = supabase.table('temporal_patterns').select('id')\
+                        .eq('user_id', user_id)\
+                        .eq('relationship_type', entity_name)\
+                        .limit(1).execute()
+                    
+                    seasonal_data_obj = {
+                        'pattern_type': pattern.get('pattern_type'),
+                        'season': pattern.get('season'),
+                        'confidence_score': pattern.get('confidence_score'),
+                        'detection_method': pattern.get('detection_method'),
+                        'pattern_data': pattern.get('pattern_data'),
+                        'job_id': pattern.get('job_id')
+                    }
+                    
+                    if existing_pattern.data:
+                        # Update existing temporal_pattern with seasonal data
+                        pattern_id = existing_pattern.data[0]['id']
+                        supabase.table('temporal_patterns').update({
+                            'seasonal_data': seasonal_data_obj
+                        }).eq('id', pattern_id).execute()
+                    else:
+                        # Create new temporal_pattern with seasonal data
+                        supabase.table('temporal_patterns').insert({
+                            'user_id': user_id,
+                            'relationship_type': entity_name,
+                            'seasonal_data': seasonal_data_obj,
+                            'job_id': pattern.get('job_id')
+                        }).execute()
+                
+                logger.info(f"✅ Stored {len(seasonal_patterns)} seasonal patterns in temporal_patterns.seasonal_data")
             
             # Detect temporal anomalies (events that break patterns)
             temporal_anomalies = []
@@ -7649,12 +7681,48 @@ class ExcelProcessor:
                                     }
                                 })
             
+            # FIX #14: Store anomalies in temporal_patterns.anomalies array (MERGE #2)
+            # temporal_anomalies table is being deprecated - data now stored as JSONB array
             if temporal_anomalies:
-                batch_size = 100
-                for i in range(0, len(temporal_anomalies), batch_size):
-                    batch = temporal_anomalies[i:i + batch_size]
-                    supabase.table('temporal_anomalies').insert(batch).execute()
-                logger.info(f"✅ Populated {len(temporal_anomalies)} temporal anomalies")
+                for anomaly in temporal_anomalies:
+                    entity_name = anomaly.get('entity_name')
+                    user_id = anomaly.get('user_id')
+                    
+                    # Find corresponding temporal_pattern for this entity
+                    pattern_resp = supabase.table('temporal_patterns').select('id, anomalies')\
+                        .eq('user_id', user_id)\
+                        .eq('relationship_type', entity_name)\
+                        .limit(1).execute()
+                    
+                    anomaly_obj = {
+                        'anomaly_type': anomaly.get('anomaly_type'),
+                        'expected_date': anomaly.get('expected_date').isoformat() if anomaly.get('expected_date') else None,
+                        'actual_date': anomaly.get('actual_date').isoformat() if anomaly.get('actual_date') else None,
+                        'deviation_days': anomaly.get('deviation_days'),
+                        'severity': anomaly.get('severity'),
+                        'confidence_score': anomaly.get('confidence_score'),
+                        'detection_method': anomaly.get('detection_method'),
+                        'anomaly_data': anomaly.get('anomaly_data')
+                    }
+                    
+                    if pattern_resp.data:
+                        # Append to existing anomalies array
+                        pattern_id = pattern_resp.data[0]['id']
+                        existing_anomalies = pattern_resp.data[0].get('anomalies', [])
+                        existing_anomalies.append(anomaly_obj)
+                        
+                        supabase.table('temporal_patterns').update({
+                            'anomalies': existing_anomalies
+                        }).eq('id', pattern_id).execute()
+                    else:
+                        # Create new temporal_pattern with this anomaly
+                        supabase.table('temporal_patterns').insert({
+                            'user_id': user_id,
+                            'relationship_type': entity_name,
+                            'anomalies': [anomaly_obj]
+                        }).execute()
+                
+                logger.info(f"✅ Stored {len(temporal_anomalies)} anomalies in temporal_patterns.anomalies")
             
             # Populate root_cause_analyses for detected anomalies
             if temporal_anomalies:
