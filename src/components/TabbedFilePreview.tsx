@@ -81,7 +81,7 @@ export const TabbedFilePreview = ({
         const rows = events.map(event => {
           const row: any = {};
           // Extract key fields for display
-          if (event.source_ts) row['Date'] = new Date(event.source_ts).toLocaleDateString();
+          if (event.ingest_ts) row['Date'] = new Date(event.ingest_ts).toLocaleDateString();
           if (event.vendor_standard) row['Vendor'] = event.vendor_standard;
           if (event.amount_usd !== null) row['Amount'] = Number(event.amount_usd); // Keep as number for sorting
           if (event.kind) row['Type'] = event.kind;

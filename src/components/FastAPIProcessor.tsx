@@ -36,6 +36,7 @@ interface FastAPIProcessingResult {
   requires_user_decision?: boolean;
   message?: string;
   existing_file_id?: string;
+  file_id?: string;
   delta_analysis?: any;
 }
 

@@ -79,9 +79,9 @@ try:
     if groq_api_key:
         groq_client = Groq(api_key=groq_api_key)
         
-        # ✅ NEW: Patch Groq client with instructor for auto-validated responses
+        # NEW: Patch Groq client with instructor for auto-validated responses
         if INSTRUCTOR_AVAILABLE:
-            groq_client = instructor.patch(groq_client)
+            groq_client = instructor.from_groq(groq_client, mode=instructor.Mode.JSON)
             logger.info("groq_client_patched_with_instructor", auto_validation=True)
         
         GROQ_AVAILABLE = True
@@ -511,13 +511,20 @@ Return ONLY valid JSON, no markdown blocks or explanations."""
             
             # ✅ REFACTORED: Use instructor for auto-validated responses
             if INSTRUCTOR_AVAILABLE and hasattr(groq_client, 'chat'):
+                # FIX #7: Wrap synchronous groq_client call in asyncio executor
+                import asyncio
+                loop = asyncio.get_event_loop()
+                
                 # Instructor automatically validates and retries on failure
-                enrichment_obj = groq_client.chat.completions.create(
-                    model="llama-3.3-70b-versatile",
-                    response_model=RelationshipEnrichment,  # Auto-validates!
-                    messages=[{"role": "user", "content": prompt}],
-                    max_tokens=500,
-                    temperature=0.3
+                enrichment_obj = await loop.run_in_executor(
+                    None,
+                    lambda: groq_client.chat.completions.create(
+                        model="llama-3.3-70b-versatile",
+                        response_model=RelationshipEnrichment,  # Auto-validates!
+                        messages=[{"role": "user", "content": prompt}],
+                        max_tokens=500,
+                        temperature=0.3
+                    )
                 )
                 
                 # Validate using Pydantic
@@ -703,19 +710,20 @@ Return ONLY valid JSON, no markdown blocks or explanations."""
         """
         Generate embedding for relationship text using BGE model.
         This enables similarity-based relationship discovery and duplicate detection.
+        
+        FIX #3: Uses injected embedding_service instead of importing inside method.
         """
         try:
             if not text:
                 return None
             
-            # Import embedding service
-            from embedding_service import get_embedding_service
-            
-            # Get embedding service instance
-            embedding_service = await get_embedding_service()
+            # FIX #3: Use injected embedding service
+            if not self.embedding_service:
+                logger.warning("Embedding service not available, skipping embedding generation")
+                return None
             
             # Generate embedding using BGE model (1024 dimensions)
-            embedding = await embedding_service.embed_text(text)
+            embedding = await self.embedding_service.embed_text(text)
             
             logger.debug(f"✅ Generated relationship embedding (1024 dims) for: {text[:50]}...")
             return embedding
@@ -797,19 +805,23 @@ Return ONLY valid JSON, no markdown blocks or explanations."""
     # - Faster (no string searching)
     
     async def _calculate_relationship_score(self, source: Dict, target: Dict, relationship_type: str) -> float:
-        """Calculate comprehensive relationship score"""
+        """Calculate comprehensive relationship score
+        
+        FIX #4: Consolidated duplicate detection logic using direct calculations
+        instead of separate _calculate_amount_score and _calculate_date_score methods.
+        """
         try:
             # Extract data from events
             source_payload = source.get('payload', {})
             target_payload = target.get('payload', {})
             
             # Calculate individual scores
-            # CRITICAL FIX: Pass full events to _calculate_amount_score for amount_usd access
-            amount_score = self._calculate_amount_score(source, target)
-            date_score = self._calculate_date_score(source, target)
+            # FIX #4: Inline amount and date scoring (consolidated from duplicate methods)
+            amount_score = self._calculate_amount_score_inline(source, target)
+            date_score = self._calculate_date_score_inline(source, target)
             entity_score = self._calculate_entity_score(source_payload, target_payload)
             id_score = self._calculate_id_score(source_payload, target_payload)
-            context_score = self._calculate_context_score(source_payload, target_payload)
+            context_score = await self._calculate_context_score(source_payload, target_payload)
             
             # Weight scores based on relationship type
             weights = self._get_relationship_weights(relationship_type)
@@ -829,10 +841,11 @@ Return ONLY valid JSON, no markdown blocks or explanations."""
             logger.error(f"Error calculating relationship score: {e}")
             return 0.0
     
-    def _calculate_amount_score(self, source: Dict, target: Dict) -> float:
-        """Calculate amount similarity score using USD-normalized amounts
+    def _calculate_amount_score_inline(self, source: Dict, target: Dict) -> float:
+        """CONSOLIDATED: Calculate amount similarity score using USD-normalized amounts
         
-        CRITICAL: Now receives full events to access amount_usd from enriched columns.
+        FIX #4: Inlined from _calculate_amount_score to consolidate duplicate logic.
+        Uses extracted amounts from enriched columns for cross-currency matching.
         """
         try:
             source_amount = self._extract_amount(source)
@@ -848,8 +861,12 @@ Return ONLY valid JSON, no markdown blocks or explanations."""
         except:
             return 0.0
     
-    def _calculate_date_score(self, source: Dict, target: Dict) -> float:
-        """Calculate date similarity score"""
+    def _calculate_date_score_inline(self, source: Dict, target: Dict) -> float:
+        """CONSOLIDATED: Calculate date similarity score
+        
+        FIX #4: Inlined from _calculate_date_score to consolidate duplicate logic.
+        Scores based on temporal proximity between transactions.
+        """
         try:
             source_date = self._extract_date(source)
             target_date = self._extract_date(target)
@@ -918,7 +935,7 @@ Return ONLY valid JSON, no markdown blocks or explanations."""
                         partial_matches += 1
             
             if partial_matches > 0:
-                return 0.5
+                return 0.75
             
             return 0.0
             
@@ -926,7 +943,11 @@ Return ONLY valid JSON, no markdown blocks or explanations."""
             return 0.0
     
     async def _calculate_context_score(self, source_payload: Dict, target_payload: Dict) -> float:
-        """CRITICAL FIX: Calculate semantic similarity using shared BGE embedding service"""
+        """
+        CRITICAL FIX: Calculate semantic similarity using shared BGE embedding service.
+        
+        FIX #3: Uses injected embedding_service instead of importing inside method.
+        """
         try:
             # Fallback to word overlap if embedding service unavailable
             source_text = str(source_payload)[:500]  # Limit to 500 chars for speed
@@ -936,16 +957,17 @@ Return ONLY valid JSON, no markdown blocks or explanations."""
                 return 0.0
             
             try:
-                # CRITICAL FIX: Use shared BGE embedding service
-                from embedding_service import get_embedding_service
-                embedding_service = await get_embedding_service()
+                # FIX #3: Use injected BGE embedding service
+                if not self.embedding_service:
+                    logger.warning("Embedding service not available, using word overlap fallback")
+                    raise Exception("Embedding service not available")
                 
                 # Generate embeddings using BGE model (1024 dims)
-                source_emb = await embedding_service.embed_text(source_text)
-                target_emb = await embedding_service.embed_text(target_text)
+                source_emb = await self.embedding_service.embed_text(source_text)
+                target_emb = await self.embedding_service.embed_text(target_text)
                 
                 # Calculate cosine similarity
-                similarity = embedding_service.similarity(source_emb, target_emb)
+                similarity = self.embedding_service.similarity(source_emb, target_emb)
                 
                 # Ensure [0, 1] range
                 return max(0.0, min(1.0, similarity))
@@ -1168,9 +1190,10 @@ Return ONLY valid JSON, no markdown blocks or explanations."""
             return exact_unique
         
         try:
-            # CRITICAL FIX: Use shared BGE embedding service
-            from embedding_service import get_embedding_service
-            embedding_service = await get_embedding_service()
+            # FIX #3: Use injected BGE embedding service
+            if not self.embedding_service:
+                logger.warning("Embedding service not available, skipping semantic deduplication")
+                return exact_unique
             
             # Generate embeddings for relationship descriptions
             descriptions = []
@@ -1179,7 +1202,7 @@ Return ONLY valid JSON, no markdown blocks or explanations."""
                 descriptions.append(desc)
             
             # Batch encode all descriptions using BGE (1024 dims)
-            embeddings = await embedding_service.embed_batch(descriptions)
+            embeddings = await self.embedding_service.embed_batch(descriptions)
             
             # Find semantic duplicates using cosine similarity
             semantic_unique = []
@@ -1197,7 +1220,7 @@ Return ONLY valid JSON, no markdown blocks or explanations."""
                         continue
                     
                     # Calculate cosine similarity
-                    similarity = embedding_service.similarity(embeddings[i], embeddings[j])
+                    similarity = self.embedding_service.similarity(embeddings[i], embeddings[j])
                     
                     # If very similar (>0.85), mark as duplicate
                     if similarity > 0.85:

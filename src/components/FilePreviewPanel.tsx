@@ -16,7 +16,7 @@ interface FilePreviewPanelProps {
 
 interface FileDetails {
   id: string;
-  filename: string;
+  filename?: string;
   status: string;
   progress: number;
   created_at: string;
@@ -46,7 +46,10 @@ export const FilePreviewPanel = ({ fileId, filename, isOpen, onClose }: FilePrev
           .single();
 
         if (fileError) throw fileError;
-        setFileDetails(fileData);
+        setFileDetails({
+          ...fileData,
+          filename: fileData.filename || filename || 'Unknown File'
+        });
 
         // Load events for this file
         const { data: eventsData, error: eventsError } = await supabase

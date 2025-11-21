@@ -71,6 +71,51 @@ export type Database = {
           },
         ]
       }
+      chat_messages: {
+        Row: {
+          chat_id: string
+          chat_title: string | null
+          confidence: number | null
+          created_at: string | null
+          id: string
+          message: string
+          metadata: Json | null
+          question_type: string | null
+          response: string | null
+          role: string
+          updated_at: string | null
+          user_id: string | null
+        }
+        Insert: {
+          chat_id: string
+          chat_title?: string | null
+          confidence?: number | null
+          created_at?: string | null
+          id?: string
+          message: string
+          metadata?: Json | null
+          question_type?: string | null
+          response?: string | null
+          role: string
+          updated_at?: string | null
+          user_id?: string | null
+        }
+        Update: {
+          chat_id?: string
+          chat_title?: string | null
+          confidence?: number | null
+          created_at?: string | null
+          id?: string
+          message?: string
+          metadata?: Json | null
+          question_type?: string | null
+          response?: string | null
+          role?: string
+          updated_at?: string | null
+          user_id?: string | null
+        }
+        Relationships: []
+      }
       discovered_platforms: {
         Row: {
           confidence_score: number | null
