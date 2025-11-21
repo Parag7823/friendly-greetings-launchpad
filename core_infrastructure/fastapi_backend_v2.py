@@ -126,17 +126,21 @@ except ImportError:
     print("🔍 DEBUG: Importing StreamedFile (flat)...", flush=True)
     from streaming_source import StreamedFile
 
+print("🔍 DEBUG: Importing EnhancedRelationshipDetector...", flush=True)
 from enhanced_relationship_detector import EnhancedRelationshipDetector
+print("🔍 DEBUG: Importing ProvenanceTracker...", flush=True)
 from provenance_tracker import normalize_business_logic, normalize_temporal_causality
 
 # Lazy import for field_mapping_learner to avoid circular dependencies
 try:
+    print("🔍 DEBUG: Importing FieldMappingLearner...", flush=True)
     try:
         from data_ingestion_normalization.field_mapping_learner import (
             learn_field_mapping,
             get_learned_mappings,
         )
     except ImportError:
+        print("🔍 DEBUG: Importing FieldMappingLearner (flat)...", flush=True)
         from field_mapping_learner import learn_field_mapping, get_learned_mappings
 except ImportError:
     # logger not initialized yet here; use print for diagnostics only
