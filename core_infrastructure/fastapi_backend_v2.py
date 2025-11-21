@@ -202,6 +202,7 @@ except Exception:
     field_validator = None  # fallback if not available
 
 from pydantic_settings import BaseSettings
+from pydantic import Field
 from typing import Optional
 
 class AppConfig(BaseSettings):
@@ -218,7 +219,7 @@ class AppConfig(BaseSettings):
     
     # Required variables
     supabase_url: str
-    supabase_service_role_key: str
+    supabase_service_role_key: str = Field(validation_alias='SUPABASE_KEY')
     
     # Optional variables with defaults
     openai_api_key: Optional[str] = None  # Optional - using Groq instead
@@ -233,12 +234,6 @@ class AppConfig(BaseSettings):
     class Config:
         env_file = ".env"
         case_sensitive = False
-        # Support aliases for environment variables
-        fields = {
-            'supabase_service_role_key': {
-                'alias': 'SUPABASE_KEY'  # Railway uses SUPABASE_KEY
-            }
-        }
     
     @property
     def redis_url_resolved(self) -> Optional[str]:
