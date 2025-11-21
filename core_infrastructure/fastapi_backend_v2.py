@@ -21,6 +21,8 @@ print("🔍 DEBUG: Standard library imports complete", flush=True)
 
 print("🔍 DEBUG: Skipped database_optimization_utils import (deferred to startup)", flush=True)
 
+print("🔍 DEBUG: Starting sentry imports...", flush=True)
+
 try:
     import sentry_sdk
     from sentry_sdk.integrations.fastapi import FastApiIntegration
@@ -51,6 +53,8 @@ except ImportError:
     pass
 except Exception as e:
     print(f"⚠ Sentry initialization failed: {e}")
+
+print("🔍 DEBUG: Sentry setup complete, starting data ingestion imports...", flush=True)
 
 try:
     import orjson
@@ -114,8 +118,12 @@ except ImportError:
     )
     from streaming_source import StreamedFile
 
+print("🔍 DEBUG: Data ingestion imports complete, importing relationship detector...", flush=True)
+
 from enhanced_relationship_detector import EnhancedRelationshipDetector
 from provenance_tracker import normalize_business_logic, normalize_temporal_causality
+
+print("🔍 DEBUG: Relationship detector imported, continuing with other imports...", flush=True)
 
 # Lazy import for field_mapping_learner to avoid circular dependencies
 try:
