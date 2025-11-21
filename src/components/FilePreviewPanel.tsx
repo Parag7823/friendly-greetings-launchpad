@@ -38,17 +38,20 @@ export const FilePreviewPanel = ({ fileId, filename, isOpen, onClose }: FilePrev
     const loadFileDetails = async () => {
       setLoading(true);
       try {
-        // Load file details
+        // Load file details with filename from raw_records relationship
         const { data: fileData, error: fileError } = await supabase
           .from('ingestion_jobs')
-          .select('*')
+          .select(`
+            *,
+            raw_records:file_id(file_name)
+          `)
           .eq('id', fileId)
           .single();
 
         if (fileError) throw fileError;
         setFileDetails({
           ...fileData,
-          filename: fileData.filename || filename || 'Unknown File'
+          filename: (fileData as any).raw_records?.file_name || filename || 'Unknown File'
         });
 
         // Load events for this file
