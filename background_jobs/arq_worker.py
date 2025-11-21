@@ -1,6 +1,6 @@
 import os
 from typing import Dict, Any, Optional, List
-from arq import Retry
+from arq import Retry, cron
 
 # ARQ imports
 from arq.connections import RedisSettings
@@ -406,6 +406,62 @@ async def detect_relationships(ctx, user_id: str, file_id: str = None) -> Dict[s
             return {"status": "failed", "user_id": user_id, "error": str(e), "retries_exhausted": True}
 
 
+async def generate_prophet_forecasts(ctx) -> None:
+    """
+    Nightly job: Generate Prophet forecasts for all users.
+    Stores results in temporal_patterns table for instant API access.
+    """
+    try:
+        logger.info("🌙 Starting nightly Prophet forecasting job")
+        from temporal_pattern_learner import TemporalPatternLearner
+        
+        # Initialize learner
+        learner = TemporalPatternLearner(supabase_client=supabase)
+        
+        # Get all users with relationships
+        # Using a distinct query to find active users
+        users_result = supabase.table('relationship_instances').select('user_id').execute()
+        if not users_result.data:
+            logger.info("No users found for forecasting")
+            return
+            
+        user_ids = list(set(r['user_id'] for r in users_result.data))
+        logger.info(f"Generating forecasts for {len(user_ids)} users")
+        
+        for user_id in user_ids:
+            try:
+                # Get relationship types for this user
+                patterns_result = supabase.table('temporal_patterns').select('relationship_type').eq('user_id', user_id).execute()
+                if not patterns_result.data:
+                    continue
+                    
+                relationship_types = [p['relationship_type'] for p in patterns_result.data]
+                
+                for rel_type in relationship_types:
+                    try:
+                        # Generate forecast (runs in thread pool - OK for background job)
+                        # This will update the database automatically
+                        await learner.forecast_with_prophet(
+                            user_id=user_id,
+                            relationship_type=rel_type,
+                            forecast_days=90
+                        )
+                        logger.debug(f"Generated forecast for user={user_id}, type={rel_type}")
+                        
+                    except Exception as e:
+                        logger.error(f"Forecast failed for user={user_id}, type={rel_type}: {e}")
+                        continue
+                        
+            except Exception as user_err:
+                logger.error(f"Forecasting failed for user {user_id}: {user_err}")
+                continue
+                
+        logger.info("✅ Nightly Prophet forecasting job completed")
+        
+    except Exception as e:
+        logger.error(f"❌ Nightly Prophet forecasting job failed: {e}")
+
+
 # --------------- ARQ Worker Settings ---------------
 class WorkerSettings:
     redis_settings = RedisSettings.from_dsn(
@@ -426,6 +482,11 @@ class WorkerSettings:
         process_pdf,
         learn_field_mapping_batch,  # CRITICAL FIX: Persistent field mapping learning
         detect_relationships,  # Background task for relationship detection
+        generate_prophet_forecasts,  # Nightly forecasting job
+    ]
+    
+    cron_jobs = [
+        cron(generate_prophet_forecasts, hour=2, minute=0)  # Run at 2 AM daily
     ]
 
     # Keep results in Redis only briefly; we don't depend on ARQ results downstream

@@ -269,6 +269,19 @@ class FinleyGraphEngine:
         
         return stats
     
+    async def clear_graph_cache(self, user_id: str):
+        """
+        Invalidate graph cache for a user.
+        Call this when new relationships are detected or entities change.
+        """
+        if self.redis_url and AIOCACHE_AVAILABLE:
+            try:
+                cache = self._get_cache()
+                await cache.delete(f"{user_id}")
+                logger.info(f"Graph cache cleared for user {user_id}")
+            except Exception as e:
+                logger.warning(f"Failed to clear graph cache: {e}")
+    
     async def _fetch_nodes(self, user_id: str) -> List[GraphNode]:
         """Fetch normalized_entities"""
         resp = self.supabase.table('normalized_entities').select(
@@ -420,7 +433,8 @@ class FinleyGraphEngine:
             
             patterns_resp = self.supabase.table('temporal_patterns').select(
                 'id, relationship_type, avg_days_between, std_dev_days, confidence_score, '
-                'has_seasonal_pattern, seasonal_period_days, seasonal_amplitude'
+                'has_seasonal_pattern, seasonal_period_days, seasonal_amplitude, '
+                'forecast_data, forecast_expires_at'
             ).eq('user_id', user_id).in_('relationship_type', rel_types).execute()
             
             pattern_map = {p['relationship_type']: p for p in patterns_resp.data} if patterns_resp.data else {}
@@ -441,7 +455,9 @@ class FinleyGraphEngine:
                         'std_dev_days': pattern.get('std_dev_days'),
                         'has_seasonal_pattern': pattern.get('has_seasonal_pattern'),
                         'seasonal_period_days': pattern.get('seasonal_period_days'),
-                        'seasonal_amplitude': pattern.get('seasonal_amplitude')
+                        'seasonal_amplitude': pattern.get('seasonal_amplitude'),
+                        'forecast_data': pattern.get('forecast_data'),
+                        'forecast_expires_at': pattern.get('forecast_expires_at')
                     }
             
             return result
@@ -647,18 +663,6 @@ class FinleyGraphEngine:
                 cache_data = {
                     'graph': self.graph,
                     'node_id_to_index': self.node_id_to_index,
-                    'index_to_node_id': self.index_to_node_id,
-                    'stats': stats.dict(),
-                    'last_build_time': self.last_build_time.isoformat() if self.last_build_time else None
-                }
-                
-                await cache.set(f"{user_id}", cache_data, ttl=3600)
-                logger.info("graph_cached_with_pickle", user_id=user_id)
-                
-        except Exception as e:
-            logger.error("cache_failed", error=str(e))
-    
-    async def _load_from_cache(self, user_id: str) -> Optional[GraphStats]:
         """
         Load from Redis using aiocache + pickle.
         

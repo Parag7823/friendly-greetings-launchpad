@@ -35,6 +35,10 @@ import asyncio
 # Timestamp parsing (replaces 30 lines of custom regex)
 import pendulum
 
+# FIX #3: Caching for expensive forecasting
+from aiocache import cached
+from aiocache.serializers import PickleSerializer
+
 # ✅ LAZY LOADING: Heavy imports moved inside functions to prevent startup blocking
 # Time series decomposition (replaces 72 lines of custom FFT)
 # from statsmodels.tsa.seasonal import seasonal_decompose
@@ -1033,6 +1037,11 @@ class TemporalPatternLearner:
                 'message': 'PyOD anomaly detection failed'
             }
     
+    @cached(
+        ttl=86400,  # 24 hours
+        key_builder=lambda f, *args, **kwargs: f"forecast:{kwargs.get('user_id')}:{kwargs.get('relationship_type')}:{kwargs.get('forecast_days', 90)}",
+        serializer=PickleSerializer()
+    )
     async def forecast_with_prophet(
         self,
         user_id: str,
@@ -1053,7 +1062,35 @@ class TemporalPatternLearner:
             Dictionary with forecast data and confidence intervals
         """
         try:
+        try:
             logger.info(f"Running Prophet forecast for {relationship_type} ({forecast_days} days)")
+            
+            # FIX #3: Check database for existing valid forecast first
+            try:
+                # Check if we have a valid forecast in temporal_patterns
+                pattern_result = self.supabase.table('temporal_patterns').select(
+                    'forecast_data, forecast_expires_at'
+                ).eq('user_id', user_id).eq('relationship_type', relationship_type).execute()
+                
+                if pattern_result.data:
+                    pattern = pattern_result.data[0]
+                    forecast_data = pattern.get('forecast_data')
+                    expires_at_str = pattern.get('forecast_expires_at')
+                    
+                    if forecast_data and expires_at_str:
+                        expires_at = self._parse_iso_timestamp(expires_at_str)
+                        # If forecast is still valid (not expired)
+                        if expires_at > datetime.utcnow():
+                            logger.info(f"Returning stored forecast for {relationship_type} (valid until {expires_at})")
+                            return {
+                                'forecast': forecast_data,
+                                'relationship_type': relationship_type,
+                                'forecast_days': forecast_days,
+                                'total_predictions': len(forecast_data),
+                                'message': 'Retrieved cached forecast from database'
+                            }
+            except Exception as db_err:
+                logger.warning(f"Failed to check stored forecast: {db_err}")
             
             # Fetch historical relationship data
             result = self.supabase.table('relationship_instances').select(
@@ -1133,6 +1170,24 @@ class TemporalPatternLearner:
             
             logger.info(f"✅ Prophet forecast completed: {len(forecast_data)} predictions")
             
+            # FIX #3: Store forecast in database (persistent storage)
+            try:
+                # Calculate expiration (7 days)
+                now = datetime.utcnow()
+                expires_at = now + timedelta(days=7)
+                
+                # Update temporal_patterns table
+                self.supabase.table('temporal_patterns').update({
+                    'forecast_data': forecast_data,
+                    'forecast_generated_at': now.isoformat(),
+                    'forecast_expires_at': expires_at.isoformat()
+                }).eq('user_id', user_id).eq('relationship_type', relationship_type).execute()
+                
+                logger.info(f"Stored forecast for {relationship_type} in database")
+                
+            except Exception as db_err:
+                logger.error(f"Failed to store forecast in database: {db_err}")
+            
             return {
                 'forecast': forecast_data,
                 'relationship_type': relationship_type,
@@ -1144,6 +1199,8 @@ class TemporalPatternLearner:
         except Exception as e:
             logger.error(f"Prophet forecasting failed: {e}", exc_info=True)
             return {
+                'forecast': [],
+                'message': f'Forecasting failed: {str(e)}'
             }
     
     async def discover_unknown_patterns(

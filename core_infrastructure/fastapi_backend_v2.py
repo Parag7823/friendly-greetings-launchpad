@@ -260,8 +260,7 @@ except ImportError:
         ) from e
 from prometheus_client import Counter, Histogram, Gauge, generate_latest, CONTENT_TYPE_LATEST
 
-# CLEANUP: Removed Celery support - Using ARQ only for async task queue
-# ARQ is async-native and better integrated with FastAPI
+
 
 def _queue_backend() -> str:
     """Return the queue backend mode: 'sync' or 'arq' (default)."""

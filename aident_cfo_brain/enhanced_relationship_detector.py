@@ -624,45 +624,6 @@ Return ONLY valid JSON, no markdown blocks or explanations."""
                 relationship_embedding = None
                 if self.semantic_extractor and semantic_description:
                     try:
-                        relationship_embedding = await self._generate_relationship_embedding(semantic_description)
-                    except Exception as e:
-                        logger.warning(f"Failed to generate relationship embedding: {e}")
-                
-                now = datetime.utcnow().isoformat()
-                relationship_instances.append({
-                    'user_id': user_id,
-                    'source_event_id': rel['source_event_id'],
-                    'target_event_id': rel['target_event_id'],
-                    'relationship_type': rel['relationship_type'],
-                    'confidence_score': rel['confidence_score'],
-                    'detection_method': rel.get('detection_method', 'unknown'),
-                    'pattern_id': pattern_id,
-                    'transaction_id': transaction_id if transaction_id else None,
-                    'relationship_embedding': relationship_embedding,
-                    'metadata': metadata,
-                    'key_factors': key_factors,
-                    'semantic_description': semantic_description,
-                    'reasoning': reasoning or 'Detected based on matching criteria',
-                    'temporal_causality': normalize_temporal_causality(temporal_causality),
-                    'business_logic': normalize_business_logic(business_logic),
-                    'created_at': now,
-                    'updated_at': now,
-                    'job_id': job_id
-                })
-            
-            # Batch insert relationships and collect results
-            batch_size = 100
-            for i in range(0, len(relationship_instances), batch_size):
-                batch = relationship_instances[i:i + batch_size]
-                try:
-                    result = self.supabase.table('relationship_instances').insert(batch).execute()
-                    if result.data:
-                        stored_relationships.extend(result.data)
-                except Exception as e:
-                    logger.warning(f"Failed to insert relationship batch: {e}")
-            
-            logger.info(
-                "relationships_stored",
                 count=len(stored_relationships),
                 total_attempted=len(relationship_instances)
             )

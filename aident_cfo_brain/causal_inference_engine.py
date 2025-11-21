@@ -657,7 +657,18 @@ class CausalInferenceEngine:
                 return event_amount * delta_ratio
         
         elif intervention_type == 'date_change':
-                    # Earlier payment = no penalty
+            try:
+                # Calculate days difference
+                if isinstance(original_value, str) and isinstance(counterfactual_value, str):
+                    from datetime import datetime
+                    orig_date = datetime.fromisoformat(original_value.replace('Z', '+00:00'))
+                    counter_date = datetime.fromisoformat(counterfactual_value.replace('Z', '+00:00'))
+                    days_diff = (counter_date - orig_date).days
+                else:
+                    days_diff = 0
+                
+                # Earlier payment = no penalty
+                if days_diff < 0:
                     return 0.0
                 
                 # Get event amount and type

@@ -30,7 +30,7 @@ py7zr==0.22.0
 rarfile==4.2
 
 # Job Orchestration and Performance Optimization Dependencies
-celery==5.3.4
+
 arq==0.26.1
 redis==5.0.1  # Redis client for arq and aiocache
 
