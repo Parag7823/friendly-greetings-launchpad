@@ -79,30 +79,7 @@ except ImportError:
     TENACITY_AVAILABLE = False
     logger.warning("tenacity not available - retry logic disabled")
 
-# Initialize Groq client for semantic analysis
-try:
-    from groq import Groq
-    groq_api_key = os.getenv('GROQ_API_KEY')
-    if groq_api_key:
-        groq_client = Groq(api_key=groq_api_key)
-        
-        # NEW: Patch Groq client with instructor for auto-validated responses
-        if INSTRUCTOR_AVAILABLE:
-            groq_client = instructor.from_groq(groq_client, mode=instructor.Mode.JSON)
-            logger.info("groq_client_patched_with_instructor", auto_validation=True)
-        
-        GROQ_AVAILABLE = True
-        logger.info("groq_client_initialized", model="llama-3.3-70b-versatile")
-    else:
-        groq_client = None
-        GROQ_AVAILABLE = False
-        logger.warning("groq_api_key_not_found")
-except ImportError:
-    groq_client = None
-    GROQ_AVAILABLE = False
-    logger.warning("groq_package_not_installed")
-
-# ✅ NEW: Pydantic models for comprehensive data validation
+# NEW: Pydantic models for comprehensive data validation
 if INSTRUCTOR_AVAILABLE:
     class RelationshipEnrichment(BaseModel):
         """Auto-validated AI response for relationship enrichment"""
