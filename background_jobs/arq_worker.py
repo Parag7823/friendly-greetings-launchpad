@@ -278,6 +278,7 @@ async def detect_relationships(ctx, user_id: str, file_id: str = None) -> Dict[s
         from groq import Groq
         from transaction_manager import get_transaction_manager
         from finley_graph_engine import FinleyGraphEngine
+        from data_ingestion_normalization.embedding_service import EmbeddingService
         
         logger.info(f"🔍 Starting background relationship detection for user_id={user_id}, file_id={file_id}")
         
@@ -296,6 +297,14 @@ async def detect_relationships(ctx, user_id: str, file_id: str = None) -> Dict[s
             except:
                 cache_client = None
             
+            # FIX #6: Initialize embedding service for dependency injection
+            embedding_service = None
+            try:
+                embedding_service = EmbeddingService(cache_client=cache_client)
+                logger.info("✅ EmbeddingService initialized for relationship detection")
+            except Exception as e:
+                logger.warning(f"⚠️ Failed to initialize EmbeddingService: {e}")
+            
             # CRITICAL FIX: Use Groq client (Llama-3.3-70B) instead of Anthropic
             # This matches the main application's AI configuration
             groq_api_key = os.getenv('GROQ_API_KEY')
@@ -305,13 +314,14 @@ async def detect_relationships(ctx, user_id: str, file_id: str = None) -> Dict[s
             groq_client = Groq(api_key=groq_api_key)
             logger.info("✅ Groq client initialized for relationship detection (Llama-3.3-70B)")
             
-            # Initialize relationship detector with Groq client
+            # Initialize relationship detector with Groq client and embedding service
             # Note: EnhancedRelationshipDetector accepts anthropic_client parameter for backward compatibility
             # but can work with any AI client that follows the same interface
             relationship_detector = EnhancedRelationshipDetector(
                 anthropic_client=groq_client,  # Pass Groq client via anthropic_client parameter
                 supabase_client=supabase,
-                cache_client=cache_client
+                cache_client=cache_client,
+                embedding_service=embedding_service  # FIX #6: Pass injected embedding service
             )
             
             # CRITICAL FIX: Use new database-driven detection (no N² loops, no hardcoded filenames)

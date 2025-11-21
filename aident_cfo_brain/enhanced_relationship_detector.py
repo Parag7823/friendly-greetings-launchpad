@@ -48,6 +48,22 @@ except ImportError:
     INSTRUCTOR_AVAILABLE = False
     logger.warning("instructor not available - AI responses won't be auto-validated")
 
+# ✅ NEW: Import embedding service for dependency injection
+try:
+    from data_ingestion_normalization.embedding_service import EmbeddingService
+    EMBEDDING_SERVICE_AVAILABLE = True
+except ImportError:
+    EMBEDDING_SERVICE_AVAILABLE = False
+    logger.warning("EmbeddingService not available - semantic embeddings disabled")
+
+# ✅ NEW: Import ProductionDuplicateDetectionService for consolidated duplicate logic
+try:
+    from duplicate_detection_fraud.production_duplicate_detection_service import ProductionDuplicateDetectionService
+    DUPLICATE_SERVICE_AVAILABLE = True
+except ImportError:
+    DUPLICATE_SERVICE_AVAILABLE = False
+    logger.warning("ProductionDuplicateDetectionService not available")
+
 # ✅ NEW: Add tenacity for retry logic
 try:
     from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
@@ -164,12 +180,20 @@ class EnhancedRelationshipDetector:
         openai_client: Any = None,  # backward-compatible alias used in older code
         supabase_client: Client = None,
         cache_client=None,
+        embedding_service=None,  # NEW: Dependency injection for embedding service
     ):
         # Prefer explicitly provided anthropic_client; else accept legacy openai_client
         client = anthropic_client or openai_client
         self.anthropic = client
         self.supabase = supabase_client
         self.cache = cache_client  # Use centralized cache, no local cache
+        
+        # FIX #6: Inject embedding service instead of loading separately
+        # This ensures consistent embeddings across API and worker processes
+        self.embedding_service = embedding_service
+        if embedding_service is None and EMBEDDING_SERVICE_AVAILABLE:
+            self.embedding_service = EmbeddingService()
+            logger.info("✅ EmbeddingService initialized via dependency injection")
         
         # REFACTORED: Initialize genius libraries
         try:
@@ -184,7 +208,10 @@ class EnhancedRelationshipDetector:
         # New: Use BGE large model (1024 dims) via embedding_service singleton
         # This eliminates 400MB+ memory waste and ensures consistent embeddings
         self.semantic_model = None  # Will use embedding_service instead
-        logger.info("✅ Using shared BGE embedding service (BAAI/bge-large-en-v1.5)")
+        if self.embedding_service:
+            logger.info("✅ Using shared BGE embedding service (BAAI/bge-large-en-v1.5)")
+        else:
+            logger.warning("⚠️ EmbeddingService not available - semantic embeddings disabled")
         
         # igraph for in-memory graph analysis
         self.graph = ig.Graph(directed=True)
@@ -195,12 +222,21 @@ class EnhancedRelationshipDetector:
             self.semantic_extractor = SemanticRelationshipExtractor(
                 openai_client=client,
                 supabase_client=supabase_client,
-                cache_client=None  # v2.0: Using aiocache (Redis) instead
+                cache_client=None,  # v2.0: Using aiocache (Redis) instead
+                embedding_service=self.embedding_service  # Pass injected embedding service
             )
             logger.info("✅ Semantic relationship extractor v2.0 initialized (aiocache + instructor)")
         else:
             self.semantic_extractor = None
             logger.warning("⚠️ Semantic relationship extractor not available")
+        
+        # Initialize duplicate detection service for consolidated amount/date logic
+        if DUPLICATE_SERVICE_AVAILABLE:
+            self.duplicate_service = ProductionDuplicateDetectionService(supabase_client)
+            logger.info("✅ ProductionDuplicateDetectionService initialized")
+        else:
+            self.duplicate_service = None
+            logger.warning("⚠️ ProductionDuplicateDetectionService not available")
         
         # Initialize causal inference engine for Bradford Hill criteria analysis
         if CAUSAL_INFERENCE_AVAILABLE:
@@ -1443,14 +1479,86 @@ Return ONLY valid JSON, no markdown blocks or explanations."""
                 'message': 'Temporal pattern learning failed'
             }
 
+    async def _get_or_create_pattern_id(self, pattern_signature: str, relationship_type: str, key_factors: List[str], user_id: str) -> Optional[str]:
+        """
+        FIX #1: Atomic UPSERT pattern using client-side retry logic with unique constraint.
+        
+        Implements robust "select-insert-select" pattern to prevent race conditions:
+        1. Try to SELECT existing pattern
+        2. If not found, INSERT new pattern
+        3. Handle unique constraint violations with retry
+        4. Return pattern ID
+        
+        This ensures atomicity without requiring custom PostgreSQL RPC.
+        
+        Args:
+            pattern_signature: Unique signature for the pattern (e.g., "invoice_to_payment_amount_match-date_match")
+            relationship_type: Type of relationship (e.g., "invoice_to_payment")
+            key_factors: List of factors that define this pattern (e.g., ["amount_match", "date_match"])
+            user_id: User ID for scoping
+        
+        Returns:
+            Pattern ID (UUID string) or None if creation fails
+        """
+        import asyncio
+        max_retries = 3
+        retry_count = 0
+        
+        while retry_count < max_retries:
+            try:
+                # Step 1: Try to SELECT existing pattern
+                select_result = self.supabase.table('temporal_patterns').select('id').eq(
+                    'pattern_signature', pattern_signature
+                ).eq('user_id', user_id).limit(1).execute()
+                
+                if select_result.data and len(select_result.data) > 0:
+                    pattern_id = select_result.data[0]['id']
+                    logger.info(f"Found existing pattern: {pattern_id}")
+                    return pattern_id
+                
+                # Step 2: Pattern doesn't exist, try to INSERT
+                insert_result = self.supabase.table('temporal_patterns').insert({
+                    'user_id': user_id,
+                    'pattern_signature': pattern_signature,
+                    'relationship_type': relationship_type,
+                    'key_factors': key_factors,
+                    'created_at': datetime.utcnow().isoformat(),
+                    'updated_at': datetime.utcnow().isoformat(),
+                    'pattern_count': 1,
+                    'std_dev_days': 5.0,  # Default value
+                    'confidence_score': 0.5  # Default value
+                }).execute()
+                
+                if insert_result.data and len(insert_result.data) > 0:
+                    pattern_id = insert_result.data[0]['id']
+                    logger.info(f"Created new pattern: {pattern_id}")
+                    return pattern_id
+                
+                # If we get here, something went wrong
+                logger.error("Insert returned no data")
+                retry_count += 1
+                
+            except Exception as e:
+                # Handle unique constraint violations (race condition)
+                if 'unique' in str(e).lower() or 'duplicate' in str(e).lower():
+                    logger.warning(f"Unique constraint violation (race condition), retrying... ({retry_count + 1}/{max_retries})")
+                    retry_count += 1
+                    # Small backoff before retry
+                    await asyncio.sleep(0.1 * (retry_count ** 2))
+                    continue
+                else:
+                    logger.error(f"Failed to get/create pattern: {e}")
+                    return None
+        
+        logger.error(f"Failed to get/create pattern after {max_retries} retries")
+        return None
+
+
 # Test function
 async def test_enhanced_relationship_detection(user_id: str = "550e8400-e29b-41d4-a716-446655440000"):
     """Test the enhanced relationship detection system"""
     try:
         # Initialize OpenAI client
-        openai_client = AsyncOpenAI(api_key=os.getenv('OPENAI_API_KEY'))
-        
-        # Initialize Supabase client
         supabase_url = os.getenv('SUPABASE_URL')
         supabase_key = os.getenv('SUPABASE_KEY')
         
@@ -1463,7 +1571,7 @@ async def test_enhanced_relationship_detection(user_id: str = "550e8400-e29b-41d
         supabase = create_client(supabase_url, supabase_key)
         
         # Initialize Enhanced Relationship Detector
-        enhanced_detector = EnhancedRelationshipDetector(openai_client, supabase)
+        enhanced_detector = EnhancedRelationshipDetector(openai_client=None, supabase_client=supabase)
         
         # Detect relationships
         result = await enhanced_detector.detect_all_relationships(user_id)
@@ -1483,5 +1591,6 @@ async def test_enhanced_relationship_detection(user_id: str = "550e8400-e29b-41d
 
 if __name__ == "__main__":
     # Run test synchronously to avoid async/sync mixing
-    result = test_enhanced_relationship_detection()
-    print(result) 
+    import asyncio
+    result = asyncio.run(test_enhanced_relationship_detection())
+    print(result)

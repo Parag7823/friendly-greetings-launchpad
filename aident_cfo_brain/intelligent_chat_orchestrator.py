@@ -31,6 +31,7 @@ from temporal_pattern_learner import TemporalPatternLearner
 from enhanced_relationship_detector import EnhancedRelationshipDetector
 from entity_resolver_optimized import EntityResolverOptimized as EntityResolver
 from finley_graph_engine import FinleyGraphEngine  # NEW: Graph intelligence
+from data_ingestion_normalization.embedding_service import EmbeddingService  # FIX #6: Dependency injection
 
 logger = structlog.get_logger(__name__)
 
@@ -79,7 +80,7 @@ class IntelligentChatOrchestrator:
     This is the missing link between the chat interface and the backend intelligence.
     """
     
-    def __init__(self, supabase_client, cache_client=None, groq_client=None):
+    def __init__(self, supabase_client, cache_client=None, groq_client=None, embedding_service=None):
         """
         Initialize the orchestrator with all intelligence engines.
         
@@ -87,6 +88,7 @@ class IntelligentChatOrchestrator:
             supabase_client: Supabase client for database access
             cache_client: Optional cache client for performance
             groq_client: Optional Groq client for LLM (for testing/mocking)
+            embedding_service: Optional embedding service for dependency injection (FIX #6)
         """
         # FIX #3: Accept groq_client for dependency injection (testing/mocking)
         if groq_client:
@@ -101,6 +103,17 @@ class IntelligentChatOrchestrator:
         self.supabase = supabase_client
         self.cache = cache_client
         
+        # FIX #6: Initialize or use injected embedding service
+        if embedding_service is None:
+            try:
+                self.embedding_service = EmbeddingService(cache_client=cache_client)
+                logger.info("✅ EmbeddingService initialized for chat orchestrator")
+            except Exception as e:
+                logger.warning(f"⚠️ Failed to initialize EmbeddingService: {e}")
+                self.embedding_service = None
+        else:
+            self.embedding_service = embedding_service
+        
         # Initialize intelligence engines
         self.causal_engine = CausalInferenceEngine(
             supabase_client=supabase_client
@@ -112,7 +125,8 @@ class IntelligentChatOrchestrator:
         
         self.relationship_detector = EnhancedRelationshipDetector(
             supabase_client=supabase_client,
-            cache_client=cache_client
+            cache_client=cache_client,
+            embedding_service=self.embedding_service  # FIX #6: Pass injected embedding service
         )
         
         self.entity_resolver = EntityResolver(

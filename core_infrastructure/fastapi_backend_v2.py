@@ -12894,18 +12894,20 @@ async def delete_file_completely(job_id: str, user_id: str):
         if event_ids:
             # FIX #3: Use soft-delete instead of hard-delete to support graph cache invalidation
             # Mark relationships as deleted instead of physically removing them
-            rel_update_1 = supabase.table('relationship_instances').update({'is_deleted': True})\
+            now = datetime.utcnow().isoformat()
+            rel_update_1 = supabase.table('relationship_instances').update({'is_deleted': True, 'updated_at': now})\
                 .in_('source_event_id', event_ids).eq('user_id', user_id).execute()
-            rel_update_2 = supabase.table('relationship_instances').update({'is_deleted': True})\
+            rel_update_2 = supabase.table('relationship_instances').update({'is_deleted': True, 'updated_at': now})\
                 .in_('target_event_id', event_ids).eq('user_id', user_id).execute()
             deletion_stats['deleted_records']['relationship_instances'] = len(rel_update_1.data or []) + len(rel_update_2.data or [])
             logger.info(f"Soft-deleted {deletion_stats['deleted_records']['relationship_instances']} relationships")
         
-        # Step 3: Delete entity_matches for events from this file
+        # Step 3: Soft-delete entity_matches for events from this file
         if event_ids:
-            entity_matches_result = supabase.table('entity_matches').delete().in_('source_row_id', event_ids).eq('user_id', user_id).execute()
+            now = datetime.utcnow().isoformat()
+            entity_matches_result = supabase.table('entity_matches').update({'is_deleted': True, 'updated_at': now}).in_('source_row_id', event_ids).eq('user_id', user_id).execute()
             deletion_stats['deleted_records']['entity_matches'] = len(entity_matches_result.data or [])
-            logger.info(f"Deleted {deletion_stats['deleted_records']['entity_matches']} entity matches")
+            logger.info(f"Soft-deleted {deletion_stats['deleted_records']['entity_matches']} entity matches")
         
         # Step 4: Delete normalized_entities that only exist in this file
         # Note: We don't delete entities that appear in other files
@@ -12915,38 +12917,42 @@ async def delete_file_completely(job_id: str, user_id: str):
         
         # Step 6: Delete debug_logs for this job
         
-        # Step 7: Delete processing_transactions for this job
+        # Step 7: Soft-delete processing_transactions for this job
         try:
-            transactions_result = supabase.table('processing_transactions').delete().eq('job_id', job_id).eq('user_id', user_id).execute()
+            now = datetime.utcnow().isoformat()
+            transactions_result = supabase.table('processing_transactions').update({'is_deleted': True, 'updated_at': now}).eq('job_id', job_id).eq('user_id', user_id).execute()
             deletion_stats['deleted_records']['processing_transactions'] = len(transactions_result.data or [])
-            logger.info(f"Deleted {deletion_stats['deleted_records']['processing_transactions']} transactions")
+            logger.info(f"Soft-deleted {deletion_stats['deleted_records']['processing_transactions']} transactions")
         except Exception as e:
-            logger.warning(f"Failed to delete processing_transactions: {e}")
+            logger.warning(f"Failed to soft-delete processing_transactions: {e}")
         
-        # Step 8: Delete event_delta_logs for this job
+        # Step 8: Soft-delete event_delta_logs for this job
         try:
-            delta_logs_result = supabase.table('event_delta_logs').delete().eq('job_id', job_id).eq('user_id', user_id).execute()
+            now = datetime.utcnow().isoformat()
+            delta_logs_result = supabase.table('event_delta_logs').update({'is_deleted': True, 'updated_at': now}).eq('job_id', job_id).eq('user_id', user_id).execute()
             deletion_stats['deleted_records']['event_delta_logs'] = len(delta_logs_result.data or [])
-            logger.info(f"Deleted {deletion_stats['deleted_records']['event_delta_logs']} delta logs")
+            logger.info(f"Soft-deleted {deletion_stats['deleted_records']['event_delta_logs']} delta logs")
         except Exception as e:
-            logger.warning(f"Failed to delete event_delta_logs: {e}")
+            logger.warning(f"Failed to soft-delete event_delta_logs: {e}")
         
-        # CRITICAL FIX: Delete advanced analytics data (previously orphaned)
-        # Step 9: Delete temporal_patterns
+        # CRITICAL FIX: Soft-delete advanced analytics data (previously orphaned)
+        # Step 9: Soft-delete temporal_patterns
         try:
-            temporal_patterns_result = supabase.table('temporal_patterns').delete().eq('job_id', job_id).eq('user_id', user_id).execute()
+            now = datetime.utcnow().isoformat()
+            temporal_patterns_result = supabase.table('temporal_patterns').update({'is_deleted': True, 'updated_at': now}).eq('job_id', job_id).eq('user_id', user_id).execute()
             deletion_stats['deleted_records']['temporal_patterns'] = len(temporal_patterns_result.data or [])
-            logger.info(f"Deleted {deletion_stats['deleted_records']['temporal_patterns']} temporal patterns")
+            logger.info(f"Soft-deleted {deletion_stats['deleted_records']['temporal_patterns']} temporal patterns")
         except Exception as e:
-            logger.warning(f"Failed to delete temporal_patterns: {e}")
+            logger.warning(f"Failed to soft-delete temporal_patterns: {e}")
         
-        # Step 10: Delete predicted_relationships
+        # Step 10: Soft-delete predicted_relationships
         try:
-            predicted_relationships_result = supabase.table('predicted_relationships').delete().eq('job_id', job_id).eq('user_id', user_id).execute()
+            now = datetime.utcnow().isoformat()
+            predicted_relationships_result = supabase.table('predicted_relationships').update({'is_deleted': True, 'updated_at': now}).eq('job_id', job_id).eq('user_id', user_id).execute()
             deletion_stats['deleted_records']['predicted_relationships'] = len(predicted_relationships_result.data or [])
-            logger.info(f"Deleted {deletion_stats['deleted_records']['predicted_relationships']} predicted relationships")
+            logger.info(f"Soft-deleted {deletion_stats['deleted_records']['predicted_relationships']} predicted relationships")
         except Exception as e:
-            logger.warning(f"Failed to delete predicted_relationships: {e}")
+            logger.warning(f"Failed to soft-delete predicted_relationships: {e}")
         
         # Step 11: Clear anomalies from temporal_patterns (FIX #14: merged table)
         try:
@@ -12958,29 +12964,32 @@ async def delete_file_completely(job_id: str, user_id: str):
         except Exception as e:
             logger.warning(f"Failed to clear anomalies: {e}")
         
-        # Step 12: Delete causal_relationships
+        # Step 12: Soft-delete causal_relationships
         try:
-            causal_relationships_result = supabase.table('causal_relationships').delete().eq('job_id', job_id).eq('user_id', user_id).execute()
+            now = datetime.utcnow().isoformat()
+            causal_relationships_result = supabase.table('causal_relationships').update({'is_deleted': True, 'updated_at': now}).eq('job_id', job_id).eq('user_id', user_id).execute()
             deletion_stats['deleted_records']['causal_relationships'] = len(causal_relationships_result.data or [])
-            logger.info(f"Deleted {deletion_stats['deleted_records']['causal_relationships']} causal relationships")
+            logger.info(f"Soft-deleted {deletion_stats['deleted_records']['causal_relationships']} causal relationships")
         except Exception as e:
-            logger.warning(f"Failed to delete causal_relationships: {e}")
+            logger.warning(f"Failed to soft-delete causal_relationships: {e}")
         
-        # Step 13: Delete root_cause_analyses
+        # Step 13: Soft-delete root_cause_analyses
         try:
-            root_cause_analyses_result = supabase.table('root_cause_analyses').delete().eq('job_id', job_id).eq('user_id', user_id).execute()
+            now = datetime.utcnow().isoformat()
+            root_cause_analyses_result = supabase.table('root_cause_analyses').update({'is_deleted': True, 'updated_at': now}).eq('job_id', job_id).eq('user_id', user_id).execute()
             deletion_stats['deleted_records']['root_cause_analyses'] = len(root_cause_analyses_result.data or [])
-            logger.info(f"Deleted {deletion_stats['deleted_records']['root_cause_analyses']} root cause analyses")
+            logger.info(f"Soft-deleted {deletion_stats['deleted_records']['root_cause_analyses']} root cause analyses")
         except Exception as e:
-            logger.warning(f"Failed to delete root_cause_analyses: {e}")
+            logger.warning(f"Failed to soft-delete root_cause_analyses: {e}")
         
-        # Step 14: Delete counterfactual_analyses
+        # Step 14: Soft-delete counterfactual_analyses
         try:
-            counterfactual_analyses_result = supabase.table('counterfactual_analyses').delete().eq('job_id', job_id).eq('user_id', user_id).execute()
+            now = datetime.utcnow().isoformat()
+            counterfactual_analyses_result = supabase.table('counterfactual_analyses').update({'is_deleted': True, 'updated_at': now}).eq('job_id', job_id).eq('user_id', user_id).execute()
             deletion_stats['deleted_records']['counterfactual_analyses'] = len(counterfactual_analyses_result.data or [])
-            logger.info(f"Deleted {deletion_stats['deleted_records']['counterfactual_analyses']} counterfactual analyses")
+            logger.info(f"Soft-deleted {deletion_stats['deleted_records']['counterfactual_analyses']} counterfactual analyses")
         except Exception as e:
-            logger.warning(f"Failed to delete counterfactual_analyses: {e}")
+            logger.warning(f"Failed to soft-delete counterfactual_analyses: {e}")
         
         # Step 15: Clear seasonal data from temporal_patterns (FIX #14: merged table)
         try:
@@ -12992,21 +13001,23 @@ async def delete_file_completely(job_id: str, user_id: str):
         except Exception as e:
             logger.warning(f"Failed to clear seasonal data: {e}")
         
-        # Step 16: Delete cross_platform_relationships
+        # Step 16: Soft-delete cross_platform_relationships
         try:
-            cross_platform_relationships_result = supabase.table('cross_platform_relationships').delete().eq('job_id', job_id).eq('user_id', user_id).execute()
+            now = datetime.utcnow().isoformat()
+            cross_platform_relationships_result = supabase.table('cross_platform_relationships').update({'is_deleted': True, 'updated_at': now}).eq('job_id', job_id).eq('user_id', user_id).execute()
             deletion_stats['deleted_records']['cross_platform_relationships'] = len(cross_platform_relationships_result.data or [])
-            logger.info(f"Deleted {deletion_stats['deleted_records']['cross_platform_relationships']} cross-platform relationships")
+            logger.info(f"Soft-deleted {deletion_stats['deleted_records']['cross_platform_relationships']} cross-platform relationships")
         except Exception as e:
-            logger.warning(f"Failed to delete cross_platform_relationships: {e}")
+            logger.warning(f"Failed to soft-delete cross_platform_relationships: {e}")
         
-        # Step 17: Delete platform_patterns
+        # Step 17: Soft-delete platform_patterns
         try:
-            platform_patterns_result = supabase.table('platform_patterns').delete().eq('job_id', job_id).eq('user_id', user_id).execute()
+            now = datetime.utcnow().isoformat()
+            platform_patterns_result = supabase.table('platform_patterns').update({'is_deleted': True, 'updated_at': now}).eq('job_id', job_id).eq('user_id', user_id).execute()
             deletion_stats['deleted_records']['platform_patterns'] = len(platform_patterns_result.data or [])
-            logger.info(f"Deleted {deletion_stats['deleted_records']['platform_patterns']} platform patterns")
+            logger.info(f"Soft-deleted {deletion_stats['deleted_records']['platform_patterns']} platform patterns")
         except Exception as e:
-            logger.warning(f"Failed to delete platform_patterns: {e}")
+            logger.warning(f"Failed to soft-delete platform_patterns: {e}")
         
         # Step 18: REMOVED - metrics table deleted
         # Metrics deletion no longer needed as table was removed
@@ -13023,7 +13034,8 @@ async def delete_file_completely(job_id: str, user_id: str):
         
         # Step 20: Soft-delete raw_events (FIX #3)
         # FIX #3: Use soft-delete instead of hard-delete to support graph cache invalidation
-        raw_events_result = supabase.table('raw_events').update({'is_deleted': True})\
+        now = datetime.utcnow().isoformat()
+        raw_events_result = supabase.table('raw_events').update({'is_deleted': True, 'updated_at': now})\
             .eq('job_id', job_id).eq('user_id', user_id).execute()
         logger.info(f"Soft-deleted {len(raw_events_result.data or [])} raw events")
         
@@ -13035,7 +13047,8 @@ async def delete_file_completely(job_id: str, user_id: str):
             entity_ids = [e['id'] for e in entity_ids_result.data] if entity_ids_result.data else []
             
             if entity_ids:
-                entities_update = supabase.table('normalized_entities').update({'is_deleted': True})\
+                now = datetime.utcnow().isoformat()
+                entities_update = supabase.table('normalized_entities').update({'is_deleted': True, 'updated_at': now})\
                     .in_('id', entity_ids).eq('user_id', user_id).execute()
                 logger.info(f"Soft-deleted {len(entities_update.data or [])} normalized entities")
         except Exception as e:
@@ -13069,17 +13082,18 @@ async def delete_file_completely(job_id: str, user_id: str):
         except Exception as e:
             logger.warning(f"Failed to clear graph cache: {e}")
         
-        # Step 21: Finally, delete the ingestion_job record (CASCADE will delete remaining linked records)
-        # Note: ingestion_jobs is still hard-deleted as it's a job tracking table
-        job_delete_result = supabase.table('ingestion_jobs').delete().eq('id', job_id).eq('user_id', user_id).execute()
+        # Step 21: Finally, soft-delete the ingestion_job record (FIX #3)
+        # FIX #3: Use soft-delete for ingestion_jobs to maintain audit trail
+        now = datetime.utcnow().isoformat()
+        job_delete_result = supabase.table('ingestion_jobs').update({'is_deleted': True, 'updated_at': now}).eq('id', job_id).eq('user_id', user_id).execute()
         deletion_stats['deleted_records']['ingestion_jobs'] = len(job_delete_result.data or [])
-        logger.info(f"Deleted ingestion job record")
+        logger.info(f"Soft-deleted ingestion job record")
         
-        # Calculate total deleted records
+        # Calculate total soft-deleted records
         total_deleted = sum(deletion_stats['deleted_records'].values())
         
         logger.info(f"✅ File deletion completed: {filename} - {total_deleted} total records marked for deletion (soft-delete)")
-        logger.info(f"📊 FIX #3: Used soft-delete for data integrity and graph cache invalidation")
+        logger.info(f"📊 FIX #3: Used soft-delete for data integrity, graph cache invalidation, and audit trail")
         
         return {
             "status": "deleted",
