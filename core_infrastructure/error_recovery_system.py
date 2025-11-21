@@ -311,7 +311,8 @@ class ErrorRecoverySystem:
                     # Check if job status is stale
                     if job_id in job_status:
                         job_info = job_status[job_id]
-                        started_at = datetime.fromisoformat(job_info.get('started_at', current_time.isoformat()))
+                        import pendulum
+                        started_at = pendulum.parse(job_info.get('started_at', current_time.isoformat())).naive()
                         
                         # If job has been running for more than 1 hour, consider it stale
                         if (current_time - started_at).total_seconds() > 3600:

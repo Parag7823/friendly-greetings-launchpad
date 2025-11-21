@@ -80,33 +80,55 @@ from dataclasses import dataclass
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 
-# Shared data_ingestion_normalization modules
-from data_ingestion_normalization.universal_field_detector import UniversalFieldDetector
-from data_ingestion_normalization.universal_platform_detector_optimized import (
-    UniversalPlatformDetectorOptimized as UniversalPlatformDetector,
-)
-from data_ingestion_normalization.universal_document_classifier_optimized import (
-    UniversalDocumentClassifierOptimized as UniversalDocumentClassifier,
-)
-from data_ingestion_normalization.universal_extractors_optimized import (
-    UniversalExtractorsOptimized as UniversalExtractors,
-)
-from data_ingestion_normalization.entity_resolver_optimized import (
-    EntityResolverOptimized as EntityResolver,
-)
-from aident_cfo_brain.enhanced_relationship_detector import EnhancedRelationshipDetector
-from provenance_tracker import normalize_business_logic, normalize_temporal_causality
+# Shared ingestion/normalization modules
+try:
+    # Local/package layout
+    from data_ingestion_normalization.universal_field_detector import UniversalFieldDetector
+    from data_ingestion_normalization.universal_platform_detector_optimized import (
+        UniversalPlatformDetectorOptimized as UniversalPlatformDetector,
+    )
+    from data_ingestion_normalization.universal_document_classifier_optimized import (
+        UniversalDocumentClassifierOptimized as UniversalDocumentClassifier,
+    )
+    from data_ingestion_normalization.universal_extractors_optimized import (
+        UniversalExtractorsOptimized as UniversalExtractors,
+    )
+    from data_ingestion_normalization.entity_resolver_optimized import (
+        EntityResolverOptimized as EntityResolver,
+    )
+    from data_ingestion_normalization.streaming_source import StreamedFile
+except ImportError:
+    # Railway/runtime layout: modules flattened to top level
+    from universal_field_detector import UniversalFieldDetector
+    from universal_platform_detector_optimized import (
+        UniversalPlatformDetectorOptimized as UniversalPlatformDetector,
+    )
+    from universal_document_classifier_optimized import (
+        UniversalDocumentClassifierOptimized as UniversalDocumentClassifier,
+    )
+    from universal_extractors_optimized import (
+        UniversalExtractorsOptimized as UniversalExtractors,
+    )
+    from entity_resolver_optimized import (
+        EntityResolverOptimized as EntityResolver,
+    )
+    from streaming_source import StreamedFile
 
-from data_ingestion_normalization.streaming_source import StreamedFile
+from enhanced_relationship_detector import EnhancedRelationshipDetector
+from provenance_tracker import normalize_business_logic, normalize_temporal_causality
 
 # Lazy import for field_mapping_learner to avoid circular dependencies
 try:
-    from data_ingestion_normalization.field_mapping_learner import (
-        learn_field_mapping,
-        get_learned_mappings,
-    )
+    try:
+        from data_ingestion_normalization.field_mapping_learner import (
+            learn_field_mapping,
+            get_learned_mappings,
+        )
+    except ImportError:
+        from field_mapping_learner import learn_field_mapping, get_learned_mappings
 except ImportError:
-    logger.warning("field_mapping_learner_unavailable", reason="module not found")
+    # logger not initialized yet here; use print for diagnostics only
+    print("field_mapping_learner_unavailable: module not found", flush=True)
     learn_field_mapping = None
     get_learned_mappings = None
 import polars as pl
@@ -277,11 +299,11 @@ async def get_arq_pool():
         return _arq_pool
 
 # Using Groq/Llama exclusively for all AI operations
-from data_ingestion_normalization.nango_client import NangoClient
+from nango_client import NangoClient
 
 # Import critical fixes systems
 from transaction_manager import initialize_transaction_manager, get_transaction_manager
-from data_ingestion_normalization.streaming_processor import (
+from streaming_processor import (
     initialize_streaming_processor,
     get_streaming_processor,
     StreamingConfig,
@@ -7543,8 +7565,8 @@ class ExcelProcessor:
             for vendor, dates in vendor_dates.items():
                 if len(dates) >= 3:
                     # Calculate time intervals between consecutive events
-                    from datetime import datetime
-                    date_objs = sorted([datetime.fromisoformat(d.replace('Z', '+00:00')) for d in dates])
+                    import pendulum
+                    date_objs = sorted([pendulum.parse(d).naive() for d in dates])
                     intervals = [(date_objs[i+1] - date_objs[i]).days for i in range(len(date_objs)-1)]
                     
                     if intervals:
@@ -7654,7 +7676,7 @@ class ExcelProcessor:
             temporal_anomalies = []
             for vendor, dates in vendor_dates.items():
                 if len(dates) >= 4:
-                    date_objs = sorted([datetime.fromisoformat(d.replace('Z', '+00:00')) for d in dates])
+                    date_objs = sorted([pendulum.parse(d).naive() for d in dates])
                     intervals = [(date_objs[i+1] - date_objs[i]).days for i in range(len(date_objs)-1)]
                     
                     if len(intervals) >= 3:
@@ -9664,7 +9686,7 @@ async def _gmail_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> Dict
                     # Only use incremental if we have a recent sync (within 30 days)
                     last_ts = uc_row.data[0].get('last_synced_at')
                     if last_ts and last_history_id:
-                        last_sync_time = datetime.fromisoformat(last_ts.replace('Z', '+00:00'))
+                        last_sync_time = pendulum.parse(last_ts).naive()
                         days_since_sync = (datetime.utcnow() - last_sync_time).days
                         if days_since_sync <= 30:
                             use_incremental = True
@@ -10121,7 +10143,7 @@ async def _dropbox_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> Di
                     # Only use cursor if it's recent (within 30 days)
                     if cursor and cursor_updated:
                         try:
-                            cursor_time = datetime.fromisoformat(cursor_updated.replace('Z', '+00:00'))
+                            cursor_time = pendulum.parse(cursor_updated).naive()
                             days_since_sync = (datetime.utcnow() - cursor_time).days
                             if days_since_sync <= 30:
                                 use_incremental = True
@@ -10395,7 +10417,7 @@ async def _gdrive_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> Dic
             try:
                 uc_last = supabase.table('user_connections').select('last_synced_at').eq('nango_connection_id', connection_id).limit(1).execute()
                 if uc_last.data and uc_last.data[0].get('last_synced_at'):
-                    last_ts = datetime.fromisoformat(uc_last.data[0]['last_synced_at'].replace('Z', '+00:00'))
+                    last_ts = pendulum.parse(uc_last.data[0]['last_synced_at']).naive()
                     modified_after = last_ts.isoformat(timespec='seconds').replace('+00:00', 'Z')
             except Exception:
                 pass
@@ -11551,7 +11573,7 @@ async def run_scheduled_syncs(request: Request, provider: Optional[str] = None, 
             due = True
             try:
                 if last:
-                    last_dt = datetime.fromisoformat(str(last).replace('Z', '+00:00'))
+                    last_dt = pendulum.parse(str(last)).naive()
                     due = (now - last_dt) >= timedelta(minutes=freq)
             except Exception:
                 due = True

@@ -326,9 +326,10 @@ class FinleyGraphEngine:
             # FIX #4: All enrichments now come directly from the materialized view
             # No need to fetch from separate maps anymore
             
-            # Parse datetime safely
+            # Parse datetime safely using pendulum
             try:
-                created_at = datetime.fromisoformat(rel['created_at'].replace('Z', '+00:00'))
+                import pendulum
+                created_at = pendulum.parse(rel['created_at']).in_timezone('UTC').naive()
             except (ValueError, TypeError):
                 created_at = datetime.now()
             
@@ -706,6 +707,7 @@ class FinleyGraphEngine:
                 if not obj:
                     return None
                 
+                import pendulum
                 self.graph = obj['graph']
                 self.node_id_to_index = obj['node_id_to_index']
                 self.index_to_node_id = obj['index_to_node_id']
@@ -725,7 +727,7 @@ class FinleyGraphEngine:
                 self.graph = obj['graph']
                 self.node_id_to_index = obj['node_id_to_index']
                 self.index_to_node_id = obj['index_to_node_id']
-                self.last_build_time = datetime.fromisoformat(obj['last_build_time']) if obj.get('last_build_time') else None
+                self.last_build_time = pendulum.parse(obj['last_build_time']).naive() if obj.get('last_build_time') else None
                 logger.info("graph_loaded_from_cache_msgpack_fallback", user_id=user_id)
                 return GraphStats(**obj['stats'])
         except Exception as e:

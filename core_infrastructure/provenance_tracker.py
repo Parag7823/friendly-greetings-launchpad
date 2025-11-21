@@ -406,22 +406,6 @@ class ProvenanceTracker:
             'has_enrichment': any(step['step'] == 'enrichment' for step in lineage_path),
             'has_entity_resolution': any(step['step'] == 'entity_resolution' for step in lineage_path)
         }
-    
-    def _calculate_duration(self, lineage_path: List[Dict[str, Any]]) -> Optional[float]:
-        """Calculate total duration from first to last step"""
-        if len(lineage_path) < 2:
-            return None
-        
-        try:
-            first_ts = datetime.fromisoformat(lineage_path[0]['timestamp'].replace('Z', '+00:00'))
-            last_ts = datetime.fromisoformat(lineage_path[-1]['timestamp'].replace('Z', '+00:00'))
-            return (last_ts - first_ts).total_seconds()
-        except Exception:
-            return None
-
-
-# ============================================================================
-# GLOBAL INSTANCE
 # ============================================================================
 
 # Create global instance for easy import

@@ -657,25 +657,6 @@ class CausalInferenceEngine:
                 return event_amount * delta_ratio
         
         elif intervention_type == 'date_change':
-            # FIX #13: Calculate impact of date changes (late fees, interest, cash flow timing)
-            try:
-                from datetime import datetime
-                
-                # Parse dates
-                if isinstance(original_value, str):
-                    original_date = datetime.fromisoformat(original_value.replace('Z', '+00:00'))
-                else:
-                    original_date = original_value
-                
-                if isinstance(counterfactual_value, str):
-                    counterfactual_date = datetime.fromisoformat(counterfactual_value.replace('Z', '+00:00'))
-                else:
-                    counterfactual_date = counterfactual_value
-                
-                # Calculate days difference
-                days_diff = (counterfactual_date - original_date).days
-                
-                if days_diff <= 0:
                     # Earlier payment = no penalty
                     return 0.0
                 

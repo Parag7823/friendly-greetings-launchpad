@@ -33,7 +33,7 @@ from collections import defaultdict
 import asyncio
 
 # Timestamp parsing (replaces 30 lines of custom regex)
-from dateutil.parser import isoparse
+import pendulum
 
 # ✅ LAZY LOADING: Heavy imports moved inside functions to prevent startup blocking
 # Time series decomposition (replaces 72 lines of custom FFT)
@@ -168,16 +168,19 @@ class TemporalPatternLearner:
     @staticmethod
     def _parse_iso_timestamp(timestamp_str: str) -> datetime:
         """
-        Parse ISO timestamp using python-dateutil.
+        Parse ISO timestamp using pendulum for consistent timezone handling.
         
-        REPLACES 30 LINES OF CUSTOM REGEX with 1 line of dateutil magic.
-        Handles ALL ISO formats automatically.
+        STANDARDIZATION: Using pendulum across entire codebase (not isoparse).
+        Handles ALL ISO formats automatically with proper timezone support.
         """
         try:
-            return isoparse(timestamp_str)
+            import pendulum
+            parsed = pendulum.parse(timestamp_str)
+            return parsed.in_timezone('UTC').naive()  # Return naive UTC datetime
         except Exception as e:
             logger.warning(f"Failed to parse '{timestamp_str}': {e}")
-            return datetime.now()
+            import pendulum
+            return pendulum.now('UTC').naive()
     
     def _get_default_config(self) -> Dict[str, Any]:
         """Get default configuration"""
