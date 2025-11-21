@@ -654,23 +654,6 @@ class FinleyGraphEngine:
                 
                 await cache.set(f"{user_id}", cache_data, ttl=3600)
                 logger.info("graph_cached_with_pickle", user_id=user_id)
-            else:
-                # Fallback to manual Redis + pickle
-                import redis.asyncio as aioredis
-                import pickle
-                client = await aioredis.from_url(self.redis_url)
-                
-                cache_data = {
-                    'graph': self.graph,
-                    'node_id_to_index': self.node_id_to_index,
-                    'index_to_node_id': self.index_to_node_id,
-                    'stats': stats.dict(),
-                    'last_build_time': self.last_build_time.isoformat() if self.last_build_time else None
-                }
-                
-                data = pickle.dumps(cache_data)
-                await client.setex(f"finley_graph:{user_id}", 3600, data)
-                logger.info("graph_cached_with_pickle_fallback", user_id=user_id)
                 
         except Exception as e:
             logger.error("cache_failed", error=str(e))
@@ -713,22 +696,6 @@ class FinleyGraphEngine:
                 self.index_to_node_id = obj['index_to_node_id']
                 self.last_build_time = pendulum.parse(obj['last_build_time']).naive() if obj.get('last_build_time') else None
                 logger.info("graph_loaded_from_cache_pickle", user_id=user_id)
-                return GraphStats(**obj['stats'])
-            else:
-                # Fallback to manual Redis + pickle
-                import redis.asyncio as aioredis
-                import pickle
-                client = await aioredis.from_url(self.redis_url)
-                data = await client.get(f"finley_graph:{user_id}")
-                if not data:
-                    return None
-                
-                obj = pickle.loads(data)
-                self.graph = obj['graph']
-                self.node_id_to_index = obj['node_id_to_index']
-                self.index_to_node_id = obj['index_to_node_id']
-                self.last_build_time = pendulum.parse(obj['last_build_time']).naive() if obj.get('last_build_time') else None
-                logger.info("graph_loaded_from_cache_msgpack_fallback", user_id=user_id)
                 return GraphStats(**obj['stats'])
         except Exception as e:
             logger.warning("cache_load_failed", error=str(e))
