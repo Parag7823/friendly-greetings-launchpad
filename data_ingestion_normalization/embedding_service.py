@@ -26,7 +26,6 @@ Usage:
 """
 
 import structlog
-import numpy as np
 from typing import List, Optional
 import asyncio
 from functools import lru_cache
@@ -34,6 +33,23 @@ import hashlib
 import os
 
 logger = structlog.get_logger(__name__)
+
+# ✅ LAZY LOADING: numpy is a heavy C extension that can cause import-time crashes
+# Load it only when needed to prevent Railway deployment crashes
+np = None  # Will be loaded on first use
+
+def _load_numpy():
+    """Lazy load numpy C extension on first use"""
+    global np
+    if np is None:
+        try:
+            import numpy as numpy_module
+            np = numpy_module
+            logger.info("✅ numpy module loaded")
+        except ImportError:
+            logger.error("numpy not installed - numerical features unavailable")
+            raise ImportError("numpy is required. Install with: pip install numpy")
+    return np
 
 # Global embedding model cache
 _embedding_model = None
@@ -148,8 +164,9 @@ class EmbeddingService:
             # Generate embedding
             embedding = self.model.encode(text, convert_to_tensor=False)
             
-            # Convert to list if numpy array
-            if isinstance(embedding, np.ndarray):
+            # Convert to list if numpy array (lazy load numpy)
+            numpy_module = _load_numpy()
+            if isinstance(embedding, numpy_module.ndarray):
                 embedding = embedding.tolist()
             
             # FIX #1: Store in Redis with 24-hour TTL (prevents unbounded growth)
@@ -207,8 +224,9 @@ class EmbeddingService:
             if texts_to_embed:
                 new_embeddings = self.model.encode(texts_to_embed, convert_to_tensor=False)
                 
-                # Convert to list if numpy array
-                if isinstance(new_embeddings, np.ndarray):
+                # Convert to list if numpy array (lazy load numpy)
+                numpy_module = _load_numpy()
+                if isinstance(new_embeddings, numpy_module.ndarray):
                     new_embeddings = new_embeddings.tolist()
                 
                 # FIX #1: Store in cache with TTL
@@ -241,14 +259,15 @@ class EmbeddingService:
             Similarity score between -1 and 1 (typically 0 to 1)
         """
         try:
-            # Convert to numpy arrays
-            e1 = np.array(embedding1)
-            e2 = np.array(embedding2)
+            # Convert to numpy arrays (lazy load numpy)
+            numpy_module = _load_numpy()
+            e1 = numpy_module.array(embedding1)
+            e2 = numpy_module.array(embedding2)
             
             # Calculate cosine similarity
-            dot_product = np.dot(e1, e2)
-            norm1 = np.linalg.norm(e1)
-            norm2 = np.linalg.norm(e2)
+            dot_product = numpy_module.dot(e1, e2)
+            norm1 = numpy_module.linalg.norm(e1)
+            norm2 = numpy_module.linalg.norm(e2)
             
             if norm1 == 0 or norm2 == 0:
                 return 0.0
@@ -273,15 +292,17 @@ class EmbeddingService:
             Similarity matrix (len(embeddings1) x len(embeddings2))
         """
         try:
-            e1 = np.array(embeddings1)
-            e2 = np.array(embeddings2)
+            # Lazy load numpy
+            numpy_module = _load_numpy()
+            e1 = numpy_module.array(embeddings1)
+            e2 = numpy_module.array(embeddings2)
             
             # Normalize embeddings
-            e1_norm = e1 / np.linalg.norm(e1, axis=1, keepdims=True)
-            e2_norm = e2 / np.linalg.norm(e2, axis=1, keepdims=True)
+            e1_norm = e1 / numpy_module.linalg.norm(e1, axis=1, keepdims=True)
+            e2_norm = e2 / numpy_module.linalg.norm(e2, axis=1, keepdims=True)
             
             # Calculate similarity matrix
-            similarity_matrix = np.dot(e1_norm, e2_norm.T)
+            similarity_matrix = numpy_module.dot(e1_norm, e2_norm.T)
             
             return similarity_matrix.tolist()
             

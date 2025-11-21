@@ -29,14 +29,45 @@ from typing import Any, Dict, List, Optional, Set
 from datasketch import MinHash
 # MinHashLSH removed - using PersistentLSHService only to avoid dual systems
 import polars as pl
-from rapidfuzz import fuzz
+
+# ✅ LAZY LOADING: rapidfuzz is a C extension that can cause import-time crashes
+fuzz = None  # Will be loaded on first use
+
+def _load_rapidfuzz():
+    """Lazy load rapidfuzz C extension on first use"""
+    global fuzz
+    if fuzz is None:
+        try:
+            from rapidfuzz import fuzz as fuzz_module
+            fuzz = fuzz_module
+            logger.info("✅ rapidfuzz module loaded")
+        except ImportError:
+            logger.error("rapidfuzz not installed - fuzzy matching unavailable")
+            raise ImportError("rapidfuzz is required. Install with: pip install rapidfuzz")
+    return fuzz
+
 import structlog
 from pydantic_settings import BaseSettings
 from supabase import Client
 from aiocache import cached, Cache
 from aiocache.serializers import JsonSerializer
 from presidio_analyzer import AnalyzerEngine
-import numpy as np
+
+# ✅ LAZY LOADING: numpy is a heavy C extension that can cause import-time crashes
+np = None  # Will be loaded on first use
+
+def _load_numpy():
+    """Lazy load numpy C extension on first use"""
+    global np
+    if np is None:
+        try:
+            import numpy as numpy_module
+            np = numpy_module
+            logger.info("✅ numpy module loaded")
+        except ImportError:
+            logger.error("numpy not installed - numerical features unavailable")
+            raise ImportError("numpy is required. Install with: pip install numpy")
+    return np
 
 # FIX #5: CENTRALIZED HASHING - Import from database_optimization_utils
 # This ensures production_duplicate_detection_service uses xxh3_128 (same as provenance_tracker)
@@ -599,8 +630,9 @@ class ProductionDuplicateDetectionService:
             
             if result.data:
                 match = result.data[0]
-                # OPTIMIZED: Use rapidfuzz for filename similarity
-                filename_score = fuzz.token_set_ratio(file_metadata.filename, match['file_name']) / 100.0
+                # OPTIMIZED: Use rapidfuzz for filename similarity (lazy load)
+                fuzz_module = _load_rapidfuzz()
+                filename_score = fuzz_module.token_set_ratio(file_metadata.filename, match['file_name']) / 100.0
                 
                 # Combined confidence score
                 confidence = (0.7 + filename_score * 0.3)  # PRESERVED: Confidence calculation
@@ -765,8 +797,9 @@ class ProductionDuplicateDetectionService:
             
             if result.data:
                 match = result.data[0]
-                # OPTIMIZED: Use rapidfuzz for filename similarity
-                filename_score = fuzz.token_set_ratio(file_metadata.filename, match['file_name']) / 100.0
+                # OPTIMIZED: Use rapidfuzz for filename similarity (lazy load)
+                fuzz_module = _load_rapidfuzz()
+                filename_score = fuzz_module.token_set_ratio(file_metadata.filename, match['file_name']) / 100.0
                 
                 # Combined confidence score
                 confidence = (0.7 + filename_score * 0.3)
