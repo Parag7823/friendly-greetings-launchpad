@@ -1008,7 +1008,16 @@ async def global_exception_handler(request: Request, exc: Exception):
     Global exception handler to ensure all errors return StandardErrorResponse format
     This provides consistent error handling across the entire API
     """
-    logger.error(f"Unhandled exception: {exc}", exc_info=True)
+    import traceback
+    
+    # Get full stack trace
+    tb_str = ''.join(traceback.format_exception(type(exc), exc, exc.__traceback__))
+    
+    # Log with full details
+    logger.error(f"❌ UNHANDLED EXCEPTION on {request.method} {request.url.path}")
+    logger.error(f"Exception type: {type(exc).__name__}")
+    logger.error(f"Exception message: {str(exc)}")
+    logger.error(f"Full traceback:\n{tb_str}")
     
     # Determine if error is retryable
     retryable = isinstance(exc, (TimeoutError, ConnectionError))
@@ -1016,7 +1025,7 @@ async def global_exception_handler(request: Request, exc: Exception):
     return JSONResponse(
         status_code=500,
         content=StandardErrorResponse(
-            error=str(exc),
+            error=f"{type(exc).__name__}: {str(exc)}",
             error_code="INTERNAL_ERROR",
             retryable=retryable,
             user_action="Please try again. If the problem persists, contact support."
