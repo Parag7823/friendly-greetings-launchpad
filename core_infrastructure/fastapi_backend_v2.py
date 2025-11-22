@@ -881,8 +881,15 @@ async def app_lifespan(app: FastAPI):
         # CRITICAL FIX: Use pooled Supabase client to prevent connection exhaustion
         # Get the client but don't force connection yet
         try:
-            supabase = get_supabase_client()
+            # Wrap in asyncio.to_thread to prevent blocking the async startup
+            supabase = await asyncio.wait_for(
+                asyncio.to_thread(get_supabase_client),
+                timeout=10.0  # 10 second timeout
+            )
             logger.info("✅ Supabase pooled client initialized")
+        except asyncio.TimeoutError:
+            logger.error("❌ Supabase client initialization timed out after 10 seconds")
+            supabase = None
         except Exception as db_err:
             logger.warning(f"⚠️ Failed to initialize Supabase client during startup: {db_err}")
             supabase = None
