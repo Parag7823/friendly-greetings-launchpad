@@ -840,12 +840,18 @@ async def app_lifespan(app: FastAPI):
     # Startup
     global supabase, optimized_db, security_validator, centralized_cache, websocket_manager, groq_client
     
-    logger.info("🚀 Starting service initialization...")
+    logger.info("="*80)
+    logger.info("🚀 STARTING SERVICE INITIALIZATION...")
+    logger.info("="*80)
     
     # CRITICAL FIX: Initialize WebSocket manager here to avoid race condition
     # This prevents crash when both Uvicorn and ARQ worker import the module simultaneously
-    websocket_manager = SocketIOWebSocketManager()
-    logger.info("✅ WebSocket manager initialized")
+    try:
+        websocket_manager = SocketIOWebSocketManager()
+        logger.info("✅ WebSocket manager initialized")
+    except Exception as ws_err:
+        logger.error(f"❌ Failed to initialize WebSocket manager: {ws_err}")
+        websocket_manager = None
     
     try:
         # Try multiple possible environment variable names for Render compatibility
@@ -981,6 +987,17 @@ async def app_lifespan(app: FastAPI):
         except Exception as init_err:
             logger.warning(f"⚠️ Failed to initialize degraded security systems: {init_err}")
     
+    # Log final startup status
+    logger.info("="*80)
+    logger.info("🎯 STARTUP COMPLETE - Service Status Summary:")
+    logger.info(f"   Supabase: {'✅ Connected' if supabase else '❌ Not initialized'}")
+    logger.info(f"   Groq Client: {'✅ Ready' if groq_client else '❌ Not initialized'}")
+    logger.info(f"   Redis Cache: {'✅ Connected' if centralized_cache else '❌ Not initialized'}")
+    logger.info(f"   Optimized DB: {'✅ Ready' if optimized_db else '❌ Not initialized'}")
+    logger.info(f"   Security Validator: {'✅ Ready' if security_validator else '❌ Not initialized'}")
+    logger.info(f"   WebSocket Manager: {'✅ Ready' if websocket_manager else '❌ Not initialized'}")
+    logger.info("="*80)
+    
     yield
     
     # Shutdown
@@ -1088,6 +1105,51 @@ try:
 except Exception as e:
     logger.error(f"🚨 CRITICAL: Environment configuration validation failed: {e}")
     raise
+
+# DIAGNOSTIC: Health check endpoint to debug service initialization
+@app.get("/health/diagnostic")
+async def diagnostic_health_check():
+    """
+    Comprehensive diagnostic endpoint to check all service states.
+    Returns detailed information about which services are initialized.
+    """
+    return {
+        "status": "running",
+        "services": {
+            "supabase": {
+                "initialized": supabase is not None,
+                "type": str(type(supabase)) if supabase else None
+            },
+            "groq_client": {
+                "initialized": groq_client is not None,
+                "type": str(type(groq_client)) if groq_client else None
+            },
+            "centralized_cache": {
+                "initialized": centralized_cache is not None,
+                "type": str(type(centralized_cache)) if centralized_cache else None
+            },
+            "optimized_db": {
+                "initialized": optimized_db is not None,
+                "type": str(type(optimized_db)) if optimized_db else None
+            },
+            "security_validator": {
+                "initialized": security_validator is not None,
+                "type": str(type(security_validator)) if security_validator else None
+            },
+            "websocket_manager": {
+                "initialized": websocket_manager is not None,
+                "type": str(type(websocket_manager)) if websocket_manager else None
+            }
+        },
+        "environment": {
+            "SUPABASE_URL": os.environ.get("SUPABASE_URL") is not None,
+            "SUPABASE_SERVICE_ROLE_KEY": os.environ.get("SUPABASE_SERVICE_ROLE_KEY") is not None,
+            "GROQ_API_KEY": os.environ.get("GROQ_API_KEY") is not None,
+            "REDIS_URL": os.environ.get("REDIS_URL") is not None,
+            "ARQ_REDIS_URL": os.environ.get("ARQ_REDIS_URL") is not None
+        }
+    }
+
 
 async def validate_critical_environment():
     """Validate critical environment variables.
