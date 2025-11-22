@@ -113,8 +113,12 @@ COPY core_infrastructure/provenance_tracker.py .
 COPY duplicate_detection_fraud/inference_service.py .
 COPY duplicate_detection_fraud/persistent_lsh_service.py .
 COPY data_ingestion_normalization/streaming_source.py .
+COPY core_infrastructure/utils/helpers.py ./core_infrastructure/utils/
 COPY start.sh .
- 
+
+# CRITICAL FIX: Copy all configuration files (YAML configs for platform mappings, exchange rates, etc.)
+COPY config/ ./config/
+
 # Copy built frontend from frontend stage
 COPY --from=frontend-builder /app/frontend/dist ./dist
 

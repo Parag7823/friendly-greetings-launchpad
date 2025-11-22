@@ -785,6 +785,10 @@ class UniversalPlatformDetectorOptimized:
     async def _safe_groq_call_with_instructor(self, prompt: str, temperature: float, max_tokens: int) -> Dict[str, Any]:
         """GENIUS v4.0: instructor for structured AI output (40% more reliable, zero JSON hallucinations)"""
         try:
+            # Lazy load instructor and groq to prevent import errors and reduce startup time
+            import instructor
+            from groq import AsyncGroq
+
             # CRITICAL FIX: Use injected groq_client instead of creating new one
             if not hasattr(self, '_groq_instructor'):
                 if self.groq_client:

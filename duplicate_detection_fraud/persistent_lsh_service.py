@@ -59,6 +59,69 @@ class PersistentLSHService:
         """Get Redis key for shard metadata"""
         return f"lsh:meta:{user_id}"
     
+    def _get_lock_key(self, user_id: str) -> str:
+        """Get Redis key for shard update lock"""
+        return f"lsh:lock:{user_id}"
+    
+    async def _acquire_lock(self, user_id: str, timeout: int = 30) -> bool:
+        """
+        Acquire distributed lock for shard updates using Redis.
+        
+        Args:
+            user_id: User ID
+            timeout: Lock timeout in seconds
+            
+        Returns:
+            True if lock acquired, False otherwise
+        """
+        from centralized_cache import safe_get_cache
+        cache = safe_get_cache()
+        
+        if not cache or not cache.redis_client:
+            logger.warning("lsh_lock_unavailable", user_id=user_id)
+            return False
+        
+        try:
+            lock_key = self._get_lock_key(user_id)
+            # SET NX EX - atomic set if not exists with expiration
+            result = await cache.redis_client.set(
+                lock_key,
+                "locked",
+                nx=True,
+                ex=timeout
+            )
+            if result:
+                logger.debug("lsh_lock_acquired", user_id=user_id, timeout=timeout)
+            return result
+        except Exception as e:
+            logger.error("lsh_lock_acquire_failed", user_id=user_id, error=str(e))
+            return False
+    
+    async def _release_lock(self, user_id: str) -> bool:
+        """
+        Release distributed lock for shard updates.
+        
+        Args:
+            user_id: User ID
+            
+        Returns:
+            True if lock released, False otherwise
+        """
+        from centralized_cache import safe_get_cache
+        cache = safe_get_cache()
+        
+        if not cache or not cache.redis_client:
+            return False
+        
+        try:
+            lock_key = self._get_lock_key(user_id)
+            await cache.redis_client.delete(lock_key)
+            logger.debug("lsh_lock_released", user_id=user_id)
+            return True
+        except Exception as e:
+            logger.error("lsh_lock_release_failed", user_id=user_id, error=str(e))
+            return False
+    
     async def _load_shard(self, user_id: str) -> Optional[Any]:
         """
         Load user's LSH shard from Redis.
@@ -144,7 +207,7 @@ class PersistentLSHService:
         content: str
     ) -> bool:
         """
-        Insert file into user's LSH shard.
+        Insert file into user's LSH shard with distributed lock to prevent race conditions.
         
         Args:
             user_id: User ID
@@ -154,6 +217,12 @@ class PersistentLSHService:
         Returns:
             True if successful
         """
+        # CRITICAL FIX: Acquire lock to prevent concurrent shard modifications
+        lock_acquired = await self._acquire_lock(user_id, timeout=30)
+        if not lock_acquired:
+            logger.warning("lsh_insert_lock_failed", user_id=user_id, file_hash=file_hash)
+            return False
+        
         try:
             from datasketch import MinHash
             
@@ -189,6 +258,10 @@ class PersistentLSHService:
         except Exception as e:
             logger.error("lsh_insert_failed", user_id=user_id, error=str(e))
             return False
+        
+        finally:
+            # Always release lock
+            await self._release_lock(user_id)
     
     async def query(
         self,

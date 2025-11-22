@@ -93,8 +93,40 @@ class CentralizedCache:
         
         self.cache = Cache(Cache.REDIS, **cache_config)
         
-        # Initialize direct Redis client for operations not supported by aiocache
-        self.redis_client = None  # Will be initialized lazily when needed
+        # CRITICAL FIX: Initialize direct Redis client for operations not supported by aiocache
+        # This enables incr(), expire(), and other direct Redis operations for distributed rate limiting
+        # ✅ THIS IS MANDATORY FOR PRODUCTION - distributed rate limiting depends on this
+        self.redis_client = None
+        self.redis_client_initialized = False
+        
+        try:
+            import redis.asyncio as aioredis
+            self.redis_client = aioredis.from_url(
+                self.redis_url,
+                encoding="utf-8",
+                decode_responses=True,
+                socket_keepalive=True,
+                socket_keepalive_intvl=30
+            )
+            self.redis_client_initialized = True
+            logger.info(
+                "✅ REDIS_CLIENT_INITIALIZED",
+                endpoint=endpoint,
+                port=port,
+                db=db,
+                tls=use_tls,
+                status="READY_FOR_DISTRIBUTED_RATE_LIMITING"
+            )
+        except Exception as e:
+            logger.error(
+                "❌ REDIS_CLIENT_INITIALIZATION_FAILED",
+                endpoint=endpoint,
+                port=port,
+                error=str(e),
+                status="FALLBACK_TO_MEMORY_CACHE_ONLY"
+            )
+            self.redis_client = None
+            self.redis_client_initialized = False
         
         # Metrics
         self.metrics = {
@@ -102,10 +134,17 @@ class CentralizedCache:
             'misses': 0,
             'sets': 0,
             'deletes': 0,
-            'errors': 0
+            'errors': 0,
+            'redis_operations': 0,
+            'fallback_operations': 0
         }
         
-        logger.info("centralized_cache_initialized", redis_url=self.redis_url, default_ttl=default_ttl)
+        logger.info(
+            "centralized_cache_initialized",
+            redis_url=self.redis_url,
+            default_ttl=default_ttl,
+            redis_client_ready=self.redis_client_initialized
+        )
     
     async def get(self, key: str) -> Optional[Any]:
         """
@@ -315,6 +354,9 @@ class CentralizedCache:
         """
         Increment a counter in cache (for rate limiting).
         
+        CRITICAL: This method MUST use Redis for distributed rate limiting across workers.
+        If Redis is unavailable, distributed rate limiting will FAIL.
+        
         Args:
             key: Cache key
             delta: Amount to increment by (default: 1)
@@ -323,21 +365,35 @@ class CentralizedCache:
             New value after increment
         """
         try:
-            if self.redis_client:
-                return await self.redis_client.incr(key, delta)
+            if self.redis_client and self.redis_client_initialized:
+                # ✅ Using Redis for distributed rate limiting
+                self.metrics['redis_operations'] += 1
+                result = await self.redis_client.incr(key, delta)
+                logger.debug("cache_incr_redis", key=key, delta=delta, result=result)
+                return result
             else:
-                # Fallback to memory cache
+                # ⚠️ FALLBACK: Memory cache only (NOT distributed across workers)
+                self.metrics['fallback_operations'] += 1
+                logger.warning(
+                    "⚠️ CACHE_INCR_FALLBACK_TO_MEMORY",
+                    key=key,
+                    redis_initialized=self.redis_client_initialized,
+                    impact="DISTRIBUTED_RATE_LIMITING_DISABLED"
+                )
                 current = await self.get(key) or 0
                 new_value = int(current) + delta
                 await self.set(key, new_value)
                 return new_value
         except Exception as e:
-            logger.error("cache_incr_error", key=key, error=str(e))
+            logger.error("❌ cache_incr_error", key=key, delta=delta, error=str(e))
             return 1
     
     async def expire(self, key: str, seconds: int) -> bool:
         """
         Set expiration time on a key.
+        
+        CRITICAL: This method MUST use Redis for distributed TTL management across workers.
+        If Redis is unavailable, TTL management will be local-only.
         
         Args:
             key: Cache key
@@ -347,21 +403,50 @@ class CentralizedCache:
             True if successful, False otherwise
         """
         try:
-            if self.redis_client:
-                return await self.redis_client.expire(key, seconds)
+            if self.redis_client and self.redis_client_initialized:
+                # ✅ Using Redis for distributed TTL
+                self.metrics['redis_operations'] += 1
+                result = await self.redis_client.expire(key, seconds)
+                logger.debug("cache_expire_redis", key=key, seconds=seconds, result=result)
+                return result
             else:
+                # ⚠️ FALLBACK: Memory cache only (NOT distributed across workers)
+                self.metrics['fallback_operations'] += 1
+                logger.warning(
+                    "⚠️ CACHE_EXPIRE_FALLBACK_TO_MEMORY",
+                    key=key,
+                    redis_initialized=self.redis_client_initialized,
+                    impact="TTL_MANAGEMENT_LOCAL_ONLY"
+                )
                 # Memory cache handles TTL differently - re-set with TTL
                 value = await self.get(key)
                 if value is not None:
                     await self.set(key, value, ttl=seconds)
                 return True
         except Exception as e:
-            logger.error("cache_expire_error", key=key, error=str(e))
+            logger.error("❌ cache_expire_error", key=key, seconds=seconds, error=str(e))
             return False
+    
+    def get_redis_status(self) -> dict:
+        """
+        Get Redis client status for monitoring and debugging.
+        
+        Returns:
+            dict with Redis status information
+        """
+        return {
+            'redis_initialized': self.redis_client_initialized,
+            'redis_client_available': self.redis_client is not None,
+            'redis_operations': self.metrics.get('redis_operations', 0),
+            'fallback_operations': self.metrics.get('fallback_operations', 0),
+            'status': '✅ REDIS_READY' if self.redis_client_initialized else '❌ REDIS_UNAVAILABLE_USING_MEMORY_CACHE'
+        }
     
     async def close(self):
         """Close cache connections."""
         try:
+            if self.redis_client:
+                await self.redis_client.close()
             await self.cache.close()
             logger.info("cache_closed")
         except Exception as e:

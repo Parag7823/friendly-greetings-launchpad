@@ -1,0 +1,37 @@
+# Exchange Rates Configuration
+# =============================
+# Fallback exchange rates (updated quarterly)
+# Last updated: 2024-Q4
+# Source: Historical forex rates
+#
+# WARNING: These are fallback rates only. The system should prefer live rates from forex-python.
+# If live rates fail, these rates are used as a last resort.
+# Do NOT rely on these for production financial calculations without verification.
+
+exchange_rates_to_usd:
+  EUR: 1.09
+  GBP: 1.27
+  INR: 0.012
+  JPY: 0.0067
+  CNY: 0.14
+  AUD: 0.65
+  CAD: 0.73
+  CHF: 1.16
+  SGD: 0.75
+  HKD: 0.13
+  NZD: 0.60
+  SEK: 0.096
+  NOK: 0.093
+  MXN: 0.058
+  BRL: 0.20
+  ZAR: 0.055
+  RUB: 0.011
+  KRW: 0.00076
+  TRY: 0.029
+  AED: 0.27
+
+# Last update timestamp (ISO 8601)
+last_updated: "2024-10-01T00:00:00Z"
+
+# Update frequency (in days)
+update_frequency_days: 90

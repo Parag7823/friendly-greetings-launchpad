@@ -19,11 +19,42 @@ class NangoClient:
     to generate session tokens for the hosted auth UI.
     """
 
-    def __init__(self, base_url: Optional[str] = None, secret_key: Optional[str] = None):
+    def __init__(
+        self,
+        base_url: Optional[str] = None,
+        secret_key: Optional[str] = None,
+        default_timeout: float = 30.0,
+        connect_session_timeout: float = 30.0,
+        gmail_profile_timeout: float = 30.0,
+        gmail_list_timeout: float = 60.0,
+        gmail_attachment_timeout: float = 120.0,
+        gmail_history_timeout: float = 60.0
+    ):
+        """
+        Initialize Nango client with configurable timeouts.
+        
+        Args:
+            base_url: Nango API base URL
+            secret_key: Nango secret key
+            default_timeout: Default timeout for requests (seconds)
+            connect_session_timeout: Timeout for connect session creation
+            gmail_profile_timeout: Timeout for Gmail profile requests
+            gmail_list_timeout: Timeout for Gmail list requests
+            gmail_attachment_timeout: Timeout for Gmail attachment requests
+            gmail_history_timeout: Timeout for Gmail history requests
+        """
         self.base_url = base_url or os.environ.get("NANGO_BASE_URL", "https://api.nango.dev")
         self.secret_key = secret_key or os.environ.get("NANGO_SECRET_KEY")
         if not self.secret_key:
             raise ValueError("NANGO_SECRET_KEY env var not set")
+        
+        # Store configurable timeouts
+        self.default_timeout = default_timeout
+        self.connect_session_timeout = connect_session_timeout
+        self.gmail_profile_timeout = gmail_profile_timeout
+        self.gmail_list_timeout = gmail_list_timeout
+        self.gmail_attachment_timeout = gmail_attachment_timeout
+        self.gmail_history_timeout = gmail_history_timeout
 
     def _headers(self, provider_config_key: Optional[str] = None, connection_id: Optional[str] = None) -> Dict[str, str]:
         if not self.secret_key:
@@ -64,18 +95,13 @@ class NangoClient:
             "allowed_integrations": allowed_integrations,
         }
         
-        # Debug logging
-        import logging
-        logger = logging.getLogger(__name__)
-        logger.info(f"Nango API Request - URL: {url}")
-        logger.info(f"Nango API Request - Payload: {payload}")
+        # Use structlog logger (already imported at module level)
+        logger.info("nango_connect_session_request", url=url, integrations=allowed_integrations)
         
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with httpx.AsyncClient(timeout=self.connect_session_timeout) as client:
             resp = await client.post(url, json=payload, headers=self._headers())
             
-            # Log response for debugging
-            logger.info(f"Nango API Response - Status: {resp.status_code}")
-            logger.info(f"Nango API Response - Body: {resp.text}")
+            logger.info("nango_connect_session_response", status=resp.status_code)
             
             resp.raise_for_status()
             return resp.json()
@@ -91,7 +117,7 @@ class NangoClient:
         except Exception:
             pass
         resp = await self._request_with_retry(
-            'GET', url, timeout=30.0,
+            'GET', url, timeout=self.gmail_profile_timeout,
             headers=self._headers(provider_config_key, connection_id)
         )
         try:
@@ -120,7 +146,7 @@ class NangoClient:
         except Exception:
             pass
         resp = await self._request_with_retry(
-            'GET', url, timeout=60.0,
+            'GET', url, timeout=self.gmail_list_timeout,
             params=params, headers=self._headers(provider_config_key, connection_id)
         )
         try:
@@ -136,7 +162,7 @@ class NangoClient:
         url = f"{self.base_url}/proxy/gmail/v1/users/me/messages/{message_id}"
         params = {"format": "full"}
         resp = await self._request_with_retry(
-            'GET', url, timeout=60.0,
+            'GET', url, timeout=self.gmail_list_timeout,
             params=params, headers=self._headers(provider_config_key, connection_id)
         )
         return resp.json()
@@ -153,7 +179,7 @@ class NangoClient:
         except Exception:
             pass
         resp = await self._request_with_retry(
-            'GET', url, timeout=120.0,
+            'GET', url, timeout=self.gmail_attachment_timeout,
             headers=self._headers(provider_config_key, connection_id)
         )
         try:
@@ -217,7 +243,7 @@ class NangoClient:
             pass
             
         resp = await self._request_with_retry(
-            'GET', url, timeout=60.0,
+            'GET', url, timeout=self.gmail_history_timeout,
             params=params, headers=self._headers(provider_config_key, connection_id)
         )
         

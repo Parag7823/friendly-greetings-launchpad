@@ -1,0 +1,93 @@
+# Platform ID Mappings
+# ====================
+# Maps platform display names to integration IDs.
+# Used by _build_platform_id_map() to resolve platform names to canonical IDs.
+#
+# Benefits:
+# - Centralized configuration (no hardcoding in code)
+# - Easy to add new platforms without code changes
+# - Non-developers can maintain platform mappings
+# - Single source of truth for platform IDs
+
+platform_mappings:
+  # Accounting & Finance
+  quickbooks:
+    - "quickbooks-online"
+    - "quickbooks"
+    - "qb"
+  
+  xero:
+    - "xero"
+  
+  stripe:
+    - "stripe"
+  
+  paypal:
+    - "paypal"
+  
+  razorpay:
+    - "razorpay"
+  
+  # E-commerce
+  shopify:
+    - "shopify"
+  
+  square:
+    - "square"
+  
+  etsy:
+    - "etsy"
+  
+  # Marketplaces
+  amazon:
+    - "amazon"
+  
+  ebay:
+    - "ebay"
+  
+  # Email & Communication
+  gmail:
+    - "gmail"
+  
+  outlook:
+    - "outlook"
+    - "microsoft-outlook"
+  
+  # Cloud Storage
+  google-drive:
+    - "google-drive"
+    - "gdrive"
+  
+  dropbox:
+    - "dropbox"
+  
+  # HR & Payroll
+  gusto:
+    - "gusto"
+  
+  workday:
+    - "workday"
+  
+  # CRM
+  salesforce:
+    - "salesforce"
+  
+  hubspot:
+    - "hubspot"
+  
+  # Project Management
+  asana:
+    - "asana"
+  
+  monday:
+    - "monday"
+    - "monday.com"
+  
+  jira:
+    - "jira"
+  
+  # Note: When adding new platforms:
+  # 1. Add the canonical ID as the key
+  # 2. List all common aliases as values
+  # 3. Keep aliases lowercase
+  # 4. Update documentation if adding new categories

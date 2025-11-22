@@ -136,6 +136,20 @@ if INSTRUCTOR_AVAILABLE:
 SEMANTIC_EXTRACTOR_AVAILABLE = False  # Assume unavailable until lazy loaded
 SemanticRelationshipExtractor = None  # Will be loaded on demand
 
+def _load_semantic_relationship_extractor():
+    """Lazy load SemanticRelationshipExtractor on first use"""
+    global SemanticRelationshipExtractor, SEMANTIC_EXTRACTOR_AVAILABLE
+    if SemanticRelationshipExtractor is None:
+        try:
+            from semantic_relationship_extractor import SemanticRelationshipExtractor as SRE
+            SemanticRelationshipExtractor = SRE
+            SEMANTIC_EXTRACTOR_AVAILABLE = True
+            logger.info("✅ SemanticRelationshipExtractor loaded")
+        except ImportError:
+            SEMANTIC_EXTRACTOR_AVAILABLE = False
+            logger.warning("SemanticRelationshipExtractor not available. Semantic analysis will be disabled.")
+    return SemanticRelationshipExtractor
+
 # LAZY LOADING: CausalInferenceEngine imports numpy and pandas at module level
 # Load it only when needed to prevent Railway deployment crashes
 CausalInferenceEngine = None  # Will be loaded on demand
@@ -304,17 +318,11 @@ class EnhancedRelationshipDetector:
         self._igraph_loaded = False
         
         # Initialize semantic relationship extractor for AI-powered analysis
-        if SEMANTIC_EXTRACTOR_AVAILABLE:
-            self.semantic_extractor = SemanticRelationshipExtractor(
-                openai_client=client,
-                supabase_client=supabase_client,
-                cache_client=None,  # v2.0: Using aiocache (Redis) instead
-                embedding_service=self.embedding_service  # Pass injected embedding service
-            )
-            logger.info("✅ Semantic relationship extractor v2.0 initialized (aiocache + instructor)")
-        else:
-            self.semantic_extractor = None
-            logger.warning("⚠️ Semantic relationship extractor not available")
+        # Defer initialization to first use to prevent startup crashes
+        self.semantic_extractor = None
+        self._semantic_extractor_loaded = False
+        self._semantic_extractor_client = client
+        self._semantic_extractor_supabase = supabase_client
         
         # Initialize duplicate detection service for consolidated amount/date logic
         if DUPLICATE_SERVICE_AVAILABLE:
@@ -363,6 +371,28 @@ class EnhancedRelationshipDetector:
                 logger.warning("⚠️ Temporal pattern learner not available")
             self._temporal_learner_loaded = True
         return self.temporal_learner
+    
+    def _ensure_semantic_extractor(self):
+        """Lazy load semantic extractor on first use"""
+        if not self._semantic_extractor_loaded:
+            SRE = _load_semantic_relationship_extractor()
+            if SRE:
+                try:
+                    self.semantic_extractor = SRE(
+                        openai_client=self._semantic_extractor_client,
+                        supabase_client=self._semantic_extractor_supabase,
+                        cache_client=None,  # v2.0: Using aiocache (Redis) instead
+                        embedding_service=self.embedding_service  # Pass injected embedding service
+                    )
+                    logger.info("✅ Semantic relationship extractor initialized")
+                except Exception as e:
+                    logger.warning(f"⚠️ Failed to initialize semantic extractor: {e}")
+                    self.semantic_extractor = None
+            else:
+                self.semantic_extractor = None
+                logger.warning("⚠️ Semantic relationship extractor not available")
+            self._semantic_extractor_loaded = True
+        return self.semantic_extractor
     
     async def detect_all_relationships(self, user_id: str, file_id: Optional[str] = None, transaction_id: Optional[str] = None) -> Dict[str, Any]:
         """
@@ -423,7 +453,7 @@ class EnhancedRelationshipDetector:
                     "relationship_types_found": list(set([r.get('relationship_type', 'unknown') for r in all_relationships])),
                     "method": "database_joins",
                     "complexity": "O(N log N) instead of O(N²)",
-                    "semantic_analysis_enabled": self.semantic_extractor is not None,
+                    "semantic_analysis_enabled": self._ensure_semantic_extractor() is not None,
                     "causal_analysis_enabled": self._ensure_causal_engine() is not None,
                     "temporal_learning_enabled": self._ensure_temporal_learner() is not None
                 },
@@ -762,7 +792,7 @@ Return ONLY valid JSON, no markdown blocks or explanations."""
                 
                 # Generate relationship embedding for semantic search (if semantic extractor available)
                 relationship_embedding = None
-                if self.semantic_extractor and semantic_description:
+                if self._ensure_semantic_extractor() and semantic_description:
                     try:
                         relationship_embedding = await self._generate_relationship_embedding(semantic_description)
                     except Exception as e:
@@ -1343,7 +1373,10 @@ Return ONLY valid JSON, no markdown blocks or explanations."""
         Returns:
             Statistics about semantic enrichment
         """
-        if not self.semantic_extractor or not relationships:
+        # Lazy load semantic extractor on first use
+        semantic_extractor = self._ensure_semantic_extractor()
+        
+        if not semantic_extractor or not relationships:
             return {
                 'enabled': False,
                 'total_relationships': len(relationships),
@@ -1380,7 +1413,7 @@ Return ONLY valid JSON, no markdown blocks or explanations."""
                             continue
                         
                         # Extract semantic relationship
-                        semantic_rel = await self.semantic_extractor.extract_semantic_relationships(
+                        semantic_rel = await semantic_extractor.extract_semantic_relationships(
                             source_event=source_event,
                             target_event=target_event,
                             context_events=None,  # Could add surrounding events for better context
@@ -1402,7 +1435,7 @@ Return ONLY valid JSON, no markdown blocks or explanations."""
                         continue
             
             # Get metrics from semantic extractor
-            extractor_metrics = self.semantic_extractor.get_metrics()
+            extractor_metrics = semantic_extractor.get_metrics()
             
             return {
                 'enabled': True,
