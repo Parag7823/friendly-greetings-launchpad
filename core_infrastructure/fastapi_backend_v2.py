@@ -9295,6 +9295,11 @@ async def _validate_security(endpoint: str, user_id: str, session_token: Optiona
     Replaces duplicate _require_security function
     """
     try:
+        # FIX: Check if security_validator is initialized before using it
+        if not security_validator:
+            logger.error(f"❌ CRITICAL: Security validator not initialized for endpoint {endpoint}")
+            raise HTTPException(status_code=503, detail="Security system not initialized. Please try again later.")
+        
         valid, violations = await security_validator.validate_request({
             'endpoint': endpoint,
             'user_id': user_id,
@@ -9311,7 +9316,12 @@ async def _validate_security(endpoint: str, user_id: str, session_token: Optiona
 
 def _safe_filename(name: str) -> str:
     try:
-        return security_validator.input_sanitizer.sanitize_string(name or "attachment")
+        # FIX: Check if security_validator is initialized
+        if security_validator and hasattr(security_validator, 'input_sanitizer'):
+            return security_validator.input_sanitizer.sanitize_string(name or "attachment")
+        else:
+            # Fallback if security_validator not initialized
+            return (name or "attachment").replace("/", "_").replace("\\", "_")[:200]
     except Exception:
         return (name or "attachment").replace("/", "_").replace("\\", "_")[:200]
 
