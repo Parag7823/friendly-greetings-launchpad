@@ -945,9 +945,10 @@ async def app_lifespan(app: FastAPI):
             
         # Initialize Groq client
         try:
-            if app_config.groq_api_key:
+            groq_api_key = os.environ.get('GROQ_API_KEY')
+            if groq_api_key:
                 if Groq:
-                    groq_client = Groq(api_key=app_config.groq_api_key)
+                    groq_client = Groq(api_key=groq_api_key)
                     logger.info("✅ Groq client initialized")
                 else:
                     logger.warning("⚠️ Groq library not available, skipping client initialization")
