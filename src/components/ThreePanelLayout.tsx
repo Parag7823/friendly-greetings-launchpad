@@ -71,7 +71,7 @@ export const ThreePanelLayout = ({ currentView = 'chat', onNavigate }: ThreePane
           <div className="h-full border-l border-border">
             <DataSourcesPanel
               isOpen={true}
-              onClose={() => {}} // Always visible in 3-panel layout
+              onClose={() => { }} // Always visible in 3-panel layout
               onFilePreview={handleFileClick}
             />
           </div>

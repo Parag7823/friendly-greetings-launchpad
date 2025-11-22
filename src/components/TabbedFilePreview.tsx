@@ -7,6 +7,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from './ui/t
 import { motion, AnimatePresence } from 'framer-motion';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from './AuthProvider';
+import { useConnections } from '@/hooks/useConnections';
 import { cn } from '@/lib/utils';
 
 // Ag-Grid Imports
