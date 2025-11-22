@@ -5,49 +5,47 @@
 
 @layer base {
   :root {
-    /* Finley AI Dark Theme - Premium Black */
-    --background: 0 0% 0%;           /* #000000 - Solid black */
-    --foreground: 0 0% 100%;         /* #FFFFFF - Pure white text */
+    /* Aident AI Theme - Electric Indigo & Deep Slate */
+    --background: 222 47% 11%;       /* #0f172a - Deep Slate */
+    --foreground: 210 40% 98%;       /* #f8fafc - Slate 50 */
     
-    --card: 0 0% 4%;                 /* #0A0A0A - Slightly lighter black for cards */
-    --card-foreground: 0 0% 100%;    /* #FFFFFF - White text on cards */
+    --card: 217 33% 17%;             /* #1e293b - Slate 800 */
+    --card-foreground: 210 40% 98%;  /* #f8fafc */
     
-    --popover: 0 0% 4%;              /* #0A0A0A - Dark popover background */
-    --popover-foreground: 0 0% 100%; /* #FFFFFF - White text in popovers */
+    --popover: 222 47% 11%;          /* #0f172a */
+    --popover-foreground: 210 40% 98%;
     
-    --primary: 0 0% 100%;            /* #FFFFFF - White for primary buttons */
-    --primary-foreground: 0 0% 0%;   /* #000000 - Black text on white buttons */
+    --primary: 249 95% 63%;          /* #6366f1 - Electric Indigo */
+    --primary-foreground: 210 40% 98%;
     
-    --secondary: 0 0% 8%;            /* #141414 - Dark gray for secondary */
-    --secondary-foreground: 0 0% 100%; /* #FFFFFF - White text on secondary */
+    --secondary: 217 33% 17%;        /* #1e293b */
+    --secondary-foreground: 210 40% 98%;
     
-    --muted: 0 0% 8%;                /* #141414 - Muted background */
-    --muted-foreground: 0 0% 63%;    /* #A0A0A0 - Muted text */
+    --muted: 217 33% 17%;            /* #1e293b */
+    --muted-foreground: 215 20% 65%; /* #94a3b8 */
     
-    --accent: 0 0% 8%;               /* #141414 - Accent background */
-    --accent-foreground: 0 0% 96%;   /* #F4F4F4 - Light accent text */
+    --accent: 217 33% 17%;           /* #1e293b */
+    --accent-foreground: 210 40% 98%;
     
-    --destructive: 0 84% 60%;        /* Red for errors */
-    --destructive-foreground: 0 0% 98%; /* Light text on destructive */
+    --destructive: 0 62% 30%;
+    --destructive-foreground: 210 40% 98%;
     
-    --border: 0 0% 12%;              /* #1F1F1F - Subtle borders */
-    --input: 0 0% 12%;               /* #1F1F1F - Input backgrounds */
-    --ring: 0 0% 63%;                /* #A0A0A0 - Focus rings */
+    --border: 217 33% 17%;           /* #1e293b */
+    --input: 217 33% 17%;
+    --ring: 249 95% 63%;             /* #6366f1 */
     
-    --radius: 0.5rem;               /* 8px border radius */
+    --radius: 0.75rem;               /* 12px - softer, more modern feel */
     
-    /* Finley AI Custom Variables */
-    --finley-accent: 0 0% 63%;       /* #A0A0A0 - Brand accent */
-    --finley-light-accent: 0 0% 96%; /* #F4F4F4 - Light accent */
-    --finley-shadow: 0 0% 0%;        /* Pure black for shadows */
+    /* Aident Custom Variables */
+    --aident-indigo: 249 95% 63%;
+    --aident-slate: 222 47% 11%;
     
     /* Gradients */
-    --gradient-primary: linear-gradient(135deg, hsl(var(--primary)), hsl(var(--finley-light-accent)));
+    --gradient-primary: linear-gradient(135deg, hsl(var(--primary)), #818cf8);
     --gradient-subtle: linear-gradient(180deg, hsl(var(--background)), hsl(var(--card)));
     
     /* Animations */
     --transition-smooth: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    --transition-fast: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   }
   
   * {
