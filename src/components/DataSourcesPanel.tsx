@@ -159,22 +159,6 @@ export const DataSourcesPanel = ({ isOpen, onClose, onFilePreview }: DataSources
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(
     new Set(['accounting', 'data-sources', 'payment'])
   );
-  const integrationsRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const handleHighlight = () => {
-      if (integrationsRef.current) {
-        integrationsRef.current.scrollIntoView({ behavior: 'smooth' });
-        integrationsRef.current.classList.add('ring-2', 'ring-primary', 'ring-offset-2');
-        setTimeout(() => {
-          integrationsRef.current?.classList.remove('ring-2', 'ring-primary', 'ring-offset-2');
-        }, 2000);
-      }
-    };
-
-    window.addEventListener('highlight-integrations', handleHighlight);
-    return () => window.removeEventListener('highlight-integrations', handleHighlight);
-  }, []);
 
   const handlePlusClick = () => {
     fileInputRef.current?.click();
@@ -788,7 +772,7 @@ export const DataSourcesPanel = ({ isOpen, onClose, onFilePreview }: DataSources
           </div>
 
           {/* Integrations Section */}
-          <div ref={integrationsRef} className="transition-all duration-300 rounded-lg">
+          <div>
             <div className="flex items-center gap-2 mb-3">
               <Plug className="w-4 h-4 text-muted-foreground" />
               <h3 className="text-sm font-medium">Integrations</h3>
@@ -836,8 +820,8 @@ export const DataSourcesPanel = ({ isOpen, onClose, onFilePreview }: DataSources
                               <div
                                 key={integration.id}
                                 className={`flex items-center justify-between p-3 border rounded-md transition-all ${connected
-                                  ? 'border-2 border-emerald-500/60 bg-gradient-to-r from-emerald-500/10 via-green-500/5 to-emerald-500/10 shadow-md shadow-emerald-500/20 hover:shadow-emerald-500/30'
-                                  : 'finley-dynamic-bg hover:bg-muted/20'
+                                    ? 'border-2 border-emerald-500/60 bg-gradient-to-r from-emerald-500/10 via-green-500/5 to-emerald-500/10 shadow-md shadow-emerald-500/20 hover:shadow-emerald-500/30'
+                                    : 'finley-dynamic-bg hover:bg-muted/20'
                                   }`}
                               >
                                 <div className="flex items-center gap-3 flex-1 min-w-0">

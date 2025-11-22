@@ -7,7 +7,6 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from './ui/t
 import { motion, AnimatePresence } from 'framer-motion';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from './AuthProvider';
-import { useConnections } from '@/hooks/useConnections';
 import { cn } from '@/lib/utils';
 
 // Ag-Grid Imports
@@ -184,22 +183,18 @@ export const TabbedFilePreview = ({
     return null;
   };
 
-  // Fetch connections to determine greeting state
-  const { data: connections = [] } = useConnections();
-  const hasConnections = connections.some(c => c.status === 'valid' || c.status === 'connected');
-
-  const handleConnectClick = () => {
-    // Dispatch event to highlight integrations in DataSourcesPanel
-    window.dispatchEvent(new CustomEvent('highlight-integrations'));
-  };
-
   if (openFiles.length === 0) {
     return (
-      <div className="h-full w-full bg-background">
-        <AidentGreeting
-          hasConnections={hasConnections}
-          onConnectClick={handleConnectClick}
-        />
+      <div className="h-full flex items-center justify-center finley-dynamic-bg">
+        <div className="text-center space-y-3 p-8">
+          <FileSpreadsheet className="w-16 h-16 mx-auto text-muted-foreground/30" />
+          <div>
+            <h3 className="text-lg font-semibold text-foreground">No files open</h3>
+            <p className="text-sm text-muted-foreground mt-1">
+              Click a file in Data Sources to view it here
+            </p>
+          </div>
+        </div>
       </div>
     );
   }
