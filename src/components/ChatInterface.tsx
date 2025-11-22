@@ -1,5 +1,4 @@
 import { Send, FileSpreadsheet, Paperclip, Loader2, X } from 'lucide-react';
-import { ChatWidget } from './ChatWidget';
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useDropzone } from 'react-dropzone';
 import { MarkdownMessage } from './MarkdownMessage';
@@ -22,15 +21,7 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [searchParams, setSearchParams] = useSearchParams();
   const [message, setMessage] = useState('');
-  const [messages, setMessages] = useState<Array<{
-    id: string;
-    text: string;
-    isUser: boolean;
-    timestamp: Date;
-    visualizations?: any[];
-    actions?: any[];
-    data?: any;
-  }>>([]);
+  const [messages, setMessages] = useState<Array<{ id: string; text: string; isUser: boolean; timestamp: Date }>>([]);
   const [currentChatId, setCurrentChatId] = useState<string | null>(null);
   const [isNewChat, setIsNewChat] = useState(true);
   const [providers, setProviders] = useState<any[]>([]);
@@ -312,16 +303,6 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
     return () => clearInterval(interval);
   }, [sampleQuestions.length]);
 
-  const handleAction = (action: any) => {
-    if (action.type === 'view_graph') {
-      toast({ title: 'Opening Graph', description: 'Graph view is coming soon!' });
-    } else if (action.type === 'export') {
-      toast({ title: 'Exporting', description: 'Export started...' });
-    } else if (action.type === 'visualize') {
-      window.dispatchEvent(new CustomEvent('visualize-data', { detail: action.data }));
-    }
-  };
-
   const handleSendMessage = async () => {
     if (message.trim() || pastedImages.length > 0) {
       // CRITICAL FIX: Process pasted images before sending message
@@ -434,10 +415,7 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
             id: `msg-${Date.now()}-ai`,
             text: data.response,
             isUser: false,
-            timestamp: new Date(data.timestamp),
-            visualizations: data.visualizations,
-            actions: data.actions,
-            data: data.data
+            timestamp: new Date(data.timestamp)
           };
 
           setMessages(prev => [...prev, aiMessage]);
@@ -624,26 +602,18 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
                   {messages.map((msg) => (
                     <div
                       key={msg.id}
-                      className={`flex flex-col ${msg.isUser ? 'items-end' : 'items-start'}`}
+                      className={`flex ${msg.isUser ? 'justify-end' : 'justify-start'}`}
                     >
                       <div
                         className={`max-w-[80%] rounded-md px-3 py-2 border ${msg.isUser
-                          ? 'bg-gradient-to-b from-background via-background to-muted/50 border-border/60 dark:from-zinc-900 dark:via-zinc-900 dark:to-zinc-800 dark:border-zinc-700 text-foreground'
-                          : 'bg-[#1a1a1a]/90 backdrop-blur-sm text-white border-white/10'
+                            ? 'bg-gradient-to-b from-background via-background to-muted/50 border-border/60 dark:from-zinc-900 dark:via-zinc-900 dark:to-zinc-800 dark:border-zinc-700 text-foreground'
+                            : 'bg-[#1a1a1a]/90 backdrop-blur-sm text-white border-white/10'
                           }`}
                       >
                         {msg.isUser ? (
                           <p className="text-xs">{msg.text}</p>
                         ) : (
-                          <>
-                            <MarkdownMessage content={msg.text} />
-                            <ChatWidget
-                              visualizations={msg.visualizations}
-                              actions={msg.actions}
-                              data={msg.data}
-                              onAction={handleAction}
-                            />
-                          </>
+                          <MarkdownMessage content={msg.text} />
                         )}
                         <p className="text-[10px] opacity-70 mt-1">
                           {msg.timestamp.toLocaleTimeString()}

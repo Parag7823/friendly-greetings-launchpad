@@ -39,11 +39,11 @@ interface TabbedFilePreviewProps {
   onFileClose: (fileId: string) => void;
 }
 
-export const TabbedFilePreview = ({
-  openFiles,
-  activeFileId,
-  onFileSelect,
-  onFileClose
+export const TabbedFilePreview = ({ 
+  openFiles, 
+  activeFileId, 
+  onFileSelect, 
+  onFileClose 
 }: TabbedFilePreviewProps) => {
   const { user } = useAuth();
   const [fileContent, setFileContent] = useState<Record<string, any[]>>({});
@@ -86,7 +86,7 @@ export const TabbedFilePreview = ({
           if (event.amount_usd !== null) row['Amount'] = Number(event.amount_usd); // Keep as number for sorting
           if (event.kind) row['Type'] = event.kind;
           if (event.source_platform) row['Platform'] = event.source_platform;
-
+          
           // Add payload fields
           if (event.payload) {
             Object.keys(event.payload).forEach(key => {
@@ -95,7 +95,7 @@ export const TabbedFilePreview = ({
               }
             });
           }
-
+          
           return row;
         });
 
@@ -120,7 +120,7 @@ export const TabbedFilePreview = ({
     return Object.keys(firstRow).map(key => {
       const isAmount = key === 'Amount';
       const isDate = key === 'Date';
-
+      
       return {
         field: key,
         headerName: key,
@@ -183,22 +183,18 @@ export const TabbedFilePreview = ({
     return null;
   };
 
-  // Fetch connections to determine greeting state
-  const { data: connections = [] } = useConnections();
-  const hasConnections = connections.some(c => c.status === 'valid' || c.status === 'connected');
-
-  const handleConnectClick = () => {
-    // Dispatch event to highlight integrations in DataSourcesPanel
-    window.dispatchEvent(new CustomEvent('highlight-integrations'));
-  };
-
   if (openFiles.length === 0) {
     return (
-      <div className="h-full w-full bg-background">
-        <AidentGreeting
-          hasConnections={hasConnections}
-          onConnectClick={handleConnectClick}
-        />
+      <div className="h-full flex items-center justify-center finley-dynamic-bg">
+        <div className="text-center space-y-3 p-8">
+          <FileSpreadsheet className="w-16 h-16 mx-auto text-muted-foreground/30" />
+          <div>
+            <h3 className="text-lg font-semibold text-foreground">No files open</h3>
+            <p className="text-sm text-muted-foreground mt-1">
+              Click a file in Data Sources to view it here
+            </p>
+          </div>
+        </div>
       </div>
     );
   }
@@ -211,7 +207,7 @@ export const TabbedFilePreview = ({
           {openFiles.map((file) => {
             const Icon = getFileIcon(file.filename);
             const isActive = file.id === activeFileId;
-
+            
             return (
               <motion.div
                 key={file.id}
@@ -232,9 +228,9 @@ export const TabbedFilePreview = ({
                 )}>
                   {file.filename}
                 </span>
-
+                
                 {getStatusBadge(file)}
-
+                
                 {/* Info Icon - Shows metadata on hover */}
                 <TooltipProvider delayDuration={0}>
                   <Tooltip>
@@ -321,12 +317,12 @@ export const TabbedFilePreview = ({
 
               {/* Ag-Grid Table */}
               {loadingContent[activeFile.id] ? (
-                <div className="flex items-center justify-center h-full">
-                  <Loader2 className="w-8 h-8 animate-spin text-primary" />
-                </div>
-              ) : fileContent[activeFile.id] && fileContent[activeFile.id].length > 0 ? (
-                <div className="h-full w-full ag-theme-quartz-dark">
-                  <style>{`
+                  <div className="flex items-center justify-center h-full">
+                    <Loader2 className="w-8 h-8 animate-spin text-primary" />
+                  </div>
+                ) : fileContent[activeFile.id] && fileContent[activeFile.id].length > 0 ? (
+                  <div className="h-full w-full ag-theme-quartz-dark">
+                    <style>{`
                       .ag-theme-quartz-dark {
                         --ag-background-color: #0A0A0A;
                         --ag-header-background-color: #111111;
@@ -343,25 +339,25 @@ export const TabbedFilePreview = ({
                         justify-content: flex-end;
                       }
                     `}</style>
-                  <AgGridReact
-                    rowData={fileContent[activeFile.id]}
-                    columnDefs={columnDefs}
-                    defaultColDef={defaultColDef}
-                    pagination={true}
-                    paginationPageSize={50}
-                    rowSelection="multiple"
-                    animateRows={true}
-                  />
-                </div>
-              ) : (
-                <div className="flex items-center justify-center h-full p-12">
-                  <Card className="p-12 text-center bg-transparent border-none shadow-none">
-                    <FileSpreadsheet className="w-16 h-16 mx-auto text-muted-foreground/30 mb-4" />
-                    <h3 className="text-sm font-semibold mb-2">No file content</h3>
-                    <p className="text-xs text-muted-foreground">Unable to load file content</p>
-                  </Card>
-                </div>
-              )
+                    <AgGridReact
+                      rowData={fileContent[activeFile.id]}
+                      columnDefs={columnDefs}
+                      defaultColDef={defaultColDef}
+                      pagination={true}
+                      paginationPageSize={50}
+                      rowSelection="multiple"
+                      animateRows={true}
+                    />
+                  </div>
+                ) : (
+                  <div className="flex items-center justify-center h-full p-12">
+                    <Card className="p-12 text-center bg-transparent border-none shadow-none">
+                      <FileSpreadsheet className="w-16 h-16 mx-auto text-muted-foreground/30 mb-4" />
+                      <h3 className="text-sm font-semibold mb-2">No file content</h3>
+                      <p className="text-xs text-muted-foreground">Unable to load file content</p>
+                    </Card>
+                  </div>
+                )
               }
             </motion.div>
           )}
