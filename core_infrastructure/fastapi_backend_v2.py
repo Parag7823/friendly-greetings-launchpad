@@ -570,7 +570,7 @@ class DateTimeEncoder(stdlib_json.JSONEncoder):
 # ============================================================================
 # Moved to: core_infrastructure/utils/helpers.py
 # Imports below:
-from utils.helpers import clean_jwt_token, safe_decode_base64
+from core_infrastructure.utils.helpers import clean_jwt_token, safe_decode_base64
 # NOTE: safe_openai_call removed - use instructor library for structured AI responses instead
 
 def safe_json_parse(json_str, fallback=None):
