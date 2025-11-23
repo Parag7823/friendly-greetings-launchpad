@@ -217,10 +217,6 @@ class UniversalDocumentClassifierOptimized:
     def _initialize_tfidf(self):
         """OPTIMIZED: Initialize TF-IDF vectorizer for smart indicator weighting (lazy-loaded)"""
         try:
-            # Lazy import sklearn only when needed
-            from sklearn.feature_extraction.text import TfidfVectorizer
-            
-            # Build corpus from all document type indicators
             corpus = []
             self.doc_types_list = []
             

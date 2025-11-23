@@ -60,6 +60,33 @@ export default {
 				// Finley AI Custom Colors
 				'finley-accent': 'hsl(var(--finley-accent))',
 				'finley-light-accent': 'hsl(var(--finley-light-accent))',
+				
+				// Neutral/Muted Tones for UI Hierarchy
+				'slate': {
+					'400': 'hsl(var(--slate-400))',
+					'500': 'hsl(var(--slate-500))',
+					'700': 'hsl(var(--slate-700))',
+					'800': 'hsl(var(--slate-800))',
+				},
+				
+				// Secondary Accent - Steel Blue
+				'steel-blue': 'hsl(var(--secondary-accent))',
+				
+				// Accessibility: Copper Variants
+				'copper': {
+					'light': 'hsl(var(--copper-light))',
+					'dark': 'hsl(var(--copper-dark))',
+				},
+				
+				// Data Visualization Palette
+				'chart': {
+					'copper': 'hsl(var(--chart-copper))',
+					'teal': 'hsl(var(--chart-teal))',
+					'purple': 'hsl(var(--chart-purple))',
+					'orange': 'hsl(var(--chart-orange))',
+					'pink': 'hsl(var(--chart-pink))',
+					'cyan': 'hsl(var(--chart-cyan))',
+				},
 			},
 			borderRadius: {
 				lg: 'var(--radius)',

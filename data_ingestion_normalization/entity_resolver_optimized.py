@@ -390,20 +390,29 @@ class EntityResolverOptimized:
             try:
                 logger.info("ai_resolution_triggered", entity_name=entity_name, candidate=match['canonical_name'], similarity=sim)
                 
-                decision = await self.instructor_client.chat.completions.create(
-                    model="llama-3.3-70b-versatile",
-                    response_model=AIEntityDecision,
-                    messages=[
-                        {
-                            "role": "system",
-                            "content": "You are an expert entity resolver. Decide if the input name matches the database candidate."
-                        },
-                        {
-                            "role": "user",
-                            "content": f"Input name: '{entity_name}'\nDatabase candidate: '{match['canonical_name']}'\nFuzzy similarity: {sim:.2f}\n\nAre these the same entity? Choose 'candidate' if they match, 'input' if they don't."
-                        }
-                    ]
-                )
+                # FIX #69: instructor.patch() is synchronous, run in thread pool to avoid blocking
+                import asyncio
+                loop = asyncio.get_event_loop()
+                from concurrent.futures import ThreadPoolExecutor
+                
+                def _call_instructor():
+                    return self.instructor_client.chat.completions.create(
+                        model="llama-3.3-70b-versatile",
+                        response_model=AIEntityDecision,
+                        messages=[
+                            {
+                                "role": "system",
+                                "content": "You are an expert entity resolver. Decide if the input name matches the database candidate."
+                            },
+                            {
+                                "role": "user",
+                                "content": f"Input name: '{entity_name}'\nDatabase candidate: '{match['canonical_name']}'\nFuzzy similarity: {sim:.2f}\n\nAre these the same entity? Choose 'candidate' if they match, 'input' if they don't."
+                            }
+                        ]
+                    )
+                
+                with ThreadPoolExecutor(max_workers=1) as executor:
+                    decision = await loop.run_in_executor(executor, _call_instructor)
                 
                 if decision.choice == "candidate":
                     match['similarity'] = 0.95  # Boost confidence with AI approval

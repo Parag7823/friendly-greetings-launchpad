@@ -78,9 +78,44 @@
     --error: 356 100% 71%;
     /* #f43f5e - Rose for negative trends */
 
+    /* Neutral/Muted Tones for UI Hierarchy */
+    --slate-800: 217 33% 15%;
+    /* #1e293b - Hover states on cards, secondary backgrounds */
+    --slate-700: 217 33% 20%;
+    /* #334155 - Borders and dividers */
+    --slate-500: 217 33% 40%;
+    /* #64748b - Secondary text (labels, timestamps, disabled states) */
+    --slate-400: 217 33% 55%;
+    /* #94a3b8 - Tertiary text, muted foreground */
+
+    /* Secondary Accent - Steel Blue (for secondary actions) */
+    --secondary-accent: 217 91% 60%;
+    /* #3b82f6 - Steel Blue for secondary buttons, "Cancel", "View Details" */
+
+    /* Accessibility: Lighter Copper for Text Contrast */
+    --copper-light: 38 92% 60%;
+    /* #fbbf24 - Lighter copper for text (7:1 contrast ratio on navy) */
+    --copper-dark: 38 92% 50%;
+    /* #f59e0b - Original copper for large elements (buttons, icons) */
+
+    /* Data Visualization Palette */
+    --chart-copper: 38 92% 50%;
+    /* #f59e0b - Primary data color */
+    --chart-teal: 174 100% 29%;
+    /* #0d9488 - Secondary data color */
+    --chart-purple: 280 85% 44%;
+    /* #9333ea - Tertiary data color */
+    --chart-orange: 25 95% 53%;
+    /* #f97316 - Quaternary data color */
+    --chart-pink: 330 81% 60%;
+    /* #ec4899 - Quinary data color */
+    --chart-cyan: 188 94% 50%;
+    /* #06b6d4 - Senary data color */
+
     /* Gradients */
     --gradient-primary: linear-gradient(135deg, hsl(var(--primary)), hsl(var(--finley-light-accent)));
     --gradient-subtle: linear-gradient(180deg, hsl(var(--background)), hsl(var(--card)));
+    --gradient-chart: linear-gradient(135deg, hsl(var(--background)), hsl(var(--primary)));
 
     /* Animations */
     --transition-smooth: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
@@ -141,6 +176,32 @@
   .finley-button-outline {
     @apply finley-button bg-transparent border border-border text-foreground;
     @apply hover:bg-accent hover:text-accent-foreground;
+  }
+
+  /* Primary Action Button - Electric Copper (high emphasis) */
+  .finley-button-primary {
+    @apply finley-button bg-primary text-primary-foreground;
+    @apply hover:bg-copper-dark hover:shadow-lg;
+  }
+
+  /* Secondary Action Button - Steel Blue (medium emphasis) */
+  .finley-button-secondary {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-medium;
+    @apply bg-steel-blue text-white hover:bg-blue-600;
+    @apply transition-all duration-200 ease-in-out;
+    @apply focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring;
+    @apply disabled:pointer-events-none disabled:opacity-50;
+  }
+
+  /* Tertiary Action Button - Muted (low emphasis) */
+  .finley-button-tertiary {
+    @apply finley-button bg-transparent border border-slate-700 text-slate-400;
+    @apply hover:bg-slate-800 hover:text-slate-300 hover:border-slate-600;
+  }
+
+  /* Disabled State Styling */
+  .finley-button:disabled {
+    @apply opacity-50 cursor-not-allowed;
   }
 
   .finley-card {
@@ -267,5 +328,79 @@
     @apply bg-gradient-to-b from-background via-background to-muted/50 border-border/60;
     @apply dark:from-zinc-900 dark:via-zinc-900 dark:to-zinc-800 dark:border-zinc-700;
     @apply transition-all duration-200;
+  }
+
+  /* Typography Utilities */
+  .text-secondary {
+    @apply text-slate-500;
+  }
+
+  .text-tertiary {
+    @apply text-slate-400;
+  }
+
+  .text-label {
+    @apply text-xs font-medium text-slate-500 uppercase tracking-wider;
+  }
+
+  .text-timestamp {
+    @apply text-xs text-slate-500;
+  }
+
+  /* Data Visualization Utilities */
+  .chart-copper {
+    @apply text-chart-copper;
+  }
+
+  .chart-teal {
+    @apply text-chart-teal;
+  }
+
+  .chart-purple {
+    @apply text-chart-purple;
+  }
+
+  .chart-orange {
+    @apply text-chart-orange;
+  }
+
+  .chart-pink {
+    @apply text-chart-pink;
+  }
+
+  .chart-cyan {
+    @apply text-chart-cyan;
+  }
+
+  /* Card Hover States */
+  .card-hover {
+    @apply transition-all duration-200 ease-in-out hover:bg-slate-800 hover:shadow-lg;
+  }
+
+  /* Border Utilities */
+  .border-divider {
+    @apply border-slate-700;
+  }
+
+  .border-subtle {
+    @apply border-slate-800;
+  }
+
+  /* Accessibility: Text with proper contrast */
+  .text-copper-accessible {
+    @apply text-copper-light font-medium;
+  }
+
+  /* Financial Data Emphasis */
+  .financial-positive {
+    @apply text-green-400 font-semibold;
+  }
+
+  .financial-negative {
+    @apply text-rose-400 font-semibold;
+  }
+
+  .financial-neutral {
+    @apply text-slate-400;
   }
 }
