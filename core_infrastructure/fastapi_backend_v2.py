@@ -2897,39 +2897,28 @@ class DataEnrichmentProcessor:
     
     async def _process_currency_with_validation(self, extraction_results: Dict, classification_results: Dict) -> Dict[str, Any]:
         """Process currency with exchange rate handling using historical rates for transaction date"""
-        try:
-            amount = extraction_results.get('amount', 0.0)
-            currency = extraction_results.get('currency', 'USD')
-            
-            # FIX #5: Use transaction date for exchange rate, not current date
-            transaction_date = extraction_results.get('date', datetime.now().strftime('%Y-%m-%d'))
-            
-            if currency == 'USD':
-                amount_usd = amount
-                exchange_rate = 1.0
-            else:
-                # Get exchange rate for the transaction date (historical data)
-                exchange_rate = await self._get_exchange_rate(currency, 'USD', transaction_date)
-                amount_usd = amount * exchange_rate
-            
-            return {
-                'amount_original': amount,
-                'amount_usd': amount_usd,
-                'currency': currency,
-                'exchange_rate': exchange_rate,
-                'exchange_date': transaction_date  # FIX #5: Use transaction date, not today
-            }
-        except Exception as e:
-            logger.error(f"Currency processing failed: {e}")
-            amount = extraction_results.get('amount', 0.0)
-            transaction_date = extraction_results.get('date', datetime.now().strftime('%Y-%m-%d'))
-            return {
-                'amount_original': amount,
-                'amount_usd': amount,
-                'currency': 'USD',
-                'exchange_rate': 1.0,
-                'exchange_date': transaction_date  # FIX #5: Use transaction date
-            }
+        amount = extraction_results.get('amount', 0.0)
+        currency = extraction_results.get('currency', 'USD')
+        
+        # FIX #5: Use transaction date for exchange rate, not current date
+        transaction_date = extraction_results.get('date', datetime.now().strftime('%Y-%m-%d'))
+        
+        if currency == 'USD':
+            amount_usd = amount
+            exchange_rate = 1.0
+        else:
+            # Get exchange rate for the transaction date (historical data)
+            # FIX #33: NO FALLBACK - fail clearly if exchange rate fetch fails
+            exchange_rate = await self._get_exchange_rate(currency, 'USD', transaction_date)
+            amount_usd = amount * exchange_rate
+        
+        return {
+            'amount_original': amount,
+            'amount_usd': amount_usd,
+            'currency': currency,
+            'exchange_rate': exchange_rate,
+            'exchange_date': transaction_date  # FIX #5: Use transaction date, not today
+        }
 
     async def _get_exchange_rate(self, from_currency: str, to_currency: str, transaction_date: str) -> float:
         """
@@ -2969,9 +2958,9 @@ class DataEnrichmentProcessor:
                 return c.get_rate(from_currency, to_currency, date_obj)
             
             # Execute in thread pool to avoid blocking
+            # FIX #34: Use global thread pool instead of creating new executor
             loop = asyncio.get_event_loop()
-            with ThreadPoolExecutor(max_workers=1) as executor:
-                rate = await loop.run_in_executor(executor, _get_rate_sync)
+            rate = await loop.run_in_executor(_thread_pool, _get_rate_sync)
             
             # Cache the rate for 24 hours
             if self.cache and hasattr(self.cache, 'store_classification'):

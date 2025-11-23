@@ -106,7 +106,7 @@ export default {
 	},
 	plugins: [
 		require("tailwindcss-animate"),
-		function({ addUtilities }) {
+		function ({ addUtilities }) {
 			addUtilities({
 				'.scrollbar-thin': {
 					'scrollbar-width': 'thin',

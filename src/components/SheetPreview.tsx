@@ -3,10 +3,10 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
-import { 
-  FileSpreadsheet, 
-  TrendingUp, 
-  DollarSign, 
+import {
+  FileSpreadsheet,
+  TrendingUp,
+  DollarSign,
   Calendar,
   Eye,
   EyeOff,
@@ -77,16 +77,16 @@ const getConfidenceIndicator = (score: number) => {
 };
 
 const formatSheetType = (type: string) => {
-  return type.split('_').map(word => 
+  return type.split('_').map(word =>
     word.charAt(0).toUpperCase() + word.slice(1)
   ).join(' ');
 };
 
-export const SheetPreview = ({ 
-  sheets, 
-  onSheetSelect, 
+export const SheetPreview = ({
+  sheets,
+  onSheetSelect,
   onPromptSuggestion,
-  selectedSheet 
+  selectedSheet
 }: SheetPreviewProps) => {
   const [expandedSheets, setExpandedSheets] = useState<Set<string>>(new Set());
   const [activeTab, setActiveTab] = useState('overview');
@@ -115,7 +115,7 @@ export const SheetPreview = ({
           {sheets.length} sheets detected • {financialSheets.length} financial statements identified
         </CardDescription>
       </CardHeader>
-      
+
       <CardContent>
         <Tabs value={activeTab} onValueChange={setActiveTab}>
           <TabsList className="grid grid-cols-3 w-full">
@@ -151,7 +151,7 @@ export const SheetPreview = ({
             <div className="space-y-2">
               <h4 className="font-medium text-sm">Quick Insights</h4>
               {sheets.map((sheet, index) => (
-                <div 
+                <div
                   key={sheet.name}
                   className="flex items-center justify-between p-3 border rounded-lg hover:bg-muted/50 transition-colors"
                 >
@@ -166,8 +166,8 @@ export const SheetPreview = ({
                   </div>
                   <div className="flex items-center gap-2">
                     {getConfidenceIndicator(sheet.confidenceScore)}
-                    <Badge 
-                      variant="outline" 
+                    <Badge
+                      variant="outline"
                       className={`text-xs ${getSheetTypeColor(sheet.type)}`}
                     >
                       {formatSheetType(sheet.type)}
@@ -230,7 +230,7 @@ export const SheetPreview = ({
                               ))}
                             </div>
                           </div>
-                          
+
                           {sheet.suggestedPrompts && sheet.suggestedPrompts.length > 0 && (
                             <div>
                               <h5 className="text-sm font-medium mb-2">Suggested Analysis</h5>
@@ -251,7 +251,7 @@ export const SheetPreview = ({
                               </div>
                             </div>
                           )}
-                          
+
                           {onSheetSelect && (
                             <Button
                               variant="outline"
