@@ -267,7 +267,9 @@ class StandardErrorResponse(BaseModel):
     
     def __init__(self, **data):
         if 'timestamp' not in data:
-            data['timestamp'] = datetime.utcnow().isoformat()
+            # FIX #19: Use pendulum for consistent timezone handling
+            import pendulum
+            data['timestamp'] = pendulum.now().to_iso8601_string()
         super().__init__(**data)
 
 class FieldDetectionRequest(BaseModel):
@@ -370,6 +372,9 @@ if TYPE_CHECKING:
 # Global optimized database client reference (set during startup)
 optimized_db: Optional["OptimizedDatabaseQueries"] = None
 
+# Global thread pool for CPU-bound operations (set during startup)
+_thread_pool: Optional[ThreadPoolExecutor] = None
+
 from centralized_cache import initialize_cache, get_cache, safe_get_cache
 
 # Backward compatibility alias
@@ -459,39 +464,18 @@ RETRIES_TOTAL = Counter('retries_total', 'Total retries by operation', ['operati
 # ----------------------------------------------------------------------------
 # DB helper wrappers with metrics
 # ----------------------------------------------------------------------------
+# LIBRARY FIX #1: Use centralized sanitize_for_json from helpers.py
+# This function is now imported from core_infrastructure.utils.helpers
+# and handles all NaN/Inf/numpy scalar types without pandas dependency
 def _sanitize_for_json(obj):
-    """Recursively sanitize NaN/Inf values for JSON serialization"""
-    import math
-    if isinstance(obj, dict):
-        return {k: _sanitize_for_json(v) for k, v in obj.items()}
-    elif isinstance(obj, list):
-        return [_sanitize_for_json(item) for item in obj]
-    elif isinstance(obj, float):
-        if math.isnan(obj) or math.isinf(obj):
-            return None
-        return obj
-    # FIX #35: Handle all types of NaN values including numpy.nan
-    elif pd.isna(obj):
-        return None
-    elif obj is np.nan:  # Catch numpy.nan specifically
-        return None
-    elif hasattr(obj, '__array__') and hasattr(obj, 'dtype'):
-        # Handle numpy scalars (np.float64(nan), etc.)
-        try:
-            if np.isnan(obj):
-                return None
-            elif np.isinf(obj):
-                return None
-        except (TypeError, ValueError):
-            pass  # Not a numeric type
-    else:
-        return obj
+    """Wrapper for centralized sanitize_for_json - delegates to helpers.py"""
+    return sanitize_for_json(obj)
 
 def _db_insert(table: str, payload):
     t0 = time.time()
     try:
-        # Sanitize payload to remove NaN/Inf values
-        sanitized_payload = _sanitize_for_json(payload)
+        # Sanitize payload to remove NaN/Inf values using centralized helper
+        sanitized_payload = sanitize_for_json(payload)
         res = supabase.table(table).insert(sanitized_payload).execute()
         DB_WRITES.labels(table=table, op='insert', status='ok').inc()
         DB_WRITE_LATENCY.labels(table=table, op='insert').observe(max(0.0, time.time() - t0))
@@ -529,48 +513,54 @@ except ImportError as e:
 
 # Note: Legacy DuplicateDetectionService is defined below in this file
 
-# Enhanced OpenCV error handling with graceful degradation
-OPENCV_AVAILABLE = False
-try:
-    import cv2
-    OPENCV_AVAILABLE = True
-    logger.info("✅ OpenCV available for advanced image processing")
-except ImportError:
-    logger.warning("⚠️ OpenCV not available - advanced image processing features disabled")
-except OSError as e:
-    if "libGL.so.1" in str(e):
-        logger.warning("⚠️ Advanced file processing features not available: libGL.so.1 missing")
-    else:
-        logger.warning(f"⚠️ OpenCV initialization warning: {e}")
-except Exception as e:
-    logger.error(f"❌ Unexpected error initializing OpenCV: {e}")
+# LIBRARY FIX #5: Removed duplicate OpenCV detection
+# OpenCV is now checked only in ADVANCED_FEATURES dict (lines ~1415-1420)
+# This eliminates redundant import and conflicting flags
 
-# Set global flag for OpenCV availability
-os.environ['OPENCV_AVAILABLE'] = str(OPENCV_AVAILABLE)
-
-# Custom JSON encoder to handle datetime objects
+# FIX #18: Custom JSON encoder with orjson support for datetime objects
 class DateTimeEncoder(stdlib_json.JSONEncoder):
     """
     Custom JSON encoder for handling datetime objects in API responses.
 
-    Extends the standard JSONEncoder to properly serialize datetime and pandas
-    Timestamp objects to ISO format strings for API responses.
+    Extends the standard JSONEncoder to properly serialize datetime objects
+    to ISO format strings for API responses.
     """
     def default(self, obj):
         if isinstance(obj, datetime):
             return obj.isoformat()
-        elif isinstance(obj, pd.Timestamp):
-            return obj.isoformat()
         elif hasattr(obj, 'isoformat'):
             return obj.isoformat()
         return super().default(obj)
+
+def safe_json_dumps(obj, default=None):
+    """
+    FIX #18: orjson-based JSON serialization (3-5x faster than stdlib json)
+    Complements safe_json_parse for complete orjson migration.
+    
+    Benefits:
+    - 3-5x faster serialization
+    - Handles datetime objects via default parameter
+    - Better performance for large objects
+    - Consistent with safe_json_parse
+    """
+    if orjson is None:
+        # Fallback to stdlib json if orjson not available
+        return stdlib_json.dumps(obj, cls=DateTimeEncoder, default=default)
+    
+    try:
+        # Use serialize_datetime_objects for datetime handling
+        serialized = serialize_datetime_objects(obj)
+        return orjson.dumps(serialized).decode('utf-8')
+    except Exception as e:
+        logger.warning(f"orjson serialization failed: {e}, falling back to stdlib json")
+        return stdlib_json.dumps(obj, cls=DateTimeEncoder, default=default)
 
 # ============================================================================
 # HELPER FUNCTIONS - Consolidated in utils/helpers.py
 # ============================================================================
 # Moved to: core_infrastructure/utils/helpers.py
 # Imports below:
-from core_infrastructure.utils.helpers import clean_jwt_token, safe_decode_base64
+from core_infrastructure.utils.helpers import clean_jwt_token, safe_decode_base64, sanitize_for_json, get_groq_client
 # NOTE: safe_openai_call removed - use instructor library for structured AI responses instead
 
 def safe_json_parse(json_str, fallback=None):
@@ -625,7 +615,7 @@ def serialize_datetime_objects(obj):
     - Better parsing and formatting
     - Handles edge cases correctly
     """
-    if isinstance(obj, (datetime, pd.Timestamp)):
+    if isinstance(obj, datetime):
         # Convert to pendulum for proper timezone handling
         return pendulum.instance(obj).to_iso8601_string()
     elif hasattr(obj, 'isoformat'):
@@ -737,30 +727,34 @@ class SocketIOWebSocketManager:
         return f"finley:job:{job_id}"
 
     async def _get_state(self, job_id: str) -> Optional[Dict[str, Any]]:
+        """FIX #14: Cache-only state retrieval with proper error handling"""
         try:
-            # FIX #44: Use centralized cache instead of direct Redis
             cache = safe_get_cache()
             if cache is not None:
                 raw = await cache.get(self._key(job_id))
                 if raw:
                     # Cache already handles JSON serialization
                     state = raw if isinstance(raw, dict) else orjson.loads(raw)
-                    self.job_status[job_id] = state
                     return state
-            return self.job_status.get(job_id)
-        except Exception:
-            return self.job_status.get(job_id)
+            # If cache unavailable or miss, return None (no fallback to memory)
+            return None
+        except Exception as e:
+            logger.warning(f"Cache retrieval failed for job {job_id}: {e}")
+            return None
 
     async def _save_state(self, job_id: str, state: Dict[str, Any]):
-        self.job_status[job_id] = state
-        # FIX #44: Use centralized cache instead of direct Redis
+        """FIX #14: Cache-only state storage with explicit error handling"""
         cache = safe_get_cache()
-        if cache is not None:
-            try:
-                # Cache handles JSON serialization automatically, TTL in seconds
-                await cache.set(self._key(job_id), state, ttl=21600)  # 6 hours
-            except Exception:
-                pass
+        if cache is None:
+            logger.error(f"❌ CRITICAL: Cache unavailable - cannot persist job state {job_id}")
+            raise RuntimeError(f"Cache service unavailable for job {job_id}")
+        
+        try:
+            # Cache handles JSON serialization automatically, TTL in seconds
+            await cache.set(self._key(job_id), state, ttl=21600)  # 6 hours
+        except Exception as e:
+            logger.error(f"❌ CRITICAL: Failed to save job state {job_id}: {e}")
+            raise RuntimeError(f"Failed to persist job state: {e}")
 
     async def merge_job_state(self, job_id: str, patch: Dict[str, Any]) -> Dict[str, Any]:
         base = await self._get_state(job_id) or {}
@@ -786,7 +780,7 @@ class SocketIOWebSocketManager:
                 "job_id": job_id,
                 "error": error_message,
                 "component": component,
-                "timestamp": datetime.utcnow().isoformat()
+                "timestamp": pendulum.now().to_iso8601_string()
             }
             await self.merge_job_state(job_id, {"status": "failed", "error": error_message})
             await sio.emit('job_error', payload, room=job_id)
@@ -804,7 +798,7 @@ class SocketIOWebSocketManager:
         payload = {
             "status": status,
             "message": message,
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": pendulum.now().to_iso8601_string()
         }
         if progress is not None:
             payload["progress"] = progress
@@ -819,7 +813,7 @@ class SocketIOWebSocketManager:
             "component": component,
             "status": status,
             "message": message,
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": pendulum.now().to_iso8601_string()
         }
         if progress is not None:
             payload["progress"] = progress
@@ -970,6 +964,14 @@ async def app_lifespan(app: FastAPI):
         except Exception as groq_err:
             logger.error(f"❌ Failed to initialize Groq client: {groq_err}")
             groq_client = None
+        
+        # Initialize global thread pool for CPU-bound operations
+        try:
+            _thread_pool = ThreadPoolExecutor(max_workers=5)
+            logger.info("✅ Global thread pool initialized for CPU-bound operations")
+        except Exception as thread_err:
+            logger.warning(f"⚠️ Failed to initialize global thread pool: {thread_err}")
+            _thread_pool = None
         
         logger.info("✅ All critical systems and optimizations initialized successfully")
         
@@ -1217,118 +1219,6 @@ async def inference_health_endpoint():
             content={'status': 'error', 'error': str(e)},
             status_code=500
         )
-
-# DISABLED: Anthropic client - now using Groq/Llama for all AI operations
-# Initialize Anthropic client with error handling
-# try:
-#     anthropic_api_key = os.getenv('ANTHROPIC_API_KEY')
-#     if not anthropic_api_key:
-#         raise ValueError("ANTHROPIC_API_KEY environment variable is required")
-#     
-#     anthropic_client = Anthropic(api_key=anthropic_api_key)
-#     logger.info("✅ Anthropic client initialized successfully")
-# except Exception as e:
-#     logger.error(f"❌ Failed to initialize Anthropic client: {e}")
-#     anthropic_client = None
-anthropic_client = None  # Not used - replaced with Groq/Llama
-
-# Initialize Groq client for cost-effective high-volume operations
-groq_client = None
-try:
-    from groq import Groq
-    groq_api_key = os.getenv('GROQ_API_KEY')
-    if groq_api_key:
-        groq_client = Groq(api_key=groq_api_key)
-        logger.info("✅ Groq client initialized successfully (Llama-3.3-70B for high-volume operations)")
-    else:
-        logger.warning("⚠️  GROQ_API_KEY not set - AI operations will be unavailable")
-except Exception as e:
-    logger.warning(f"⚠️  Failed to initialize Groq client: {e}")
-    groq_client = None
-
-# CRITICAL FIX: Moved initialization to startup event to prevent blocking during module import
-# This allows Uvicorn to start quickly without waiting for external service connections
-# The initialization will happen asynchronously after the server starts
-
-# Initialize Supabase client and critical systems
-# MOVED TO STARTUP EVENT - See @app.on_event("startup") below
-# try:
-#     # Try multiple possible environment variable names for Render compatibility
-#     supabase_url = (
-#         os.environ.get("SUPABASE_URL") or 
-#         os.environ.get("SUPABASE_PROJECT_URL") or
-#         os.environ.get("DATABASE_URL")  # Sometimes Render uses this
-#     )
-#     supabase_key = (
-#         os.environ.get("SUPABASE_SERVICE_ROLE_KEY") or 
-#         os.environ.get("SUPABASE_SERVICE_KEY") or  # This is what's in Render!
-#         os.environ.get("SUPABASE_KEY") or
-#         os.environ.get("SUPABASE_ANON_KEY")  # Fallback to anon key if service role not available
-#     )
-#     
-#     # Enhanced diagnostics for deployment debugging
-#     logger.info(f"🔍 Environment diagnostics:")
-#     logger.info(f"   SUPABASE_URL present: {'✅' if supabase_url else '❌'}")
-#     logger.info(f"   SUPABASE_SERVICE_ROLE_KEY present: {'✅' if supabase_key else '❌'}")
-#     logger.info(f"   Available env vars: {sorted([k for k in os.environ.keys() if 'SUPABASE' in k.upper()])}")
-#     
-#     if supabase_key:
-#         supabase_key = clean_jwt_token(supabase_key)
-#     
-#     if not supabase_url or not supabase_key:
-#         missing_vars = []
-#         if not supabase_url:
-#             missing_vars.append("SUPABASE_URL")
-#         if not supabase_key:
-#             missing_vars.append("SUPABASE_SERVICE_KEY (or SUPABASE_SERVICE_ROLE_KEY)")
-#         raise ValueError(f"Missing required environment variables: {', '.join(missing_vars)}. Please check your deployment configuration.")
-#     
-#     # CRITICAL FIX: Use pooled Supabase client to prevent connection exhaustion
-#     supabase = get_supabase_client()
-#     logger.info("✅ Supabase pooled client initialized successfully")
-#     
-#     # Initialize critical systems
-#     initialize_transaction_manager(supabase)
-#     initialize_streaming_processor(StreamingConfig(
-#         chunk_size=1000,
-#         memory_limit_mb=1600,  # Increased from 800MB to handle larger files safely
-#         max_file_size_gb=10
-#     ))
-#     initialize_error_recovery_system(supabase)
-#     
-#     # Initialize security system (observability removed - using structlog)
-#     security_validator = SecurityValidator()
-#     
-#     # CRITICAL FIX: Initialize optimized database queries
-#     optimized_db = OptimizedDatabaseQueries(supabase)
-#     logger.info("✅ Optimized database queries initialized")
-#     
-#     logger.info("✅ Observability and security systems initialized")
-#     
-#     
-#     # REFACTORED: Initialize centralized Redis cache (replaces ai_cache_system.py)
-#     # This provides distributed caching across all workers and instances for true scalability
-#     centralized_cache = initialize_cache(
-#         redis_url=os.environ.get('ARQ_REDIS_URL') or os.environ.get('REDIS_URL'),
-#         default_ttl=7200  # 2 hours default TTL
-#     )
-#     logger.info("✅ Centralized Redis cache initialized - distributed caching across all workers!")
-#     
-#     logger.info("✅ All critical systems and optimizations initialized successfully")
-#     
-# except Exception as e:
-#     logger.error(f"❌ Failed to initialize critical systems: {e}")
-#     supabase = None
-#     optimized_db = None
-#     # Log critical database failure for monitoring
-#     logger.critical(f"🚨 DATABASE CONNECTION FAILED - System running in degraded mode: {e}")
-#     # Initialize minimal observability/logging to prevent NameError in endpoints
-#     try:
-#         # Fallback lightweight initialization (observability removed - using structlog)
-#         security_validator = SecurityValidator()
-#         logger.info("✅ Degraded mode security initialized (no database)")
-#     except Exception as init_err:
-#         logger.warning(f"⚠️ Failed to initialize degraded security systems: {init_err}")
 
 # Database health check function
 def check_database_health():
@@ -1586,11 +1476,10 @@ class VendorStandardizer:
             # Clean the vendor name
             cleaned_name = self._clean_vendor_name(vendor_name)
             
-            # Execute CPU-bound rapidfuzz operation in thread pool
+            # Execute CPU-bound rapidfuzz operation in global thread pool
             import asyncio
             loop = asyncio.get_event_loop()
-            with ThreadPoolExecutor(max_workers=1) as executor:
-                similarity = await loop.run_in_executor(executor, _compute_similarity_sync, vendor_name, cleaned_name)
+            similarity = await loop.run_in_executor(_thread_pool, _compute_similarity_sync, vendor_name, cleaned_name)
             
             result = {
                 "vendor_raw": vendor_name,
@@ -1816,9 +1705,7 @@ class PlatformIDExtractor:
                 "extraction_method": "error_fallback"
             }
     
-    # _generate_deterministic_platform_id replaced by improved version below (PHASE 3.2)
-    
-    def _validate_platform_id(self, id_value: str, id_type: str, platform: str) -> Dict[str, Any]:
+    async def _validate_platform_id(self, id_value: str, id_type: str, platform: str) -> Dict[str, Any]:
         """Validate extracted platform ID against business rules"""
         try:
             validation_result = {
@@ -1866,11 +1753,10 @@ class PlatformIDExtractor:
                         return True
                 return False
             
-            # Execute CPU-bound rapidfuzz operation in thread pool
+            # Execute CPU-bound rapidfuzz operation in global thread pool
             import asyncio
             loop = asyncio.get_event_loop()
-            with ThreadPoolExecutor(max_workers=1) as executor:
-                has_suspicious = loop.run_until_complete(loop.run_in_executor(executor, _check_suspicious_patterns_sync, id_value))
+            has_suspicious = await loop.run_in_executor(_thread_pool, _check_suspicious_patterns_sync, id_value)
             
             if has_suspicious:
                 validation_result['warnings'].append('ID contains test/sample indicators')
@@ -1954,7 +1840,7 @@ class PlatformIDExtractor:
         
         return {'is_valid': True, 'reason': 'Standard validation passed'}
     
-    async def _generate_deterministic_platform_id(self, row_data: Dict, platform: str) -> str:
+    def _generate_deterministic_platform_id(self, row_data: Dict, platform: str) -> str:
         """
         PHASE 3.2: hashids for deterministic IDs (Reversible, URL-safe)
         Replaces 34 lines of custom hash generation with battle-tested library.
@@ -3264,7 +3150,9 @@ class DataEnrichmentProcessor:
             for date_col in ['date', 'transaction_date', 'created_at', 'timestamp']:
                 if date_col in row_data:
                     try:
-                        source_ts = pd.to_datetime(row_data[date_col]).isoformat()
+                        # Parse date using Polars for better performance
+                        parsed_date = pl.Series([row_data[date_col]]).str.to_datetime().to_list()[0]
+                        source_ts = parsed_date.isoformat() if hasattr(parsed_date, 'isoformat') else str(parsed_date)
                         break
                     except:
                         continue
@@ -3464,8 +3352,10 @@ class DataEnrichmentProcessor:
         df = validated_input['df']
         filename = validated_input['filename']
         
-        # Convert to Polars if needed
-        if isinstance(df, pd.DataFrame):
+        # Ensure we're working with Polars DataFrame
+        if hasattr(df, 'to_pandas'):  # Already a Polars DataFrame
+            pl_df = df
+        elif hasattr(df, 'values'):  # Pandas DataFrame
             pl_df = pl.from_pandas(df)
         else:
             pl_df = df
@@ -3615,7 +3505,7 @@ class DataEnrichmentProcessor:
         
         return patterns
     
-    def _generate_statistical_summary(self, df: pd.DataFrame) -> Dict[str, Any]:
+    def _generate_statistical_summary(self, df) -> Dict[str, Any]:
         """
         LIBRARY REPLACEMENT: Generate statistical summary using polars (50x faster)
         Replaces pandas operations with vectorized polars operations.
@@ -3630,8 +3520,10 @@ class DataEnrichmentProcessor:
             # LIBRARY REPLACEMENT: Convert to polars for faster operations (already in requirements)
             import polars as pl
             
-            # Convert pandas to polars for faster operations
-            if isinstance(df, pd.DataFrame):
+            # Ensure we're working with Polars DataFrame
+            if hasattr(df, 'to_pandas'):  # Already a Polars DataFrame
+                pl_df = df
+            elif hasattr(df, 'values'):  # Pandas DataFrame
                 pl_df = pl.from_pandas(df)
             else:
                 pl_df = df
@@ -3737,21 +3629,8 @@ class DataEnrichmentProcessor:
             # Prepare AI prompt
             prompt = self._build_ai_classification_prompt(document_features, pattern_classification)
             
-            # CRITICAL FIX: Initialize Groq client if not already done (avoid global dependency)
-            # Check if global groq_client is available
-            if groq_client is None:
-                # Try to initialize from environment
-                if Groq is None:
-                    raise ValueError("Groq library not installed. Install with: pip install groq")
-                
-                groq_api_key = os.environ.get('GROQ_API_KEY')
-                if not groq_api_key:
-                    raise ValueError("GROQ_API_KEY environment variable not set")
-                
-                # Initialize local Groq client
-                local_groq_client = Groq(api_key=groq_api_key)
-            else:
-                local_groq_client = groq_client
+            # FIX #32: Use unified Groq client initialization helper
+            local_groq_client = get_groq_client()
             
             # Call AI service (using Groq Llama-3.3-70B for cost-effective document classification)
             response = local_groq_client.chat.completions.create(
@@ -4067,8 +3946,9 @@ def _shared_fallback_classification(row: Any, platform_info: Dict, column_names:
     # Handle different row types
     if isinstance(row, dict):
         iterable_values = [val for val in row.values() if val is not None and str(val).strip().lower() != 'nan']
-    elif isinstance(row, pd.Series):
-        iterable_values = [val for val in row.values if pd.notna(val)]
+    elif hasattr(row, 'to_dict'):  # Polars Series or similar
+        row_dict = row.to_dict() if hasattr(row, 'to_dict') else dict(row)
+        iterable_values = [val for val in row_dict.values() if val is not None and str(val).lower() != 'nan']
     elif hasattr(row, '__iter__'):
         iterable_values = [val for val in row if val is not None and str(val).strip().lower() != 'nan']
     else:
@@ -4130,7 +4010,8 @@ class AIRowClassifier:
             # Prepare row data for AI analysis
             row_data = {}
             for col, val in row.items():
-                if pd.notna(val):
+                # Check if value is not null/None
+                if val is not None and str(val).lower() != 'nan':
                     row_data[str(col)] = str(val)
             
             # Create context for AI
@@ -4186,10 +4067,10 @@ class AIRowClassifier:
             """
             
             # Get AI response using Groq (Llama-3.3-70B for cost-effective batch classification)
-            if not groq_client:
-                raise ValueError("Groq client not initialized. Please check GROQ_API_KEY.")
+            # FIX #32: Use unified Groq client initialization helper
+            ai_client = get_groq_client()
             
-            response = groq_client.chat.completions.create(
+            response = ai_client.chat.completions.create(
                 model="llama-3.3-70b-versatile",
                 messages=[{"role": "user", "content": prompt}],
                 max_tokens=1000,
@@ -4222,7 +4103,8 @@ class AIRowClassifier:
                         # Convert row to dict for entity resolution
                         row_data = {}
                         for col, val in row.items():
-                            if pd.notna(val):
+                            # Check if value is not null/None
+                            if val is not None and str(val).lower() != 'nan':
                                 row_data[str(col)] = str(val)
                         
                         # Resolve entities
@@ -4266,12 +4148,13 @@ class AIRowClassifier:
             logger.error(f"AI classification failed: {e}")
             return self._fallback_classification(row, platform_info, column_names)
     
-    def _fallback_classification(self, row: pd.Series, platform_info: Dict, column_names: List[str]) -> Dict[str, Any]:
+    def _fallback_classification(self, row, platform_info: Dict, column_names: List[str]) -> Dict[str, Any]:
         """DEDUPLICATION FIX: Use shared fallback classification utility"""
         result = _shared_fallback_classification(row, platform_info, column_names)
         
         # Add entity extraction for AIRowClassifier
-        row_str = ' '.join(str(val).lower() for val in row.values if pd.notna(val))
+        row_values = row.values() if isinstance(row, dict) else (row.to_dict().values() if hasattr(row, 'to_dict') else row)
+        row_str = ' '.join(str(val).lower() for val in row_values if val is not None and str(val).lower() != 'nan')
         result['entities'] = self.extract_entities_from_text(row_str)
         
         return result
@@ -4492,7 +4375,7 @@ class AIRowClassifier:
         return None
     
     async def _fallback_entity_matching(self, entity_name: str, entity_type: str, user_id: str,
-                                       platform_info: Dict, supabase_client, existing_df: pd.DataFrame) -> Optional[str]:
+                                       platform_info: Dict, supabase_client, existing_df) -> Optional[str]:
         """Fallback rapidfuzz matching when recordlinkage fails"""
         try:
             from rapidfuzz import fuzz, process
@@ -4611,7 +4494,7 @@ class RowProcessor:
         self.ai_classifier = ai_classifier
         self.enrichment_processor = enrichment_processor
     
-    async def process_row(self, row: pd.Series, row_index: int, sheet_name: str, 
+    async def process_row(self, row, row_index: int, sheet_name: str, 
                    platform_info: Dict, file_context: Dict, column_names: List[str]) -> Dict[str, Any]:
         """Process a single row and create an event with AI-powered classification and enrichment"""
         
@@ -4673,16 +4556,24 @@ class RowProcessor:
         
         return event
     
-    def _convert_row_to_json_serializable(self, row: pd.Series) -> Dict[str, Any]:
-        """Convert a pandas Series to JSON-serializable format"""
+    def _convert_row_to_json_serializable(self, row) -> Dict[str, Any]:
+        """Convert a row (Polars or dict) to JSON-serializable format"""
         result = {}
-        for column, value in row.items():
-            if pd.isna(value):
+        
+        # Handle different row types
+        if isinstance(row, dict):
+            items = row.items()
+        elif hasattr(row, 'to_dict'):
+            items = row.to_dict().items()
+        elif hasattr(row, 'items'):
+            items = row.items()
+        else:
+            return {}
+        
+        for column, value in items:
+            # Check if value is null/None
+            if value is None or (isinstance(value, str) and value.lower() == 'nan'):
                 result[str(column)] = None
-            elif isinstance(value, pd.Timestamp):
-                result[str(column)] = value.isoformat()
-            elif isinstance(value, (pd.Timedelta, pd.Period)):
-                result[str(column)] = str(value)
             elif isinstance(value, (int, float, str, bool)):
                 result[str(column)] = value
             elif isinstance(value, (list, dict)):
@@ -4699,17 +4590,15 @@ class RowProcessor:
             return {str(k): self._convert_nested_to_json_serializable(v) for k, v in obj.items()}
         elif isinstance(obj, list):
             return [self._convert_nested_to_json_serializable(item) for item in obj]
-        elif isinstance(obj, pd.Timestamp):
+        elif hasattr(obj, 'isoformat'):
+            # Handle datetime-like objects (datetime, date, time, etc.)
             return obj.isoformat()
-        elif isinstance(obj, (pd.Timedelta, pd.Period)):
-            return str(obj)
-        elif pd.isna(obj):
+        elif obj is None or (isinstance(obj, str) and obj.lower() == 'nan'):
             return None
         elif isinstance(obj, (int, float, str, bool)):
             return obj
         else:
             return str(obj)
-    
 
 
 class ExcelProcessor:
@@ -4823,10 +4712,10 @@ class ExcelProcessor:
             logger.warning(f"Failed to parse timestamp '{timestamp_str}': {e}, using current time")
             return pendulum.now('UTC').to_datetime()
     
-    async def detect_anomalies(self, df: pd.DataFrame, sheet_name: str) -> Dict[str, Any]:
+    async def detect_anomalies(self, df, sheet_name: str) -> Dict[str, Any]:
         """FIX #16: Detect anomalies in Excel data using thread pool to avoid blocking event loop"""
         
-        def _detect_anomalies_sync(df_copy: pd.DataFrame) -> Dict[str, Any]:
+        def _detect_anomalies_sync(df_copy) -> Dict[str, Any]:
             """CPU-bound anomaly detection moved to sync function for thread pool execution"""
             anomalies = {
                 'corrupted_cells': [],
@@ -4891,7 +4780,7 @@ class ExcelProcessor:
         with ThreadPoolExecutor(max_workers=1) as executor:
             return await loop.run_in_executor(executor, _detect_anomalies_sync, df.copy())
     
-    def detect_financial_fields(self, df: pd.DataFrame, sheet_name: str) -> Dict[str, Any]:
+    def detect_financial_fields(self, df, sheet_name: str) -> Dict[str, Any]:
         """Auto-detect financial fields (P&L, balance sheet, cashflow)"""
         financial_detection = {
             'sheet_type': 'unknown',
@@ -4901,7 +4790,7 @@ class ExcelProcessor:
         }
         
         try:
-            column_names = [col.lower().strip() for col in df.columns if pd.notna(col)]
+            column_names = [col.lower().strip() for col in df.columns if col is not None and str(col).lower() != 'nan']
             
             # Check for P&L indicators
             pl_score = 0
@@ -5064,13 +4953,11 @@ class ExcelProcessor:
             return [self._sanitize_nan_for_json(item) for item in obj]
         elif isinstance(obj, float) and (math.isnan(obj) or math.isinf(obj)):
             return None
-        # FIX #35: Handle all types of NaN values including numpy.nan
-        elif pd.isna(obj):
+        elif obj is None or (isinstance(obj, str) and obj.lower() == 'nan'):
             return None
-        elif obj is np.nan:  # Catch numpy.nan specifically
+        elif obj is np.nan:
             return None
         elif hasattr(obj, '__array__') and hasattr(obj, 'dtype'):
-            # Handle numpy scalars (np.float64(nan), etc.)
             try:
                 if np.isnan(obj):
                     return None
@@ -5078,10 +4965,9 @@ class ExcelProcessor:
                     return None
             except (TypeError, ValueError):
                 pass  # Not a numeric type
-        else:
-            return obj
+        return obj
     
-    async def _fast_classify_row_cached(self, row: pd.Series, platform_info: dict, column_names: list) -> dict:
+    async def _fast_classify_row_cached(self, row, platform_info: dict, column_names: list) -> dict:
         """Fast cached classification with AI fallback - 90% cost reduction"""
         try:
             # FIX #16: Move CPU-bound row.to_dict() to thread pool
@@ -5108,7 +4994,8 @@ class ExcelProcessor:
                 return cached_result
             
             # Fast pattern-based classification as fallback
-            row_text = ' '.join([str(val) for val in row.values if pd.notna(val)]).lower()
+            row_values = row.values() if isinstance(row, dict) else (row.to_dict().values() if hasattr(row, 'to_dict') else row)
+            row_text = ' '.join([str(val) for val in row_values if val is not None and str(val).lower() != 'nan']).lower()
             
             classification = {
                 'category': 'financial',
@@ -5143,11 +5030,12 @@ class ExcelProcessor:
                 'method': 'fallback'
             }
 
-    def _fast_classify_row(self, row: pd.Series, platform_info: dict, column_names: list) -> dict:
+    def _fast_classify_row(self, row, platform_info: dict, column_names: list) -> dict:
         """Fast pattern-based row classification without AI"""
         try:
             # Convert row to string for pattern matching
-            row_text = ' '.join([str(val) for val in row.values if pd.notna(val)]).lower()
+            row_values = row.values() if isinstance(row, dict) else (row.to_dict().values() if hasattr(row, 'to_dict') else row)
+            row_text = ' '.join([str(val) for val in row_values if val is not None and str(val).lower() != 'nan']).lower()
             
             # Pattern-based classification
             if any(keyword in row_text for keyword in ['salary', 'payroll', 'wage', 'employee']):
@@ -8426,10 +8314,10 @@ async def generate_chat_title(request: dict):
         })
         
         # Use Groq for simple title generation (cost-effective)
-        if not groq_client:
-            raise ValueError("Groq client not initialized. Please check GROQ_API_KEY.")
+        # FIX #32: Use unified Groq client initialization helper
+        title_client = get_groq_client()
         
-        response = groq_client.chat.completions.create(
+        response = title_client.chat.completions.create(
             model="llama-3.3-70b-versatile",
             messages=[
                 {"role": "system", "content": "Generate a concise, descriptive title (max 6 words) for this financial question. Return ONLY the title, no quotes or extra text."},
