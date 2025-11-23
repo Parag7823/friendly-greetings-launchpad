@@ -29,6 +29,7 @@ import ahocorasick
 # import easyocr  # 92% OCR accuracy vs 60% tesseract
 import structlog
 import numpy as np
+from sklearn.metrics.pairwise import cosine_similarity
 from pydantic import BaseModel, Field, validator
 from pydantic_settings import BaseSettings
 from aiocache import cached, Cache
@@ -845,9 +846,6 @@ class UniversalDocumentClassifierOptimized:
             # OPTIMIZED: Use TF-IDF for smart indicator weighting
             if self.tfidf_vectorizer and self.doc_type_vectors is not None:
                 try:
-                    # Lazy import sklearn only when needed
-                    from sklearn.metrics.pairwise import cosine_similarity
-                    
                     # Transform combined text to TF-IDF vector
                     text_vector = self.tfidf_vectorizer.transform([combined_text])
                     

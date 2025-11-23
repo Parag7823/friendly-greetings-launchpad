@@ -5,64 +5,78 @@
 
 @layer base {
   :root {
-    /* Finley AI Dark Theme - Premium Black */
-    --background: 0 0% 0%;
-    /* #000000 - Solid black */
-    --foreground: 0 0% 100%;
-    /* #FFFFFF - Pure white text */
+    /* The Executive Theme - Midnight Navy & Copper */
+    
+    /* Primary Backgrounds */
+    --background: 217 33% 2%;
+    /* #020617 - Void Navy (deepest blue, almost black) */
+    --foreground: 220 13% 91%;
+    /* #e2e8f0 - Platinum (high contrast, softer than white) */
 
-    --card: 0 0% 4%;
-    /* #0A0A0A - Slightly lighter black for cards */
-    --card-foreground: 0 0% 100%;
-    /* #FFFFFF - White text on cards */
+    --card: 217 33% 9%;
+    /* #0f172a - Deep River (slightly lighter navy for cards) */
+    --card-foreground: 220 13% 91%;
+    /* #e2e8f0 - Platinum text on cards */
 
-    --popover: 0 0% 4%;
-    /* #0A0A0A - Dark popover background */
-    --popover-foreground: 0 0% 100%;
-    /* #FFFFFF - White text in popovers */
+    --popover: 217 33% 9%;
+    /* #0f172a - Deep River for popovers */
+    --popover-foreground: 220 13% 91%;
+    /* #e2e8f0 - Platinum text */
 
-    --primary: 0 0% 100%;
-    /* #FFFFFF - White for primary buttons */
-    --primary-foreground: 0 0% 0%;
-    /* #000000 - Black text on white buttons */
+    /* Primary Accent - Electric Copper */
+    --primary: 38 92% 50%;
+    /* #f59e0b - Electric Copper for primary buttons and active states */
+    --primary-foreground: 217 33% 2%;
+    /* #020617 - Void Navy text on copper buttons */
 
-    --secondary: 0 0% 8%;
-    /* #141414 - Dark gray for secondary */
-    --secondary-foreground: 0 0% 100%;
-    /* #FFFFFF - White text on secondary */
+    /* Secondary - Platinum */
+    --secondary: 220 13% 91%;
+    /* #e2e8f0 - Platinum for secondary elements */
+    --secondary-foreground: 217 33% 2%;
+    /* #020617 - Void Navy text on platinum */
 
-    --muted: 0 0% 8%;
-    /* #141414 - Muted background */
-    --muted-foreground: 0 0% 63%;
-    /* #A0A0A0 - Muted text */
+    /* Muted - Subtle navy tones */
+    --muted: 217 33% 15%;
+    /* Muted navy background */
+    --muted-foreground: 220 13% 60%;
+    /* Muted text */
 
-    --accent: 0 0% 8%;
-    /* #141414 - Accent background */
-    --accent-foreground: 0 0% 96%;
-    /* #F4F4F4 - Light accent text */
+    /* Accent - Electric Copper */
+    --accent: 38 92% 50%;
+    /* #f59e0b - Electric Copper for accents */
+    --accent-foreground: 217 33% 2%;
+    /* #020617 - Void Navy text on copper accents */
 
-    --destructive: 0 84% 60%;
-    /* Red for errors */
-    --destructive-foreground: 0 0% 98%;
-    /* Light text on destructive */
+    /* Status Colors */
+    --destructive: 356 100% 71%;
+    /* #f43f5e - Rose for errors and negative trends */
+    --destructive-foreground: 220 13% 91%;
+    /* Platinum text on destructive */
 
-    --border: 0 0% 12%;
-    /* #1F1F1F - Subtle borders */
-    --input: 0 0% 12%;
-    /* #1F1F1F - Input backgrounds */
-    --ring: 0 0% 63%;
-    /* #A0A0A0 - Focus rings */
+    /* Borders and Inputs */
+    --border: 217 33% 15%;
+    /* Subtle navy borders */
+    --input: 217 33% 9%;
+    /* #0f172a - Deep River for input backgrounds */
+    --ring: 38 92% 50%;
+    /* #f59e0b - Electric Copper for focus rings */
 
     --radius: 0.5rem;
     /* 8px border radius */
 
     /* Finley AI Custom Variables */
-    --finley-accent: 0 0% 63%;
-    /* #A0A0A0 - Brand accent */
-    --finley-light-accent: 0 0% 96%;
-    /* #F4F4F4 - Light accent */
-    --finley-shadow: 0 0% 0%;
-    /* Pure black for shadows */
+    --finley-accent: 38 92% 50%;
+    /* #f59e0b - Electric Copper brand accent */
+    --finley-light-accent: 38 92% 60%;
+    /* Lighter copper for hover states */
+    --finley-shadow: 217 33% 2%;
+    /* Void Navy for shadows */
+    
+    /* Status Colors */
+    --success: 16 100% 66%;
+    /* #10b981 - Emerald for positive trends */
+    --error: 356 100% 71%;
+    /* #f43f5e - Rose for negative trends */
 
     /* Gradients */
     --gradient-primary: linear-gradient(135deg, hsl(var(--primary)), hsl(var(--finley-light-accent)));
@@ -82,6 +96,17 @@
     font-family: 'Inter', system-ui, -apple-system, sans-serif;
     font-feature-settings: "cv11", "ss01";
     font-variation-settings: "opsz" 32;
+  }
+
+  /* Enforce tabular numbers for grids and tables - ensures columns align perfectly */
+  .ag-theme-alpine-dark,
+  table,
+  [role="grid"],
+  [role="table"],
+  .data-table,
+  .financial-grid {
+    font-feature-settings: "tnum";
+    font-variant-numeric: tabular-nums;
   }
 
   /* Custom scrollbar for dark theme */

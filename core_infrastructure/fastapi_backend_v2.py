@@ -7529,7 +7529,6 @@ class ExcelProcessor:
             for vendor, dates in vendor_dates.items():
                 if len(dates) >= 3:
                     # Calculate time intervals between consecutive events
-                    import pendulum
                     date_objs = sorted([pendulum.parse(d).naive() for d in dates])
                     intervals = [(date_objs[i+1] - date_objs[i]).days for i in range(len(date_objs)-1)]
                     
