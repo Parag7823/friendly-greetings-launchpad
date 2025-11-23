@@ -20,6 +20,7 @@ import { useAuth } from './AuthProvider';
 import { supabase } from '@/integrations/supabase/client';
 import { config } from '@/config';
 import { useToast } from './ui/use-toast';
+import { BrandedLoader } from './BrandedLoader';
 // Removed framer-motion - not needed in 3-panel layout
 import { useFastAPIProcessor } from './FastAPIProcessor';
 
@@ -780,7 +781,7 @@ export const DataSourcesPanel = ({ isOpen, onClose, onFilePreview }: DataSources
 
             {loading ? (
               <div className="flex items-center justify-center py-8">
-                <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+                <BrandedLoader text="Loading integrations..." size="md" variant="spinner" />
               </div>
             ) : (
               <div className="space-y-4">

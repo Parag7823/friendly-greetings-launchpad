@@ -8,6 +8,7 @@ import { useToast } from '@/hooks/use-toast';
 import { useSearchParams } from 'react-router-dom';
 import { config } from '@/config';
 import { useFastAPIProcessor } from './FastAPIProcessor';
+import { ChatInputMicroInteractions } from './ChatInputMicroInteractions';
 
 interface ChatInterfaceProps {
   currentView?: string;
@@ -35,6 +36,7 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
   const [configConnId, setConfigConnId] = useState<string | null>(null);
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
   const [pastedImages, setPastedImages] = useState<File[]>([]);
+  const [isThinking, setIsThinking] = useState(false);
 
   // IMPROVEMENT: Cleanup Object URLs to prevent memory leaks
   useEffect(() => {
@@ -625,134 +627,72 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
               )}
             </div>
 
-            {/* Chat Input Area - Rounded with animated questions */}
+            {/* Chat Input Area with Micro-Interactions */}
             <div className="border-t border-border/50 p-4 finley-dynamic-bg">
               <div className="max-w-4xl mx-auto">
-                <div className="relative rounded-[20px]">
-                  {/* Animated gradient border line */}
-                  <div
-                    className="absolute inset-0 opacity-75 animate-border-slide pointer-events-none z-0"
-                    style={{
-                      background: `linear-gradient(90deg, 
-                          transparent 0%, 
-                          transparent 40%, 
-                          hsl(var(--foreground)) 50%, 
-                          transparent 60%, 
-                          transparent 100%)`,
-                      backgroundSize: '200% 100%',
-                      animationDuration: '5s',
-                      padding: '1px',
-                      borderRadius: '20px',
-                      WebkitMask: 'linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0)',
-                      WebkitMaskComposite: 'xor',
-                      maskComposite: 'exclude',
-                    }}
-                  />
+                {/* Attached Files Preview - Above input */}
+                {pastedImages.length > 0 && (
+                  <div className="mb-3 flex flex-wrap gap-2 p-2 glass-card rounded-lg">
+                    {pastedImages.map((file, index) => {
+                      const isImage = file.type.startsWith('image/');
+                      return (
+                        <div key={index} className="relative group">
+                          {isImage ? (
+                            <img
+                              src={URL.createObjectURL(file)}
+                              alt={file.name}
+                              className="w-16 h-16 object-cover rounded border border-border"
+                            />
+                          ) : (
+                            <div className="w-16 h-16 flex flex-col items-center justify-center rounded border border-border bg-muted text-center p-1">
+                              <FileSpreadsheet className="w-6 h-6 text-muted-foreground mb-1" />
+                              <span className="text-[8px] text-muted-foreground truncate w-full px-1">
+                                {file.name.split('.').pop()?.toUpperCase()}
+                              </span>
+                            </div>
+                          )}
+                          <button
+                            onClick={() => setPastedImages(prev => prev.filter((_, i) => i !== index))}
+                            className="absolute -top-1 -right-1 w-5 h-5 bg-destructive text-destructive-foreground rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                            title={`Remove ${file.name}`}
+                          >
+                            <X className="w-3 h-3" />
+                          </button>
+                        </div>
+                      );
+                    })}
+                    <div className="flex items-center text-xs text-muted-foreground px-2">
+                      {pastedImages.length} file(s) ready to send
+                    </div>
+                  </div>
+                )}
 
-                  {/* Attached Files Preview - Above input */}
-                  {pastedImages.length > 0 && (
-                    <div className="mb-2 flex flex-wrap gap-2 p-2 bg-muted/30 rounded-lg border border-border/50">
-                      {pastedImages.map((file, index) => {
-                        const isImage = file.type.startsWith('image/');
-                        return (
-                          <div key={index} className="relative group">
-                            {isImage ? (
-                              <img
-                                src={URL.createObjectURL(file)}
-                                alt={file.name}
-                                className="w-16 h-16 object-cover rounded border border-border"
-                              />
-                            ) : (
-                              <div className="w-16 h-16 flex flex-col items-center justify-center rounded border border-border bg-muted text-center p-1">
-                                <FileSpreadsheet className="w-6 h-6 text-muted-foreground mb-1" />
-                                <span className="text-[8px] text-muted-foreground truncate w-full px-1">
-                                  {file.name.split('.').pop()?.toUpperCase()}
-                                </span>
-                              </div>
-                            )}
-                            <button
-                              onClick={() => setPastedImages(prev => prev.filter((_, i) => i !== index))}
-                              className="absolute -top-1 -right-1 w-5 h-5 bg-destructive text-destructive-foreground rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
-                              title={`Remove ${file.name}`}
-                            >
-                              <X className="w-3 h-3" />
-                            </button>
-                          </div>
-                        );
-                      })}
-                      <div className="flex items-center text-xs text-muted-foreground px-2">
-                        {pastedImages.length} file(s) ready to send
+                {/* Drag and Drop Wrapper */}
+                <div
+                  {...getRootProps()}
+                  className={`relative rounded-lg transition-all duration-200 ${isDragActive ? 'ring-2 ring-primary/50' : ''}`}
+                >
+                  <input {...getInputProps()} />
+
+                  {/* Drag Overlay */}
+                  {isDragActive && (
+                    <div className="absolute inset-0 z-50 rounded-lg bg-primary/10 backdrop-blur-sm flex items-center justify-center border-2 border-dashed border-primary">
+                      <div className="text-center">
+                        <Paperclip className="w-8 h-8 text-primary mx-auto mb-2 animate-bounce" />
+                        <p className="text-sm font-medium text-primary">Drop files here</p>
                       </div>
                     </div>
                   )}
 
-                  {/* Input wrapper with background */}
-                  <div
-                    {...getRootProps()}
-                    className={`relative z-10 border rounded-[20px] bg-black/40 backdrop-blur-sm border-white/10 shadow-lg transition-colors duration-200 ${isDragActive ? 'border-primary/50 bg-primary/5' : ''}`}
-                  >
-                    <input {...getInputProps()} />
-
-                    {/* Drag Overlay */}
-                    {isDragActive && (
-                      <div className="absolute inset-0 z-50 rounded-[20px] bg-primary/10 backdrop-blur-sm flex items-center justify-center border-2 border-dashed border-primary">
-                        <div className="text-center">
-                          <Paperclip className="w-8 h-8 text-primary mx-auto mb-2 animate-bounce" />
-                          <p className="text-sm font-medium text-primary">Drop files here</p>
-                        </div>
-                      </div>
-                    )}
-
-                    <div className="relative">
-                      <input
-                        type="text"
-                        value={message}
-                        onChange={(e) => setMessage(e.target.value)}
-                        onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') {
-                            e.preventDefault();
-                            handleSendMessage();
-                          }
-                        }}
-                        onPaste={handlePaste}
-                        placeholder={isDragActive ? "Drop files to attach..." : sampleQuestions[currentQuestionIndex]}
-                        className="w-full bg-transparent border-none pl-14 pr-14 py-4 text-sm text-white placeholder-white/50 focus:outline-none focus:ring-0"
-                        autoComplete="off"
-                        spellCheck="false"
-                      />
-
-                      {/* File Upload Button - Left side */}
-                      <button
-                        onClick={open}
-                        disabled={uploadingFile}
-                        className="absolute left-4 top-1/2 -translate-y-1/2 w-9 h-9 text-muted-foreground hover:text-foreground rounded-full flex items-center justify-center transition-all duration-200 hover:bg-muted/50 disabled:opacity-50 disabled:cursor-not-allowed relative"
-                        title="Upload files or images"
-                      >
-                        {uploadingFile ? (
-                          <Loader2 className="w-5 h-5 animate-spin" />
-                        ) : (
-                          <>
-                            <Paperclip className="w-5 h-5" />
-                            {pastedImages.length > 0 && (
-                              <span className="absolute -top-1 -right-1 w-4 h-4 bg-primary text-primary-foreground text-[10px] font-bold rounded-full flex items-center justify-center">
-                                {pastedImages.length}
-                              </span>
-                            )}
-                          </>
-                        )}
-                      </button>
-
-                      {/* Send Button - Right side */}
-                      <button
-                        onClick={handleSendMessage}
-                        disabled={!message.trim() && pastedImages.length === 0}
-                        className="absolute right-4 top-1/2 -translate-y-1/2 w-9 h-9 bg-primary text-primary-foreground rounded-full flex items-center justify-center transition-all duration-200 hover:bg-primary/90 hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
-                      >
-                        <Send className="w-4 h-4" />
-                      </button>
-                    </div>
-                  </div>
+                  {/* Chat Input Micro-Interactions Component */}
+                  <ChatInputMicroInteractions
+                    value={message}
+                    onChange={setMessage}
+                    onSend={handleSendMessage}
+                    isLoading={isThinking}
+                    placeholder={isDragActive ? "Drop files to attach..." : sampleQuestions[currentQuestionIndex]}
+                    onFileClick={open}
+                  />
                 </div>
               </div>
             </div>

@@ -1,9 +1,6 @@
 # Standard library imports
 from __future__ import annotations
 
-# DEBUG: Print to see if module import starts
-print("🔍 DEBUG: Starting fastapi_backend_v2.py import...", flush=True)
-
 # Standard library imports
 import os
 import sys
@@ -12,14 +9,11 @@ import uuid
 import secrets
 import time
 import mmap
-
-print("🔍 DEBUG: Standard library imports complete", flush=True)
+import structlog
 
 # CRITICAL FIX: Defer database_optimization_utils import to startup event
 # This import was blocking module load - moved to startup event where it's used
 # from database_optimization_utils import OptimizedDatabaseQueries
-
-print("🔍 DEBUG: Skipped database_optimization_utils import (deferred to startup)", flush=True)
 
 try:
     import sentry_sdk
@@ -3173,8 +3167,9 @@ class DataEnrichmentProcessor:
                 validation_flags['amount_valid'] = False
                 validation_flags['validation_errors'].append(f'amount_usd exceeds limit: {amount_usd}')
             
-            # Validate currency
-            valid_currencies = ['USD', 'EUR', 'GBP', 'INR', 'JPY', 'CNY', 'AUD', 'CAD', 'CHF', 'SEK', 'NZD']
+            # FIX #46: Use configuration-based validation rules instead of hardcoded
+            # Validate currency - configuration can be overridden via environment or config file
+            valid_currencies = os.getenv('VALID_CURRENCIES', 'USD,EUR,GBP,INR,JPY,CNY,AUD,CAD,CHF,SEK,NZD').split(',')
             currency = enhanced.get('currency', 'USD')
             if currency not in valid_currencies:
                 validation_flags['currency_valid'] = False
@@ -4333,8 +4328,11 @@ class AIRowClassifier:
     
     async def _create_new_entity(self, entity_name: str, entity_type: str, user_id: str, 
                                 platform_info: Dict, supabase_client) -> Optional[str]:
-        """Create a new entity in the database"""
-        try:
+        """Create a new entity in the database with retry logic"""
+        from tenacity import retry, stop_after_attempt, wait_exponential
+        
+        @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
+        async def _insert_with_retry():
             new_entity = {
                 'user_id': user_id,
                 'entity_type': entity_type,
@@ -4346,15 +4344,25 @@ class AIRowClassifier:
                 'last_seen_at': datetime.utcnow().isoformat()
             }
             
+            # FIX #38: Add validation before insert
+            if not entity_name or not entity_type or not user_id:
+                raise ValueError(f"Missing required fields: name={entity_name}, type={entity_type}, user={user_id}")
+            
             result = supabase_client.table('normalized_entities').insert(new_entity).execute()
             
-            if result.data and len(result.data) > 0:
-                entity_id = result.data[0]['id']
-                logger.info(f"Created new entity: {entity_type} - {entity_name}")
-                return entity_id
+            # FIX #38: Validate insert result
+            if not result.data or len(result.data) == 0:
+                raise ValueError(f"Insert succeeded but no data returned for entity {entity_name}")
+            
+            return result.data[0]['id']
+        
+        try:
+            entity_id = await _insert_with_retry()
+            logger.info(f"Created new entity: {entity_type} - {entity_name} (ID: {entity_id})")
+            return entity_id
                 
         except Exception as e:
-            logger.error(f"Failed to create entity {entity_name}: {e}")
+            logger.error(f"Failed to create entity {entity_name} after 3 retries: {e}")
         
         return None
     
