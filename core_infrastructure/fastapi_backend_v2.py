@@ -2963,15 +2963,10 @@ class DataEnrichmentProcessor:
             # LIBRARY REPLACEMENT: Use forex-python for exchange rates
             def _get_rate_sync():
                 c = CurrencyRates()
-                try:
-                    # Parse transaction date
-                    date_obj = datetime.strptime(transaction_date, '%Y-%m-%d').date()
-                    # Get historical rate for transaction date
-                    return c.get_rate(from_currency, to_currency, date_obj)
-                except Exception as date_error:
-                    logger.debug(f"Historical rate failed, using current rate: {date_error}")
-                    # Fallback to current rate if historical fails
-                    return c.get_rate(from_currency, to_currency)
+                # Parse transaction date
+                date_obj = datetime.strptime(transaction_date, '%Y-%m-%d').date()
+                # Get historical rate for transaction date - NO FALLBACK, fail clearly if it fails
+                return c.get_rate(from_currency, to_currency, date_obj)
             
             # Execute in thread pool to avoid blocking
             loop = asyncio.get_event_loop()
