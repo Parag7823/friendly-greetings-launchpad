@@ -21,8 +21,10 @@ import { supabase } from '@/integrations/supabase/client';
 import { config } from '@/config';
 import { useToast } from './ui/use-toast';
 import { BrandedLoader } from './BrandedLoader';
-// Removed framer-motion - not needed in 3-panel layout
+import { FileCard } from './FileCard';
+import { FileStatusSheet } from './FileStatusSheet';
 import { useFastAPIProcessor } from './FastAPIProcessor';
+import { useFileStatusStore } from '@/stores/useFileStatusStore'; // ERROR #7: Only uses activeFileId and setActiveFile
 
 interface DataSourcesPanelProps {
   isOpen: boolean;
@@ -150,6 +152,11 @@ export const DataSourcesPanel = ({ isOpen, onClose, onFilePreview }: DataSources
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [uploadedFiles, setUploadedFiles] = useState<any[]>([]);
+  const [statusSheetOpen, setStatusSheetOpen] = useState(false);
+  
+  // Step 5.1: Use sticky activeFileId from store (panel stays open, just updates content)
+  const activeFileId = useFileStatusStore((state) => state.activeFileId);
+  const setActiveFile = useFileStatusStore((state) => state.setActiveFile);
 
   // IMPROVEMENT: Use shared hook for connections (prevents duplicate polling)
   const { data: connections = [], isLoading: loading, refetch: refetchConnections } = useConnections();
@@ -475,40 +482,52 @@ export const DataSourcesPanel = ({ isOpen, onClose, onFilePreview }: DataSources
     };
   }, [user?.id, isOpen, refreshConnections, verifyConnector, verifying]);
 
-  // Load uploaded files with real-time polling
-  useEffect(() => {
-    const loadFiles = async () => {
-      if (!user?.id) return;
-      try {
-        console.log('🔄 Loading uploaded files for user:', user.id);
-        const { data, error } = await supabase
-          .from('ingestion_jobs')
-          .select('id, filename, status, created_at, progress, error_message')
-          .eq('user_id', user.id)
-          .order('created_at', { ascending: false })
-          .limit(20);
+  // Load uploaded files - initial load only
+  const loadFiles = async () => {
+    if (!user?.id) return;
+    try {
+      console.log('🔄 Loading uploaded files for user:', user.id);
+      const { data, error } = await supabase
+        .from('ingestion_jobs')
+        .select('id, filename, status, created_at, progress, error_message, source')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false })
+        .limit(20);
 
-        if (error) {
-          console.error('❌ Error loading files:', error);
-        } else {
-          console.log('✅ Loaded files:', data?.length || 0, 'files');
-          console.log('Files data:', data);
-          setUploadedFiles(data || []);
-        }
-      } catch (e) {
-        console.error('❌ Failed to load files:', e);
+      if (error) {
+        console.error('❌ Error loading files:', error);
+      } else {
+        console.log('✅ Loaded files:', data?.length || 0, 'files');
+        setUploadedFiles(data || []);
       }
-    };
+    } catch (e) {
+      console.error('❌ Failed to load files:', e);
+    }
+  };
 
+  // ERROR #4 FIX: Replace polling with WebSocket events
+  // Only load on mount and when WebSocket events fire
+  useEffect(() => {
     if (isOpen && user?.id) {
-      loadFiles(); // Initial load immediately
-      // CRITICAL FIX: Reduce polling frequency to prevent database overload
-      // With 1000 concurrent users, 2-second polling = 30,000 req/min
-      // Changed to 30 seconds = 2,000 req/min (15x reduction)
-      // TODO: Replace with WebSocket subscriptions for true real-time updates
-      const interval = setInterval(loadFiles, 30000); // Poll every 30 seconds
+      loadFiles(); // Initial load only
 
-      // Listen for file upload events and actually process the files
+      // Listen for WebSocket job completion events
+      const handleJobComplete = () => {
+        console.log('📡 Job complete event received, refreshing files');
+        loadFiles();
+      };
+
+      const handleJobUpdate = () => {
+        console.log('📡 Job update event received, refreshing files');
+        loadFiles();
+      };
+
+      const handleJobError = () => {
+        console.log('📡 Job error event received, refreshing files');
+        loadFiles();
+      };
+
+      // Listen for file upload events and process files
       const handleFileUpload = async (event: any) => {
         const files = event.detail?.files;
         if (files && files.length > 0) {
@@ -527,9 +546,6 @@ export const DataSourcesPanel = ({ isOpen, onClose, onFilePreview }: DataSources
                 (progress) => {
                   // Progress callback
                   console.log(`Processing ${file.name}:`, progress);
-
-                  // Refresh file list on any progress update to show all files
-                  loadFiles();
 
                   if (progress.status === 'completed') {
                     toast({
@@ -562,10 +578,17 @@ export const DataSourcesPanel = ({ isOpen, onClose, onFilePreview }: DataSources
           loadFiles();
         }
       };
+
+      // Register WebSocket event listeners
+      window.addEventListener('job_complete', handleJobComplete);
+      window.addEventListener('job_update', handleJobUpdate);
+      window.addEventListener('job_error', handleJobError);
       window.addEventListener('files-selected-for-upload', handleFileUpload as EventListener);
 
       return () => {
-        clearInterval(interval);
+        window.removeEventListener('job_complete', handleJobComplete);
+        window.removeEventListener('job_update', handleJobUpdate);
+        window.removeEventListener('job_error', handleJobError);
         window.removeEventListener('files-selected-for-upload', handleFileUpload);
       };
     }
@@ -591,14 +614,14 @@ export const DataSourcesPanel = ({ isOpen, onClose, onFilePreview }: DataSources
 
       <div className="flex-1 overflow-y-auto">
         <div className="p-4 space-y-6">
-          {/* Unified Uploaded Files Section - Shows all files with their current state */}
+          {/* Financial Documents Section - Shows all files with their current state */}
           <div>
             <div className="flex items-center justify-between mb-3">
               <div className="flex items-center gap-2">
                 <FileSpreadsheet className="w-4 h-4 text-muted-foreground" />
-                <h3 className="text-xs font-medium">Uploaded Files</h3>
+                <h2 className="text-sm font-semibold">Financial Documents</h2>
                 {uploadedFiles.length > 0 && (
-                  <Badge variant="outline" className="text-[8px]">
+                  <Badge variant="secondary" className="text-[9px]">
                     {uploadedFiles.length}
                   </Badge>
                 )}
@@ -665,109 +688,28 @@ export const DataSourcesPanel = ({ isOpen, onClose, onFilePreview }: DataSources
               </div>
             ) : (
               <div className="max-h-[400px] overflow-y-auto space-y-2 pr-2 scrollbar-thin">
-                {uploadedFiles.map((file) => {
-                  const isProcessing = file.status === 'processing' || file.status === 'pending';
-                  const isCompleted = file.status === 'completed';
-                  const isFailed = file.status === 'failed';
-                  const progress = file.progress || 0;
-
-                  return (
-                    <div
-                      key={file.id}
-                      className="flex items-center justify-between p-3 rounded-md border finley-dynamic-bg hover:bg-muted/20 transition-colors group cursor-pointer"
-                      onClick={() => onFilePreview?.(file.id, file.filename || file.id, file)}
-                    >
-                      <div className="flex-1 min-w-0 space-y-1">
-                        <div className="flex items-center gap-2">
-                          <p className="text-xs font-medium truncate text-foreground">
-                            {file.filename || file.id || 'Unnamed File'}
-                          </p>
-                          {isProcessing && (
-                            <Loader2 className="w-3 h-3 animate-spin text-primary flex-shrink-0" />
-                          )}
-                          {isCompleted && (
-                            <CheckCircle2 className="w-3 h-3 text-green-500 flex-shrink-0" />
-                          )}
-                          {isFailed && (
-                            <AlertCircle className="w-3 h-3 text-destructive flex-shrink-0" />
-                          )}
-                        </div>
-
-                        <div className="flex items-center gap-2">
-                          <p className="text-[8px] text-muted-foreground">
-                            {new Date(file.created_at).toLocaleString()}
-                          </p>
-                          {isProcessing && progress > 0 && (
-                            <span className="text-[8px] text-primary font-medium">
-                              {progress}%
-                            </span>
-                          )}
-                        </div>
-
-                        {/* Progress bar for processing files */}
-                        {isProcessing && (
-                          <div className="w-full h-1 bg-muted rounded-full overflow-hidden">
-                            <div
-                              className="h-full bg-primary transition-all duration-300"
-                              style={{ width: `${progress}%` }}
-                            />
-                          </div>
-                        )}
-                      </div>
-
-                      <div className="ml-3 flex items-center gap-2 flex-shrink-0">
-                        {/* Preview button */}
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onFilePreview?.(file.id, file.filename || file.id, file);
-                          }}
-                          className="p-1.5 hover:bg-primary/10 rounded transition-colors opacity-0 group-hover:opacity-100"
-                          title="Preview file"
-                        >
-                          <Eye className="w-3.5 h-3.5 text-primary" />
-                        </button>
-
-                        <div>
-                          {isProcessing && (
-                            <Badge variant="secondary" className="text-[10px]">
-                              Processing...
-                            </Badge>
-                          )}
-                          {isCompleted && (
-                            <Badge variant="default" className="text-[10px] bg-green-500/10 text-green-600 border-green-500/20">
-                              ✓ Completed
-                            </Badge>
-                          )}
-                          {isFailed && (
-                            <div className="flex flex-col items-end gap-1">
-                              <Badge variant="destructive" className="text-[10px]">
-                                Failed
-                              </Badge>
-                              {file.error_message && (
-                                <p className="text-[9px] text-destructive/70 max-w-[150px] text-right truncate" title={file.error_message}>
-                                  {file.error_message}
-                                </p>
-                              )}
-                            </div>
-                          )}
-                        </div>
-
-                        {/* Delete button */}
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleDeleteFile(file.id, file.filename || file.id);
-                          }}
-                          className="p-1 hover:bg-destructive/10 rounded transition-colors opacity-0 group-hover:opacity-100"
-                          title="Delete file"
-                        >
-                          <Trash2 className="w-3.5 h-3.5 text-muted-foreground hover:text-destructive transition-colors" />
-                        </button>
-                      </div>
-                    </div>
-                  );
-                })}
+                {uploadedFiles.map((file) => (
+                  <FileCard
+                    key={file.id}
+                    file={{
+                      id: file.id,
+                      filename: file.filename || file.id || 'Unnamed File',
+                      status: file.status || 'pending',
+                      created_at: file.created_at,
+                      progress: file.progress,
+                      error_message: file.error_message,
+                      source: file.source || 'manual'
+                    }}
+                    onPreview={(fileId, filename, fileData) => {
+                      onFilePreview?.(fileId, filename, fileData);
+                    }}
+                    onDelete={handleDeleteFile}
+                    onViewProgress={(fileId) => {
+                      setActiveFile(fileId);
+                      setStatusSheetOpen(true);
+                    }}
+                  />
+                ))}
               </div>
             )}
           </div>
@@ -926,6 +868,20 @@ export const DataSourcesPanel = ({ isOpen, onClose, onFilePreview }: DataSources
           </div>
         </div>
       </div>
+
+      {/* File Status Sheet - Real-time processing status (Step 5.1: Sticky panel) */}
+      {activeFileId && (
+        <FileStatusSheet
+          fileId={activeFileId}
+          open={statusSheetOpen}
+          onOpenChange={(open) => {
+            setStatusSheetOpen(open);
+            if (!open) {
+              setActiveFile(null);
+            }
+          }}
+        />
+      )}
     </div>
   );
 };

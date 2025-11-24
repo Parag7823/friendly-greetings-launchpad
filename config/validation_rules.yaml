@@ -1,0 +1,60 @@
+# Validation Rules Configuration
+# ================================
+# Centralized validation rules for financial data enrichment.
+# Non-developers can edit these values without touching code.
+#
+# Usage:
+# - Load this file at startup
+# - Use values for all validation checks
+# - Override via environment variables if needed
+
+amount:
+  min_value: -100000000.0  # -$100M
+  max_value: 100000000.0   # +$100M
+  required_precision: 2    # Decimal places
+  description: "Amount validation range for transactions"
+
+currency:
+  valid_currencies:
+    - USD
+    - EUR
+    - GBP
+    - INR
+    - JPY
+    - CNY
+    - AUD
+    - CAD
+    - CHF
+    - SEK
+    - NZD
+  default_currency: USD
+  description: "List of supported currencies"
+
+exchange_rate:
+  min_rate: 0.001
+  max_rate: 1000.0
+  description: "Exchange rate validation bounds"
+
+vendor:
+  min_length: 2
+  max_length: 255
+  description: "Vendor name validation"
+
+confidence:
+  threshold: 0.7
+  high_priority_threshold: 0.5
+  description: "Confidence score thresholds for review flagging"
+
+transaction_type:
+  valid_types:
+    - income
+    - expense
+    - transfer
+    - refund
+    - unknown
+  description: "Valid transaction type classifications"
+
+date:
+  min_year: 1900
+  max_year: 2100
+  description: "Date range validation"

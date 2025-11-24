@@ -1,11 +1,15 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Menu } from 'lucide-react';
+import { Menu, Loader2 } from 'lucide-react';
 import { FinleySidebar } from './FinleySidebar';
 import { ThreePanelLayout } from './ThreePanelLayout';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from './AuthProvider';
 import { Button } from './ui/button';
+import { Badge } from './ui/badge';
+import { useFileStatusSocket } from '@/hooks/useFileStatusSocket';
+import { supabase } from '@/integrations/supabase/client';
+import { WebSocketProvider } from '@/contexts/WebSocketContext';
 
 export const FinleyLayout = () => {
   const { user, loading, signInAnonymously } = useAuth();
@@ -13,8 +17,27 @@ export const FinleyLayout = () => {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(true);
   const [currentView, setCurrentView] = useState('chat');
   const [currentChatId, setCurrentChatId] = useState<string | null>(null);
+  const [sessionToken, setSessionToken] = useState<string | null>(null);
   const location = useLocation();
   const navigate = useNavigate();
+
+  // ERROR #2 FIX: Initialize WebSocket with auth credentials
+  useEffect(() => {
+    const loadSession = async () => {
+      if (!user?.id) return;
+      try {
+        const { data } = await supabase.auth.getSession();
+        const token = data.session?.access_token || null;
+        setSessionToken(token);
+      } catch (error) {
+        console.error('Failed to load session token:', error);
+      }
+    };
+    loadSession();
+  }, [user?.id]);
+
+  // Initialize WebSocket connection with auth
+  const { socket, isConnected } = useFileStatusSocket(user?.id, sessionToken);
 
   // Listen for chat events
   useEffect(() => {
@@ -142,13 +165,31 @@ export const FinleyLayout = () => {
       
       {/* Main Content */}
       <div className="flex-1 flex flex-col min-h-0">
-        {/* 3-Panel Layout */}
-        <div className="flex-1 min-h-0">
-          <ThreePanelLayout 
-            currentView={currentView}
-            onNavigate={handleNavigate}
-          />
-        </div>
+        {/* ERROR #5 FIX: Wrap with WebSocketProvider for global access */}
+        <WebSocketProvider socket={socket} isConnected={isConnected}>
+          {/* ERROR #6 FIX: WebSocket connection status indicator */}
+          {user && !isConnected && (
+            <motion.div
+              initial={{ opacity: 0, y: -10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              className="fixed top-4 right-4 z-50"
+            >
+              <Badge variant="destructive" className="text-xs gap-1.5 px-2.5 py-1">
+                <Loader2 className="w-3 h-3 animate-spin" />
+                Reconnecting...
+              </Badge>
+            </motion.div>
+          )}
+
+          {/* 3-Panel Layout */}
+          <div className="flex-1 min-h-0">
+            <ThreePanelLayout 
+              currentView={currentView}
+              onNavigate={handleNavigate}
+            />
+          </div>
+        </WebSocketProvider>
       </div>
     </div>
   );

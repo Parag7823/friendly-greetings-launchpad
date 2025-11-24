@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
 import { GripVertical } from 'lucide-react';
 import { ChatInterface } from './ChatInterface';
@@ -14,6 +14,21 @@ interface ThreePanelLayoutProps {
 export const ThreePanelLayout = ({ currentView = 'chat', onNavigate }: ThreePanelLayoutProps) => {
   const [openFiles, setOpenFiles] = useState<any[]>([]);
   const [activeFileId, setActiveFileId] = useState<string | null>(null);
+  const rightPanelRef = useRef<any>(null);
+
+  // Step 4.1: Hide right panel by default with localStorage memory
+  useEffect(() => {
+    const isFirstVisit = !localStorage.getItem('rightPanelExpanded');
+    const wasExpanded = localStorage.getItem('rightPanelExpanded') === 'true';
+    
+    if (isFirstVisit && rightPanelRef.current) {
+      // On first visit, collapse the right panel
+      rightPanelRef.current?.collapse?.();
+    } else if (wasExpanded && rightPanelRef.current) {
+      // If user previously expanded it, keep it expanded
+      rightPanelRef.current?.expand?.();
+    }
+  }, []);
 
   // Handle file click from Data Sources
   const handleFileClick = (fileId: string, filename: string, fileData: any) => {
@@ -66,8 +81,17 @@ export const ThreePanelLayout = ({ currentView = 'chat', onNavigate }: ThreePane
           </div>
         </PanelResizeHandle>
 
-        {/* Data Sources Panel - 25% default */}
-        <Panel defaultSize={25} minSize={15} maxSize={40} className="relative">
+        {/* Data Sources Panel - 25% default, collapsible (Step 4.1) */}
+        <Panel
+          ref={rightPanelRef}
+          defaultSize={25}
+          minSize={15}
+          maxSize={40}
+          collapsible
+          className="relative"
+          onCollapse={() => localStorage.setItem('rightPanelExpanded', 'false')}
+          onExpand={() => localStorage.setItem('rightPanelExpanded', 'true')}
+        >
           <div className="h-full border-l border-border">
             <DataSourcesPanel
               isOpen={true}

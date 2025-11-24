@@ -13,6 +13,7 @@ import math
 import structlog
 import os
 from typing import Optional, Any, Dict, List
+from datetime import datetime
 
 logger = structlog.get_logger(__name__)
 
@@ -198,3 +199,168 @@ def get_groq_client():
     
     # Create and return local client
     return Groq(api_key=groq_api_key)
+
+
+# FIX #50: CONVERSATIONAL STATUS MESSAGE GENERATOR (with instructor + groq)
+def generate_friendly_status(step: str, context: Optional[Dict[str, Any]] = None) -> str:
+    """
+    Convert technical processing steps into human-readable, conversational status messages.
+    
+    Uses Groq LLM with instructor library to generate friendly, specific messages.
+    Falls back to predefined messages if LLM unavailable.
+    
+    Args:
+        step: Technical step identifier (e.g., 'duplicate_check', 'field_detection')
+        context: Optional context dict with details like:
+            - 'filename': Name of file being processed
+            - 'sheet_count': Number of sheets
+            - 'row_count': Number of rows
+            - 'similarity_score': Duplicate similarity percentage
+            - 'new_rows': New rows found in delta analysis
+            - 'existing_rows': Existing rows in delta analysis
+    
+    Returns:
+        Friendly, conversational status message
+        
+    Examples:
+        >>> generate_friendly_status('duplicate_check', {'filename': 'expenses.csv'})
+        "Checking if I've seen this file before..."
+        
+        >>> generate_friendly_status('field_detection', {'columns': ['Date', 'Amount']})
+        "Analyzing the structure of your data..."
+    """
+    context = context or {}
+    
+    # Predefined friendly messages (fast path - no LLM needed)
+    friendly_messages = {
+        'initializing_streaming': "Getting ready to read your file...",
+        'duplicate_check': "Checking if I've seen this file before...",
+        'field_detection': "Analyzing the structure of your data...",
+        'platform_detection': "Figuring out where this data came from...",
+        'document_classification': "Understanding what type of document this is...",
+        'starting_transaction': "Setting up secure storage for your data...",
+        'storing': "Saving your file details...",
+        'extracting': "Reading through your data...",
+        'processing_decision': "Processing your request...",
+        'duplicate_found': "Found an exact match - I've processed this before",
+        'near_duplicate_found': "Found a similar file - let me compare them",
+        'content_duplicate_found': "This data overlaps with something I already have",
+        'delta_analysis_complete': "Spotted the differences in your data",
+        'entity_resolution': "Matching entities across your data...",
+        'classification': "Categorizing your transactions...",
+        'enrichment': "Adding context to your data...",
+        'complete': "Done! I've processed your file successfully",
+        'error': "Oops, something went wrong"
+    }
+    
+    # Return predefined message if available (fast path)
+    if step in friendly_messages:
+        base_message = friendly_messages[step]
+        
+        # Enhance with context if available
+        if context:
+            if step == 'duplicate_check' and context.get('filename'):
+                return f"Checking if I've seen {context['filename']} before..."
+            elif step == 'field_detection' and context.get('columns'):
+                col_count = len(context['columns'])
+                return f"Analyzing {col_count} columns in your data..."
+            elif step == 'near_duplicate_found' and context.get('similarity_score'):
+                score = int(context['similarity_score'] * 100)
+                return f"Found a {score}% match with something I processed earlier"
+            elif step == 'delta_analysis_complete':
+                new = context.get('new_rows', 0)
+                existing = context.get('existing_rows', 0)
+                return f"Spotted the differences: {new} new rows, {existing} I already know"
+            elif step == 'extracting' and context.get('row_count'):
+                return f"Reading through {context['row_count']:,} rows of data..."
+        
+        return base_message
+    
+    # Fallback: Try to use LLM with instructor for unknown steps
+    try:
+        import instructor
+        
+        client = get_groq_client()
+        # Wrap Groq client with instructor for structured responses
+        client_with_instructor = instructor.from_groq(client)
+        
+        context_str = ""
+        if context:
+            context_str = "\n".join([f"- {k}: {v}" for k, v in context.items()])
+        
+        response = client_with_instructor.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[{
+                "role": "system",
+                "content": "Convert technical processing steps into friendly, conversational status updates. Be specific about what you found. Keep messages under 50 characters."
+            }, {
+                "role": "user",
+                "content": f"Step: {step}, Context: {context_str}"
+            }],
+            max_tokens=50,
+            temperature=0.7
+        )
+        
+        message = response.choices[0].message.content.strip()
+        logger.info(f"✅ Generated friendly message for '{step}': {message}")
+        return message
+        
+    except ImportError:
+        logger.warning("instructor library not installed - using fallback message")
+    except Exception as e:
+        logger.warning(f"Failed to generate friendly status for '{step}': {e}")
+    
+    # Final fallback: generic message
+    return f"Processing: {step.replace('_', ' ')}..."
+
+
+async def send_websocket_progress(
+    manager: Any,
+    job_id: str,
+    step: str,
+    progress: int,
+    context: Optional[Dict[str, Any]] = None,
+    extra_data: Optional[Dict[str, Any]] = None
+) -> None:
+    """
+    Send WebSocket progress update with friendly status message.
+    
+    Combines technical step info with human-readable message and sends via Socket.IO.
+    
+    Args:
+        manager: SocketIOWebSocketManager instance
+        job_id: Job ID for routing
+        step: Technical step identifier
+        progress: Progress percentage (0-100)
+        context: Optional context for message generation
+        extra_data: Optional additional data to include in update
+        
+    Examples:
+        >>> await send_websocket_progress(
+        ...     manager, job_id, 'duplicate_check', 15,
+        ...     context={'filename': 'expenses.csv'}
+        ... )
+    """
+    try:
+        # Generate friendly message (synchronous function)
+        friendly_message = generate_friendly_status(step, context)
+        
+        # Build payload
+        payload = {
+            "step": step,
+            "message": friendly_message,
+            "progress": progress,
+            "timestamp": datetime.utcnow().isoformat()
+        }
+        
+        # Add extra data if provided
+        if extra_data:
+            payload.update(extra_data)
+        
+        # Send via WebSocket (async)
+        await manager.send_update(job_id, payload)
+        logger.info(f"✅ WebSocket progress sent: {step} ({progress}%) - {friendly_message}")
+        
+    except Exception as e:
+        logger.error(f"Failed to send WebSocket progress for job {job_id}: {e}")
+        # Don't raise - allow processing to continue even if WebSocket fails

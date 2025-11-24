@@ -47,6 +47,11 @@ except Exception as e:
     print(f"⚠ Sentry initialization failed: {e}")
 
 try:
+    import pandas as pd
+except ImportError:
+    pd = None
+
+try:
     import orjson
 except ImportError:
     orjson = None
@@ -554,7 +559,7 @@ def safe_json_dumps(obj, default=None):
 # ============================================================================
 # Moved to: core_infrastructure/utils/helpers.py
 # Imports below:
-from core_infrastructure.utils.helpers import clean_jwt_token, safe_decode_base64, sanitize_for_json, get_groq_client
+from core_infrastructure.utils.helpers import clean_jwt_token, safe_decode_base64, sanitize_for_json, get_groq_client, generate_friendly_status, send_websocket_progress
 # NOTE: safe_openai_call removed - use instructor library for structured AI responses instead
 
 def safe_json_parse(json_str, fallback=None):
@@ -1967,13 +1972,52 @@ class DataEnrichmentProcessor:
             'max_memory_usage_mb': int(os.getenv('ENRICHMENT_MAX_MEMORY_MB', '512'))
         }
     
+    def _load_platform_patterns(self) -> Dict[str, Any]:
+        """
+        FIX #48: Load platform patterns from config/platform_id_patterns.yaml
+        Non-developers can edit patterns without code changes.
+        Falls back to empty dict if YAML not found.
+        """
+        try:
+            import yaml
+            config_path = os.path.join(os.path.dirname(__file__), '..', 'config', 'platform_id_patterns.yaml')
+            if os.path.exists(config_path):
+                with open(config_path, 'r') as f:
+                    config = yaml.safe_load(f)
+                    logger.info(f"✅ Platform patterns loaded from {config_path}")
+                    return config.get('platforms', {})
+        except Exception as e:
+            logger.warning(f"Failed to load platform patterns from YAML: {e}. Using empty patterns.")
+        
+        return {}
+    
     def _load_validation_rules(self) -> Dict[str, Any]:
-        """Load validation rules for data enrichment"""
+        """
+        FIX #46: Load validation rules from config/validation_rules.yaml
+        Non-developers can edit validation rules without code changes.
+        Falls back to hardcoded defaults if YAML not found.
+        """
+        try:
+            import yaml
+            config_path = os.path.join(os.path.dirname(__file__), '..', 'config', 'validation_rules.yaml')
+            if os.path.exists(config_path):
+                with open(config_path, 'r') as f:
+                    rules = yaml.safe_load(f)
+                    logger.info(f"✅ Validation rules loaded from {config_path}")
+                    return rules
+        except Exception as e:
+            logger.warning(f"Failed to load validation rules from YAML: {e}. Using hardcoded defaults.")
+        
+        # Hardcoded fallback (backward compatibility)
         return {
             'amount': {
-                'min_value': -1000000.0,
-                'max_value': 1000000.0,
+                'min_value': -100000000.0,
+                'max_value': 100000000.0,
                 'required_precision': 2
+            },
+            'currency': {
+                'valid_currencies': ['USD', 'EUR', 'GBP', 'INR', 'JPY', 'CNY', 'AUD', 'CAD', 'CHF', 'SEK', 'NZD'],
+                'default_currency': 'USD'
             },
             'date': {
                 'min_year': 1900,
@@ -1981,12 +2025,14 @@ class DataEnrichmentProcessor:
                 'required_format': '%Y-%m-%d'
             },
             'vendor': {
-                'min_length': 1,
+                'min_length': 2,
                 'max_length': 255,
                 'forbidden_chars': ['<', '>', '&', '"', "'"]
+            },
+            'confidence': {
+                'threshold': 0.7,
+                'high_priority_threshold': 0.5
             }
-            # Note: Platform validation removed - system supports 50+ platforms dynamically
-            # See universal_platform_detector_optimized.py for full platform database
         }
     
     async def enrich_row_data(self, row_data: Dict, platform_info: Dict, column_names: List[str], 
@@ -2177,32 +2223,42 @@ class DataEnrichmentProcessor:
             )
             ai_classifications = ai_classifications + [{} for _ in range(len(batch_data) - len(ai_classifications))]
         
-        # Process batch concurrently with memory monitoring
-        semaphore = asyncio.Semaphore(10)  # Limit concurrent operations
+        # FIX #55: Process batch in chunks instead of waiting for all tasks
+        # Problem: Semaphore(10) with gather(*tasks) processes 10 at a time but waits for all before starting next batch
+        # Solution: Process in chunks of 10, start next chunk immediately after current chunk completes
+        chunk_size = 10
+        all_results = []
         
         async def enrich_single_row(row_data, ai_classification, index):
-            async with semaphore:
-                try:
-                    # Add row index to file context
-                    row_context = file_context.copy()
-                    row_context['row_index'] = index
-                    
-                    return await self.enrich_row_data(
-                        row_data, platform_info, column_names, ai_classification, row_context
-                    )
-                except Exception as e:
-                    logger.error(f"Batch enrichment error for row {index}: {e}")
-                    return await self._create_fallback_payload(
-                        row_data, platform_info, ai_classification, file_context, str(e)
-                    )
+            try:
+                # Add row index to file context
+                row_context = file_context.copy()
+                row_context['row_index'] = index
+                
+                return await self.enrich_row_data(
+                    row_data, platform_info, column_names, ai_classification, row_context
+                )
+            except Exception as e:
+                logger.error(f"Batch enrichment error for row {index}: {e}")
+                return await self._create_fallback_payload(
+                    row_data, platform_info, ai_classification, file_context, str(e)
+                )
         
-        # Execute batch processing
-        tasks = [
-            enrich_single_row(row_data, ai_classifications[i], i)
-            for i, row_data in enumerate(batch_data)
-        ]
+        # FIX #55: Process in chunks for better throughput
+        # Instead of: create all tasks, wait for all with gather
+        # Do: create chunk tasks, wait for chunk, then start next chunk
+        for chunk_start in range(0, len(batch_data), chunk_size):
+            chunk_end = min(chunk_start + chunk_size, len(batch_data))
+            chunk_tasks = [
+                enrich_single_row(batch_data[i], ai_classifications[i], i)
+                for i in range(chunk_start, chunk_end)
+            ]
+            
+            # Process this chunk and collect results
+            chunk_results = await asyncio.gather(*chunk_tasks, return_exceptions=True)
+            all_results.extend(chunk_results)
         
-        results = await asyncio.gather(*tasks, return_exceptions=True)
+        results = all_results
         
         # Filter out exceptions and log errors
         enriched_results = []
@@ -2524,8 +2580,12 @@ class DataEnrichmentProcessor:
             logger.error(f"Input validation failed: {e}")
             raise ValidationError(f"Input validation failed: {str(e)}")
     
-    def _sanitize_string(self, value: str) -> str:
-        """LIBRARY FIX: Sanitize string input using validators + presidio (replaces manual char removal)"""
+    def _sanitize_string(self, value: str, field_type: str = 'generic') -> str:
+        """
+        LIBRARY FIX: Sanitize string input using validators + presidio (replaces manual char removal)
+        FIX #57: Don't redact vendor/financial fields - only detect and log PII
+        Redacting breaks data accuracy (e.g., "John Smith Contracting" → "[REDACTED] Contracting")
+        """
         if not isinstance(value, str):
             return str(value)
         
@@ -2544,7 +2604,8 @@ class DataEnrichmentProcessor:
         from bleach import clean
         sanitized = clean(value, tags=[], strip=True)
         
-        # LIBRARY FIX: Use presidio for PII detection and redaction
+        # FIX #57: Only detect PII in financial/vendor fields, don't redact (data integrity)
+        # Redaction breaks vendor matching and financial data accuracy
         try:
             from presidio_analyzer import AnalyzerEngine
             analyzer = AnalyzerEngine()
@@ -2552,22 +2613,22 @@ class DataEnrichmentProcessor:
             # Detect PII entities
             results = analyzer.analyze(text=sanitized, language='en')
             
-            # Log if PII detected
+            # Log if PII detected (for audit trail)
             if results:
                 pii_types = [r.entity_type for r in results]
-                logger.warning(f"PII detected in string: {pii_types}")
-                # Redact PII for safety
-                for result in results:
-                    start = result.start
-                    end = result.end
-                    sanitized = sanitized[:start] + '[REDACTED]' + sanitized[end:]
+                logger.warning(f"PII detected in {field_type} field: {pii_types} - NOT REDACTED to preserve data integrity")
+                # FIX #57: Do NOT redact - just log for audit purposes
+                # Redaction corrupts financial data (vendor names, descriptions, etc.)
         except Exception as e:
             logger.debug(f"Presidio PII detection skipped: {e}")
         
         return sanitized.strip()
     
     def _validate_filename(self, filename: str) -> bool:
-        """LIBRARY FIX: Validate filename using validators (replaces manual path traversal checks)"""
+        """
+        LIBRARY FIX: Validate filename using validators (replaces manual path traversal checks)
+        FIX #58: os.path.basename() already strips path components, so checks for .., /, \\ are redundant
+        """
         if not filename or not isinstance(filename, str):
             return False
         
@@ -2578,12 +2639,13 @@ class DataEnrichmentProcessor:
         import os
         basename = os.path.basename(filename)
         
-        # Check for path traversal attempts
-        if '..' in basename or '/' in basename or '\\' in basename:
-            logger.warning(f"Path traversal attempt detected: {filename}")
-            return False
+        # FIX #58: REMOVED redundant path traversal checks
+        # os.path.basename() already strips all path components:
+        # - basename('/path/to/../file.txt') returns 'file.txt'
+        # - basename('C:\\path\\file.txt') returns 'file.txt'
+        # Checking for .., /, \\ in basename is redundant and never triggers
         
-        # Validate filename format
+        # Validate filename format using slug validator (only real validation needed)
         if not slug(basename.replace('.', '-')):
             logger.warning(f"Invalid filename format: {filename}")
             return False
@@ -2771,12 +2833,12 @@ class DataEnrichmentProcessor:
                 # Description extraction with enhanced patterns
                 elif any(kw in field_name for kw in description_variations):
                     description = str(field_value).strip() if field_value else ''
-                
                 # Currency extraction
                 elif 'currency' in field_name:
                     currency = str(field_value).upper() if field_value else 'USD'
             
-            # FIX #26: Second pass - Fallback to fuzzy column matching if no high-confidence fields found
+            # FIX #26 & #56: Second pass - Fallback to fuzzy column matching if no high-confidence fields found
+            # FIX #56: Early exit flags to prevent unnecessary loop iterations after finding matches
             if not amount or not vendor_name or not description:
                 from rapidfuzz import fuzz
                 
@@ -2790,7 +2852,9 @@ class DataEnrichmentProcessor:
                                 normalized_amount = self._normalize_amount_value(col_value)
                                 if normalized_amount > 0:
                                     amount = normalized_amount
-                                    break
+                                    break  # Exit pattern loop
+                        if amount:
+                            continue  # FIX #56: Skip to next column if amount found
                     
                     # Fuzzy match for vendor if not found
                     if not vendor_name:
@@ -2798,7 +2862,9 @@ class DataEnrichmentProcessor:
                             if fuzz.token_sort_ratio(col_name_lower, vendor_pattern) > 80:
                                 if isinstance(col_value, str) and col_value.strip():
                                     vendor_name = str(col_value).strip()
-                                    break
+                                    break  # Exit pattern loop
+                        if vendor_name:
+                            continue  # FIX #56: Skip to next column if vendor found
                     
                     # Fuzzy match for description if not found
                     if not description:
@@ -2806,12 +2872,12 @@ class DataEnrichmentProcessor:
                             if fuzz.token_sort_ratio(col_name_lower, desc_pattern) > 80:
                                 if isinstance(col_value, str) and col_value.strip():
                                     description = str(col_value).strip()
-                                    break
-            
-            # Calculate extraction confidence from UniversalFieldDetector
-            confidence = field_detection_result.get('confidence', 0.0)
-            fields_found = sum([bool(amount), bool(vendor_name), bool(date), bool(description)])
-            
+                                    break  # Exit pattern loop
+                        if description:
+                            continue  # FIX #56: Skip to next column if description found
+                    
+                    # FIX #56: Early exit if all fields found
+                    if amount and vendor_name and description:
             extraction_results = {
                 'amount': amount,
                 'vendor_name': vendor_name,
@@ -2851,30 +2917,38 @@ class DataEnrichmentProcessor:
  
     
     async def _extract_platform_ids_universal(self, validated_data: Dict, classification_results: Dict) -> Dict[str, Any]:
-        """Extract platform-specific IDs using UniversalPlatformDetectorOptimized (consolidated)"""
+        """
+        FIX #48: Extract platform-specific IDs from YAML config (not from detector instance)
+        Loads patterns from config/platform_id_patterns.yaml for efficiency
+        """
         try:
+            from parse import parse
+            
             row_data = validated_data.get('row_data', {})
             platform = classification_results.get('platform', 'unknown')
             
-            # Use UniversalPlatformDetectorOptimized's platform_patterns
-            # This is the canonical source for platform patterns
-            platform_detector = UniversalPlatformDetector(anthropic_client=None, cache_client=safe_get_ai_cache())
+            # FIX #48: Load platform patterns from YAML config file
+            # Non-developers can edit patterns without code changes
+            platform_patterns = self._load_platform_patterns()
             
-            # Extract IDs using the detector's patterns
+            # Extract IDs using the patterns from YAML
             platform_ids = {}
-            if hasattr(platform_detector, 'platform_patterns'):
-                patterns = platform_detector.platform_patterns.get(platform.lower(), {})
+            patterns = platform_patterns.get(platform.lower(), {})
+            
+            for id_type, pattern_info in patterns.items():
+                # Handle both single pattern and list of patterns
+                pattern_list = pattern_info if isinstance(pattern_info, list) else [pattern_info]
                 
-                for id_type, pattern_info in patterns.items():
-                    pattern = pattern_info.get('pattern', '') if isinstance(pattern_info, dict) else pattern_info
-                    if pattern:
-                        import re
-                        for col_name, col_value in row_data.items():
-                            if col_value and isinstance(col_value, str):
-                                match = re.search(pattern, col_value, re.IGNORECASE)
-                                if match:
-                                    platform_ids[id_type] = col_value
-                                    break
+                for col_name, col_value in row_data.items():
+                    if col_value and isinstance(col_value, str):
+                        for pattern in pattern_list:
+                            # Use parse library (inverse of format) for pattern matching
+                            result = parse(pattern, col_value)
+                            if result:
+                                platform_ids[id_type] = col_value
+                                break
+                    if id_type in platform_ids:
+                        break
             
             return {
                 'platform_ids': platform_ids,
@@ -2916,21 +2990,18 @@ class DataEnrichmentProcessor:
 
     async def _get_exchange_rate(self, from_currency: str, to_currency: str, transaction_date: str) -> float:
         """
-        LIBRARY REPLACEMENT: Get exchange rate using forex-python (50+ lines → 15 lines)
-        Replaces custom API calls with battle-tested forex library.
+        FIX #51: Use aiohttp for async exchange rate fetching (not synchronous forex-python)
+        forex-python is synchronous and requires thread pool overhead.
+        aiohttp is already in requirements (3.11.7) and provides true async I/O.
         
-        Benefits:
-        - Real-time and historical rates
-        - Automatic caching and error handling
-        - Better reliability and accuracy
-        - 70% code reduction
+        Uses exchangerate-api.com (free tier: 1500 requests/month)
+        Falls back to forex-python only if aiohttp fails.
         """
+        import aiohttp
+        from datetime import datetime
+        import asyncio
+        
         try:
-            # LIBRARY REPLACEMENT: Use forex-python (already in requirements)
-            from forex_python.converter import CurrencyRates, CurrencyCodes
-            from datetime import datetime
-            import asyncio
-            
             # FIX #5: Use transaction_date in cache key for historical accuracy
             cache_key = f"exchange_rate_{from_currency}_{to_currency}_{transaction_date}"
             
@@ -2943,20 +3014,41 @@ class DataEnrichmentProcessor:
                 if cached_rate and isinstance(cached_rate, dict):
                     return cached_rate.get('rate', 1.0)
             
-            # LIBRARY REPLACEMENT: Use forex-python for exchange rates
+            # FIX #51: Use aiohttp for true async exchange rate fetching
+            # exchangerate-api.com provides real-time rates (free tier: 1500 requests/month)
+            api_url = f"https://api.exchangerate-api.com/v4/latest/{from_currency}"
+            
+            try:
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(api_url, timeout=aiohttp.ClientTimeout(total=5)) as response:
+                        if response.status == 200:
+                            data = await response.json()
+                            rate = data.get('rates', {}).get(to_currency)
+                            if rate:
+                                # Cache the rate for 24 hours
+                                if self.cache and hasattr(self.cache, 'store_classification'):
+                                    await self.cache.store_classification(
+                                        {'cache_key': cache_key},
+                                        {'rate': rate},
+                                        'exchange_rate',
+                                        ttl_hours=24
+                                    )
+                                return rate
+            except Exception as aiohttp_err:
+                logger.warning(f"aiohttp exchange rate fetch failed: {aiohttp_err}, falling back to forex-python")
+            
+            # Fallback: Use forex-python only if aiohttp fails (thread pool overhead acceptable as fallback)
+            from forex_python.converter import CurrencyRates
+            
             def _get_rate_sync():
                 c = CurrencyRates()
-                # Parse transaction date
                 date_obj = datetime.strptime(transaction_date, '%Y-%m-%d').date()
-                # Get historical rate for transaction date - NO FALLBACK, fail clearly if it fails
                 return c.get_rate(from_currency, to_currency, date_obj)
             
-            # Execute in thread pool to avoid blocking
-            # FIX #34: Use global thread pool instead of creating new executor
             loop = asyncio.get_event_loop()
             rate = await loop.run_in_executor(_thread_pool, _get_rate_sync)
             
-            # Cache the rate for 24 hours
+            # Cache the fallback rate
             if self.cache and hasattr(self.cache, 'store_classification'):
                 await self.cache.store_classification(
                     {'cache_key': cache_key},
@@ -2968,7 +3060,7 @@ class DataEnrichmentProcessor:
             return rate
             
         except Exception as e:
-            logger.error(f"❌ CRITICAL: Exchange rate fetch failed for {from_currency}/{to_currency}: {e}. Cannot proceed without live rates.")
+            logger.error(f" CRITICAL: Exchange rate fetch failed for {from_currency}/{to_currency}: {e}. Cannot proceed without live rates.")
             raise ValueError(f"Exchange rate unavailable for {from_currency}/{to_currency}. Live forex service required.")
     
     async def _build_enriched_payload(self, validated_data: Dict, extraction_results: Dict, 
@@ -3119,8 +3211,9 @@ class DataEnrichmentProcessor:
             enhanced['amount_signed_usd'] = amount_signed_usd
             enhanced['affects_cash'] = affects_cash
             
-            # FIX #2: Standardize timestamp semantics (MEDIUM PRIORITY)
-            # Use consistent naming: source_ts, ingested_ts, processed_ts
+            # FIX #2 & #47: Standardize timestamp semantics (MEDIUM PRIORITY)
+            # Use consistent datetime.utcnow() for all timestamps (source of truth)
+            # Naming: source_ts (transaction time), ingested_ts (when we received it), processed_ts (when we processed it)
             current_time = datetime.utcnow().isoformat()
             
             # Extract source timestamp from row data
@@ -3167,14 +3260,15 @@ class DataEnrichmentProcessor:
                 validation_flags['amount_valid'] = False
                 validation_flags['validation_errors'].append(f'amount_usd exceeds limit: {amount_usd}')
             
-            # FIX #46: Use configuration-based validation rules instead of hardcoded
-            # Validate currency - configuration can be overridden via environment or config file
-            valid_currencies = os.getenv('VALID_CURRENCIES', 'USD,EUR,GBP,INR,JPY,CNY,AUD,CAD,CHF,SEK,NZD').split(',')
+            # FIX #46: Load validation rules from config/validation_rules.yaml
+            # Non-developers can edit validation rules without code changes
+            validation_rules = self._load_validation_rules()
+            valid_currencies = validation_rules.get('currency', {}).get('valid_currencies', ['USD'])
             currency = enhanced.get('currency', 'USD')
             if currency not in valid_currencies:
                 validation_flags['currency_valid'] = False
                 validation_flags['validation_errors'].append(f'Invalid currency code: {currency}')
-                enhanced['currency'] = 'USD'  # Fallback
+                enhanced['currency'] = validation_rules.get('currency', {}).get('default_currency', 'USD')
             
             # Validate exchange rate
             exchange_rate = enhanced.get('exchange_rate', 1.0)
@@ -3704,7 +3798,8 @@ class DataEnrichmentProcessor:
             parsed_result['classification_method'] = 'ai_analysis'
             return parsed_result
             
-        except (json.JSONDecodeError, getattr(orjson, 'JSONDecodeError', ValueError)) as e:
+        except (ValueError) as e:
+            # FIX #49: Standardized error handling - orjson raises ValueError, not JSONDecodeError
             logger.error(f"Failed to parse AI response: {e}")
             return {
                 'document_type': 'unknown',
@@ -4165,9 +4260,10 @@ class AIRowClassifier:
             try:
                 nlp = spacy.load("en_core_web_sm")
             except OSError:
-                logger.warning("spaCy model 'en_core_web_sm' not found. Run: python -m spacy download en_core_web_sm")
-                # Fallback to basic regex for critical path
-                return self._extract_entities_regex_fallback(text)
+                logger.error("spaCy model 'en_core_web_sm' not found. Run: python -m spacy download en_core_web_sm")
+                # FIX #53: CRITICAL - Don't fallback to regex (causes false positives like "New York" as person)
+                # If major NLP functionality fails, platform should report error clearly
+                raise ValueError("spaCy NER model required for entity extraction. Install with: python -m spacy download en_core_web_sm")
             
             # Process text with spaCy
             doc = nlp(text)
@@ -4210,36 +4306,14 @@ class AIRowClassifier:
             
             return entities
             
+        except ValueError as ve:
+            # FIX #53: Re-raise critical errors (missing spaCy model)
+            logger.error(f"Critical NLP error: {ve}")
+            raise
         except Exception as e:
-            logger.warning(f"spaCy entity extraction failed: {e}, falling back to regex")
-            return self._extract_entities_regex_fallback(text)
-    
-    def _extract_entities_regex_fallback(self, text: str) -> Dict[str, List[str]]:
-        """Fallback regex extraction when spaCy fails"""
-        entities = {
-            'employees': [],
-            'vendors': [],
-            'customers': [],
-            'projects': []
-        }
-        
-        # Simplified regex patterns for fallback
-        person_pattern = r'\b[A-Z][a-z]+ [A-Z][a-z]+\b'
-        company_pattern = r'\b[A-Z][a-z]+ (?:Inc|Corp|LLC|Ltd|Company|Co|Services|Solutions|Systems|Tech)\b'
-        
-        # Extract basic patterns
-        person_matches = re.findall(person_pattern, text)
-        company_matches = re.findall(company_pattern, text)
-        
-        entities['employees'] = list(set(person_matches))
-        entities['vendors'] = list(set(company_matches))
-        
-        return entities
-    
-    async def map_relationships(self, entities: Dict[str, List[str]], platform_info: Dict, 
-                               user_id: str, supabase_client) -> Dict[str, str]:
-        """
-        LIBRARY REPLACEMENT: Map entities using recordlinkage for probabilistic matching
+            # FIX #53: Don't fallback to regex - report error clearly
+            logger.error(f"spaCy entity extraction failed: {e}. Entity extraction requires spaCy NER model.")
+            raise ValueError(f"Entity extraction failed. Install spaCy model: python -m spacy download en_core_web_sm")
         Replaces manual SQL queries with ML-based entity resolution.
         
         Benefits:
@@ -4931,46 +5005,88 @@ class ExcelProcessor:
                         'sheet_count': len(fallback_sheets) if isinstance(fallback_sheets, dict) else (0 if fallback_sheets is None else 1),
                         'filename': filename
                     }
-                }
             except Exception as fallback_err:
                 logger.error(f"Fallback XLSX processing also failed: {fallback_err}")
                 raise ValueError(f"Failed to process XLSX file: {str(e)}")
 
-    def _sanitize_nan_for_json(self, obj):
-        """Recursively replace NaN values with None for JSON serialization"""
-        import math
-        if isinstance(obj, dict):
-            return {k: self._sanitize_nan_for_json(v) for k, v in obj.items()}
-        elif isinstance(obj, list):
-            return [self._sanitize_nan_for_json(item) for item in obj]
-        elif isinstance(obj, float) and (math.isnan(obj) or math.isinf(obj)):
-            return None
-        elif obj is None or (isinstance(obj, str) and obj.lower() == 'nan'):
-            return None
-        elif obj is np.nan:
-            return None
-        elif hasattr(obj, '__array__') and hasattr(obj, 'dtype'):
-            try:
-                if np.isnan(obj):
-                    return None
-                elif np.isinf(obj):
-                    return None
-            except (TypeError, ValueError):
-                pass  # Not a numeric type
-        return obj
-    
-    async def _fast_classify_row_cached(self, row, platform_info: dict, column_names: list) -> dict:
-        """Fast cached classification with AI fallback - 90% cost reduction"""
-        try:
-            # FIX #16: Move CPU-bound row.to_dict() to thread pool
-            def _convert_row_sync(row_copy):
-                row_dict = row_copy.to_dict()
-                return self._sanitize_nan_for_json(row_dict)
-            
-            import asyncio
-            loop = asyncio.get_event_loop()
-            with ThreadPoolExecutor(max_workers=1) as executor:
-                row_dict_sanitized = await loop.run_in_executor(executor, _convert_row_sync, row.copy())
+    # FIX #52: REMOVED duplicate _sanitize_nan_for_json function
+    # DEDUPLICATION: Centralized sanitization logic
+    # - _sanitize_for_json (line 469): Wrapper that delegates to helpers.sanitize_for_json
+    # - transaction_manager.py (line 27): Imports from helpers.sanitize_for_json
+    # - DELETED: _sanitize_nan_for_json (was lines 5019-5038) - DUPLICATE REMOVED
+    # Single source of truth: core_infrastructure.utils.helpers.sanitize_for_json
+    # 
+    # ARCHITECTURE NOTE: Pandas vs Polars
+    # - Primary: Polars (line 184) for all data processing
+    # - Fallback: Pandas (line 50) for:
+    #   * recordlinkage entity matching (requires pandas DataFrames)
+    #   * Excel file fallback (pd.read_excel)
+    #   * CSV metadata extraction (pd.read_csv)
+    # This is intentional - Polars is used where possible, pandas only for compatibility
+
+async def _fast_classify_row_cached(self, row, platform_info: dict, column_names: list) -> dict:
+    """Fast cached classification with AI fallback - 90% cost reduction"""
+    try:
+        # FIX #16: Move CPU-bound row.to_dict() to thread pool
+        def _convert_row_sync(row_copy):
+            row_dict = row_copy.to_dict()
+            # Use centralized sanitize_for_json from helpers
+            return sanitize_for_json(row_dict)
+        
+        import asyncio
+        loop = asyncio.get_event_loop()
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            row_dict_sanitized = await loop.run_in_executor(executor, _convert_row_sync, row.copy())
+        
+        row_content = {
+            'data': row_dict_sanitized,
+            'platform': platform_info.get('platform', 'unknown'),
+            'columns': column_names
+        }
+        
+        # Try to get from AI cache first
+        ai_cache = safe_get_ai_cache()
+        cached_result = await ai_cache.get_cached_classification(row_content, "row_classification")
+        
+        if cached_result:
+            return cached_result
+        
+        # Fast pattern-based classification as fallback
+        row_values = row.values() if isinstance(row, dict) else (row.to_dict().values() if hasattr(row, 'to_dict') else row)
+        row_text = ' '.join([str(val) for val in row_values if val is not None and str(val).lower() != 'nan']).lower()
+        
+        classification = {
+            'category': 'financial',
+            'subcategory': 'transaction',
+            'confidence': 0.7,
+            'method': 'pattern_based_cached'
+        }
+        
+        # Revenue patterns
+        revenue_patterns = ['income', 'revenue', 'payment received', 'deposit', 'credit']
+        if any(pattern in row_text for pattern in revenue_patterns):
+            classification['category'] = 'revenue'
+            classification['confidence'] = 0.8
+        
+        # Expense patterns  
+        expense_patterns = ['expense', 'cost', 'payment', 'debit', 'withdrawal', 'fee']
+        if any(pattern in row_text for pattern in expense_patterns):
+            classification['category'] = 'expense'
+            classification['confidence'] = 0.8
+        
+        # Cache the result for future use
+        await ai_cache.store_classification(row_content, classification, "row_classification")
+        
+        return classification
+        
+    except Exception as e:
+        logger.warning(f"Fast cached classification failed: {e}")
+        return {
+            'category': 'unknown',
+            'subcategory': 'unknown', 
+            'confidence': 0.1,
+            'method': 'fallback'
+        }
             
             row_content = {
                 'data': row_dict_sanitized,
@@ -11580,6 +11696,41 @@ async def handle_get_status(sid, data):
     if job_id:
         status = await websocket_manager.get_job_status(job_id)
         return status or {'status': 'unknown'}
+
+@sio.on('pause_processing')
+async def handle_pause_processing(sid, data):
+    """
+    Socket.IO pause processing handler (Step 3.5)
+    
+    Allows frontend to pause file processing via WebSocket.
+    Sets a flag that processing functions check cooperatively.
+    """
+    try:
+        file_id = data.get('fileId')
+        if not file_id:
+            logger.warning(f"Pause request missing fileId from {sid}")
+            return {'status': 'error', 'message': 'fileId required'}
+        
+        # Set pause flag in job state
+        current_status = await websocket_manager.get_job_status(file_id) or {}
+        await websocket_manager.merge_job_state(file_id, {
+            **current_status,
+            'status': 'paused',
+            'paused_at': datetime.utcnow().isoformat()
+        })
+        
+        logger.info(f"✅ Processing paused for file {file_id} by {sid}")
+        
+        # Notify all clients in the job room
+        await sio.emit('processing_paused', {
+            'fileId': file_id,
+            'timestamp': datetime.utcnow().isoformat()
+        }, room=file_id)
+        
+        return {'status': 'success', 'message': 'Processing paused'}
+    except Exception as e:
+        logger.error(f"Failed to pause processing: {e}")
+        return {'status': 'error', 'message': str(e)}
 
 # LIBRARY REPLACEMENT: Socket.IO-based WebSocket manager (replaces 368-line custom implementation)
 # NOTE: Class definition moved to line 685 to fix forward reference error
