@@ -3212,9 +3212,9 @@ class DataEnrichmentProcessor:
             enhanced['affects_cash'] = affects_cash
             
             # FIX #2 & #47: Standardize timestamp semantics (MEDIUM PRIORITY)
-            # Use consistent datetime.utcnow() for all timestamps (source of truth)
+            # Use consistent pendulum.now() for all timestamps (source of truth)
             # Naming: source_ts (transaction time), ingested_ts (when we received it), processed_ts (when we processed it)
-            current_time = datetime.utcnow().isoformat()
+            current_time = pendulum.now().to_iso8601_string()
             
             # Extract source timestamp from row data
             source_ts = None
@@ -3233,7 +3233,7 @@ class DataEnrichmentProcessor:
             enhanced['processed_ts'] = current_time  # When we processed it
             
             # For currency conversion, use transaction date
-            transaction_date = source_ts.split('T')[0] if source_ts else datetime.utcnow().strftime('%Y-%m-%d')
+            transaction_date = source_ts.split('T')[0] if source_ts else pendulum.now().strftime('%Y-%m-%d')
             enhanced['transaction_date'] = transaction_date
             enhanced['exchange_rate_date'] = enhanced.get('exchange_date', transaction_date)
             
@@ -3945,7 +3945,7 @@ class DataEnrichmentProcessor:
                 'ai_analysis': ai_classification,
                 'ocr_analysis': ocr_analysis
             },
-            'analysis_timestamp': datetime.utcnow().isoformat(),
+            'analysis_timestamp': pendulum.now().to_iso8601_string(),
             'analysis_version': '2.0.0'
         }
         
@@ -3971,7 +3971,7 @@ class DataEnrichmentProcessor:
             "classification_reasoning": f"Fallback classification due to error: {error_message}",
             "platform_indicators": [],
             "document_indicators": [],
-            "analysis_timestamp": datetime.utcnow().isoformat(),
+            "analysis_timestamp": pendulum.now().to_iso8601_string(),
             "analysis_version": "2.0.0-fallback"
         }
     
@@ -3993,7 +3993,7 @@ class DataEnrichmentProcessor:
             'document_type': result.get('document_type', 'unknown'),
             'confidence': result.get('confidence', 0.0),
             'processing_time': processing_time,
-            'timestamp': datetime.utcnow().isoformat()
+            'timestamp': pendulum.now().to_iso8601_string()
         }
         
         logger.info(f"Document analysis audit: {orjson.dumps(audit_data).decode()}")
@@ -4213,7 +4213,8 @@ class AIRowClassifier:
                         classification['entity_resolution_error'] = str(e)
                 
                 return classification
-            except json.JSONDecodeError as e:
+            except (ValueError, orjson.JSONDecodeError) as e:
+                # FIX #49: orjson raises ValueError, not json.JSONDecodeError
                 logger.error(f"AI classification JSON parsing failed: {e}")
                 logger.error(f"Raw AI response: {result}")
                 return self._fallback_classification(row, platform_info, column_names)
@@ -4414,8 +4415,8 @@ class AIRowClassifier:
                 'aliases': [entity_name],
                 'platform_sources': [platform_info.get('platform', 'unknown')],
                 'confidence_score': 0.8,  # Higher confidence for spaCy-extracted entities
-                'first_seen_at': datetime.utcnow().isoformat(),
-                'last_seen_at': datetime.utcnow().isoformat()
+                'first_seen_at': pendulum.now().to_iso8601_string(),
+                'last_seen_at': pendulum.now().to_iso8601_string()
             }
             
             # FIX #38: Add validation before insert
@@ -4555,6 +4556,11 @@ async def save_clean_event(tx, event: Dict[str, Any]) -> Dict[str, Any]:
 class RowProcessor:
     """Processes individual rows and creates events"""
     
+    # FIX #20: Move pattern lists to class-level constants (avoid recreating for every row)
+    REVENUE_PATTERNS = ['income', 'revenue', 'payment received', 'deposit', 'credit']
+    EXPENSE_PATTERNS = ['expense', 'cost', 'payment', 'debit', 'withdrawal', 'fee']
+    PAYROLL_PATTERNS = ['salary', 'payroll', 'wage', 'employee']
+    
     def __init__(self, platform_detector: UniversalPlatformDetector, ai_classifier, enrichment_processor):
         self.platform_detector = platform_detector
         self.ai_classifier = ai_classifier
@@ -4596,7 +4602,7 @@ class RowProcessor:
             "sheet_name": sheet_name,
             "source_filename": file_context['filename'],
             "uploader": file_context['user_id'],
-            "ingest_ts": datetime.utcnow().isoformat(),
+            "ingest_ts": pendulum.now().to_iso8601_string(),
             "status": "pending",
             "confidence_score": enriched_payload.get('ai_confidence', 0.5),
             "classification_metadata": {
@@ -4996,18 +5002,8 @@ class ExcelProcessor:
             
         except Exception as e:
             logger.error(f"Error in streaming XLSX processing: {e}")
-            # FIX #NEW_6: Fix broken fallback - use file_path with openpyxl engine
-            try:
-                fallback_sheets = pd.read_excel(file_path, sheet_name=None, engine='openpyxl')
-                return {
-                    'sheets': fallback_sheets if isinstance(fallback_sheets, dict) else {'Sheet1': fallback_sheets},
-                    'summary': {
-                        'sheet_count': len(fallback_sheets) if isinstance(fallback_sheets, dict) else (0 if fallback_sheets is None else 1),
-                        'filename': filename
-                    }
-            except Exception as fallback_err:
-                logger.error(f"Fallback XLSX processing also failed: {fallback_err}")
-                raise ValueError(f"Failed to process XLSX file: {str(e)}")
+            logger.error(f"CRITICAL: Streaming XLSX processing failed. File may be corrupted or too large.")
+            raise ValueError(f"Failed to process XLSX file: {str(e)}. Please ensure file is valid and under 100MB.")
 
     # FIX #52: REMOVED duplicate _sanitize_nan_for_json function
     # DEDUPLICATION: Centralized sanitization logic
@@ -5020,9 +5016,12 @@ class ExcelProcessor:
     # - Primary: Polars (line 184) for all data processing
     # - Fallback: Pandas (line 50) for:
     #   * recordlinkage entity matching (requires pandas DataFrames)
-    #   * Excel file fallback (pd.read_excel)
     #   * CSV metadata extraction (pd.read_csv)
     # This is intentional - Polars is used where possible, pandas only for compatibility
+    # 
+    # FIX #8: No pd.read_excel fallback in stream_xlsx_processing
+    # Reason: pd.read_excel loads entire file into memory, defeating streaming purpose
+    # Solution: Fail fast with clear error if streaming fails (file likely corrupted)
 
 async def _fast_classify_row_cached(self, row, platform_info: dict, column_names: list) -> dict:
     """Fast cached classification with AI fallback - 90% cost reduction"""
@@ -5306,10 +5305,10 @@ async def _fast_classify_row_cached(self, row, platform_info: dict, column_names
             'user_id': user_id,
             'status': 'pending',  # FIXED: Use 'pending' instead of 'active' for initial state
             'operation_type': 'file_processing',
-            'started_at': datetime.utcnow().isoformat(),
+            'started_at': pendulum.now().to_iso8601_string(),
             'job_id': job_id,  # FIXED: Add job_id as top-level field
             'file_id': None,  # Will be set after raw_record creation
-            'start_time': datetime.utcnow().isoformat(),  # FIXED: Add start_time for monitoring
+            'start_time': pendulum.now().to_iso8601_string(),  # FIXED: Add start_time for monitoring
             'metadata': {
                 'job_id': job_id,
                 'filename': streamed_file.filename,
@@ -5336,8 +5335,8 @@ async def _fast_classify_row_cached(self, row, platform_info: dict, column_names
                 'lock_type': 'file_processing',
                 'resource_id': job_id,
                 'user_id': user_id,
-                'acquired_at': datetime.utcnow().isoformat(),
-                'expires_at': (datetime.utcnow() + timedelta(hours=1)).isoformat(),
+                'acquired_at': pendulum.now().to_iso8601_string(),
+                'expires_at': pendulum.now().add(hours=1).to_iso8601_string(),
                 'job_id': job_id,
                 'metadata': {
                     'filename': streamed_file.filename,
@@ -5452,7 +5451,7 @@ async def _fast_classify_row_cached(self, row, platform_info: dict, column_names
                     filename=streamed_file.filename,
                     file_size=streamed_file_size or streamed_file.size,
                     content_type='application/octet-stream',
-                    upload_timestamp=datetime.utcnow()
+                    upload_timestamp=pendulum.now()
                 )
 
                 # CRITICAL FIX: Convert streaming file to bytes for extractors
@@ -5492,7 +5491,7 @@ async def _fast_classify_row_cached(self, row, platform_info: dict, column_names
                         supabase.table('ingestion_jobs').update({
                             'status': 'failed',
                             'error_message': error_msg,
-                            'updated_at': datetime.utcnow().isoformat()
+                            'updated_at': pendulum.now().to_iso8601_string()
                         }).eq('id', job_id).execute()
                     except Exception as db_err:
                         logger.warning(f"Failed to update job status on duplicate detection error: {db_err}")
@@ -5517,7 +5516,7 @@ async def _fast_classify_row_cached(self, row, platform_info: dict, column_names
                     try:
                         supabase.table('ingestion_jobs').update({
                             'status': 'waiting_user_decision',
-                            'updated_at': datetime.utcnow().isoformat(),
+                            'updated_at': pendulum.now().to_iso8601_string(),
                             'progress': 20,
                             'result': {
                                 'status': 'duplicate_detected',
@@ -5551,7 +5550,7 @@ async def _fast_classify_row_cached(self, row, platform_info: dict, column_names
                     try:
                         supabase.table('ingestion_jobs').update({
                             'status': 'waiting_user_decision',
-                            'updated_at': datetime.utcnow().isoformat(),
+                            'updated_at': pendulum.now().to_iso8601_string(),
                             'progress': 35,
                             'result': {
                                 'status': 'near_duplicate_detected',
@@ -5605,7 +5604,7 @@ async def _fast_classify_row_cached(self, row, platform_info: dict, column_names
                     try:
                         supabase.table('ingestion_jobs').update({
                             'status': 'waiting_user_decision',
-                            'updated_at': datetime.utcnow().isoformat(),
+                            'updated_at': pendulum.now().to_iso8601_string(),
                             'progress': 30,
                             'result': {
                                 'status': 'content_duplicate_detected',
@@ -5881,7 +5880,7 @@ async def _fast_classify_row_cached(self, row, platform_info: dict, column_names
                     'file_hash': file_hash,
                     'sheets_row_hashes': sheets_row_hashes,
                     'total_rows': sum(meta.get('row_count', 0) for meta in sheets_metadata.values()),
-                    'processed_at': datetime.utcnow().isoformat(),
+                    'processed_at': pendulum.now().to_iso8601_string(),
                     'duplicate_analysis': duplicate_analysis
                 },
                 'status': 'processing',
@@ -5918,8 +5917,8 @@ async def _fast_classify_row_cached(self, row, platform_info: dict, column_names
                 'extracted_rows': 0,  # FIXED: Add extracted rows count
                 'total_rows': 0,  # FIXED: Add total rows (will be updated later)
                 'transaction_id': transaction_id,  # FIXED: Link to transaction
-                'created_at': datetime.utcnow().isoformat(),
-                'updated_at': datetime.utcnow().isoformat()
+                'created_at': pendulum.now().to_iso8601_string(),
+                'updated_at': pendulum.now().to_iso8601_string()
             }
             
             try:
@@ -5931,7 +5930,7 @@ async def _fast_classify_row_cached(self, row, platform_info: dict, column_names
                 job_result = await tx.update('ingestion_jobs', {
                     'file_id': file_id,
                     'status': 'processing',
-                    'updated_at': datetime.utcnow().isoformat()
+                    'updated_at': pendulum.now().to_iso8601_string()
                 }, {'id': job_id})
         
         # Step 5: Process each sheet with optimized batch processing
@@ -6292,7 +6291,7 @@ async def _fast_classify_row_cached(self, row, platform_info: dict, column_names
                                 
                                 event['dedupe_metadata'] = {
                                     'hash_algorithm': dedupe_result.get('hash_algorithm', 'xxhash64' if xxhash else 'sha256'),
-                                    'hash_timestamp': datetime.utcnow().isoformat(),
+                                    'hash_timestamp': pendulum.now().to_iso8601_string(),
                                     'normalized': True,
                                     'entity_resolved': bool(event.get('entity_resolution')),
                                     'is_duplicate': dedupe_result.get('is_duplicate', False),
@@ -6465,7 +6464,7 @@ async def _fast_classify_row_cached(self, row, platform_info: dict, column_names
                         'total_rows': total_rows,
                         'events_created': events_created,
                         'errors': errors,
-                        'processed_at': datetime.utcnow().isoformat()
+                        'processed_at': pendulum.now().to_iso8601_string()
                     }
                 }, {'id': file_id})
         except Exception as e:
@@ -6684,7 +6683,7 @@ async def _fast_classify_row_cached(self, row, platform_info: dict, column_names
                         rel_count = count_result.count or 0
                         supabase.table('raw_events').update({
                             'relationship_count': rel_count,
-                            'last_relationship_check': datetime.utcnow().isoformat()
+                            'last_relationship_check': pendulum.now().to_iso8601_string()
                         }).eq('id', event_id).execute()
                     except Exception as update_err:
                         logger.warning(f"Failed to update relationship count for event {event_id}: {update_err}")
@@ -6741,7 +6740,7 @@ async def _fast_classify_row_cached(self, row, platform_info: dict, column_names
                     'platform_confidence': platform_info.get('confidence', 0.0),
                     'entities_resolved': len(entities) if 'entities' in locals() else 0,
                     'relationships_found': relationship_results.get('total_relationships', 0) if 'relationship_results' in locals() and relationship_results is not None else 0,
-                    'processing_time_seconds': (datetime.utcnow() - self._parse_iso_timestamp(transaction_data['started_at'])).total_seconds() if transaction_id else 0
+                    'processing_time_seconds': (pendulum.now() - self._parse_iso_timestamp(transaction_data['started_at'])).total_seconds() if transaction_id else 0
                 }
             }
             
@@ -6763,8 +6762,8 @@ async def _fast_classify_row_cached(self, row, platform_info: dict, column_names
             try:
                 supabase.table('processing_transactions').update({
                     'status': 'committed',
-                    'committed_at': datetime.utcnow().isoformat(),
-                    'end_time': datetime.utcnow().isoformat(),  # FIXED: Add end_time for monitoring
+                    'committed_at': pendulum.now().to_iso8601_string(),
+                    'end_time': pendulum.now().to_iso8601_string(),  # FIXED: Add end_time for monitoring
                     'metadata': {
                         **transaction_data['metadata'],
                         'events_created': events_created,
@@ -6787,7 +6786,7 @@ async def _fast_classify_row_cached(self, row, platform_info: dict, column_names
                 'processing_stage': 'completed',  # FIXED: Update processing stage
                 'extracted_rows': events_created,  # FIXED: Set final extracted rows count
                 'total_rows': processed_rows,  # FIXED: Set total rows processed
-                'updated_at': datetime.utcnow().isoformat(),
+                'updated_at': pendulum.now().to_iso8601_string(),
                 'transaction_id': transaction_id
             }, {'id': job_id})
         
@@ -7314,7 +7313,7 @@ async def _fast_classify_row_cached(self, row, platform_info: dict, column_names
                             # Update raw_events.relationship_count
                             supabase.table('raw_events').update({
                                 'relationship_count': rel_count,
-                                'last_relationship_check': datetime.utcnow().isoformat()
+                                'last_relationship_check': pendulum.now().to_iso8601_string()
                             }).eq('id', event_id).eq('user_id', user_id).execute()
                         except Exception as update_err:
                             logger.warning(f"Failed to update relationship count for event {event_id}: {update_err}")
@@ -7438,7 +7437,7 @@ async def _fast_classify_row_cached(self, row, platform_info: dict, column_names
                         'platform_name': platform_name,
                         'discovery_reason': platform.get('discovery_reason', 'Detected from uploaded file'),
                         'confidence_score': float(platform.get('detection_confidence', 0.95)),
-                        'discovered_at': datetime.utcnow().isoformat(),
+                        'discovered_at': pendulum.now().to_iso8601_string(),
                         'transaction_id': transaction_id,
                         'job_id': job_id
                     }
@@ -7600,7 +7599,7 @@ async def _fast_classify_row_cached(self, row, platform_info: dict, column_names
                         'confidence_score': min(0.9, 0.5 + (occurrence_count * 0.1)),
                         'prediction_method': 'pattern_based',
                         'pattern_id': pattern.get('id'),
-                        'predicted_at': datetime.utcnow().isoformat(),
+                        'predicted_at': pendulum.now().to_iso8601_string(),
                         'prediction_basis': {
                             'pattern_occurrences': occurrence_count,
                             'pattern_data': pattern_data
@@ -7947,11 +7946,11 @@ async def handle_duplicate_decision(request: DuplicateDecisionRequest):
                     # Update ingestion_jobs
                     await tx.update('ingestion_jobs', {
                         'status': 'cancelled',
-                        'updated_at': datetime.utcnow().isoformat(),
+                        'updated_at': pendulum.now().to_iso8601_string(),
                         'error_message': 'Skipped due to duplicate',
                         'metadata': {
                             'duplicate_decision': 'skip',
-                            'decided_at': datetime.utcnow().isoformat(),
+                            'decided_at': pendulum.now().to_iso8601_string(),
                             'existing_file_id': request.existing_file_id
                         }
                     }, {'id': request.job_id})
@@ -7963,9 +7962,9 @@ async def handle_duplicate_decision(request: DuplicateDecisionRequest):
                             await tx.update('raw_records', {
                                 'duplicate_decision': 'skip',
                                 'duplicate_of': request.existing_file_id,
-                                'decision_timestamp': datetime.utcnow().isoformat(),
+                                'decision_timestamp': pendulum.now().to_iso8601_string(),
                                 'decision_metadata': {
-                                    'decided_at': datetime.utcnow().isoformat(),
+                                    'decided_at': pendulum.now().to_iso8601_string(),
                                     'job_id': request.job_id,
                                     'user_action': 'skip'
                                 }
@@ -8135,7 +8134,7 @@ async def handle_duplicate_decision(request: DuplicateDecisionRequest):
                         supabase.table('ingestion_jobs').update({
                             'status': 'completed',
                             'progress': 100,
-                            'updated_at': datetime.utcnow().isoformat(),
+                            'updated_at': pendulum.now().to_iso8601_string(),
                             'metadata': {
                                 'duplicate_decision': 'delta_merge',
                                 'merge_result': merge_result,
@@ -8158,7 +8157,7 @@ async def handle_duplicate_decision(request: DuplicateDecisionRequest):
                     supabase.table('ingestion_jobs').update({
                         'status': 'failed',
                         'error_message': error_msg,
-                        'updated_at': datetime.utcnow().isoformat()
+                        'updated_at': pendulum.now().to_iso8601_string()
                     }).eq('id', request.job_id).execute()
                     
                     raise HTTPException(status_code=400, detail=error_msg)
@@ -8176,7 +8175,7 @@ async def handle_duplicate_decision(request: DuplicateDecisionRequest):
                         supabase.table('ingestion_jobs').update({
                             'status': 'failed',
                             'error_message': error_msg,
-                            'updated_at': datetime.utcnow().isoformat()
+                            'updated_at': pendulum.now().to_iso8601_string()
                         }).eq('id', request.job_id).execute()
                     except Exception as db_err:
                         logger.error(f"Failed to update job status after delta merge error: {db_err}")
@@ -8517,7 +8516,7 @@ async def chat_endpoint(request: dict):
         # Return response in format expected by frontend
         return {
             "response": response.answer,
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": pendulum.now().to_iso8601_string(),
             "question_type": response.question_type.value,
             "confidence": response.confidence,
             "data": response.data,
@@ -9008,7 +9007,7 @@ async def process_excel_endpoint(
             "status": "starting",
             "message": "Initializing processing...",
             "progress": 0,
-            "started_at": datetime.utcnow().isoformat(),
+            "started_at": pendulum.now().to_iso8601_string(),
             "components": {}
         })
 
@@ -9196,7 +9195,7 @@ async def get_component_metrics():
         return {
             "status": "success",
             "metrics": metrics,
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": pendulum.now().to_iso8601_string()
         }
         
     except Exception as e:
@@ -9368,7 +9367,7 @@ async def _enqueue_file_processing(user_id: str, filename: str, storage_path: st
             'file_name': filename,
             'status': 'queued',
             'storage_path': storage_path,
-            'created_at': datetime.utcnow().isoformat()
+            'created_at': pendulum.now().to_iso8601_string()
         }
         # Best-effort insert
         try:
@@ -9439,7 +9438,7 @@ async def _enqueue_pdf_processing(user_id: str, filename: str, storage_path: str
             'file_name': filename,
             'status': 'queued',
             'storage_path': storage_path,
-            'created_at': datetime.utcnow().isoformat()
+            'created_at': pendulum.now().to_iso8601_string()
         }
         try:
             supabase.table('ingestion_jobs').insert(job_data).execute()
@@ -9484,13 +9483,13 @@ async def start_pdf_processing_job(user_id: str, job_id: str, storage_path: str,
             **base,
             "user_id": user_id,
             "status": base.get("status", "queued"),
-            "started_at": base.get("started_at") or datetime.utcnow().isoformat(),
+            "started_at": base.get("started_at") or pendulum.now().to_iso8601_string(),
         })
         # Mark job as processing
         try:
             supabase.table('ingestion_jobs').update({
                 'status': 'processing',
-                'updated_at': datetime.utcnow().isoformat()
+                'updated_at': pendulum.now().to_iso8601_string()
             }).eq('id', job_id).execute()
         except Exception:
             pass
@@ -9538,7 +9537,7 @@ async def start_pdf_processing_job(user_id: str, job_id: str, storage_path: str,
                 'text_excerpt': (text_excerpt[:16000] if text_excerpt else None),
                 'tables_preview': tables_preview if tables_preview else None,
                 'pages_processed': pages_processed,
-                'processed_at': datetime.utcnow().isoformat()
+                'processed_at': pendulum.now().to_iso8601_string()
             },
             'status': 'completed',
             'classification_status': 'pending'
@@ -9566,7 +9565,7 @@ async def start_pdf_processing_job(user_id: str, job_id: str, storage_path: str,
                 await tx.insert('raw_records', record)
                 await tx.update('ingestion_jobs', {
                     'status': 'completed',
-                    'updated_at': datetime.utcnow().isoformat()
+                    'updated_at': pendulum.now().to_iso8601_string()
                 }, {'id': job_id})
         except Exception as e:
             logger.error(f"Failed to persist PDF processing results transactionally: {e}")
@@ -9582,7 +9581,7 @@ async def start_pdf_processing_job(user_id: str, job_id: str, storage_path: str,
                 await tx.update('ingestion_jobs', {
                     'status': 'failed',
                     'error_message': str(e),
-                    'updated_at': datetime.utcnow().isoformat()
+                    'updated_at': pendulum.now().to_iso8601_string()
                 }, {'id': job_id})
         except Exception:
             pass
@@ -9681,7 +9680,7 @@ async def _process_api_data_through_pipeline(
                 'source': f'connector_{source_platform.lower()}',
                 'job_type': 'api_sync',
                 'status': 'processing',
-                'created_at': datetime.utcnow().isoformat()
+                'created_at': pendulum.now().to_iso8601_string()
             }).execute()
         except Exception as e:
             logger.warning(f"Failed to create ingestion_job for {source_platform}: {e}")
@@ -9704,7 +9703,7 @@ async def _process_api_data_through_pipeline(
         try:
             supabase.table('ingestion_jobs').update({
                 'status': 'completed',
-                'updated_at': datetime.utcnow().isoformat()
+                'updated_at': pendulum.now().to_iso8601_string()
             }).eq('id', job_id).execute()
         except Exception as e:
             logger.warning(f"Failed to update ingestion_job status: {e}")
@@ -9786,7 +9785,7 @@ async def _gmail_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> Dict
                 'user_connection_id': user_connection_id,
                 'type': req.mode,
                 'status': 'running',
-                'started_at': datetime.utcnow().isoformat(),
+                'started_at': pendulum.now().to_iso8601_string(),
                 'stats': orjson.dumps({'records_fetched': 0, 'actions_used': 0}).decode()
             })
     except Exception:
@@ -9940,7 +9939,7 @@ async def _gmail_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> Dict
                     try:
                         source_ts = parsedate_to_datetime(date_hdr).isoformat()
                     except Exception:
-                        source_ts = datetime.utcnow().isoformat()
+                        source_ts = pendulum.now().to_iso8601_string()
 
                 # Walk parts recursively to find attachments
                 def iter_parts(node):
@@ -9989,7 +9988,7 @@ async def _gmail_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> Dict
                             'user_connection_id': user_connection_id,
                             'provider_id': provider_attachment_id,
                             'kind': 'email',
-                            'source_ts': source_ts or datetime.utcnow().isoformat(),
+                            'source_ts': source_ts or pendulum.now().to_iso8601_string(),
                             'hash': file_hash,
                             'storage_path': storage_path,
                             'metadata': {'subject': subject, 'filename': filename, 'mime_type': mime_type, 'correlation_id': req.correlation_id},
@@ -10041,7 +10040,7 @@ async def _gmail_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> Dict
                 # Update sync_run status
                 await tx.update('sync_runs', {
                     'status': run_status,
-                    'finished_at': datetime.utcnow().isoformat(),
+                    'finished_at': pendulum.now().to_iso8601_string(),
                     'stats': orjson.dumps(stats).decode(),
                     'error': '; '.join(errors)[:500] if errors else None
                 }, {'id': sync_run_id})
@@ -10073,7 +10072,7 @@ async def _gmail_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> Dict
                     logger.info(f"✅ Saved Gmail historyId for incremental sync: {current_history_id}")
                 
                 await tx.update('user_connections', {
-                    'last_synced_at': datetime.utcnow().isoformat(),
+                    'last_synced_at': pendulum.now().to_iso8601_string(),
                     'metadata': updated_meta
                 }, {'nango_connection_id': connection_id})
                 
@@ -10083,15 +10082,15 @@ async def _gmail_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> Dict
                     'user_connection_id': user_connection_id,
                     'resource': 'emails',
                     'cursor_type': 'time',
-                    'value': datetime.utcnow().isoformat()
+                    'value': pendulum.now().to_iso8601_string()
                 }
                 try:
                     await tx.insert('sync_cursors', cursor_data)
                 except Exception:
                     # If insert fails (duplicate), update instead
                     await tx.update('sync_cursors', {
-                        'value': datetime.utcnow().isoformat(),
-                        'updated_at': datetime.utcnow().isoformat()
+                        'value': pendulum.now().to_iso8601_string(),
+                        'updated_at': pendulum.now().to_iso8601_string()
                     }, {
                         'user_connection_id': user_connection_id,
                         'resource': 'emails',
@@ -10142,7 +10141,7 @@ async def _gmail_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> Dict
         try:
             supabase.table('sync_runs').update({
                 'status': 'failed',
-                'finished_at': datetime.utcnow().isoformat(),
+                'finished_at': pendulum.now().to_iso8601_string(),
                 'error': str(e)
             }).eq('id', sync_run_id).execute()
         except Exception:
@@ -10195,8 +10194,8 @@ async def _zohomail_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> D
                     'user_connection_id': None,
                     'type': req.mode,
                     'status': 'failed',
-                    'started_at': datetime.utcnow().isoformat(),
-                    'finished_at': datetime.utcnow().isoformat(),
+                    'started_at': pendulum.now().to_iso8601_string(),
+                    'finished_at': pendulum.now().to_iso8601_string(),
                     'stats': orjson.dumps(stats).decode(),
                     'error': error_message,
                 },
@@ -10260,7 +10259,7 @@ async def _dropbox_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> Di
                 'user_connection_id': user_connection_id,
                 'type': req.mode,
                 'status': 'running',
-                'started_at': datetime.utcnow().isoformat(),
+                'started_at': pendulum.now().to_iso8601_string(),
                 'stats': orjson.dumps(stats).decode()
             })
     except Exception:
@@ -10333,7 +10332,7 @@ async def _dropbox_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> Di
                         'user_connection_id': user_connection_id,
                         'provider_id': path_lower,
                         'kind': 'file',
-                        'source_ts': server_modified or datetime.utcnow().isoformat(),
+                        'source_ts': server_modified or pendulum.now().to_iso8601_string(),
                         'hash': file_hash,
                         'storage_path': storage_path,
                         'metadata': {'name': name, 'correlation_id': req.correlation_id},
@@ -10419,7 +10418,7 @@ async def _dropbox_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> Di
                     except Exception:
                         await tx.update('sync_cursors', {
                             'value': cursor,
-                            'updated_at': datetime.utcnow().isoformat()
+                            'updated_at': pendulum.now().to_iso8601_string()
                         }, {
                             'user_connection_id': user_connection_id,
                             'resource': 'dropbox',
@@ -10438,13 +10437,13 @@ async def _dropbox_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> Di
             ) as tx:
                 await tx.update('sync_runs', {
                     'status': run_status,
-                    'finished_at': datetime.utcnow().isoformat(),
+                    'finished_at': pendulum.now().to_iso8601_string(),
                     'stats': orjson.dumps(stats).decode(),
                     'error': '; '.join(errors)[:500] if errors else None
                 }, {'id': sync_run_id})
                 
                 await tx.update('user_connections', {
-                    'last_synced_at': datetime.utcnow().isoformat()
+                    'last_synced_at': pendulum.now().to_iso8601_string()
                 }, {'nango_connection_id': connection_id})
                 
                 logger.info(f"✅ Dropbox sync completed in transaction: {stats['records_fetched']} items, status={run_status}")
@@ -10485,7 +10484,7 @@ async def _dropbox_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> Di
             logger.error(f"Error recovery failed: {recovery_error}")
         
         try:
-            supabase.table('sync_runs').update({'status': 'failed', 'finished_at': datetime.utcnow().isoformat(), 'error': str(e)}).eq('id', sync_run_id).execute()
+            supabase.table('sync_runs').update({'status': 'failed', 'finished_at': pendulum.now().to_iso8601_string(), 'error': str(e)}).eq('id', sync_run_id).execute()
         except Exception:
             pass
         try:
@@ -10542,7 +10541,7 @@ async def _gdrive_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> Dic
                 'user_connection_id': user_connection_id,
                 'type': req.mode,
                 'status': 'running',
-                'started_at': datetime.utcnow().isoformat(),
+                'started_at': pendulum.now().to_iso8601_string(),
                 'stats': orjson.dumps(stats).decode()
             })
     except Exception:
@@ -10600,7 +10599,7 @@ async def _gdrive_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> Dic
                             'user_connection_id': user_connection_id,
                             'provider_id': fid,
                             'kind': 'file',
-                            'source_ts': f.get('modifiedTime') or datetime.utcnow().isoformat(),
+                            'source_ts': f.get('modifiedTime') or pendulum.now().to_iso8601_string(),
                             'hash': file_hash,
                             'storage_path': storage_path,
                             'metadata': {'name': name, 'mime': mime, 'correlation_id': req.correlation_id},
@@ -10665,12 +10664,12 @@ async def _gdrive_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> Dic
             ) as tx:
                 await tx.update('sync_runs', {
                     'status': run_status,
-                    'finished_at': datetime.utcnow().isoformat(),
+                    'finished_at': pendulum.now().to_iso8601_string(),
                     'stats': orjson.dumps(stats).decode(),
                     'error': '; '.join(errors)[:500] if errors else None
                 }, {'id': sync_run_id})
                 await tx.update('user_connections', {
-                    'last_synced_at': datetime.utcnow().isoformat()
+                    'last_synced_at': pendulum.now().to_iso8601_string()
                 }, {'nango_connection_id': connection_id})
         except Exception as completion_err:
             logger.error(f"Failed to update GDrive sync completion status: {completion_err}")
@@ -10706,7 +10705,7 @@ async def _gdrive_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> Dic
             logger.error(f"Error recovery failed: {recovery_error}")
         
         try:
-            supabase.table('sync_runs').update({'status': 'failed', 'finished_at': datetime.utcnow().isoformat(), 'error': str(e)}).eq('id', sync_run_id).execute()
+            supabase.table('sync_runs').update({'status': 'failed', 'finished_at': pendulum.now().to_iso8601_string(), 'error': str(e)}).eq('id', sync_run_id).execute()
         except Exception:
             pass
         try:
@@ -10889,8 +10888,8 @@ async def verify_connection(req: dict):
                 'provider': provider,
                 'status': 'active',
                 'sync_frequency_minutes': 60,
-                'created_at': datetime.utcnow().isoformat(),
-                'updated_at': datetime.utcnow().isoformat()
+                'created_at': pendulum.now().to_iso8601_string(),
+                'updated_at': pendulum.now().to_iso8601_string()
             }
             
             # Only add connector_id if we have one
@@ -11110,7 +11109,7 @@ async def connectors_disconnect(req: ConnectorDisconnectRequest):
                     'user_connections',
                     {
                         'status': 'disconnected',
-                        'updated_at': datetime.utcnow().isoformat()
+                        'updated_at': pendulum.now().to_iso8601_string()
                     },
                     {'nango_connection_id': connection_id}
                 )
@@ -11208,7 +11207,7 @@ async def _process_webhook_delta_items(user_id: str, user_connection_id: str, pr
                     'user_connection_id': user_connection_id,
                     'provider_id': str(item_id),
                     'kind': 'txn',
-                    'source_ts': item.get('date') or item.get('updated_at') or datetime.utcnow().isoformat(),
+                    'source_ts': item.get('date') or item.get('updated_at') or pendulum.now().to_iso8601_string(),
                     'metadata': meta,
                     'status': 'fetched'
                 }
@@ -11355,8 +11354,8 @@ async def nango_webhook(request: Request):
                         'status': 'active',
                         'last_synced_at': None,
                         'sync_frequency_minutes': 60,
-                        'created_at': datetime.utcnow().isoformat(),
-                        'updated_at': datetime.utcnow().isoformat()
+                        'created_at': pendulum.now().to_iso8601_string(),
+                        'updated_at': pendulum.now().to_iso8601_string()
                     }, on_conflict='nango_connection_id').execute()
                     logger.info(f"✅ User connection upserted: connection_id={connection_id}")
                 except Exception as e:
@@ -11400,7 +11399,7 @@ async def nango_webhook(request: Request):
                             try:
                                 supabase.table('webhook_events').update({
                                     'status': 'processed',
-                                    'processed_at': datetime.utcnow().isoformat()
+                                    'processed_at': pendulum.now().to_iso8601_string()
                                 }).eq('event_id', event_id).execute()
                             except Exception:
                                 pass
@@ -11687,7 +11686,7 @@ async def disconnect(sid):
 @sio.on('ping')
 async def handle_ping(sid):
     """Socket.IO ping handler - replaces manual ping/pong"""
-    return {'type': 'pong', 'timestamp': datetime.utcnow().isoformat()}
+    return {'type': 'pong', 'timestamp': pendulum.now().to_iso8601_string()}
 
 @sio.on('get_status')
 async def handle_get_status(sid, data):
@@ -11716,7 +11715,7 @@ async def handle_pause_processing(sid, data):
         await websocket_manager.merge_job_state(file_id, {
             **current_status,
             'status': 'paused',
-            'paused_at': datetime.utcnow().isoformat()
+            'paused_at': pendulum.now().to_iso8601_string()
         })
         
         logger.info(f"✅ Processing paused for file {file_id} by {sid}")
@@ -11724,7 +11723,7 @@ async def handle_pause_processing(sid, data):
         # Notify all clients in the job room
         await sio.emit('processing_paused', {
             'fileId': file_id,
-            'timestamp': datetime.utcnow().isoformat()
+            'timestamp': pendulum.now().to_iso8601_string()
         }, room=file_id)
         
         return {'status': 'success', 'message': 'Processing paused'}
@@ -11750,7 +11749,7 @@ async def start_processing_job(user_id: str, job_id: str, storage_path: str, fil
             **base,
             "user_id": user_id,
             "status": base.get("status", "queued"),
-            "started_at": base.get("started_at") or datetime.utcnow().isoformat(),
+            "started_at": base.get("started_at") or pendulum.now().to_iso8601_string(),
         })
         async def is_cancelled() -> bool:
             status = await websocket_manager.get_job_status(job_id)
@@ -11849,7 +11848,7 @@ async def cancel_upload(job_id: str):
             **base,
             "status": "cancelled",
             "message": "Cancelled by user",
-            "updated_at": datetime.utcnow().isoformat()
+            "updated_at": pendulum.now().to_iso8601_string()
         })
         # Notify over WS if connected
         await websocket_manager.send_overall_update(
@@ -12134,7 +12133,7 @@ class UniversalComponentDatabaseManager:
                 'component_type': 'field_detection',
                 'job_id': job_id or str(uuid.uuid4()),
                 'result_data': result,
-                'created_at': datetime.utcnow().isoformat(),
+                'created_at': pendulum.now().to_iso8601_string(),
                 'metadata': {
                     'detected_fields': result.get('detected_fields', {}),
                     'confidence_scores': result.get('confidence_scores', {}),
@@ -12158,7 +12157,7 @@ class UniversalComponentDatabaseManager:
                 'component_type': 'platform_detection',
                 'job_id': job_id or str(uuid.uuid4()),
                 'result_data': result,
-                'created_at': datetime.utcnow().isoformat(),
+                'created_at': pendulum.now().to_iso8601_string(),
                 'metadata': {
                     'detected_platform': result.get('platform', 'unknown'),
                     'confidence': result.get('confidence', 0.0),
@@ -12182,7 +12181,7 @@ class UniversalComponentDatabaseManager:
                 'component_type': 'document_classification',
                 'job_id': job_id or str(uuid.uuid4()),
                 'result_data': result,
-                'created_at': datetime.utcnow().isoformat(),
+                'created_at': pendulum.now().to_iso8601_string(),
                 'metadata': {
                     'document_type': result.get('document_type', 'unknown'),
                     'confidence': result.get('confidence', 0.0),
@@ -12206,7 +12205,7 @@ class UniversalComponentDatabaseManager:
                 'component_type': 'data_extraction',
                 'job_id': job_id or str(uuid.uuid4()),
                 'result_data': result,
-                'created_at': datetime.utcnow().isoformat(),
+                'created_at': pendulum.now().to_iso8601_string(),
                 'metadata': {
                     'extracted_rows': len(result.get('extracted_data', [])),
                     'extraction_method': result.get('extraction_method', 'unknown'),
@@ -12230,7 +12229,7 @@ class UniversalComponentDatabaseManager:
                 'component_type': 'entity_resolution',
                 'job_id': job_id or str(uuid.uuid4()),
                 'result_data': result,
-                'created_at': datetime.utcnow().isoformat(),
+                'created_at': pendulum.now().to_iso8601_string(),
                 'metadata': {
                     'resolved_entities': len(result.get('resolved_entities', [])),
                     'platform': platform,
@@ -12338,7 +12337,7 @@ class UniversalComponentMonitoringSystem:
     def record_operation_metrics(self, component: str, operation: str, duration: float, success: bool, 
                                 user_id: str = None, metadata: Dict[str, Any] = None):
         """Record operation metrics for monitoring"""
-        timestamp = datetime.utcnow().isoformat()
+        timestamp = pendulum.now().to_iso8601_string()
         
         if component not in self.metrics_store:
             self.metrics_store[component] = {
@@ -12380,7 +12379,7 @@ class UniversalComponentMonitoringSystem:
     
     def record_performance_metrics(self, component: str, metrics: Dict[str, Any]):
         """Record performance-specific metrics"""
-        timestamp = datetime.utcnow().isoformat()
+        timestamp = pendulum.now().to_iso8601_string()
         
         if component not in self.performance_tracker:
             self.performance_tracker[component] = []
@@ -12399,7 +12398,7 @@ class UniversalComponentMonitoringSystem:
     def record_error(self, component: str, operation: str, error: Exception, 
                     user_id: str = None, context: Dict[str, Any] = None):
         """Record error details for monitoring and debugging"""
-        timestamp = datetime.utcnow().isoformat()
+        timestamp = pendulum.now().to_iso8601_string()
         
         if component not in self.error_tracker:
             self.error_tracker[component] = []
@@ -12425,7 +12424,7 @@ class UniversalComponentMonitoringSystem:
                        details: Dict[str, Any], action: str = "execute"):
         """Record audit trail for compliance and debugging"""
         audit_record = {
-            'timestamp': datetime.utcnow().isoformat(),
+            'timestamp': pendulum.now().to_iso8601_string(),
             'component': component,
             'operation': operation,
             'user_id': user_id,
@@ -12443,7 +12442,7 @@ class UniversalComponentMonitoringSystem:
         """Update health status for a component"""
         self.health_status[component] = {
             'status': status,  # 'healthy', 'degraded', 'unhealthy'
-            'last_check': datetime.utcnow().isoformat(),
+            'last_check': pendulum.now().to_iso8601_string(),
             'details': details or {}
         }
     
@@ -12524,7 +12523,7 @@ async def get_observability_metrics():
         return {
             "status": "success",
             "message": "Use /metrics endpoint for Prometheus metrics",
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": pendulum.now().to_iso8601_string()
         }
     except Exception as e:
         logger.error(f"Failed to get observability metrics: {e}")
@@ -12539,7 +12538,7 @@ async def get_security_status():
         return {
             "status": "success",
             "security": security_stats,
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": pendulum.now().to_iso8601_string()
         }
     except Exception as e:
         logger.error(f"Failed to get security status: {e}")
@@ -12594,7 +12593,7 @@ async def get_health_status():
         return {
             'status': 'success',
             'health': overall_health,
-            'timestamp': datetime.utcnow().isoformat()
+            'timestamp': pendulum.now().to_iso8601_string()
         }
         
     except Exception as e:
@@ -12610,7 +12609,7 @@ async def get_monitoring_metrics():
         return {
             'status': 'success',
             'metrics': metrics_summary,
-            'timestamp': datetime.utcnow().isoformat()
+            'timestamp': pendulum.now().to_iso8601_string()
         }
         
     except Exception as e:
@@ -12648,7 +12647,7 @@ async def get_error_logs(component: str = None, limit: int = 100):
         return {
             'status': 'success',
             'error_logs': error_logs,
-            'timestamp': datetime.utcnow().isoformat()
+            'timestamp': pendulum.now().to_iso8601_string()
         }
         
     except Exception as e:
@@ -12673,7 +12672,7 @@ async def get_audit_log(component: str = None, user_id: str = None, limit: int =
             'status': 'success',
             'audit_log': audit_records,
             'total_records': len(audit_records),
-            'timestamp': datetime.utcnow().isoformat()
+            'timestamp': pendulum.now().to_iso8601_string()
         }
         
     except Exception as e:
@@ -12690,7 +12689,7 @@ async def health_check():
     try:
         health_status = {
             "status": "healthy",
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": pendulum.now().to_iso8601_string(),
             "version": "2.0.0",
             "environment": {
                 "supabase_configured": bool(supabase),
@@ -12722,7 +12721,7 @@ async def health_check():
         return {
             "status": "error",
             "error": str(e),
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": pendulum.now().to_iso8601_string()
         }
 
 # ============================================================================
@@ -12811,7 +12810,7 @@ async def delete_file_completely(job_id: str, user_id: str):
         if event_ids:
             # FIX #3: Use soft-delete instead of hard-delete to support graph cache invalidation
             # Mark relationships as deleted instead of physically removing them
-            now = datetime.utcnow().isoformat()
+            now = pendulum.now().to_iso8601_string()
             rel_update_1 = supabase.table('relationship_instances').update({'is_deleted': True, 'updated_at': now})\
                 .in_('source_event_id', event_ids).eq('user_id', user_id).execute()
             rel_update_2 = supabase.table('relationship_instances').update({'is_deleted': True, 'updated_at': now})\
@@ -12821,7 +12820,7 @@ async def delete_file_completely(job_id: str, user_id: str):
         
         # Step 3: Soft-delete entity_matches for events from this file
         if event_ids:
-            now = datetime.utcnow().isoformat()
+            now = pendulum.now().to_iso8601_string()
             entity_matches_result = supabase.table('entity_matches').update({'is_deleted': True, 'updated_at': now}).in_('source_row_id', event_ids).eq('user_id', user_id).execute()
             deletion_stats['deleted_records']['entity_matches'] = len(entity_matches_result.data or [])
             logger.info(f"Soft-deleted {deletion_stats['deleted_records']['entity_matches']} entity matches")
@@ -12836,7 +12835,7 @@ async def delete_file_completely(job_id: str, user_id: str):
         
         # Step 7: Soft-delete processing_transactions for this job
         try:
-            now = datetime.utcnow().isoformat()
+            now = pendulum.now().to_iso8601_string()
             transactions_result = supabase.table('processing_transactions').update({'is_deleted': True, 'updated_at': now}).eq('job_id', job_id).eq('user_id', user_id).execute()
             deletion_stats['deleted_records']['processing_transactions'] = len(transactions_result.data or [])
             logger.info(f"Soft-deleted {deletion_stats['deleted_records']['processing_transactions']} transactions")
@@ -12845,7 +12844,7 @@ async def delete_file_completely(job_id: str, user_id: str):
         
         # Step 8: Soft-delete event_delta_logs for this job
         try:
-            now = datetime.utcnow().isoformat()
+            now = pendulum.now().to_iso8601_string()
             delta_logs_result = supabase.table('event_delta_logs').update({'is_deleted': True, 'updated_at': now}).eq('job_id', job_id).eq('user_id', user_id).execute()
             deletion_stats['deleted_records']['event_delta_logs'] = len(delta_logs_result.data or [])
             logger.info(f"Soft-deleted {deletion_stats['deleted_records']['event_delta_logs']} delta logs")
@@ -12855,7 +12854,7 @@ async def delete_file_completely(job_id: str, user_id: str):
         # CRITICAL FIX: Soft-delete advanced analytics data (previously orphaned)
         # Step 9: Soft-delete temporal_patterns
         try:
-            now = datetime.utcnow().isoformat()
+            now = pendulum.now().to_iso8601_string()
             temporal_patterns_result = supabase.table('temporal_patterns').update({'is_deleted': True, 'updated_at': now}).eq('job_id', job_id).eq('user_id', user_id).execute()
             deletion_stats['deleted_records']['temporal_patterns'] = len(temporal_patterns_result.data or [])
             logger.info(f"Soft-deleted {deletion_stats['deleted_records']['temporal_patterns']} temporal patterns")
@@ -12864,7 +12863,7 @@ async def delete_file_completely(job_id: str, user_id: str):
         
         # Step 10: Soft-delete predicted_relationships
         try:
-            now = datetime.utcnow().isoformat()
+            now = pendulum.now().to_iso8601_string()
             predicted_relationships_result = supabase.table('predicted_relationships').update({'is_deleted': True, 'updated_at': now}).eq('job_id', job_id).eq('user_id', user_id).execute()
             deletion_stats['deleted_records']['predicted_relationships'] = len(predicted_relationships_result.data or [])
             logger.info(f"Soft-deleted {deletion_stats['deleted_records']['predicted_relationships']} predicted relationships")
@@ -12883,7 +12882,7 @@ async def delete_file_completely(job_id: str, user_id: str):
         
         # Step 12: Soft-delete causal_relationships
         try:
-            now = datetime.utcnow().isoformat()
+            now = pendulum.now().to_iso8601_string()
             causal_relationships_result = supabase.table('causal_relationships').update({'is_deleted': True, 'updated_at': now}).eq('job_id', job_id).eq('user_id', user_id).execute()
             deletion_stats['deleted_records']['causal_relationships'] = len(causal_relationships_result.data or [])
             logger.info(f"Soft-deleted {deletion_stats['deleted_records']['causal_relationships']} causal relationships")
@@ -12892,7 +12891,7 @@ async def delete_file_completely(job_id: str, user_id: str):
         
         # Step 13: Soft-delete root_cause_analyses
         try:
-            now = datetime.utcnow().isoformat()
+            now = pendulum.now().to_iso8601_string()
             root_cause_analyses_result = supabase.table('root_cause_analyses').update({'is_deleted': True, 'updated_at': now}).eq('job_id', job_id).eq('user_id', user_id).execute()
             deletion_stats['deleted_records']['root_cause_analyses'] = len(root_cause_analyses_result.data or [])
             logger.info(f"Soft-deleted {deletion_stats['deleted_records']['root_cause_analyses']} root cause analyses")
@@ -12901,7 +12900,7 @@ async def delete_file_completely(job_id: str, user_id: str):
         
         # Step 14: Soft-delete counterfactual_analyses
         try:
-            now = datetime.utcnow().isoformat()
+            now = pendulum.now().to_iso8601_string()
             counterfactual_analyses_result = supabase.table('counterfactual_analyses').update({'is_deleted': True, 'updated_at': now}).eq('job_id', job_id).eq('user_id', user_id).execute()
             deletion_stats['deleted_records']['counterfactual_analyses'] = len(counterfactual_analyses_result.data or [])
             logger.info(f"Soft-deleted {deletion_stats['deleted_records']['counterfactual_analyses']} counterfactual analyses")
@@ -12920,7 +12919,7 @@ async def delete_file_completely(job_id: str, user_id: str):
         
         # Step 16: Soft-delete cross_platform_relationships
         try:
-            now = datetime.utcnow().isoformat()
+            now = pendulum.now().to_iso8601_string()
             cross_platform_relationships_result = supabase.table('cross_platform_relationships').update({'is_deleted': True, 'updated_at': now}).eq('job_id', job_id).eq('user_id', user_id).execute()
             deletion_stats['deleted_records']['cross_platform_relationships'] = len(cross_platform_relationships_result.data or [])
             logger.info(f"Soft-deleted {deletion_stats['deleted_records']['cross_platform_relationships']} cross-platform relationships")
@@ -12929,7 +12928,7 @@ async def delete_file_completely(job_id: str, user_id: str):
         
         # Step 17: Soft-delete platform_patterns
         try:
-            now = datetime.utcnow().isoformat()
+            now = pendulum.now().to_iso8601_string()
             platform_patterns_result = supabase.table('platform_patterns').update({'is_deleted': True, 'updated_at': now}).eq('job_id', job_id).eq('user_id', user_id).execute()
             deletion_stats['deleted_records']['platform_patterns'] = len(platform_patterns_result.data or [])
             logger.info(f"Soft-deleted {deletion_stats['deleted_records']['platform_patterns']} platform patterns")
@@ -12951,7 +12950,7 @@ async def delete_file_completely(job_id: str, user_id: str):
         
         # Step 20: Soft-delete raw_events (FIX #3)
         # FIX #3: Use soft-delete instead of hard-delete to support graph cache invalidation
-        now = datetime.utcnow().isoformat()
+        now = pendulum.now().to_iso8601_string()
         raw_events_result = supabase.table('raw_events').update({'is_deleted': True, 'updated_at': now})\
             .eq('job_id', job_id).eq('user_id', user_id).execute()
         logger.info(f"Soft-deleted {len(raw_events_result.data or [])} raw events")
@@ -12964,7 +12963,7 @@ async def delete_file_completely(job_id: str, user_id: str):
             entity_ids = [e['id'] for e in entity_ids_result.data] if entity_ids_result.data else []
             
             if entity_ids:
-                now = datetime.utcnow().isoformat()
+                now = pendulum.now().to_iso8601_string()
                 entities_update = supabase.table('normalized_entities').update({'is_deleted': True, 'updated_at': now})\
                     .in_('id', entity_ids).eq('user_id', user_id).execute()
                 logger.info(f"Soft-deleted {len(entities_update.data or [])} normalized entities")
@@ -13001,7 +13000,7 @@ async def delete_file_completely(job_id: str, user_id: str):
         
         # Step 21: Finally, soft-delete the ingestion_job record (FIX #3)
         # FIX #3: Use soft-delete for ingestion_jobs to maintain audit trail
-        now = datetime.utcnow().isoformat()
+        now = pendulum.now().to_iso8601_string()
         job_delete_result = supabase.table('ingestion_jobs').update({'is_deleted': True, 'updated_at': now}).eq('id', job_id).eq('user_id', user_id).execute()
         deletion_stats['deleted_records']['ingestion_jobs'] = len(job_delete_result.data or [])
         logger.info(f"Soft-deleted ingestion job record")

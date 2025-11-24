@@ -19,6 +19,7 @@ from dataclasses import dataclass
 from contextlib import asynccontextmanager
 from supabase import Client
 import pandas as pd
+import pendulum
 
 logger = structlog.get_logger(__name__)
 
@@ -155,7 +156,7 @@ class DatabaseTransactionManager:
                 'user_id': context.user_id,
                 'status': 'active',
                 'operation_type': context.operation_type,
-                'started_at': datetime.utcnow().isoformat(),
+                'started_at': pendulum.now().to_iso8601_string(),
                 'metadata': {
                     'operations_planned': 0,
                     'operations_completed': 0,
@@ -172,7 +173,7 @@ class DatabaseTransactionManager:
             self.active_transactions[context.transaction_id] = {
                 'context': context,
                 'operations': [],
-                'started_at': datetime.utcnow(),
+                'started_at': pendulum.now(),
                 'status': 'active'
             }
             
@@ -188,7 +189,7 @@ class DatabaseTransactionManager:
             # Update transaction status to committed
             self.supabase.table('processing_transactions').update({
                 'status': 'committed',
-                'committed_at': datetime.utcnow().isoformat(),
+                'committed_at': pendulum.now().to_iso8601_string(),
                 'metadata': {
                     **self.active_transactions[context.transaction_id]['context'].metadata,
                     'operations_completed': len(context.operations),
@@ -218,7 +219,7 @@ class DatabaseTransactionManager:
             # Update transaction status to rolled back
             self.supabase.table('processing_transactions').update({
                 'status': 'rolled_back',
-                'rolled_back_at': datetime.utcnow().isoformat(),
+                'rolled_back_at': pendulum.now().to_iso8601_string(),
                 'error_details': error,
                 'metadata': {
                     **self.active_transactions[context.transaction_id]['context'].metadata,
@@ -235,7 +236,7 @@ class DatabaseTransactionManager:
             try:
                 self.supabase.table('processing_transactions').update({
                     'status': 'failed',
-                    'failed_at': datetime.utcnow().isoformat(),
+                    'failed_at': pendulum.now().to_iso8601_string(),
                     'error_details': f"Rollback failed: {e}. Original error: {error}"
                 }).eq('id', context.transaction_id).execute()
             except:

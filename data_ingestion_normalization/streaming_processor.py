@@ -28,7 +28,10 @@ logger = structlog.get_logger(__name__)
 class StreamingConfig:
     """Configuration for streaming operations - all values configurable via environment"""
     chunk_size: int = 1000  # Rows per chunk (env: STREAMING_CHUNK_SIZE)
-    memory_limit_mb: int = 800  # Memory limit in MB (env: STREAMING_MEMORY_LIMIT_MB)
+    # FIX #6: Consolidated memory limit default to 1600MB (matches fastapi_backend_v2.py usage)
+    # Previously: 800MB default in streaming_processor.py vs 1600MB in fastapi_backend_v2.py
+    # Now: Single source of truth via environment variable STREAMING_MEMORY_LIMIT_MB
+    memory_limit_mb: int = 1600  # Memory limit in MB (env: STREAMING_MEMORY_LIMIT_MB)
     max_file_size_gb: int = 5  # Maximum file size in GB (env: STREAMING_MAX_FILE_SIZE_GB)
     temp_dir: Optional[str] = None  # Temp directory (env: STREAMING_TEMP_DIR)
     enable_compression: bool = True  # Enable compression (env: STREAMING_ENABLE_COMPRESSION)
@@ -40,7 +43,8 @@ class StreamingConfig:
         import os
         return StreamingConfig(
             chunk_size=int(os.getenv('STREAMING_CHUNK_SIZE', '1000')),
-            memory_limit_mb=int(os.getenv('STREAMING_MEMORY_LIMIT_MB', '800')),
+            # FIX #6: Updated default from 800 to 1600 for consistency
+            memory_limit_mb=int(os.getenv('STREAMING_MEMORY_LIMIT_MB', '1600')),
             max_file_size_gb=int(os.getenv('STREAMING_MAX_FILE_SIZE_GB', '5')),
             temp_dir=os.getenv('STREAMING_TEMP_DIR'),
             enable_compression=os.getenv('STREAMING_ENABLE_COMPRESSION', 'true').lower() == 'true',

@@ -147,18 +147,59 @@ class ErrorRecoverySystem:
             current_status = job_data.get('status')
             transaction_id = job_data.get('transaction_id')
             file_id = job_data.get('file_id')
+            updated_at = job_data.get('updated_at')
             
-            # FIX #43: Do not cleanup active jobs - only cleanup truly failed/stale jobs
+            # FIX #5: Timeout-based cleanup for stuck jobs
+            # Problem: Jobs stuck in "processing" forever are never cleaned up
+            # Solution: Allow cleanup if job is active but hasn't been updated in > 24 hours
+            from datetime import datetime, timedelta
             active_statuses = {'processing', 'pending', 'queued', 'running', 'started'}
+            
             if current_status in active_statuses:
-                logger.warning(f"Skipping cleanup for active job {job_id} with status: {current_status}")
-                return RecoveryResult(
-                    success=False,
-                    recovery_action=RecoveryAction.CLEANUP,
-                    cleaned_records=[],
-                    recovered_data=None,
-                    error=f"Cannot cleanup active job with status: {current_status}"
-                )
+                # Check if job is stuck (no update for > 24 hours)
+                stale_threshold_hours = 24
+                if updated_at:
+                    try:
+                        # Parse ISO format timestamp
+                        if isinstance(updated_at, str):
+                            updated_time = datetime.fromisoformat(updated_at.replace('Z', '+00:00'))
+                        else:
+                            updated_time = updated_at
+                        
+                        time_since_update = datetime.utcnow() - updated_time.replace(tzinfo=None)
+                        is_stale = time_since_update > timedelta(hours=stale_threshold_hours)
+                        
+                        if not is_stale:
+                            logger.warning(f"Skipping cleanup for active job {job_id} with status: {current_status} (updated {time_since_update.total_seconds()/3600:.1f}h ago)")
+                            return RecoveryResult(
+                                success=False,
+                                recovery_action=RecoveryAction.CLEANUP,
+                                cleaned_records=[],
+                                recovered_data=None,
+                                error=f"Cannot cleanup active job with status: {current_status}"
+                            )
+                        else:
+                            # Job is stale - allow cleanup
+                            logger.warning(f"Cleaning up stale job {job_id} stuck in {current_status} for {time_since_update.total_seconds()/3600:.1f}h")
+                    except Exception as parse_err:
+                        logger.warning(f"Failed to parse job timestamp: {parse_err}, skipping cleanup")
+                        return RecoveryResult(
+                            success=False,
+                            recovery_action=RecoveryAction.CLEANUP,
+                            cleaned_records=[],
+                            recovered_data=None,
+                            error=f"Cannot parse job timestamp for {job_id}"
+                        )
+                else:
+                    # No timestamp - skip cleanup to be safe
+                    logger.warning(f"Skipping cleanup for active job {job_id} with no timestamp")
+                    return RecoveryResult(
+                        success=False,
+                        recovery_action=RecoveryAction.CLEANUP,
+                        cleaned_records=[],
+                        recovered_data=None,
+                        error=f"Cannot cleanup active job without timestamp: {current_status}"
+                    )
             
             # Step 2: Clean up raw_events
             if file_id:

@@ -324,6 +324,21 @@ class CentralizedCache:
             'hit_rate_percent': round(hit_rate, 2)
         }
     
+    def _generate_cache_key(self, content: Any, classification_type: str) -> str:
+        """
+        FIX #17: Extract cache key generation to eliminate duplication.
+        
+        Generates consistent cache keys for classification caching.
+        Used by both get_cached_classification and set_cached_classification.
+        """
+        import hashlib
+        import orjson as json  # LIBRARY REPLACEMENT: orjson for 3-5x faster JSON parsing
+        
+        # Generate cache key from content
+        content_str = json.dumps(content, sort_keys=True) if isinstance(content, dict) else str(content)
+        content_hash = hashlib.sha256(content_str.encode()).hexdigest()[:16]
+        return f"{classification_type}:{content_hash}"
+    
     async def get_cached_classification(self, content: Any, classification_type: str) -> Optional[Any]:
         """
         Get cached classification result (compatibility method for AI cache).
@@ -335,14 +350,8 @@ class CentralizedCache:
         Returns:
             Cached classification result or None
         """
-        import hashlib
-        import orjson as json  # LIBRARY REPLACEMENT: orjson for 3-5x faster JSON parsing
-        
-        # Generate cache key from content
-        content_str = json.dumps(content, sort_keys=True) if isinstance(content, dict) else str(content)
-        content_hash = hashlib.sha256(content_str.encode()).hexdigest()[:16]
-        cache_key = f"{classification_type}:{content_hash}"
-        
+        # FIX #17: Use extracted helper method
+        cache_key = self._generate_cache_key(content, classification_type)
         return await self.get(cache_key)
     
     async def set_cached_classification(self, content: Any, classification_type: str, result: Any, ttl: Optional[int] = None) -> bool:
@@ -358,14 +367,8 @@ class CentralizedCache:
         Returns:
             True if successful, False otherwise
         """
-        import hashlib
-        import orjson as json  # LIBRARY REPLACEMENT: orjson for 3-5x faster JSON parsing
-        
-        # Generate cache key from content
-        content_str = json.dumps(content, sort_keys=True) if isinstance(content, dict) else str(content)
-        content_hash = hashlib.sha256(content_str.encode()).hexdigest()[:16]
-        cache_key = f"{classification_type}:{content_hash}"
-        
+        # FIX #17: Use extracted helper method
+        cache_key = self._generate_cache_key(content, classification_type)
         return await self.set(cache_key, result, ttl=ttl)
     
     async def store_classification(self, content: Any, result: Any, classification_type: str, ttl_hours: Optional[int] = None, **kwargs) -> bool:
