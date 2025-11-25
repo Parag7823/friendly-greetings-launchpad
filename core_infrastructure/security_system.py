@@ -29,7 +29,6 @@ from pathlib import Path
 # NASA-GRADE v4.0: Industry-standard security libraries
 import bleach  # XSS protection (Mozilla-backed, 99.9% effective)
 import magic  # MIME type detection (libmagic)
-import defusedxml.ElementTree as ET  # XML bomb protection
 import structlog  # JSON logging
 from pydantic import BaseModel, Field, validator  # Schema validation
 from slowapi import Limiter  # Rate limiting
@@ -81,8 +80,13 @@ class InputSanitizer:
     """
     
     def __init__(self):
-        # v4.0: python-magic for MIME detection (libmagic, industry standard)
-        self.mime_detector = magic.Magic(mime=True)
+        # FIX #29: v4.0: python-magic for MIME detection with fallback
+        # libmagic may not be available in all environments
+        self.mime_detector = None
+        try:
+            self.mime_detector = magic.Magic(mime=True)
+        except Exception as e:
+            logger.warning(f"python-magic initialization failed: {e}. Will use filetype library as fallback.")
         
         # Dangerous file extensions (preserved)
         self.dangerous_extensions = {

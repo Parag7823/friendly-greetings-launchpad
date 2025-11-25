@@ -43,6 +43,30 @@ from embedding_service import get_embedding_service
 
 logger = structlog.get_logger(__name__)
 
+# FIX #4: Singleton cache instance to avoid creating new Cache per call
+# This prevents cache divergence and connection pooling waste
+_semantic_cache_instance: Optional[Cache] = None
+_semantic_cache_lock = asyncio.Lock()
+
+async def _get_semantic_cache(redis_url: str) -> Cache:
+    """
+    Get or create singleton Cache instance for semantic relationships.
+    Reuses connection pool across all calls.
+    """
+    global _semantic_cache_instance
+    if _semantic_cache_instance is None:
+        async with _semantic_cache_lock:
+            if _semantic_cache_instance is None:
+                parsed = urlparse(redis_url)
+                _semantic_cache_instance = Cache(
+                    Cache.REDIS,
+                    endpoint=parsed.hostname,
+                    port=parsed.port or 6379,
+                    serializer=PickleSerializer()
+                )
+                logger.info("✅ Semantic cache singleton initialized")
+    return _semantic_cache_instance
+
 # ✅ NEW: Jinja2 Environment for prompt templates
 jinja_env = Environment(
     loader=BaseLoader(),
@@ -516,19 +540,13 @@ Processing {{ batch_size }} relationship pairs from user {{ user_id }}.
             return None
     
     async def _store_in_cache(self, cache_key: str, semantic_rel: SemanticRelationship):
-        """Store in aiocache (Redis-backed)"""
+        """Store in aiocache (Redis-backed) using singleton instance"""
         if not self.config['enable_caching']:
             return
         
         try:
-            # ✅ REFACTORED: Use urllib.parse instead of brittle string splitting
-            parsed = urlparse(self.config['redis_url'])
-            cache = Cache(
-                Cache.REDIS,
-                endpoint=parsed.hostname,
-                port=parsed.port or 6379,
-                serializer=PickleSerializer()
-            )
+            # FIX #4: Use singleton cache instance instead of creating new Cache per call
+            cache = await _get_semantic_cache(self.config['redis_url'])
             await cache.set(cache_key, semantic_rel, ttl=self.config['cache_ttl_seconds'])
         except Exception as e:
             logger.debug(f"Cache set failed: {e}")

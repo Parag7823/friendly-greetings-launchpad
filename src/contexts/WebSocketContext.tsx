@@ -15,10 +15,15 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode; socket: So
   isConnected,
 }) => {
   const emit = (event: string, data?: any) => {
-    if (socket?.connected) {
+    // FIX #11: Check proper socket state (not just connected flag)
+    // Socket can be in states: connecting (0), open/connected (1), closing (2), closed (3)
+    if (socket && socket.connected && socket.readyState === 1) {
       socket.emit(event, data);
     } else {
-      console.warn(`WebSocket not connected, cannot emit ${event}`);
+      const state = socket?.readyState ?? -1;
+      const stateNames = { 0: 'connecting', 1: 'open', 2: 'closing', 3: 'closed' };
+      const stateName = stateNames[state as keyof typeof stateNames] || 'unknown';
+      console.warn(`WebSocket not ready (state: ${stateName}), cannot emit ${event}`);
     }
   };
 

@@ -78,14 +78,21 @@ export class UnifiedErrorHandler {
     const description = this.getUserFriendlyMessage(error);
     const variant = this.getToastVariant(error.severity);
 
-    // Use toast function if available (set by component)
-    if (toastFn) {
-      toastFn({
-        title,
-        description,
-        variant,
-        duration: this.getToastDuration(error.severity)
-      });
+    // BUG #9 FIX: Add null check before calling toastFn
+    // Prevents silent failures when toast function is not initialized
+    if (toastFn && typeof toastFn === 'function') {
+      try {
+        toastFn({
+          title,
+          description,
+          variant,
+          duration: this.getToastDuration(error.severity)
+        });
+      } catch (toastError) {
+        // Fallback to console if toast function throws
+        console.error('Toast function error:', toastError);
+        console.warn(`[${variant}] ${title}: ${description}`);
+      }
     } else {
       // Fallback to console if toast not available
       console.warn(`[${variant}] ${title}: ${description}`);

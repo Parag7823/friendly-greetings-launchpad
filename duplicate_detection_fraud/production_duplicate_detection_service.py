@@ -17,6 +17,7 @@ Version: 4.0.0
 """
 
 import asyncio
+import hashlib
 import orjson as json
 import os
 import re
@@ -41,10 +42,12 @@ def _load_rapidfuzz():
             from rapidfuzz import fuzz as fuzz_module
             fuzz = fuzz_module
             logger.info("✅ rapidfuzz module loaded")
-        except ImportError:
-            logger.error("rapidfuzz not installed - fuzzy matching unavailable")
-            raise ImportError("rapidfuzz is required. Install with: pip install rapidfuzz")
-    return fuzz
+        except ImportError as e:
+            logger.error("rapidfuzz not installed - fuzzy matching unavailable", error=str(e))
+            # Return None instead of raising - callers will handle gracefully
+            fuzz = False  # Mark as failed to avoid retry
+            return None
+    return fuzz if fuzz is not False else None
 
 import structlog
 from pydantic_settings import BaseSettings
@@ -64,10 +67,12 @@ def _load_numpy():
             import numpy as numpy_module
             np = numpy_module
             logger.info("✅ numpy module loaded")
-        except ImportError:
-            logger.error("numpy not installed - numerical features unavailable")
-            raise ImportError("numpy is required. Install with: pip install numpy")
-    return np
+        except ImportError as e:
+            logger.error("numpy not installed - numerical features unavailable", error=str(e))
+            # Return None instead of raising - callers will handle gracefully
+            np = False  # Mark as failed to avoid retry
+            return None
+    return np if np is not False else None
 
 # FIX #5: CENTRALIZED HASHING - Import from database_optimization_utils
 # This ensures production_duplicate_detection_service uses xxh3_128 (same as provenance_tracker)
@@ -80,13 +85,9 @@ except ImportError:
     import xxhash
     _HAS_CENTRALIZED_HASHING = False
 
-try:
-    from presidio_analyzer import AnalyzerEngine
-    presidio_analyzer = AnalyzerEngine()
-    PRESIDIO_AVAILABLE = True
-except ImportError:
-    PRESIDIO_AVAILABLE = False
-    presidio_analyzer = None
+# FIX #3: Remove duplicate presidio import (already imported at line 54)
+# Use the first import only
+PRESIDIO_AVAILABLE = True if presidio_analyzer else False
 
 # Configure structured logging with structlog
 logger = structlog.get_logger(__name__)
@@ -190,28 +191,39 @@ class ProductionDuplicateDetectionService:
         self.redis_client = redis_client
         self.config = config  # Store config instance
         
-        # CRITICAL FIX: Use centralized Redis cache - FAIL FAST if unavailable
+        # FIX #4: GRACEFUL DEGRADATION - Cache initialization with fallback
         from centralized_cache import safe_get_cache
         self.cache = safe_get_cache()
         if self.cache is None:
-            raise RuntimeError(
-                "Centralized Redis cache not initialized. "
-                "Call initialize_cache() at startup or set REDIS_URL environment variable. "
-                "MEMORY cache fallback removed to prevent cache divergence across workers."
+            logger.warning(
+                "⚠️ Centralized Redis cache not initialized. "
+                "Duplicate detection will operate in degraded mode without caching. "
+                "Call initialize_cache() at startup or set REDIS_URL environment variable."
             )
+            # Continue with None cache - methods will handle gracefully
         
-        # CRITICAL FIX: Use persistent LSH service ONLY - in-memory LSH removed
-        # Old: In-memory LSH lost on restart, grows unbounded, diverges from persistent
-        # New: Redis-backed LSH with per-user sharding, persistent, scalable
-        from persistent_lsh_service import get_lsh_service
-        self.lsh_service = get_lsh_service()
+        # FIX #5: LSH SERVICE INITIALIZATION WITH ERROR HANDLING
+        self.lsh_service = None
+        try:
+            from persistent_lsh_service import get_lsh_service
+            self.lsh_service = get_lsh_service()
+            if self.lsh_service is None:
+                logger.warning("⚠️ LSH service returned None - near-duplicate detection disabled")
+        except ImportError as e:
+            logger.warning(f"⚠️ persistent_lsh_service not available: {e} - near-duplicate detection disabled")
+        except Exception as e:
+            logger.warning(f"⚠️ Failed to initialize LSH service: {e} - near-duplicate detection disabled")
         
         # REMOVED: In-memory LSH fallback (causes cache divergence)
         # self.lsh = MinHashLSH(threshold=config.minhash_threshold, num_perm=config.minhash_num_perm)
         self.lsh = None  # Removed - use lsh_service only
         
-        logger.info("persistent_lsh_service_initialized", 
-                   message="Using persistent LSH service only. In-memory LSH removed.")
+        if self.lsh_service:
+            logger.info("persistent_lsh_service_initialized", 
+                       message="Using persistent LSH service. In-memory LSH removed.")
+        else:
+            logger.warning("persistent_lsh_service_unavailable", 
+                          message="LSH service not available - near-duplicate detection disabled")
         
         # REMOVED: sqlalchemy (redundant - supabase client is sufficient)
         # v3.0 had both sqlalchemy + supabase (double DB client)
@@ -228,6 +240,8 @@ class ProductionDuplicateDetectionService:
         }
         
         logger.info("NASA-GRADE Duplicate Detection Service initialized", 
+                   cache_available=self.cache is not None,
+                   lsh_available=self.lsh_service is not None,
                    cache_size=config.max_cache_size,
                    minhash_perms=config.minhash_num_perm)
     

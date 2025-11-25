@@ -7,6 +7,8 @@ import { useFastAPIProcessor } from './FastAPIProcessor';
 import { DuplicateDetectionModal } from './DuplicateDetectionModal';
 import { config } from '@/config';
 import { useAuth } from './AuthProvider';
+import { validateFile } from '@/utils/fileHelpers';
+import { useStandardToasts } from '@/hooks/useStandardToasts';
 
 interface FileRowData {
   id: string;
@@ -74,6 +76,7 @@ export const EnhancedFileUpload: React.FC<EnhancedFileUploadProps> = ({ initialF
 
   const { toast } = useToast();
   const { processFileWithFastAPI } = useFastAPIProcessor();
+  const standardToasts = useStandardToasts();
 
   // Auto-process initialFiles when provided
   React.useEffect(() => {
@@ -81,45 +84,6 @@ export const EnhancedFileUpload: React.FC<EnhancedFileUploadProps> = ({ initialF
       handleFilesSelected(initialFiles);
     }
   }, [initialFiles]);
-
-  // FIX #3: Expand file type validation to match backend capabilities
-  const validateFile = (file: File): { isValid: boolean; error?: string } => {
-    const validTypes = [
-      // Spreadsheets
-      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-      'application/vnd.ms-excel',
-      'text/csv',
-      // PDFs
-      'application/pdf',
-      // Images
-      'image/png',
-      'image/jpeg',
-      'image/jpg',
-      'image/gif',
-      'image/webp',
-      'image/bmp',
-      'image/tiff'
-    ];
-    
-    const validExtensions = /\.(xlsx|xls|csv|pdf|png|jpg|jpeg|gif|webp|bmp|tiff|tif)$/i;
-    
-    if (!validTypes.includes(file.type) && !file.name.match(validExtensions)) {
-      return {
-        isValid: false,
-        error: 'Please upload Excel (.xlsx, .xls), CSV, PDF, or image files (PNG, JPG, GIF, WebP, BMP, TIFF).'
-      };
-    }
-    
-    const maxSize = 500 * 1024 * 1024; // 500MB (matches backend limit)
-    if (file.size > maxSize) {
-      return {
-        isValid: false,
-        error: 'File size must be less than 500MB.'
-      };
-    }
-    
-    return { isValid: true };
-  };
 
   const processFile = async (file: File, fileId: string, customPrompt?: string) => {
     try {
@@ -339,11 +303,7 @@ export const EnhancedFileUpload: React.FC<EnhancedFileUploadProps> = ({ initialF
 
     const invalidFiles = validations.filter(v => !v.validation.isValid);
     if (invalidFiles.length > 0) {
-      toast({
-        variant: "destructive",
-        title: "Upload Failed",
-        description: `Invalid files: ${invalidFiles.map(f => f.file.name).join(', ')}`
-      });
+      standardToasts.fileValidationFailed(invalidFiles.map(f => f.file.name));
       return;
     }
 

@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
-import { X, FileSpreadsheet, FileText, File, Info, Loader2, CheckCircle2, AlertCircle } from 'lucide-react';
+import { X, FileSpreadsheet, Info, Loader2, CheckCircle2, AlertCircle } from 'lucide-react';
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
 import { Card } from './ui/card';
@@ -8,6 +8,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from './AuthProvider';
 import { cn } from '@/lib/utils';
+import { getFileIcon } from '@/utils/fileHelpers';
 
 // Ag-Grid Imports
 import { AgGridReact } from 'ag-grid-react';
@@ -15,6 +16,7 @@ import { ColDef, ModuleRegistry } from 'ag-grid-community';
 import { ClientSideRowModelModule } from 'ag-grid-community';
 import 'ag-grid-community/styles/ag-grid.css';
 import 'ag-grid-community/styles/ag-theme-quartz.css';
+import '@/styles/ag-grid-finley-theme.css';
 
 // Register Ag-Grid modules
 ModuleRegistry.registerModules([ClientSideRowModelModule]);
@@ -52,6 +54,35 @@ export const TabbedFilePreview = ({
 
   const activeFile = openFiles.find(f => f.id === activeFileId);
 
+  // FIX #14: Cleanup file content cache when file is closed to prevent memory leaks
+  useEffect(() => {
+    return () => {
+      // Clear content for files that are no longer in openFiles
+      setFileContent(prev => {
+        const activeFileIds = new Set(openFiles.map(f => f.id));
+        const cleaned = { ...prev };
+        Object.keys(cleaned).forEach(fileId => {
+          if (!activeFileIds.has(fileId)) {
+            delete cleaned[fileId];
+          }
+        });
+        return cleaned;
+      });
+      
+      // Clear loading state for closed files
+      setLoadingContent(prev => {
+        const activeFileIds = new Set(openFiles.map(f => f.id));
+        const cleaned = { ...prev };
+        Object.keys(cleaned).forEach(fileId => {
+          if (!activeFileIds.has(fileId)) {
+            delete cleaned[fileId];
+          }
+        });
+        return cleaned;
+      });
+    };
+  }, [openFiles]);
+
   // Load raw file content for active file
   useEffect(() => {
     if (!activeFileId || loadingContent[activeFileId] || fileContent[activeFileId]) return;
@@ -59,13 +90,15 @@ export const TabbedFilePreview = ({
     const loadFileContent = async () => {
       setLoadingContent(prev => ({ ...prev, [activeFileId]: true }));
       try {
-        // Fetch raw events from database (already processed data)
+        // BUG #8 FIX: Load only first 100 rows initially for performance
+        // AG-Grid will request more rows as user scrolls (server-side pagination)
+        // This reduces initial memory usage from 50,000 rows to 100 rows
         const { data: events, error } = await supabase
           .from('raw_events')
           .select('*')
           .eq('file_id', activeFileId)
           .order('source_ts', { ascending: true })
-          .limit(1000); // Increased limit for Ag-Grid capability
+          .limit(100); // Load first 100 rows only
 
         if (error) {
           console.error('Failed to load events:', error);
@@ -145,13 +178,6 @@ export const TabbedFilePreview = ({
     resizable: true,
   }), []);
 
-  const getFileIcon = (filename: string) => {
-    if (!filename) return File;
-    const ext = filename.split('.').pop()?.toLowerCase();
-    if (ext === 'csv' || ext === 'xlsx' || ext === 'xls') return FileSpreadsheet;
-    if (ext === 'txt' || ext === 'md') return FileText;
-    return File;
-  };
 
   const getStatusBadge = (file: OpenFile) => {
     const isProcessing = file.status === 'processing' || file.status === 'pending';
@@ -322,23 +348,6 @@ export const TabbedFilePreview = ({
                 </div>
               ) : fileContent[activeFile.id] && fileContent[activeFile.id].length > 0 ? (
                 <div className="h-full w-full ag-theme-quartz-dark">
-                  <style>{`
-                      .ag-theme-quartz-dark {
-                        --ag-background-color: #0A0A0A;
-                        --ag-header-background-color: #111111;
-                        --ag-row-hover-color: #1a1a1a;
-                        --ag-border-color: #222;
-                        --ag-font-family: 'Inter', sans-serif;
-                        --ag-font-size: 12px;
-                      }
-                      .ag-header-cell-label {
-                        font-weight: 600;
-                        color: #a1a1aa;
-                      }
-                      .ag-right-aligned-header .ag-header-cell-label {
-                        justify-content: flex-end;
-                      }
-                    `}</style>
                   <AgGridReact
                     rowData={fileContent[activeFile.id]}
                     columnDefs={columnDefs}

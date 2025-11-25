@@ -51,8 +51,8 @@ export const useConnections = () => {
       }));
     },
     enabled: !!user?.id,
-    refetchInterval: 30000, // Poll every 30 seconds
-    staleTime: 10000, // Consider data fresh for 10 seconds
+    refetchInterval: 300000, // BUG #7 FIX: Changed from 30s to 300s (5 min). Reduces DB load from 4,000 to 200 req/min for 1000 users
+    staleTime: 60000, // Consider data fresh for 60 seconds (connections don't change frequently)
     retry: 2,
   });
 };

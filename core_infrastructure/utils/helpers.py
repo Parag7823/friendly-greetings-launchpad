@@ -12,6 +12,7 @@ import binascii
 import math
 import structlog
 import os
+import hashlib
 from typing import Optional, Any, Dict, List
 from datetime import datetime
 
@@ -364,3 +365,224 @@ async def send_websocket_progress(
     except Exception as e:
         logger.error(f"Failed to send WebSocket progress for job {job_id}: {e}")
         # Don't raise - allow processing to continue even if WebSocket fails
+
+
+# FIX #20: CONSOLIDATED CONNECTOR UPSERT LOGIC
+# Replaces 3x duplicate code in _gmail_sync_run, _dropbox_sync_run, _gdrive_sync_run
+async def upsert_connector_and_connection(
+    supabase_client: Any,
+    transaction_manager: Any,
+    user_id: str,
+    connection_id: str,
+    provider_key: str,
+    scopes: List[str],
+    endpoints_needed: List[str]
+) -> tuple:
+    """
+    FIX #20: Consolidated connector upsert logic.
+    
+    Replaces duplicate code that appeared 3x in:
+    - _gmail_sync_run (lines 9757-9797)
+    - _dropbox_sync_run (lines 10254-10281)
+    - _gdrive_sync_run (lines 10540-10562)
+    
+    Args:
+        supabase_client: Supabase client instance
+        transaction_manager: Transaction manager instance
+        user_id: User ID
+        connection_id: Nango connection ID
+        provider_key: Provider integration ID (NANGO_GMAIL_INTEGRATION_ID, etc.)
+        scopes: OAuth scopes required
+        endpoints_needed: API endpoints needed
+    
+    Returns:
+        Tuple of (connector_id, user_connection_id) or (None, None) on failure
+    """
+    try:
+        async with transaction_manager.transaction(
+            user_id=user_id,
+            operation_type="connector_upsert"
+        ) as tx:
+            # Upsert connector definition
+            try:
+                await tx.insert('connectors', {
+                    'provider': provider_key,
+                    'integration_id': provider_key,
+                    'auth_type': 'OAUTH2',
+                    'scopes': __import__('orjson').dumps(scopes).decode(),
+                    'endpoints_needed': __import__('orjson').dumps(endpoints_needed).decode(),
+                    'enabled': True
+                })
+            except Exception as e:
+                # Duplicate key error - connector already exists, which is fine
+                logger.debug(f"Connector already exists for {provider_key}: {e}")
+            
+            # Fetch connector id (still need sync for query)
+            connector_row = supabase_client.table('connectors').select('id').eq('provider', provider_key).limit(1).execute()
+            connector_id = connector_row.data[0]['id'] if connector_row.data else None
+            
+            # Upsert user_connection
+            try:
+                await tx.insert('user_connections', {
+                    'user_id': user_id,
+                    'connector_id': connector_id,
+                    'nango_connection_id': connection_id,
+                    'status': 'active',
+                    'sync_mode': 'pull'
+                })
+            except Exception as e:
+                # Duplicate key error - user_connection already exists, which is fine
+                logger.debug(f"User connection already exists: {e}")
+            
+            uc_row = supabase_client.table('user_connections').select('id').eq('nango_connection_id', connection_id).limit(1).execute()
+            user_connection_id = uc_row.data[0]['id'] if uc_row.data else None
+            
+            return connector_id, user_connection_id
+            
+    except Exception as e:
+        logger.error(f"Failed to upsert connector records for {provider_key}: {e}")
+        return None, None
+
+
+# FIX #20: CONSOLIDATED SYNC RUN CREATION LOGIC
+# Replaces 3x duplicate code in _gmail_sync_run, _dropbox_sync_run, _gdrive_sync_run
+async def create_sync_run(
+    supabase_client: Any,
+    transaction_manager: Any,
+    user_id: str,
+    user_connection_id: Optional[str],
+    mode: str,
+    stats: Dict[str, Any]
+) -> str:
+    """
+    FIX #20: Consolidated sync run creation logic.
+    
+    Replaces duplicate code that appeared 3x in:
+    - _gmail_sync_run (lines 9800-9818)
+    - _dropbox_sync_run (lines 10283-10300)
+    - _gdrive_sync_run (lines 10530-10546)
+    
+    Args:
+        supabase_client: Supabase client instance
+        transaction_manager: Transaction manager instance
+        user_id: User ID
+        user_connection_id: User connection ID (can be None)
+        mode: Sync mode ('full', 'incremental', 'historical')
+        stats: Initial stats dict
+    
+    Returns:
+        sync_run_id (UUID string)
+    """
+    import uuid
+    import pendulum
+    
+    sync_run_id = str(uuid.uuid4())
+    try:
+        async with transaction_manager.transaction(
+            user_id=user_id,
+            operation_type="connector_sync_start"
+        ) as tx:
+            await tx.insert('sync_runs', {
+                'id': sync_run_id,
+                'user_id': user_id,
+                'user_connection_id': user_connection_id,
+                'type': mode,
+                'status': 'running',
+                'started_at': pendulum.now().to_iso8601_string(),
+                'stats': __import__('orjson').dumps(stats).decode()
+            })
+    except Exception as e:
+        logger.error(f"Failed to create sync_run: {e}")
+        # Still return the ID so processing can continue
+    
+    return sync_run_id
+
+
+# FIX #79: SHARED CACHE KEY GENERATION
+# Replaces 3x duplicate code in:
+# - universal_platform_detector_optimized.py (_generate_detection_id)
+# - universal_document_classifier_optimized.py (_generate_classification_id)
+# - entity_resolver_optimized.py (_generate_resolution_id)
+def generate_cache_key(prefix: str, *args) -> str:
+    """
+    FIX #79: Unified cache key generation using deterministic hashing.
+    
+    Generates consistent cache keys for detection, classification, and resolution
+    operations. Uses MD5 hashing for deterministic, collision-resistant keys.
+    
+    Args:
+        prefix: Key prefix (e.g., 'detect', 'classify', 'resolve')
+        *args: Variable arguments to hash (payload, filename, user_id, entity_name, etc.)
+    
+    Returns:
+        Deterministic cache key in format: "{prefix}_{user_part}_{content_hash}"
+        
+    Examples:
+        >>> generate_cache_key('detect', {'field': 'value'}, 'file.csv', 'user123')
+        'detect_user123_a1b2c3d4'
+        
+        >>> generate_cache_key('classify', {'type': 'invoice'}, 'doc.pdf', 'user456')
+        'classify_user456_e5f6g7h8'
+        
+        >>> generate_cache_key('resolve', 'Company Inc', 'vendor', 'stripe', 'user789')
+        'resolve_user789_i9j0k1l2'
+    """
+    if not args:
+        raise ValueError("generate_cache_key requires at least one argument after prefix")
+    
+    # Convert all arguments to strings and combine
+    content_parts = []
+    user_part = "anon"
+    
+    for i, arg in enumerate(args):
+        if isinstance(arg, dict):
+            # For dicts, use sorted items for deterministic hashing
+            arg_str = str(sorted(arg.items()))
+        else:
+            arg_str = str(arg)
+        
+        content_parts.append(arg_str)
+        
+        # Extract user_id if it's the last argument and looks like a UUID/user ID
+        if i == len(args) - 1 and arg and isinstance(arg, str) and len(arg) > 0:
+            user_part = arg[:12]  # Use first 12 chars of user_id
+    
+    # Hash all content for deterministic key
+    content_str = "|".join(content_parts)
+    content_hash = hashlib.md5(content_str.encode()).hexdigest()[:8]
+    
+    return f"{prefix}_{user_part}_{content_hash}"
+
+
+# FIX #52: SHARED CACHE INITIALIZATION
+# Replaces 3x duplicate code in:
+# - universal_platform_detector_optimized.py (lines 101-109)
+# - universal_document_classifier_optimized.py (lines 112-120)
+# - universal_field_detector.py (lines 108-113)
+def initialize_centralized_cache(cache_client=None):
+    """
+    FIX #52: Unified cache initialization for all detectors.
+    
+    Initializes centralized Redis cache with fail-fast behavior.
+    Prevents cache divergence across workers by enforcing Redis requirement.
+    
+    Args:
+        cache_client: Optional pre-initialized cache client
+        
+    Returns:
+        Initialized cache client
+        
+    Raises:
+        RuntimeError: If Redis cache not available
+    """
+    from centralized_cache import safe_get_cache
+    
+    cache = cache_client or safe_get_cache()
+    if cache is None:
+        raise RuntimeError(
+            "Centralized Redis cache not initialized. "
+            "Call initialize_cache() at startup or set REDIS_URL environment variable. "
+            "MEMORY cache fallback removed to prevent cache divergence across workers."
+        )
+    
+    return cache

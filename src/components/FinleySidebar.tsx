@@ -15,6 +15,7 @@ import { ShareModal } from './ShareModal';
 import { useAuth } from './AuthProvider';
 import { supabase } from '@/integrations/supabase/client';
 import { config } from '../config';
+import { getSessionToken } from '@/utils/authHelpers';
 
 interface ChatHistory {
   id: string;
@@ -42,28 +43,16 @@ export const FinleySidebar = ({ onClose, onNavigate, currentView = 'chat', isCol
     title: ''
   });
 
-  // Load chat history from localStorage on mount
+  // FIX #13: Load chat history from database first, fallback to localStorage only if DB fails
+  // This prevents 2 API calls and race conditions
+  // FIX #12: Fixed dependency array to use [user?.id] instead of [user]
   useEffect(() => {
     const loadChatHistory = async () => {
-      // First try to load from localStorage
-      const savedHistory = localStorage.getItem('finley-chat-history');
-      if (savedHistory) {
-        try {
-          const parsed = JSON.parse(savedHistory);
-          setChatHistory(parsed.map((chat: any) => ({
-            ...chat,
-            timestamp: new Date(chat.timestamp)
-          })));
-        } catch (error) {
-          console.error('Failed to load chat history from localStorage:', error);
-        }
-      }
-      
-      // Also try to load from database (for persistence across devices)
+      if (!user?.id) return; // Wait for user to be available
+
       try {
-        if (!user?.id) return; // Wait for user to be available
-        const { data: sessionData } = await supabase.auth.getSession();
-        const sessionToken = sessionData?.session?.access_token;
+        // FIX #9: Use centralized getSessionToken helper instead of inline call
+        const sessionToken = await getSessionToken();
         
         const response = await fetch(`${config.apiUrl}/chat-history/${user.id}`, {
           headers: {
@@ -80,26 +69,33 @@ export const FinleySidebar = ({ onClose, onNavigate, currentView = 'chat', isCol
               messages: chat.messages || []
             }));
             
-            // Merge with localStorage data, prioritizing database
-            setChatHistory(prev => {
-              const merged = [...dbHistory];
-              // Add any localStorage chats not in database
-              prev.forEach(localChat => {
-                if (!merged.find(dbChat => dbChat.id === localChat.id)) {
-                  merged.push(localChat);
-                }
-              });
-              return merged.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
-            });
+            setChatHistory(dbHistory.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime()));
+            // Update localStorage with DB data
+            localStorage.setItem('finley-chat-history', JSON.stringify(dbHistory));
+            return; // Success - don't fallback to localStorage
           }
         }
       } catch (error) {
         console.error('Failed to load chat history from database:', error);
       }
+      
+      // Fallback: Load from localStorage only if DB fails or returns no data
+      try {
+        const savedHistory = localStorage.getItem('finley-chat-history');
+        if (savedHistory) {
+          const parsed = JSON.parse(savedHistory);
+          setChatHistory(parsed.map((chat: any) => ({
+            ...chat,
+            timestamp: new Date(chat.timestamp)
+          })));
+        }
+      } catch (error) {
+        console.error('Failed to load chat history from localStorage:', error);
+      }
     };
 
     loadChatHistory();
-  }, [user]);
+  }, [user?.id]);
 
   // Save chat history to localStorage whenever it changes
   useEffect(() => {
@@ -158,8 +154,8 @@ export const FinleySidebar = ({ onClose, onNavigate, currentView = 'chat', isCol
     const newTitle = editingTitle.trim();
     
     try {
-      const { data: sessionData } = await supabase.auth.getSession();
-      const sessionToken = sessionData?.session?.access_token;
+      // FIX #9: Use centralized getSessionToken helper
+      const sessionToken = await getSessionToken();
       
       const response = await fetch(`${config.apiUrl}/chat/rename`, {
         method: 'PUT',
@@ -215,8 +211,8 @@ export const FinleySidebar = ({ onClose, onNavigate, currentView = 'chat', isCol
 
   const handleDelete = async (chatId: string) => {
     try {
-      const { data: sessionData } = await supabase.auth.getSession();
-      const sessionToken = sessionData?.session?.access_token;
+      // FIX #9: Use centralized getSessionToken helper
+      const sessionToken = await getSessionToken();
       
       const response = await fetch(`${config.apiUrl}/chat/delete`, {
         method: 'DELETE',

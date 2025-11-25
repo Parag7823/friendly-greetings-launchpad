@@ -32,6 +32,7 @@ from enhanced_relationship_detector import EnhancedRelationshipDetector
 from entity_resolver_optimized import EntityResolverOptimized as EntityResolver
 from finley_graph_engine import FinleyGraphEngine  # NEW: Graph intelligence
 from data_ingestion_normalization.embedding_service import EmbeddingService  # FIX #6: Dependency injection
+from aident_memory_manager import AidentMemoryManager  # NEW: Conversational memory with LangChain
 
 logger = structlog.get_logger(__name__)
 
@@ -197,15 +198,28 @@ class IntelligentChatOrchestrator:
         try:
             logger.info(f"Processing question: '{question}' for user_id={user_id}, chat_id={chat_id}")
             
-            # Step 0: Load conversation history for context
+            # Step 0a: Initialize per-user memory manager (isolated, no cross-user contamination)
+            memory_manager = AidentMemoryManager(
+                user_id=user_id,
+                redis_url=os.getenv('ARQ_REDIS_URL') or os.getenv('REDIS_URL')
+            )
+            await memory_manager.load_memory()
+            
+            # Step 0b: Load conversation history for context
             conversation_history = await self._load_conversation_history(user_id, chat_id) if chat_id else []
             
-            # Step 1: Classify the question type (with conversation context)
-            question_type, confidence = await self._classify_question(question, user_id, conversation_history)
+            # Step 1: Classify the question type (with memory context + conversation history)
+            memory_context = memory_manager.get_context()
+            question_type, confidence = await self._classify_question(
+                question, 
+                user_id, 
+                conversation_history,
+                memory_context=memory_context
+            )
             
             logger.info(f"Question classified as: {question_type.value} (confidence: {confidence:.2f})")
             
-            # Step 2: Route to appropriate handler (pass conversation history)
+            # Step 2: Route to appropriate handler (pass conversation history + memory context)
             if question_type == QuestionType.CAUSAL:
                 response = await self._handle_causal_question(question, user_id, context, conversation_history)
             
@@ -227,10 +241,15 @@ class IntelligentChatOrchestrator:
             else:
                 response = await self._handle_general_question(question, user_id, context, conversation_history)
             
-            # Step 3: Store in database
+            # Step 3: Save memory after response (for context in next turn)
+            await memory_manager.add_message(question, response.answer)
+            
+            # Step 4: Store in database
             await self._store_chat_message(user_id, chat_id, question, response)
             
-            logger.info(f"✅ Question processed successfully: {question_type.value}")
+            # Step 5: Log memory stats for monitoring
+            memory_stats = await memory_manager.get_memory_stats()
+            logger.info(f"✅ Question processed successfully: {question_type.value}", memory_stats=memory_stats)
             
             return response
             
@@ -247,15 +266,17 @@ class IntelligentChatOrchestrator:
         self,
         question: str,
         user_id: str,
-        conversation_history: list[Dict[str, str]] = None
+        conversation_history: list[Dict[str, str]] = None,
+        memory_context: str = ""
     ) -> Tuple[QuestionType, float]:
         """
-        Classify the question type using Claude with conversation context.
+        Classify the question type using Groq with conversation + memory context.
         
         Args:
             question: User's question
             user_id: User ID for context
             conversation_history: Previous messages for context
+            memory_context: Summarized conversation memory from LangChain
         
         Returns:
             Tuple of (QuestionType, confidence_score)
@@ -280,11 +301,13 @@ class IntelligentChatOrchestrator:
             })
             
             # CHANGED: Use Groq/Llama-3.3-70B (fast, cost-effective) to classify the question
-            # Build prompt with conversation history
-            prompt = """You are Finley's question classifier. Classify user questions to route them to the right analysis engine.
+            # Build prompt with conversation history + memory context
+            memory_section = f"\nCONVERSATION MEMORY (auto-summarized):\n{memory_context}\n" if memory_context else ""
+            
+            prompt = f"""You are Finley's question classifier. Classify user questions to route them to the right analysis engine.
 
-CRITICAL: Consider conversation history to understand context. Follow-up questions like "How?" or "Why?" refer to previous context.
-
+CRITICAL: Consider conversation history AND memory context to understand context. Follow-up questions like "How?" or "Why?" refer to previous context.
+{memory_section}
 QUESTION TYPES:
 - **causal**: WHY questions (e.g., "Why did revenue drop?", "What caused the spike?")
 - **temporal**: WHEN questions, patterns over time (e.g., "When will they pay?", "Is this seasonal?")
@@ -295,9 +318,9 @@ QUESTION TYPES:
 - **general**: Platform questions, general advice, how-to
 - **unknown**: Cannot classify
 
-Respond with ONLY JSON: {"type": "question_type", "confidence": 0.0-1.0, "reasoning": "brief explanation"}
+Respond with ONLY JSON: {{"type": "question_type", "confidence": 0.0-1.0, "reasoning": "brief explanation"}}
 
-Question: """ + question
+Question: {question}"""
             
             response = await self.groq.chat.completions.create(
                 model="llama-3.3-70b-versatile",

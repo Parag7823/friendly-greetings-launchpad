@@ -98,15 +98,9 @@ class UniversalPlatformDetectorOptimized:
         self.supabase = supabase_client
         self.config = config or self._get_default_config()
         
-        # CRITICAL FIX: Use centralized Redis cache - FAIL FAST if unavailable
-        from centralized_cache import safe_get_cache
-        self.cache = cache_client or safe_get_cache()
-        if self.cache is None:
-            raise RuntimeError(
-                "Centralized Redis cache not initialized. "
-                "Call initialize_cache() at startup or set REDIS_URL environment variable. "
-                "MEMORY cache fallback removed to prevent cache divergence across workers."
-            )
+        # FIX #52: Use shared cache initialization utility
+        from core_infrastructure.utils.helpers import initialize_centralized_cache
+        self.cache = initialize_centralized_cache(cache_client)
         
         # Comprehensive platform database
         self.platform_database = self._initialize_platform_database()
@@ -128,9 +122,10 @@ class UniversalPlatformDetectorOptimized:
             'processing_times': []
         }
         
-        # Learning system - now persists to database
+        # FIX #81: Use shared learning system
+        from shared_learning_system import SharedLearningSystem
+        self.learning_system = SharedLearningSystem()
         self.learning_enabled = True
-        self.detection_history = []  # Keep small in-memory buffer for immediate access
         
         # CRITICAL FIX: Add cache versioning and invalidation
         self.cache_version = "v2.1.0"  # Increment when patterns change
@@ -664,18 +659,34 @@ class UniversalPlatformDetectorOptimized:
             
             combined_text = " ".join(text_parts).lower()  # Case-insensitive
             
-            # CRITICAL FIX: Lazy-load automaton from inference service
+            # CRITICAL FIX: Lazy-load automaton from inference service with error handling
+            # FIX #75: Add try/except to gracefully fallback if service fails
             if self.automaton is None:
-                from inference_service import AutomatonService
-                self.automaton = await AutomatonService.get_platform_automaton()
+                try:
+                    from inference_service import AutomatonService
+                    self.automaton = await AutomatonService.get_platform_automaton()
+                except Exception as e:
+                    logger.warning(f"Failed to load automaton service, falling back to pattern matching: {e}")
+                    self.automaton = None  # Will use pattern matching fallback below
             
             # GENIUS v4.0: Use pyahocorasick automaton (2x faster, async-ready)
             # Single pass through text - O(n) with Aho-Corasick algorithm
             found_matches = []
             found_indicators = []
-            for end_index, (platform_id, indicator) in self.automaton.iter(combined_text):
-                found_matches.append(platform_id)
-                found_indicators.append(indicator)
+            
+            # FIX #75: Fallback to pattern matching if automaton is unavailable
+            if self.automaton is not None:
+                for end_index, (platform_id, indicator) in self.automaton.iter(combined_text):
+                    found_matches.append(platform_id)
+                    found_indicators.append(indicator)
+            else:
+                # Fallback: Use simple pattern matching from platform_database
+                logger.info("Using fallback pattern matching for platform detection")
+                for platform_id, platform_info in self.platform_database.items():
+                    for pattern in platform_info.get('patterns', []):
+                        if pattern.lower() in combined_text:
+                            found_matches.append(platform_id)
+                            found_indicators.append(pattern)
             
             if not found_matches:
                 return None
@@ -766,12 +777,9 @@ class UniversalPlatformDetectorOptimized:
     
     # Helper methods
     def _generate_detection_id(self, payload: Dict, filename: str, user_id: str) -> str:
-        """Generate deterministic detection ID (no timestamp)"""
-        payload_str = str(sorted(payload.items())) if isinstance(payload, dict) else str(payload)
-        content_hash = hashlib.md5(payload_str.encode()).hexdigest()[:8]
-        filename_part = hashlib.md5((filename or "-").encode()).hexdigest()[:6]
-        user_part = (user_id or "anon")[:12]
-        return f"detect_{user_part}_{filename_part}_{content_hash}"
+        """FIX #79: Generate deterministic detection ID using shared utility"""
+        from core_infrastructure.utils.helpers import generate_cache_key
+        return generate_cache_key('detect', payload, filename, user_id)
     
     # GENIUS v4.0: Pydantic model for structured AI output (instructor magic)
     class PlatformDetectionResult(BaseModel):
@@ -789,14 +797,14 @@ class UniversalPlatformDetectorOptimized:
             import instructor
             from groq import AsyncGroq
 
-            # CRITICAL FIX: Use injected groq_client instead of creating new one
+            # FIX #40: Use injected groq_client, fail gracefully if not provided
+            # Problem: Creating multiple Groq clients wastes resources and causes connection issues
+            # Solution: Use single injected client or raise error (don't create fallback)
             if not hasattr(self, '_groq_instructor'):
-                if self.groq_client:
-                    self._groq_instructor = instructor.patch(self.groq_client)
-                else:
-                    # Fallback: create new client if none provided
-                    groq_client = AsyncGroq(api_key=os.getenv('GROQ_API_KEY'))
-                    self._groq_instructor = instructor.patch(groq_client)
+                if not self.groq_client:
+                    logger.error("Groq client not injected - platform detection requires initialized Groq client")
+                    raise ValueError("Groq client must be injected during initialization")
+                self._groq_instructor = instructor.patch(self.groq_client)
             
             # GENIUS v4.0: instructor guarantees valid pydantic output (no JSON parsing errors!)
             result = await self._groq_instructor.chat.completions.create(
@@ -893,52 +901,11 @@ class UniversalPlatformDetectorOptimized:
             self.metrics['processing_times'] = self.metrics['processing_times'][-1000:]
     
     async def _update_learning_system(self, result: Dict[str, Any], payload: Dict, filename: str, user_id: str = None):
-        """Update learning system with detection results - now persists to database"""
+        """FIX #81: Update learning system using shared utility"""
         if not self.config.enable_learning:
             return
         
-        learning_entry = {
-            'detection_id': result['detection_id'],
-            'platform': result['platform'],
-            'confidence': result['confidence'],
-            'method': result['method'],
-            'indicators': result['indicators'],
-            'payload_keys': list(payload.keys()) if isinstance(payload, dict) else [],
-            'filename': filename,
-            'timestamp': datetime.utcnow().isoformat()
-        }
-        
-        # Keep small in-memory buffer for immediate access
-        self.detection_history.append(learning_entry)
-        if len(self.detection_history) > 100:  # Keep only last 100 in memory
-            self.detection_history = self.detection_history[-100:]
-        
-        # CRITICAL FIX: Persist to database using production-grade log writer
-        if user_id:
-            try:
-                from detection_log_writer import log_platform_detection
-                
-                await log_platform_detection(
-                    user_id=user_id,
-                    detection_id=result['detection_id'],
-                    platform=result['platform'],
-                    confidence=float(result['confidence']),
-                    method=result['method'],
-                    indicators=result.get('indicators', []),
-                    payload_keys=list(payload.keys()) if isinstance(payload, dict) else [],
-                    filename=filename,
-                    metadata={
-                        'processing_time': result.get('processing_time'),
-                        'fallback_used': result.get('fallback_used', False),
-                        'category': result.get('category', 'unknown'),
-                    },
-                    supabase_client=self.supabase,
-                )
-                logger.debug("Platform detection logged", platform=result['platform'])
-                
-            except Exception as e:
-                # Don't fail detection if logging fails
-                logger.warning("Failed to log platform detection", error=str(e))
+        await self.learning_system.log_detection(result, payload, filename, user_id, self.supabase)
     
     async def _log_detection_audit(self, detection_id: str, result: Dict[str, Any], user_id: str):
         """Log detection audit information"""
@@ -966,7 +933,7 @@ class UniversalPlatformDetectorOptimized:
             'cache_hit_rate': self.metrics['cache_hits'] / (self.metrics['cache_hits'] + self.metrics['cache_misses']) if (self.metrics['cache_hits'] + self.metrics['cache_misses']) > 0 else 0.0,
             'platforms_supported': len(self.platform_database),
             'learning_enabled': self.config.enable_learning,
-            'recent_detections': len(self.detection_history)
+            'recent_detections': len(self.learning_system.get_history())
         }
     
     def get_platform_database(self) -> Dict[str, Dict[str, Any]]:

@@ -40,6 +40,26 @@ _circuit_breaker_open = False
 _circuit_breaker_failure_count = 0
 _circuit_breaker_last_reset = None
 
+def _parse_redis_url(redis_url: str) -> Dict[str, Any]:
+    """
+    FIX #16: Extract Redis URL parsing to eliminate duplication.
+    
+    Parses Redis URL and returns connection components.
+    Used by both __init__ and initialize_cache.
+    """
+    from urllib.parse import urlparse
+    
+    parsed = urlparse(redis_url)
+    
+    return {
+        'endpoint': parsed.hostname or 'localhost',
+        'port': parsed.port or 6379,
+        'password': parsed.password or os.environ.get('REDIS_PASSWORD'),
+        'db': int(parsed.path.lstrip('/')) if parsed.path and parsed.path != '/' else 0,
+        'use_tls': parsed.scheme in ('rediss', 'redis+tls') or os.environ.get('REDIS_TLS', 'false').lower() == 'true'
+    }
+
+
 class CentralizedCache:
     """
     Production-ready centralized cache with Redis backend.
@@ -65,18 +85,13 @@ class CentralizedCache:
         self.redis_url = redis_url or os.environ.get('ARQ_REDIS_URL') or os.environ.get('REDIS_URL', 'redis://localhost:6379')
         self.default_ttl = default_ttl
         
-        # CRITICAL FIX: Robust Redis URL parsing
-        from urllib.parse import urlparse
-        parsed = urlparse(self.redis_url)
-        
-        # Extract components
-        endpoint = parsed.hostname or 'localhost'
-        port = parsed.port or 6379
-        password = parsed.password or os.environ.get('REDIS_PASSWORD')
-        db = int(parsed.path.lstrip('/')) if parsed.path and parsed.path != '/' else 0
-        
-        # Check for TLS
-        use_tls = parsed.scheme in ('rediss', 'redis+tls') or os.environ.get('REDIS_TLS', 'false').lower() == 'true'
+        # FIX #16: Use extracted helper method
+        parsed_config = _parse_redis_url(self.redis_url)
+        endpoint = parsed_config['endpoint']
+        port = parsed_config['port']
+        password = parsed_config['password']
+        db = parsed_config['db']
+        use_tls = parsed_config['use_tls']
         
         # Initialize aiocache with Redis backend
         cache_config = {
@@ -465,14 +480,14 @@ def initialize_cache(redis_url: Optional[str] = None, default_ttl: int = 3600) -
     # CRITICAL FIX: Configure aiocache global config to use same Redis backend
     # This ensures @cached decorators point to centralized Redis, not separate cache
     from aiocache import caches
-    from urllib.parse import urlparse
     
-    parsed = urlparse(_cache_instance.redis_url)
-    endpoint = parsed.hostname or 'localhost'
-    port = parsed.port or 6379
-    password = parsed.password or os.environ.get('REDIS_PASSWORD')
-    db = int(parsed.path.lstrip('/')) if parsed.path and parsed.path != '/' else 0
-    use_tls = parsed.scheme in ('rediss', 'redis+tls') or os.environ.get('REDIS_TLS', 'false').lower() == 'true'
+    # FIX #16: Use extracted helper method
+    parsed_config = _parse_redis_url(_cache_instance.redis_url)
+    endpoint = parsed_config['endpoint']
+    port = parsed_config['port']
+    password = parsed_config['password']
+    db = parsed_config['db']
+    use_tls = parsed_config['use_tls']
     
     aiocache_config = {
         'default': {

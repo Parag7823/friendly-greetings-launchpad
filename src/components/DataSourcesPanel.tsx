@@ -25,6 +25,8 @@ import { FileCard } from './FileCard';
 import { FileStatusSheet } from './FileStatusSheet';
 import { useFastAPIProcessor } from './FastAPIProcessor';
 import { useFileStatusStore } from '@/stores/useFileStatusStore'; // ERROR #7: Only uses activeFileId and setActiveFile
+import { getSessionToken } from '@/utils/authHelpers';
+import { useStandardToasts } from '@/hooks/useStandardToasts';
 
 interface DataSourcesPanelProps {
   isOpen: boolean;
@@ -203,10 +205,8 @@ export const DataSourcesPanel = ({ isOpen, onClose, onFilePreview }: DataSources
     );
   };
 
-  const getSessionToken = useCallback(async () => {
-    const { data: sessionData } = await supabase.auth.getSession();
-    return sessionData?.session?.access_token;
-  }, []);
+
+  const standardToasts = useStandardToasts();
 
   const handleConnect = async (provider: string) => {
     if (!user?.id) return;
@@ -215,7 +215,8 @@ export const DataSourcesPanel = ({ isOpen, onClose, onFilePreview }: DataSources
     try {
       const sessionToken = await getSessionToken();
       if (!sessionToken) {
-        throw new Error('Unable to authenticate request. Please sign in again.');
+        standardToasts.authenticationRequired();
+        return;
       }
 
       const response = await fetch(`${config.apiUrl}/api/connectors/initiate`, {
@@ -532,10 +533,7 @@ export const DataSourcesPanel = ({ isOpen, onClose, onFilePreview }: DataSources
         const files = event.detail?.files;
         if (files && files.length > 0) {
           // Show toast for batch upload
-          toast({
-            title: 'Uploading Files',
-            description: `Processing ${files.length} file${files.length > 1 ? 's' : ''}...`
-          });
+          standardToasts.uploadStarted(files.length);
 
           // Process all files in parallel (not sequentially)
           const uploadPromises = Array.from(files).map(async (file: File) => {
@@ -548,26 +546,15 @@ export const DataSourcesPanel = ({ isOpen, onClose, onFilePreview }: DataSources
                   console.log(`Processing ${file.name}:`, progress);
 
                   if (progress.status === 'completed') {
-                    toast({
-                      title: 'File Completed',
-                      description: `${file.name} processed successfully`
-                    });
+                    standardToasts.processingComplete(file.name);
                   } else if (progress.status === 'error') {
-                    toast({
-                      title: 'Upload Failed',
-                      description: `${file.name} failed to process`,
-                      variant: 'destructive'
-                    });
+                    standardToasts.processingFailed(file.name);
                   }
                 }
               );
             } catch (error) {
               console.error(`File upload error for ${file.name}:`, error);
-              toast({
-                title: 'Upload Failed',
-                description: `${file.name} failed to process`,
-                variant: 'destructive'
-              });
+              standardToasts.processingFailed(file.name);
             }
           });
 

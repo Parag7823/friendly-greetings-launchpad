@@ -577,7 +577,8 @@ class EnhancedRelationshipDetector:
         Raises:
             ValueError: If Groq is unavailable or enrichment fails
         """
-        if not GROQ_AVAILABLE or not groq_client:
+        # FIX #1: Use self.anthropic (Groq client) instead of undefined groq_client
+        if not self.anthropic:
             logger.error("groq_unavailable_cannot_enrich_relationship")
             raise ValueError("Groq client not available for relationship enrichment")
         
@@ -642,15 +643,16 @@ Return ONLY valid JSON, no markdown blocks or explanations."""
 
             
             # ✅ REFACTORED: Use instructor for auto-validated responses
-            if INSTRUCTOR_AVAILABLE and hasattr(groq_client, 'chat'):
-                # FIX #7: Wrap synchronous groq_client call in asyncio executor
+            # FIX #2: Use self.anthropic (Groq client) instead of undefined groq_client
+            if INSTRUCTOR_AVAILABLE and hasattr(self.anthropic, 'chat'):
+                # FIX #7: Wrap synchronous Groq call in asyncio executor
                 import asyncio
                 loop = asyncio.get_event_loop()
                 
                 # Instructor automatically validates and retries on failure
                 enrichment_obj = await loop.run_in_executor(
                     None,
-                    lambda: groq_client.chat.completions.create(
+                    lambda: self.anthropic.chat.completions.create(
                         model="llama-3.3-70b-versatile",
                         response_model=RelationshipEnrichment,  # Auto-validates!
                         messages=[{"role": "user", "content": prompt}],
@@ -707,11 +709,16 @@ Return ONLY valid JSON, no markdown blocks or explanations."""
 
             # Fetch all events in one query
             events_map = {}
-            if GROQ_AVAILABLE and event_ids:
+            # FIX #3: Check if self.anthropic (Groq client) is available instead of undefined GROQ_AVAILABLE
+            if self.anthropic and event_ids:
                 try:
-                    events_result = self.supabase.table('raw_events').select(
-                        'id, source_platform, document_type, amount_usd, source_ts, vendor_standard'
-                    ).in_('id', list(event_ids)).execute()
+                    # FIX #3: Wrap synchronous Supabase call in asyncio.to_thread() to avoid blocking event loop
+                    import asyncio
+                    events_result = await asyncio.to_thread(
+                        lambda: self.supabase.table('raw_events').select(
+                            'id, source_platform, document_type, amount_usd, source_ts, vendor_standard'
+                        ).in_('id', list(event_ids)).execute()
+                    )
                     
                     if events_result.data:
                         events_map = {e['id']: e for e in events_result.data}
@@ -1627,10 +1634,13 @@ Return ONLY valid JSON, no markdown blocks or explanations."""
         
         while retry_count < max_retries:
             try:
+                # FIX #5: Wrap synchronous Supabase calls in asyncio.to_thread() to avoid blocking event loop
                 # Step 1: Try to SELECT existing pattern
-                select_result = self.supabase.table('temporal_patterns').select('id').eq(
-                    'pattern_signature', pattern_signature
-                ).eq('user_id', user_id).limit(1).execute()
+                select_result = await asyncio.to_thread(
+                    lambda: self.supabase.table('temporal_patterns').select('id').eq(
+                        'pattern_signature', pattern_signature
+                    ).eq('user_id', user_id).limit(1).execute()
+                )
                 
                 if select_result.data and len(select_result.data) > 0:
                     pattern_id = select_result.data[0]['id']
@@ -1638,17 +1648,19 @@ Return ONLY valid JSON, no markdown blocks or explanations."""
                     return pattern_id
                 
                 # Step 2: Pattern doesn't exist, try to INSERT
-                insert_result = self.supabase.table('temporal_patterns').insert({
-                    'user_id': user_id,
-                    'pattern_signature': pattern_signature,
-                    'relationship_type': relationship_type,
-                    'key_factors': key_factors,
-                    'created_at': datetime.utcnow().isoformat(),
-                    'updated_at': datetime.utcnow().isoformat(),
-                    'pattern_count': 1,
-                    'std_dev_days': 5.0,  # Default value
-                    'confidence_score': 0.5  # Default value
-                }).execute()
+                insert_result = await asyncio.to_thread(
+                    lambda: self.supabase.table('temporal_patterns').insert({
+                        'user_id': user_id,
+                        'pattern_signature': pattern_signature,
+                        'relationship_type': relationship_type,
+                        'key_factors': key_factors,
+                        'created_at': datetime.utcnow().isoformat(),
+                        'updated_at': datetime.utcnow().isoformat(),
+                        'pattern_count': 1,
+                        'std_dev_days': 5.0,  # Default value
+                        'confidence_score': 0.5  # Default value
+                    }).execute()
+                )
                 
                 if insert_result.data and len(insert_result.data) > 0:
                     pattern_id = insert_result.data[0]['id']

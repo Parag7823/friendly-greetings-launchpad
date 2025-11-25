@@ -113,6 +113,7 @@ COPY core_infrastructure/provenance_tracker.py .
 COPY duplicate_detection_fraud/inference_service.py .
 COPY duplicate_detection_fraud/persistent_lsh_service.py .
 COPY data_ingestion_normalization/streaming_source.py .
+COPY data_ingestion_normalization/shared_learning_system.py .
 COPY core_infrastructure/utils/helpers.py ./core_infrastructure/utils/
 COPY start.sh .
 

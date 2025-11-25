@@ -77,14 +77,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  // Expose getToken globally for easy access
-  useEffect(() => {
-    (window as any).getAuthToken = getToken;
-    return () => {
-      delete (window as any).getAuthToken;
-    };
-  }, []);
-
   const value = {
     user,
     loading,

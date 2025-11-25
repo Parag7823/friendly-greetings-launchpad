@@ -105,12 +105,10 @@ class UniversalFieldDetector:
         self.openai_client = openai_client
         self.config = FieldDetectorConfig()
         
-        # CRITICAL FIX: Initialize centralized cache for @cached decorator
-        self.cache = safe_get_cache()
-        if self.cache:
-            logger.info("Centralized cache initialized for field detector")
-        else:
-            logger.warning("Centralized cache unavailable, using in-memory cache for @cached decorator")
+        # FIX #52: Use shared cache initialization utility
+        from core_infrastructure.utils.helpers import initialize_centralized_cache
+        self.cache = initialize_centralized_cache(None)
+        logger.info("Centralized cache initialized for field detector")
         
         # GENIUS #1: Load patterns from YAML (non-devs can edit!)
         self.field_patterns = self._load_field_patterns()

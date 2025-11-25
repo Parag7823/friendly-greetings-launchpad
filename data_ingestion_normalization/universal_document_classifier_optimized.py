@@ -39,6 +39,14 @@ from sentence_transformers import SentenceTransformer
 
 logger = structlog.get_logger(__name__)
 
+# FIX #58: Global TF-IDF cache to prevent re-training on every instance
+_TFIDF_CACHE = {
+    'vectorizer': None,
+    'doc_type_vectors': None,
+    'doc_types_list': None,
+    'initialized': False
+}
+
 # OPTIMIZED: Type-safe configuration with pydantic-settings
 class DocumentClassifierConfig(BaseSettings):
     """Type-safe configuration with auto-validation"""
@@ -109,15 +117,9 @@ class UniversalDocumentClassifierOptimized:
         self.supabase = supabase_client
         self.config = config or self._get_default_config()
         
-        # CRITICAL FIX: Use centralized Redis cache - FAIL FAST if unavailable
-        from centralized_cache import safe_get_cache
-        self.cache = cache_client or safe_get_cache()
-        if self.cache is None:
-            raise RuntimeError(
-                "Centralized Redis cache not initialized. "
-                "Call initialize_cache() at startup or set REDIS_URL environment variable. "
-                "MEMORY cache fallback removed to prevent cache divergence across workers."
-            )
+        # FIX #52: Use shared cache initialization utility
+        from core_infrastructure.utils.helpers import initialize_centralized_cache
+        self.cache = initialize_centralized_cache(cache_client)
         
         # Comprehensive document type database
         self.document_database = self._initialize_document_database()
@@ -130,9 +132,10 @@ class UniversalDocumentClassifierOptimized:
         self.ocr_available = False  # Will be set when OCR is used
         self.sentence_model = None  # Lazy-loaded via SentenceModelService
         self.row_type_embeddings = None  # Lazy-loaded
-        self.tfidf_vectorizer = None  # Lazy-loaded via TFIDFService
-        self.doc_type_vectors = None  # Lazy-loaded
-        self.doc_types_list = None  # Lazy-loaded
+        # FIX #58: Use global TF-IDF cache instead of per-instance training
+        self.tfidf_vectorizer = None  # Will reference global cache
+        self.doc_type_vectors = None  # Will reference global cache
+        self.doc_types_list = None  # Will reference global cache
         
         # Performance tracking
         self.metrics = {
@@ -149,9 +152,10 @@ class UniversalDocumentClassifierOptimized:
             'processing_times': []
         }
         
-        # Learning system - now persists to database
+        # FIX #81: Use shared learning system
+        from shared_learning_system import SharedLearningSystem
+        self.learning_system = SharedLearningSystem()
         self.learning_enabled = True
-        self.classification_history = []  # Keep small in-memory buffer
         
         logger.info("NASA-GRADE Document Classifier v4.0.0 initialized",
                    cache_size=self.config.max_cache_size,
@@ -167,21 +171,47 @@ class UniversalDocumentClassifierOptimized:
     
     def _initialize_ocr(self):
         """
-        CRITICAL FIX: Use inference_service for lazy OCR loading.
+        FIX #63: Use inference_service for lazy OCR loading with proper error handling.
         Old: Direct easyocr.Reader initialization = slow cold start, high memory
         New: Lazy loading via inference_service = on-demand, shared across workers
+        
+        Error handling: If OCR service fails, gracefully degrade without silent failures
         """
         # REMOVED: Direct easyocr initialization
         # self.ocr_reader = easyocr.Reader(['en'], gpu=False)
         
         # OCR will be loaded lazily via inference_service when needed
         self.ocr_reader = None  # Lazy-loaded via OCRService
-        self.ocr_available = True  # Assume available, will be checked on first use
+        self.ocr_available = False  # Don't assume available - will be checked on first use
+        self._ocr_error = None  # Track any OCR initialization errors
         
         logger.info("ocr_deferred_to_inference_service", 
                    lazy_loading=True,
-                   accuracy="92%")
+                   accuracy="92%",
+                   error_handling="graceful_degradation")
         return True
+    
+    async def _ensure_ocr_available(self) -> bool:
+        """
+        FIX #63: Lazy-load OCR with error handling.
+        Returns True if OCR is available, False otherwise.
+        Logs errors instead of failing silently.
+        """
+        if self.ocr_reader is not None:
+            return self.ocr_available
+        
+        try:
+            # Try to load OCR from inference service
+            from inference_service import OCRService
+            self.ocr_reader = await OCRService.get_ocr_reader()
+            self.ocr_available = True
+            logger.info("✅ OCR service loaded successfully")
+            return True
+        except Exception as e:
+            self._ocr_error = str(e)
+            self.ocr_available = False
+            logger.error(f"❌ OCR service failed to load: {e}. Document classification will continue without OCR.")
+            return False
     
     def _initialize_sentence_model(self):
         """
@@ -215,22 +245,43 @@ class UniversalDocumentClassifierOptimized:
                    lazy_loading=True)
     
     def _initialize_tfidf(self):
-        """OPTIMIZED: Initialize TF-IDF vectorizer for smart indicator weighting (lazy-loaded)"""
+        """FIX #58: Initialize TF-IDF vectorizer with global caching to prevent re-training"""
+        global _TFIDF_CACHE
+        
+        # Check if already initialized globally
+        if _TFIDF_CACHE['initialized']:
+            self.tfidf_vectorizer = _TFIDF_CACHE['vectorizer']
+            self.doc_type_vectors = _TFIDF_CACHE['doc_type_vectors']
+            self.doc_types_list = _TFIDF_CACHE['doc_types_list']
+            logger.info("TF-IDF vectorizer loaded from global cache (no re-training)")
+            return
+        
         try:
             corpus = []
-            self.doc_types_list = []
+            doc_types_list = []
             
             for doc_type, info in self.document_database.items():
                 # Combine indicators into document representation
                 doc_text = ' '.join(info['indicators'] + info['keywords'] + info['field_patterns'])
                 corpus.append(doc_text)
-                self.doc_types_list.append(doc_type)
+                doc_types_list.append(doc_type)
             
-            # Train TF-IDF on indicator corpus
-            self.tfidf_vectorizer = TfidfVectorizer()
-            self.doc_type_vectors = self.tfidf_vectorizer.fit_transform(corpus)
+            # Train TF-IDF on indicator corpus (only once globally)
+            tfidf_vectorizer = TfidfVectorizer()
+            doc_type_vectors = tfidf_vectorizer.fit_transform(corpus)
             
-            logger.info("TF-IDF vectorizer trained",
+            # Store in global cache
+            _TFIDF_CACHE['vectorizer'] = tfidf_vectorizer
+            _TFIDF_CACHE['doc_type_vectors'] = doc_type_vectors
+            _TFIDF_CACHE['doc_types_list'] = doc_types_list
+            _TFIDF_CACHE['initialized'] = True
+            
+            # Reference from instance
+            self.tfidf_vectorizer = tfidf_vectorizer
+            self.doc_type_vectors = doc_type_vectors
+            self.doc_types_list = doc_types_list
+            
+            logger.info("TF-IDF vectorizer trained and cached globally",
                        document_types=len(corpus),
                        features="smart_weighting+ambiguity_handling")
         except Exception as e:
@@ -585,7 +636,7 @@ class UniversalDocumentClassifierOptimized:
                     'payload_keys': list(payload.keys()) if isinstance(payload, dict) else [],
                     'classification_methods_used': [final_result['method']],
                     'ocr_available': self.ocr_available,
-                    'ai_available': self.anthropic is not None
+                    'ai_available': self.groq_client is not None  # FIX #76: Use groq_client instead of anthropic
                 }
             })
             
@@ -930,23 +981,21 @@ class UniversalDocumentClassifierOptimized:
     
     # Helper methods
     def _generate_classification_id(self, payload: Dict, filename: str, user_id: str) -> str:
-        """Generate deterministic classification ID (no timestamp)"""
-        try:
-            payload_str = str(sorted(payload.items())) if isinstance(payload, dict) else str(payload)
-        except Exception:
-            payload_str = str(payload)
-        content_hash = hashlib.md5(payload_str.encode()).hexdigest()[:8]
-        filename_part = hashlib.md5((filename or "-").encode()).hexdigest()[:6]
-        user_part = (user_id or "anon")[:12]
-        return f"classify_{user_part}_{filename_part}_{content_hash}"
+        """FIX #79: Generate deterministic classification ID using shared utility"""
+        from core_infrastructure.utils.helpers import generate_cache_key
+        return generate_cache_key('classify', payload, filename, user_id)
     
     async def _safe_groq_call(self, prompt: str, temperature: float, max_tokens: int) -> str:
         """Safe Groq API call with error handling for cost-effective document classification"""
         try:
-            from groq import Groq
-            groq_client = Groq(api_key=os.getenv('GROQ_API_KEY'))
+            # FIX #67: Use injected groq_client instead of creating new client per call
+            # Problem: Creating NEW Groq client on EVERY call wastes resources and causes rate limiting
+            # Solution: Use injected client or fail gracefully
+            if not self.groq_client:
+                logger.error("Groq client not injected - document classification requires initialized Groq client")
+                raise ValueError("Groq client must be injected during initialization")
             
-            response = groq_client.chat.completions.create(
+            response = self.groq_client.chat.completions.create(
                 model="llama-3.3-70b-versatile",
                 messages=[{"role": "user", "content": prompt}],
                 max_tokens=max_tokens,
@@ -1000,52 +1049,11 @@ class UniversalDocumentClassifierOptimized:
             self.metrics['processing_times'] = self.metrics['processing_times'][-1000:]
     
     async def _update_learning_system(self, result: Dict[str, Any], payload: Dict, filename: str, user_id: str = None):
-        """Update learning system with classification results - now persists to database"""
+        """FIX #81: Update learning system using shared utility"""
         if not self.config.enable_learning:
             return
         
-        learning_entry = {
-            'classification_id': result.get('classification_id'),
-            'document_type': result['document_type'],
-            'confidence': result['confidence'],
-            'method': result['method'],
-            'indicators': result['indicators'],
-            'payload_keys': list(payload.keys()) if isinstance(payload, dict) else [],
-            'filename': filename,
-            'timestamp': datetime.utcnow().isoformat()
-        }
-        
-        # Keep small in-memory buffer for immediate access
-        self.classification_history.append(learning_entry)
-        if len(self.classification_history) > 100:  # Keep only last 100 in memory
-            self.classification_history = self.classification_history[-100:]
-        
-        # CRITICAL FIX: Persist to database using production-grade log writer
-        if user_id:
-            try:
-                from detection_log_writer import log_document_classification
-                
-                await log_document_classification(
-                    user_id=user_id,
-                    classification_id=result.get('classification_id', 'unknown'),
-                    document_type=result['document_type'],
-                    confidence=float(result['confidence']),
-                    method=result['method'],
-                    indicators=result.get('indicators', []),
-                    payload_keys=list(payload.keys()) if isinstance(payload, dict) else [],
-                    filename=filename,
-                    metadata={
-                        'processing_time': result.get('processing_time'),
-                        'category': result.get('category'),
-                        'ocr_used': result.get('ocr_used', False),
-                    },
-                    supabase_client=self.supabase,
-                )
-                logger.debug(f"✅ Document classification logged: {result['document_type']}")
-                
-            except Exception as e:
-                # Don't fail classification if logging fails
-                logger.warning(f"Failed to log document classification: {e}")
+        await self.learning_system.log_classification(result, payload, filename, user_id, self.supabase)
     
     async def classify_rows_batch(self, rows: List[Dict], platform_info: Dict, column_names: List[str], user_id: str = None) -> List[Dict[str, Any]]:
         """

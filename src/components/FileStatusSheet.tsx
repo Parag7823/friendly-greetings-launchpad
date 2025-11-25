@@ -3,7 +3,8 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from './ui/sheet';
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
-import { Pause } from 'lucide-react';
+import { Pause, CheckCircle, AlertCircle, Loader2, Clock } from 'lucide-react';
+import { Progress } from './ui/progress';
 import { useFileStatusStore } from '@/stores/useFileStatusStore';
 import { useWebSocket } from '@/contexts/WebSocketContext';
 

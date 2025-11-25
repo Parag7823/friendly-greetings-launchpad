@@ -9,6 +9,9 @@ import { useSearchParams } from 'react-router-dom';
 import { config } from '@/config';
 import { useFastAPIProcessor } from './FastAPIProcessor';
 import { ChatInputMicroInteractions } from './ChatInputMicroInteractions';
+import { useFileUpload } from '@/hooks/useFileUpload';
+import { getSessionToken } from '@/utils/authHelpers';
+import { useStandardToasts } from '@/hooks/useStandardToasts';
 
 interface ChatInterfaceProps {
   currentView?: string;
@@ -82,6 +85,7 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
 
       try {
         // Load chat messages from backend
+        const sessionToken = await getSessionToken();
         const { data, error } = await supabase
           .from('chat_messages')
           .select('*')
@@ -118,8 +122,7 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
       if (currentView !== 'marketplace') return;
       try {
         setLoadingProviders(true);
-        const { data: sessionData } = await supabase.auth.getSession();
-        const sessionToken = sessionData?.session?.access_token;
+        const sessionToken = await getSessionToken();
         const resp = await fetch(`${config.apiUrl}/api/connectors/providers`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -138,11 +141,11 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
     loadProviders();
   }, [currentView, user?.id]);
 
-  const handleConnect = async (providerKey: string) => {
+  // PERF FIX #2: Wrap handleConnect in useCallback to prevent unnecessary re-renders
+  const handleConnect = useCallback(async (providerKey: string) => {
     try {
       setConnecting(providerKey);
-      const { data: sessionData } = await supabase.auth.getSession();
-      const sessionToken = sessionData?.session?.access_token;
+      const sessionToken = await getSessionToken();
       const resp = await fetch(`${config.apiUrl}/api/connectors/initiate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -167,7 +170,7 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
     } finally {
       setConnecting(null);
     }
-  };
+  }, [user?.id, toast]);
 
   // Helpers for marketplace rendering
   const providerSet = new Set((providers || []).map((p: any) => p.provider));
@@ -187,8 +190,7 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
   const fetchConnections = async () => {
     try {
       setLoadingConnections(true);
-      const { data: sessionData } = await supabase.auth.getSession();
-      const sessionToken = sessionData?.session?.access_token;
+      const sessionToken = await getSessionToken();
       const resp = await fetch(`${config.apiUrl}/api/connectors/user-connections`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -208,10 +210,15 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
   useEffect(() => {
     if (currentView !== 'marketplace') return;
     fetchConnections();
+    // BOTTLENECK #1 FIX: Polling interval optimized
     // CRITICAL FIX: Reduce polling frequency to prevent database overload
     // With 1000 concurrent users, 15-second polling = 4,000 req/min
     // Changed to 60 seconds = 1,000 req/min (4x reduction)
     // Connections don't change frequently, so 1-minute polling is sufficient
+    // 
+    // FUTURE OPTIMIZATION: Replace with WebSocket events
+    // Backend could emit 'connection_updated' events when connections change
+    // This would eliminate polling entirely and provide real-time updates
     const id = window.setInterval(fetchConnections, 60000);
     return () => window.clearInterval(id);
   }, [currentView, user?.id]);
@@ -245,12 +252,12 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
     }
   };
 
-  const handleSyncNow = async (integrationId: string | null | undefined, connectionId: string) => {
+  // PERF FIX #3: Wrap handleSyncNow in useCallback to prevent unnecessary re-renders
+  const handleSyncNow = useCallback(async (integrationId: string | null | undefined, connectionId: string) => {
     if (!integrationId) return;
     try {
       setSyncing(connectionId);
-      const { data: sessionData } = await supabase.auth.getSession();
-      const sessionToken = sessionData?.session?.access_token;
+      const sessionToken = await getSessionToken();
       const resp = await fetch(`${config.apiUrl}/api/connectors/sync`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -275,7 +282,7 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
     } finally {
       setSyncing(null);
     }
-  };
+  }, [user?.id, toast]);
 
   // Function to reset chat for new conversation
   const resetChat = () => {
@@ -305,7 +312,9 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
     return () => clearInterval(interval);
   }, [sampleQuestions.length]);
 
-  const handleSendMessage = async () => {
+  // PERF FIX #1: Wrap handleSendMessage in useCallback to prevent unnecessary re-renders
+  // This prevents child components from re-rendering when parent state changes
+  const handleSendMessage = useCallback(async () => {
     if (message.trim() || pastedImages.length > 0) {
       // CRITICAL FIX: Process pasted images before sending message
       if (pastedImages.length > 0) {
@@ -346,8 +355,7 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
         // If this is a new chat, generate a title and create chat entry
         if (isNewChat) {
           try {
-            const { data: sessionData } = await supabase.auth.getSession();
-            const sessionToken = sessionData?.session?.access_token;
+            const sessionToken = await getSessionToken();
 
             const titleResponse = await fetch(`${config.apiUrl}/generate-chat-title`, {
               method: 'POST',
@@ -393,8 +401,7 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
         }
 
         // Send message to backend
-        const { data: sessionData } = await supabase.auth.getSession();
-        const sessionToken = sessionData?.session?.access_token;
+        const sessionToken = await getSessionToken();
 
         const response = await fetch(`${config.apiUrl}/chat`, {
           method: 'POST',
@@ -449,7 +456,7 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
         setMessages(prev => [...prev, errorMessage]);
       }
     }
-  };
+  }, [message, pastedImages, currentChatId, isNewChat, user?.id, onNavigate, setSearchParams]);
 
   const onDrop = useCallback((acceptedFiles: File[]) => {
     if (acceptedFiles.length > 0) {

@@ -8,6 +8,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { ChevronDown, ChevronUp, ExternalLink } from "lucide-react";
 import { Link } from "react-router-dom";
 import { config } from "@/config";
+import { getSessionToken } from "@/utils/authHelpers";
 
 interface ConnectorConfigModalProps {
   open: boolean;
@@ -53,8 +54,8 @@ export default function ConnectorConfigModal({ open, onOpenChange, connectionId,
     if (!open || !connectionId || !userId) return;
     try {
       setLoading(true);
-      const { data: sessionData } = await supabase.auth.getSession();
-      const sessionToken = sessionData?.session?.access_token;
+      // FIX #9: Use centralized getSessionToken helper
+      const sessionToken = await getSessionToken();
       const params = new URLSearchParams({ connection_id: connectionId, user_id: userId });
       if (sessionToken) params.set("session_token", sessionToken);
       const resp = await fetch(`${config.apiUrl}/api/connectors/status?${params.toString()}`, {
@@ -89,8 +90,8 @@ export default function ConnectorConfigModal({ open, onOpenChange, connectionId,
     if (!integrationId) return;
     try {
       setReconnecting(true);
-      const { data: sessionData } = await supabase.auth.getSession();
-      const sessionToken = sessionData?.session?.access_token;
+      // FIX #9: Use centralized getSessionToken helper
+      const sessionToken = await getSessionToken();
       // Reuse initiate endpoint to start reauth for same integration
       const resp = await fetch(`${config.apiUrl}/api/connectors/initiate`, {
         method: "POST",
@@ -195,8 +196,8 @@ export default function ConnectorConfigModal({ open, onOpenChange, connectionId,
                           if (!connectionId || !userId) return;
                           try {
                             setSavingFreq(true);
-                            const { data: sessionData } = await supabase.auth.getSession();
-                            const sessionToken = sessionData?.session?.access_token;
+                            // FIX #9: Use centralized getSessionToken helper
+                            const sessionToken = await getSessionToken();
                             const resp = await fetch(`${config.apiUrl}/api/connectors/frequency`, {
                               method: 'POST',
                               headers: { 
@@ -258,8 +259,8 @@ export default function ConnectorConfigModal({ open, onOpenChange, connectionId,
                           if (!connectionId || !userId) return;
                           try {
                             setAdvSaving(true);
-                            const { data: sessionData } = await supabase.auth.getSession();
-                            const sessionToken = sessionData?.session?.access_token;
+                            // FIX #9: Use centralized getSessionToken helper
+                            const sessionToken = await getSessionToken();
                             const updates: any = {};
                             if (realmId !== undefined) updates.realmId = realmId;
                             if (tenantId !== undefined) updates.tenantId = tenantId;

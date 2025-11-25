@@ -13,10 +13,40 @@ from supabase import Client
 import structlog
 
 from finley_graph_engine import FinleyGraphEngine, PathResult, GraphStats
+from core_infrastructure.supabase_client import get_supabase_client
 
 logger = structlog.get_logger(__name__)
 
 router = APIRouter(prefix="/api/v1/graph", tags=["Knowledge Graph"])
+
+
+# ============================================================================
+# FIX #33: DEPENDENCY INJECTION FOR SUPABASE CLIENT
+# ============================================================================
+
+async def get_supabase_client_dependency() -> Client:
+    """
+    FastAPI dependency function for Supabase client injection.
+    
+    FIX #33: Provides proper dependency injection for all endpoints.
+    Replaces broken Depends() with no argument.
+    
+    Returns:
+        Pooled Supabase client instance
+    
+    Usage in endpoints:
+        @router.post("/endpoint")
+        async def my_endpoint(supabase: Client = Depends(get_supabase_client_dependency)):
+            ...
+    """
+    try:
+        client = get_supabase_client()
+        if client is None:
+            raise HTTPException(status_code=503, detail="Supabase client not available")
+        return client
+    except Exception as e:
+        logger.error("supabase_dependency_injection_failed", error=str(e))
+        raise HTTPException(status_code=503, detail="Database service unavailable")
 
 
 # ============================================================================
@@ -184,8 +214,8 @@ async def get_graph_engine(
     """
     Create and return a FinleyGraphEngine instance for the given user.
     
-    The engine will attempt to load from Redis cache if available,
-    otherwise it will be empty and ready for building.
+    FIX #25: Attempts to load from Redis cache first.
+    If cache miss, returns empty engine ready for building.
     
     Args:
         user_id: User ID to load graph for
@@ -193,9 +223,19 @@ async def get_graph_engine(
         redis_url: Optional Redis URL for caching
         
     Returns:
-        FinleyGraphEngine instance
+        FinleyGraphEngine instance with graph loaded from cache if available
     """
     engine = FinleyGraphEngine(supabase, redis_url)
+    
+    # FIX #25: Attempt to load from cache
+    if redis_url:
+        cached_stats = await engine._load_from_cache(user_id)
+        if cached_stats:
+            logger.info("graph_loaded_from_cache", user_id=user_id, 
+                       nodes=cached_stats.node_count, edges=cached_stats.edge_count)
+            return engine
+    
+    # Cache miss - return empty engine for building
     return engine
 
 
@@ -209,7 +249,7 @@ async def get_graph_engine(
 @router.post("/build", response_model=GraphBuildResponse)
 async def build_graph(
     request: GraphBuildRequest,
-    supabase: Client = Depends(),
+    supabase: Client = Depends(get_supabase_client_dependency),
     redis_url: Optional[str] = None
 ):
     """
@@ -239,7 +279,7 @@ async def build_graph(
 @router.post("/update", response_model=IncrementalUpdateResponse)
 async def incremental_update(
     request: IncrementalUpdateRequest,
-    supabase: Client = Depends(),
+    supabase: Client = Depends(get_supabase_client_dependency),
     redis_url: Optional[str] = None
 ):
     """
@@ -271,7 +311,7 @@ async def incremental_update(
 @router.post("/query/path", response_model=PathQueryResponse)
 async def query_path(
     request: PathQueryRequest,
-    supabase: Client = Depends(),
+    supabase: Client = Depends(get_supabase_client_dependency),
     redis_url: Optional[str] = None
 ):
     """
@@ -283,10 +323,17 @@ async def query_path(
     - "Trace the flow from expense to revenue"
     """
     try:
-        engine = await get_graph_engine(request.user_id, supabase, redis_url)
+        # FIX #26: Use consistent Pattern 1 initialization
+        engine = FinleyGraphEngine(supabase, redis_url)
         
-        if not engine.graph:
-            raise HTTPException(status_code=400, detail="Graph not built. Call /build first.")
+        # Attempt to load from cache first
+        if redis_url:
+            cached_stats = await engine._load_from_cache(request.user_id)
+            if not cached_stats:
+                raise HTTPException(status_code=400, detail="Graph not built. Call /build first.")
+        else:
+            if not engine.graph:
+                raise HTTPException(status_code=400, detail="Graph not built. Call /build first.")
         
         path = engine.find_path(
             request.source_entity_id,
@@ -317,7 +364,7 @@ async def query_path(
 @router.post("/query/importance", response_model=ImportanceQueryResponse)
 async def query_importance(
     request: ImportanceQueryRequest,
-    supabase: Client = Depends(),
+    supabase: Client = Depends(get_supabase_client_dependency),
     redis_url: Optional[str] = None
 ):
     """
@@ -373,7 +420,7 @@ async def query_importance(
 @router.post("/query/communities", response_model=CommunityQueryResponse)
 async def query_communities(
     request: CommunityQueryRequest,
-    supabase: Client = Depends(),
+    supabase: Client = Depends(get_supabase_client_dependency),
     redis_url: Optional[str] = None
 ):
     """
@@ -411,7 +458,7 @@ async def query_communities(
 @router.get("/stats/{user_id}", response_model=GraphStats)
 async def get_graph_stats(
     user_id: str,
-    supabase: Client = Depends(),
+    supabase: Client = Depends(get_supabase_client_dependency),
     redis_url: Optional[str] = None
 ):
     """Get current graph statistics for user"""
@@ -442,7 +489,7 @@ async def get_graph_stats(
 @router.post("/query/temporal-patterns", response_model=TemporalPatternQueryResponse)
 async def query_temporal_patterns(
     request: TemporalPatternQueryRequest,
-    supabase: Client = Depends(),
+    supabase: Client = Depends(get_supabase_client_dependency),
     redis_url: Optional[str] = None
 ):
     """
@@ -500,7 +547,7 @@ async def query_temporal_patterns(
 @router.post("/query/seasonal-cycles", response_model=SeasonalCycleQueryResponse)
 async def query_seasonal_cycles(
     request: SeasonalCycleQueryRequest,
-    supabase: Client = Depends(),
+    supabase: Client = Depends(get_supabase_client_dependency),
     redis_url: Optional[str] = None
 ):
     """
@@ -556,7 +603,7 @@ async def query_seasonal_cycles(
 @router.post("/query/fraud-detection", response_model=FraudDetectionQueryResponse)
 async def query_fraud_detection(
     request: FraudDetectionQueryRequest,
-    supabase: Client = Depends(),
+    supabase: Client = Depends(get_supabase_client_dependency),
     redis_url: Optional[str] = None
 ):
     """
@@ -618,7 +665,7 @@ async def query_fraud_detection(
 @router.post("/query/root-causes", response_model=RootCauseQueryResponse)
 async def query_root_causes(
     request: RootCauseQueryRequest,
-    supabase: Client = Depends(),
+    supabase: Client = Depends(get_supabase_client_dependency),
     redis_url: Optional[str] = None
 ):
     """
@@ -678,7 +725,7 @@ async def query_root_causes(
 @router.post("/query/predictions", response_model=PredictionQueryResponse)
 async def query_predictions(
     request: PredictionQueryRequest,
-    supabase: Client = Depends(),
+    supabase: Client = Depends(get_supabase_client_dependency),
     redis_url: Optional[str] = None
 ):
     """

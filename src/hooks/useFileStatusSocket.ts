@@ -28,8 +28,7 @@ export const useFileStatusSocket = (userId?: string, sessionToken?: string) => {
   const handleFileProgress = useCallback(
     (data: any) => {
       const {
-        fileId,
-        jobId,
+        job_id,
         step,
         message,
         progress,
@@ -38,12 +37,13 @@ export const useFileStatusSocket = (userId?: string, sessionToken?: string) => {
         ...extra
       } = data;
 
-      // Use fileId or jobId as identifier
-      const id = fileId || jobId;
-      if (!id) {
-        console.warn('Received progress update without fileId or jobId', data);
+      // ISSUE #2 FIX: Standardize on job_id (backend now includes it in payload)
+      // Removed fileId/jobId fallback - use only job_id for consistency
+      if (!job_id) {
+        console.warn('Received progress update without job_id', data);
         return;
       }
+      const id = job_id;
 
       // Create processing step
       const processingStep: ProcessingStep = {
@@ -138,15 +138,11 @@ export const useFileStatusSocket = (userId?: string, sessionToken?: string) => {
       });
 
       // File processing event handlers
-      // ERROR #8 FIX: Standardize on 'job_update' event name (backend uses this)
+      // BUG #1 FIX: Use only 'job_update' (backend standardized on this)
+      // Removed duplicate 'file_progress' listener - was redundant
       socket.on('job_update', (data) => {
         handleFileProgress(data);
         // ERROR #4 FIX: Emit window events for polling replacement
-        window.dispatchEvent(new CustomEvent('job_update', { detail: data }));
-      });
-      // Keep 'file_progress' as alias for backward compatibility
-      socket.on('file_progress', (data) => {
-        handleFileProgress(data);
         window.dispatchEvent(new CustomEvent('job_update', { detail: data }));
       });
       socket.on('job_complete', (data) => {

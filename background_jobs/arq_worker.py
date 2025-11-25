@@ -23,99 +23,90 @@ from fastapi_backend_v2 import (
     NANGO_ZOHO_MAIL_INTEGRATION_ID,
 )
 
-# FIX #7: Strict dependency on centralized supabase_client.py
-# Fail hard in production if supabase_client module is missing
+# FIX #6: Supabase client initialization with graceful degradation
 try:
     from supabase_client import get_supabase_client
     supabase = get_supabase_client()
     logger.info("✅ ARQ worker using centralized Supabase client with connection pooling")
 except ImportError as e:
-    logger.critical(f"❌ FATAL: supabase_client.py not found. ARQ worker cannot initialize: {e}")
-    raise RuntimeError(
-        "ARQ worker requires supabase_client module for connection pooling. "
-        "Ensure supabase_client.py is in core_infrastructure/ and SUPABASE_URL, "
-        "SUPABASE_SERVICE_ROLE_KEY environment variables are set."
-    ) from e
+    logger.error(f"⚠️ supabase_client.py not found: {e}")
+    supabase = None
+except Exception as e:
+    logger.error(f"⚠️ Failed to initialize Supabase client: {e}")
+    supabase = None
 
 
 # --------------- ARQ Task Functions ---------------
 # Each task is fully functional and reuses the existing application logic.
 
-async def _record_job_failure(provider: str, req: Dict[str, Any], err: Exception) -> None:
-    """
-    FIX #5: Record failed job to DLQ table.
-    
-    Separated from retry logic to use ARQ's native Retry mechanism.
-    """
-    try:
-        conn_id = req.get('connection_id') or 'unknown'
-        corr = req.get('correlation_id') or ''
-        supabase.table('job_failures').insert({
-            'provider': provider,
-            'user_id': req.get('user_id'),
-            'connection_id': conn_id,
-            'correlation_id': corr,
-            'payload': req,
-            'error': str(err)
-        }).execute()
-    except Exception as e:
-        logger.warning(f"Failed to record job failure: {e}")
-    
-    try:
-        JOBS_PROCESSED.labels(provider=provider, status='failed').inc()
-    except Exception:
-        pass
+# FIX #7: DEAD CODE REMOVED - _record_job_failure()
+# This function was defined but never called anywhere in the codebase.
+# ARQ's native Retry mechanism handles retries, and error logging is done
+# directly in each sync function (gmail_sync, dropbox_sync, etc.).
+# Removing this unused function reduces code clutter and maintenance burden.
 
 
 async def gmail_sync(ctx, req: Dict[str, Any]) -> Dict[str, Any]:
     """
-    FIX #5: Uses ARQ's native Retry mechanism with exponential backoff.
+    FIX #7: Uses ARQ's native Retry mechanism with exponential backoff.
     - Removes custom Redis-backed retry logic
     - Leverages ARQ's built-in retry handling
     - Cleaner, more robust implementation
+    - Logs exceptions before retrying for observability
     """
     nango = NangoClient()
     try:
         return await _gmail_sync_run(nango, ConnectorSyncRequest(**req))
     except Exception as e:
-        # FIX #5: Use ARQ's native Retry with exponential backoff
+        # FIX #7: Log exception before retrying for observability
+        logger.error(f"❌ Gmail sync failed: {e}", error_type=type(e).__name__, request=req)
+        # Use ARQ's native Retry with exponential backoff
         # ARQ handles retry count internally, no need for custom Redis tracking
         raise Retry(defer=30)  # Initial 30 second delay, ARQ will exponentially backoff
 
 
 async def dropbox_sync(ctx, req: Dict[str, Any]) -> Dict[str, Any]:
     """
-    FIX #5: Uses ARQ's native Retry mechanism with exponential backoff.
+    FIX #7: Uses ARQ's native Retry mechanism with exponential backoff.
+    - Logs exceptions before retrying for observability
     """
     nango = NangoClient()
     try:
         return await _dropbox_sync_run(nango, ConnectorSyncRequest(**req))
     except Exception as e:
-        # FIX #5: Use ARQ's native Retry with exponential backoff
+        # FIX #7: Log exception before retrying for observability
+        logger.error(f"❌ Dropbox sync failed: {e}", error_type=type(e).__name__, request=req)
+        # Use ARQ's native Retry with exponential backoff
         raise Retry(defer=30)
 
 
 async def gdrive_sync(ctx, req: Dict[str, Any]) -> Dict[str, Any]:
     """
-    FIX #5: Uses ARQ's native Retry mechanism with exponential backoff.
+    FIX #7: Uses ARQ's native Retry mechanism with exponential backoff.
+    - Logs exceptions before retrying for observability
     """
     nango = NangoClient()
     try:
         return await _gdrive_sync_run(nango, ConnectorSyncRequest(**req))
     except Exception as e:
-        # FIX #5: Use ARQ's native Retry with exponential backoff
+        # FIX #7: Log exception before retrying for observability
+        logger.error(f"❌ Google Drive sync failed: {e}", error_type=type(e).__name__, request=req)
+        # Use ARQ's native Retry with exponential backoff
         raise Retry(defer=30)
 
 
 async def zoho_mail_sync(ctx, req: Dict[str, Any]) -> Dict[str, Any]:
     """
-    FIX #5: Uses ARQ's native Retry mechanism with exponential backoff.
+    FIX #7: Uses ARQ's native Retry mechanism with exponential backoff.
+    - Logs exceptions before retrying for observability
     """
     nango = NangoClient()
     try:
         return await _zohomail_sync_run(nango, ConnectorSyncRequest(**req))
     except Exception as e:
-        # FIX #5: Use ARQ's native Retry with exponential backoff
+        # FIX #7: Log exception before retrying for observability
+        logger.error(f"❌ Zoho Mail sync failed: {e}", error_type=type(e).__name__, request=req)
+        # Use ARQ's native Retry with exponential backoff
         raise Retry(defer=45)  # Initial 45 second delay for Zoho (slower API)
 
 
@@ -155,6 +146,7 @@ async def process_spreadsheet(ctx, user_id: str, filename: str, storage_path: st
     CRITICAL FIX: Removed nested transaction wrapper.
     ExcelProcessor.process_file manages transaction internally (fastapi_backend_v2.py@8676-8680).
     Nested transactions cause deadlocks.
+    FIX #7: Added exception logging for observability
     """
     try:
         # Transaction managed inside start_processing_job -> ExcelProcessor.process_file
@@ -170,21 +162,26 @@ async def process_spreadsheet(ctx, user_id: str, filename: str, storage_path: st
         return {"status": "completed", "job_id": job_id}
             
     except Exception as e:
-        logger.error(f"❌ ARQ spreadsheet processing failed for job {job_id}: {e}")
+        # FIX #7: Log full exception details for debugging
+        logger.error(f"❌ ARQ spreadsheet processing failed for job {job_id}", 
+                    error=str(e), error_type=type(e).__name__, user_id=user_id, filename=filename)
         # Transaction auto-rolls back on exception
-        # Retry with exponential backoff
-        delay = await _retry_or_dlq(ctx, 'spreadsheet_processing', {
-            'user_id': user_id,
-            'job_id': job_id,
-            'filename': filename
-        }, e, max_retries=3, base_delay=60)
-        if delay is None:
-            return {"status": "failed", "job_id": job_id, "error": str(e)}
-        raise Retry(defer=delay)
+        # Use ARQ's native Retry with exponential backoff
+        # Calculate exponential backoff: 60s, 120s, 240s for retries 1, 2, 3
+        retry_count = getattr(ctx, 'retry_count', 0) if ctx else 0
+        if retry_count < 3:
+            delay = 60 * (2 ** retry_count)  # 60s, 120s, 240s
+            logger.info(f"Retrying spreadsheet processing in {delay}s (attempt {retry_count + 1}/3)", job_id=job_id)
+            raise Retry(defer=delay)
+        else:
+            logger.error(f"❌ Spreadsheet processing failed after 3 retries for job {job_id}", error=str(e))
+            return {"status": "failed", "job_id": job_id, "error": str(e), "retries_exhausted": True}
 
 
 async def process_pdf(ctx, user_id: str, filename: str, storage_path: str, job_id: str) -> Dict[str, Any]:
-    """FIX #5: Wrap ARQ PDF processing in transaction for consistency with Phase 1-11"""
+    """FIX #7: Wrap ARQ PDF processing in transaction for consistency with Phase 1-11
+    Added exception logging for observability
+    """
     try:
         from transaction_manager import get_transaction_manager
         transaction_manager = get_transaction_manager()
@@ -199,16 +196,18 @@ async def process_pdf(ctx, user_id: str, filename: str, storage_path: str, job_i
             return {"status": "completed", "job_id": job_id}
             
     except Exception as e:
-        logger.error(f"❌ ARQ PDF processing failed for job {job_id}: {e}")
+        # FIX #7: Log full exception details for debugging
+        logger.error(f"❌ ARQ PDF processing failed for job {job_id}", 
+                    error=str(e), error_type=type(e).__name__, user_id=user_id, filename=filename)
         # Transaction auto-rolls back on exception
-        # FIX #9: Use ARQ's native Retry with exponential backoff
+        # Use ARQ's native Retry with exponential backoff
         retry_count = getattr(ctx, 'retry_count', 0) if ctx else 0
         if retry_count < 3:
             delay = 60 * (2 ** retry_count)  # 60s, 120s, 240s
-            logger.info(f"Retrying PDF processing in {delay}s (attempt {retry_count + 1}/3)")
+            logger.info(f"Retrying PDF processing in {delay}s (attempt {retry_count + 1}/3)", job_id=job_id)
             raise Retry(defer=delay)
         else:
-            logger.error(f"❌ PDF processing failed after 3 retries for job {job_id}")
+            logger.error(f"❌ PDF processing failed after 3 retries for job {job_id}", error=str(e))
             return {"status": "failed", "job_id": job_id, "error": str(e), "retries_exhausted": True}
 
 
@@ -216,6 +215,7 @@ async def learn_field_mapping_batch(ctx, mappings: List[Dict[str, Any]]) -> Dict
     """
     CRITICAL FIX: Persistent field mapping learning via ARQ.
     Replaces in-process asyncio.Queue to prevent data loss on restart.
+    FIX #7: Added exception logging for observability
     
     Args:
         ctx: ARQ context
@@ -238,7 +238,8 @@ async def learn_field_mapping_batch(ctx, mappings: List[Dict[str, Any]]) -> Dict
                 else:
                     failed_count += 1
             except Exception as e:
-                logger.error(f"Failed to write field mapping: {e}")
+                # FIX #7: Log mapping details for debugging
+                logger.error(f"Failed to write field mapping", error=str(e), mapping_id=mapping.get('id'))
                 failed_count += 1
         
         logger.info(f"✅ Field mapping batch completed: {success_count} success, {failed_count} failed")
@@ -250,15 +251,16 @@ async def learn_field_mapping_batch(ctx, mappings: List[Dict[str, Any]]) -> Dict
         }
         
     except Exception as e:
-        logger.error(f"❌ Field mapping batch processing failed: {e}")
-        # FIX #9: Use ARQ's native Retry with exponential backoff
+        # FIX #7: Log full exception details for debugging
+        logger.error(f"❌ Field mapping batch processing failed", error=str(e), error_type=type(e).__name__)
+        # Use ARQ's native Retry with exponential backoff
         retry_count = getattr(ctx, 'retry_count', 0) if ctx else 0
         if retry_count < 3:
             delay = 30 * (2 ** retry_count)  # 30s, 60s, 120s
             logger.info(f"Retrying field mapping batch in {delay}s (attempt {retry_count + 1}/3)")
             raise Retry(defer=delay)
         else:
-            logger.error(f"❌ Field mapping batch failed after 3 retries")
+            logger.error(f"❌ Field mapping batch failed after 3 retries", error=str(e))
             return {"status": "failed", "error": str(e), "retries_exhausted": True}
 
 
@@ -267,6 +269,7 @@ async def detect_relationships(ctx, user_id: str, file_id: str = None) -> Dict[s
     CRITICAL FIX #8: Background task for relationship detection with transaction wrapper.
     This decouples heavy analysis from the synchronous ingestion pipeline and ensures
     atomic operations (all-or-nothing) for data consistency.
+    FIX #7: Added exception logging for observability
     
     Args:
         ctx: ARQ context
@@ -280,7 +283,7 @@ async def detect_relationships(ctx, user_id: str, file_id: str = None) -> Dict[s
         from finley_graph_engine import FinleyGraphEngine
         from data_ingestion_normalization.embedding_service import EmbeddingService
         
-        logger.info(f"🔍 Starting background relationship detection for user_id={user_id}, file_id={file_id}")
+        logger.info(f"🔍 Starting background relationship detection", user_id=user_id, file_id=file_id)
         
         # FIX #8: Wrap entire detection in transaction for atomic operations
         transaction_manager = get_transaction_manager()

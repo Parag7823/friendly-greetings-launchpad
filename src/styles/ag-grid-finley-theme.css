@@ -1,0 +1,22 @@
+/**
+ * AG-Grid Finley Theme
+ * Extracted from TabbedFilePreview inline styles to prevent duplication
+ */
+
+.ag-theme-quartz-dark {
+  --ag-background-color: #0A0A0A;
+  --ag-header-background-color: #111111;
+  --ag-row-hover-color: #1a1a1a;
+  --ag-border-color: #222;
+  --ag-font-family: 'Inter', sans-serif;
+  --ag-font-size: 12px;
+}
+
+.ag-header-cell-label {
+  font-weight: 600;
+  color: #a1a1aa;
+}
+
+.ag-right-aligned-header .ag-header-cell-label {
+  justify-content: flex-end;
+}

@@ -269,6 +269,25 @@ class FinleyGraphEngine:
         
         return stats
     
+    def _get_cache(self):
+        """
+        FIX #24: Create and return aiocache Cache instance for Redis.
+        Used by clear_graph_cache() and other cache operations.
+        
+        Returns:
+            aiocache.Cache instance configured for Redis
+        """
+        from urllib.parse import urlparse
+        parsed = urlparse(self.redis_url)
+        
+        return Cache(
+            Cache.REDIS,
+            endpoint=parsed.hostname,
+            port=parsed.port or 6379,
+            serializer=PickleSerializer(),
+            namespace="finley_graph"
+        )
+    
     async def clear_graph_cache(self, user_id: str):
         """
         Invalidate graph cache for a user.
@@ -284,10 +303,13 @@ class FinleyGraphEngine:
     
     async def _fetch_nodes(self, user_id: str) -> List[GraphNode]:
         """Fetch normalized_entities"""
-        resp = self.supabase.table('normalized_entities').select(
-            'id, entity_type, canonical_name, confidence_score, '
-            'platform_sources, first_seen_at, last_seen_at, email, phone, bank_account'
-        ).eq('user_id', user_id).execute()
+        # FIX #27: Wrap synchronous Supabase call in asyncio.to_thread() to prevent blocking event loop
+        resp = await asyncio.to_thread(
+            lambda: self.supabase.table('normalized_entities').select(
+                'id, entity_type, canonical_name, confidence_score, '
+                'platform_sources, first_seen_at, last_seen_at, email, phone, bank_account'
+            ).eq('user_id', user_id).execute()
+        )
         return [GraphNode(**row) for row in resp.data]
     
     async def _fetch_edges(self, user_id: str) -> List[GraphEdge]:
@@ -300,19 +322,22 @@ class FinleyGraphEngine:
         - Performance: ~10x faster for 200 users
         """
         # FIX #4: Fetch all enriched relationships in ONE query from materialized view
-        enriched_resp = self.supabase.table('view_enriched_relationships').select(
-            'id, source_event_id, target_event_id, relationship_type, '
-            'confidence_score, detection_method, reasoning, created_at, '
-            'causal_strength, causal_direction, '
-            'temporal_pattern_id, recurrence_score, recurrence_frequency, last_occurrence, next_predicted_occurrence, '
-            'seasonal_pattern_id, seasonal_strength, seasonal_months, '
-            'pattern_id, pattern_confidence, pattern_name, '
-            'cross_platform_id, platform_sources, '
-            'predicted_relationship_id, prediction_confidence, prediction_reason, '
-            'root_cause_id, root_cause_analysis, '
-            'delta_log_id, change_type, '
-            'duplicate_transaction_id, is_duplicate, duplicate_confidence'
-        ).eq('user_id', user_id).execute()
+        # FIX #27: Wrap synchronous Supabase call in asyncio.to_thread() to prevent blocking event loop
+        enriched_resp = await asyncio.to_thread(
+            lambda: self.supabase.table('view_enriched_relationships').select(
+                'id, source_event_id, target_event_id, relationship_type, '
+                'confidence_score, detection_method, reasoning, created_at, '
+                'causal_strength, causal_direction, '
+                'temporal_pattern_id, recurrence_score, recurrence_frequency, last_occurrence, next_predicted_occurrence, '
+                'seasonal_pattern_id, seasonal_strength, seasonal_months, '
+                'pattern_id, pattern_confidence, pattern_name, '
+                'cross_platform_id, platform_sources, '
+                'predicted_relationship_id, prediction_confidence, prediction_reason, '
+                'root_cause_id, root_cause_analysis, '
+                'delta_log_id, change_type, '
+                'duplicate_transaction_id, is_duplicate, duplicate_confidence'
+            ).eq('user_id', user_id).execute()
+        )
         
         enriched_rels = enriched_resp.data
         if not enriched_rels:
@@ -401,28 +426,41 @@ class FinleyGraphEngine:
         """Map event IDs to entity IDs"""
         if not event_ids:
             return {}
-        resp = self.supabase.table('entity_matches').select(
-            'source_row_id, normalized_entity_id'
-        ).eq('user_id', user_id).in_('source_row_id', event_ids).execute()
+        # FIX #27: Wrap synchronous Supabase call in asyncio.to_thread() to prevent blocking event loop
+        resp = await asyncio.to_thread(
+            lambda: self.supabase.table('entity_matches').select(
+                'source_row_id, normalized_entity_id'
+            ).eq('user_id', user_id).in_('source_row_id', event_ids).execute()
+        )
         return {row['source_row_id']: row['normalized_entity_id'] for row in resp.data}
     
     async def _fetch_causal_enrichments(self, user_id: str, rel_ids: List[str]) -> Dict[str, Dict]:
         """Fetch causal_relationships - Layer 1: Why did this connection happen?"""
         if not rel_ids:
             return {}
-        resp = self.supabase.table('causal_relationships').select(
-            'relationship_id, causal_score, causal_direction'
-        ).eq('user_id', user_id).in_('relationship_id', rel_ids).execute()
-        return {row['relationship_id']: row for row in resp.data}
+        try:
+            # FIX #27: Wrap synchronous Supabase call in asyncio.to_thread() to prevent blocking event loop
+            resp = await asyncio.to_thread(
+                lambda: self.supabase.table('causal_relationships').select(
+                    'relationship_id, causal_score, causal_direction'
+                ).eq('user_id', user_id).in_('relationship_id', rel_ids).execute()
+            )
+            return {row['relationship_id']: row for row in resp.data}
+        except Exception as e:
+            logger.warning("causal_enrichment_failed", error=str(e))
+            return {}
     
     async def _fetch_temporal_enrichments(self, user_id: str, rel_ids: List[str]) -> Dict[str, Dict]:
         """Fetch temporal_patterns - Layer 2: When does this happen? How often?"""
         if not rel_ids:
             return {}
         try:
-            rel_resp = self.supabase.table('relationship_instances').select(
-                'id, relationship_type'
-            ).eq('user_id', user_id).in_('id', rel_ids).execute()
+            # FIX #27: Wrap synchronous Supabase calls in asyncio.to_thread() to prevent blocking event loop
+            rel_resp = await asyncio.to_thread(
+                lambda: self.supabase.table('relationship_instances').select(
+                    'id, relationship_type'
+                ).eq('user_id', user_id).in_('id', rel_ids).execute()
+            )
             
             if not rel_resp.data:
                 return {}
@@ -431,11 +469,13 @@ class FinleyGraphEngine:
             if not rel_types:
                 return {}
             
-            patterns_resp = self.supabase.table('temporal_patterns').select(
-                'id, relationship_type, avg_days_between, std_dev_days, confidence_score, '
-                'has_seasonal_pattern, seasonal_period_days, seasonal_amplitude, '
-                'forecast_data, forecast_expires_at'
-            ).eq('user_id', user_id).in_('relationship_type', rel_types).execute()
+            patterns_resp = await asyncio.to_thread(
+                lambda: self.supabase.table('temporal_patterns').select(
+                    'id, relationship_type, avg_days_between, std_dev_days, confidence_score, '
+                    'has_seasonal_pattern, seasonal_period_days, seasonal_amplitude, '
+                    'forecast_data, forecast_expires_at'
+                ).eq('user_id', user_id).in_('relationship_type', rel_types).execute()
+            )
             
             pattern_map = {p['relationship_type']: p for p in patterns_resp.data} if patterns_resp.data else {}
             
@@ -476,10 +516,13 @@ class FinleyGraphEngine:
             return {}
         try:
             # FIX #14: Query temporal_patterns instead of seasonal_patterns
-            resp = self.supabase.table('temporal_patterns').select(
-                'id as relationship_id, seasonal_data'
-            ).eq('user_id', user_id).in_('id', rel_ids)\
-             .not_('seasonal_data', 'is', None).execute()
+            # FIX #27: Wrap synchronous Supabase call in asyncio.to_thread() to prevent blocking event loop
+            resp = await asyncio.to_thread(
+                lambda: self.supabase.table('temporal_patterns').select(
+                    'id as relationship_id, seasonal_data'
+                ).eq('user_id', user_id).in_('id', rel_ids)\
+                 .not_('seasonal_data', 'is', None).execute()
+            )
             
             # Extract seasonal data from JSONB
             result = {}
@@ -499,9 +542,12 @@ class FinleyGraphEngine:
         if not rel_ids:
             return {}
         try:
-            resp = self.supabase.table('relationship_instances').select(
-                'id, pattern_id'
-            ).eq('user_id', user_id).in_('id', rel_ids).execute()
+            # FIX #27: Wrap synchronous Supabase calls in asyncio.to_thread() to prevent blocking event loop
+            resp = await asyncio.to_thread(
+                lambda: self.supabase.table('relationship_instances').select(
+                    'id, pattern_id'
+                ).eq('user_id', user_id).in_('id', rel_ids).execute()
+            )
             
             if not resp.data:
                 return {}
@@ -510,9 +556,11 @@ class FinleyGraphEngine:
             if not pattern_ids:
                 return {}
             
-            patterns_resp = self.supabase.table('relationship_patterns').select(
-                'id, relationship_type, pattern_data'
-            ).in_('id', pattern_ids).execute()
+            patterns_resp = await asyncio.to_thread(
+                lambda: self.supabase.table('relationship_patterns').select(
+                    'id, relationship_type, pattern_data'
+                ).in_('id', pattern_ids).execute()
+            )
             
             pattern_map = {p['id']: p for p in patterns_resp.data} if patterns_resp.data else {}
             
@@ -538,9 +586,12 @@ class FinleyGraphEngine:
         if not rel_ids:
             return {}
         try:
-            resp = self.supabase.table('cross_platform_relationships').select(
-                'relationship_id, cross_platform_id, platform_sources'
-            ).eq('user_id', user_id).in_('relationship_id', rel_ids).execute()
+            # FIX #27: Wrap synchronous Supabase call in asyncio.to_thread() to prevent blocking event loop
+            resp = await asyncio.to_thread(
+                lambda: self.supabase.table('cross_platform_relationships').select(
+                    'relationship_id, cross_platform_id, platform_sources'
+                ).eq('user_id', user_id).in_('relationship_id', rel_ids).execute()
+            )
             return {row['relationship_id']: row for row in resp.data}
         except Exception as e:
             logger.warning("cross_platform_enrichment_failed", error=str(e))
@@ -551,9 +602,12 @@ class FinleyGraphEngine:
         if not rel_ids:
             return {}
         try:
-            rel_resp = self.supabase.table('relationship_instances').select(
-                'id, relationship_type, source_event_id'
-            ).eq('user_id', user_id).in_('id', rel_ids).execute()
+            # FIX #27: Wrap synchronous Supabase calls in asyncio.to_thread() to prevent blocking event loop
+            rel_resp = await asyncio.to_thread(
+                lambda: self.supabase.table('relationship_instances').select(
+                    'id, relationship_type, source_event_id'
+                ).eq('user_id', user_id).in_('id', rel_ids).execute()
+            )
             
             if not rel_resp.data:
                 return {}
@@ -562,9 +616,11 @@ class FinleyGraphEngine:
             if not source_event_ids:
                 return {}
             
-            predictions_resp = self.supabase.table('predicted_relationships').select(
-                'id, source_event_id, confidence_score, prediction_reasoning, expected_date, status'
-            ).eq('user_id', user_id).in_('source_event_id', source_event_ids).execute()
+            predictions_resp = await asyncio.to_thread(
+                lambda: self.supabase.table('predicted_relationships').select(
+                    'id, source_event_id, confidence_score, prediction_reasoning, expected_date, status'
+                ).eq('user_id', user_id).in_('source_event_id', source_event_ids).execute()
+            )
             
             pred_map = {p['source_event_id']: p for p in predictions_resp.data} if predictions_resp.data else {}
             
@@ -592,9 +648,12 @@ class FinleyGraphEngine:
         if not rel_ids:
             return {}
         try:
-            resp = self.supabase.table('root_cause_analyses').select(
-                'relationship_id, root_cause_analysis'
-            ).eq('user_id', user_id).in_('relationship_id', rel_ids).execute()
+            # FIX #27: Wrap synchronous Supabase call in asyncio.to_thread() to prevent blocking event loop
+            resp = await asyncio.to_thread(
+                lambda: self.supabase.table('root_cause_analyses').select(
+                    'relationship_id, root_cause_analysis'
+                ).eq('user_id', user_id).in_('relationship_id', rel_ids).execute()
+            )
             return {row['relationship_id']: row for row in resp.data}
         except Exception as e:
             logger.warning("root_cause_enrichment_failed", error=str(e))
@@ -605,9 +664,12 @@ class FinleyGraphEngine:
         if not rel_ids:
             return {}
         try:
-            resp = self.supabase.table('event_delta_logs').select(
-                'relationship_id, change_type'
-            ).eq('user_id', user_id).in_('relationship_id', rel_ids).execute()
+            # FIX #27: Wrap synchronous Supabase call in asyncio.to_thread() to prevent blocking event loop
+            resp = await asyncio.to_thread(
+                lambda: self.supabase.table('event_delta_logs').select(
+                    'relationship_id, change_type'
+                ).eq('user_id', user_id).in_('relationship_id', rel_ids).execute()
+            )
             return {row['relationship_id']: row for row in resp.data}
         except Exception as e:
             logger.warning("delta_enrichment_failed", error=str(e))
@@ -624,9 +686,12 @@ class FinleyGraphEngine:
             return {}
         try:
             # FIX #14: Query relationship_instances instead of duplicate_transactions
-            resp = self.supabase.table('relationship_instances').select(
-                'id as relationship_id, is_duplicate, duplicate_confidence'
-            ).eq('user_id', user_id).in_('id', rel_ids).eq('is_duplicate', True).execute()
+            # FIX #27: Wrap synchronous Supabase call in asyncio.to_thread() to prevent blocking event loop
+            resp = await asyncio.to_thread(
+                lambda: self.supabase.table('relationship_instances').select(
+                    'id as relationship_id, is_duplicate, duplicate_confidence'
+                ).eq('user_id', user_id).in_('id', rel_ids).eq('is_duplicate', True).execute()
+            )
             return {row['relationship_id']: row for row in resp.data}
         except Exception as e:
             logger.warning("duplicate_enrichment_failed", error=str(e))
@@ -645,20 +710,13 @@ class FinleyGraphEngine:
         - 10-20x faster (connection pooling via aiocache)
         - Handles all Python object types automatically
         - Consistent with centralized_cache.py implementation
+        
+        FIX #2: Reuse _get_cache() method instead of creating duplicate Cache instance
         """
         try:
             if AIOCACHE_AVAILABLE:
-                # Use aiocache with connection pooling and PickleSerializer
-                from urllib.parse import urlparse
-                parsed = urlparse(self.redis_url)
-                
-                cache = Cache(
-                    Cache.REDIS,
-                    endpoint=parsed.hostname,
-                    port=parsed.port or 6379,
-                    serializer=PickleSerializer(),  # FIX #1: Use pickle for complex objects
-                    namespace="finley_graph"  # Add namespace for clarity
-                )
+                # FIX #2: Reuse _get_cache() method to avoid duplicate Cache instance creation
+                cache = self._get_cache()
                 
                 cache_data = {
                     'graph': self.graph,
@@ -809,9 +867,12 @@ class FinleyGraphEngine:
         logger.info("incremental_update", user_id=user_id, since=since.isoformat())
         
         # FIX #2: Fetch deleted entities (soft-delete flag)
-        deleted_entities = self.supabase.table('normalized_entities').select(
-            'id'
-        ).eq('user_id', user_id).eq('is_deleted', True).gte('updated_at', since.isoformat()).execute()
+        # FIX #27: Wrap synchronous Supabase call in asyncio.to_thread() to prevent blocking event loop
+        deleted_entities = await asyncio.to_thread(
+            lambda: self.supabase.table('normalized_entities').select(
+                'id'
+            ).eq('user_id', user_id).eq('is_deleted', True).gte('updated_at', since.isoformat()).execute()
+        )
         
         nodes_deleted = 0
         for row in deleted_entities.data or []:
@@ -825,9 +886,12 @@ class FinleyGraphEngine:
                 logger.debug(f"Deleted node: {entity_id}")
         
         # FIX #2: Fetch deleted relationships
-        deleted_rels = self.supabase.table('relationship_instances').select(
-            'id'
-        ).eq('user_id', user_id).eq('is_deleted', True).gte('updated_at', since.isoformat()).execute()
+        # FIX #27: Wrap synchronous Supabase call in asyncio.to_thread() to prevent blocking event loop
+        deleted_rels = await asyncio.to_thread(
+            lambda: self.supabase.table('relationship_instances').select(
+                'id'
+            ).eq('user_id', user_id).eq('is_deleted', True).gte('updated_at', since.isoformat()).execute()
+        )
         
         edges_deleted = 0
         for row in deleted_rels.data or []:
@@ -840,10 +904,13 @@ class FinleyGraphEngine:
                 logger.debug(f"Deleted edge: {rel_id}")
         
         # Fetch new entities
-        resp = self.supabase.table('normalized_entities').select(
-            'id, entity_type, canonical_name, confidence_score, '
-            'platform_sources, first_seen_at, last_seen_at, email, phone, bank_account'
-        ).eq('user_id', user_id).eq('is_deleted', False).gte('last_seen_at', since.isoformat()).execute()
+        # FIX #27: Wrap synchronous Supabase call in asyncio.to_thread() to prevent blocking event loop
+        resp = await asyncio.to_thread(
+            lambda: self.supabase.table('normalized_entities').select(
+                'id, entity_type, canonical_name, confidence_score, '
+                'platform_sources, first_seen_at, last_seen_at, email, phone, bank_account'
+            ).eq('user_id', user_id).eq('is_deleted', False).gte('last_seen_at', since.isoformat()).execute()
+        )
         
         nodes_added = 0
         for row in resp.data:
@@ -864,10 +931,13 @@ class FinleyGraphEngine:
                 nodes_added += 1
         
         # Fetch new relationships
-        rel_resp = self.supabase.table('relationship_instances').select(
-            'id, source_event_id, target_event_id, relationship_type, '
-            'confidence_score, detection_method, reasoning, created_at'
-        ).eq('user_id', user_id).gte('created_at', since.isoformat()).execute()
+        # FIX #27: Wrap synchronous Supabase call in asyncio.to_thread() to prevent blocking event loop
+        rel_resp = await asyncio.to_thread(
+            lambda: self.supabase.table('relationship_instances').select(
+                'id, source_event_id, target_event_id, relationship_type, '
+                'confidence_score, detection_method, reasoning, created_at'
+            ).eq('user_id', user_id).gte('created_at', since.isoformat()).execute()
+        )
         
         if not rel_resp.data:
             return {'nodes_added': nodes_added, 'edges_added': 0}
@@ -976,6 +1046,8 @@ class FinleyGraphEngine:
         
         FIX #3: Called when file is deleted to invalidate stale graph data.
         Prevents ghost nodes from appearing in graph queries.
+        
+        FIX #26b: Handle case where supabase=None (cache-only mode).
         """
         if not self.redis_url:
             logger.debug("Redis not configured, skipping cache clear")
@@ -983,16 +1055,7 @@ class FinleyGraphEngine:
         
         try:
             if AIOCACHE_AVAILABLE:
-                from urllib.parse import urlparse
-                parsed = urlparse(self.redis_url)
-                
-                cache = Cache(
-                    Cache.REDIS,
-                    endpoint=parsed.hostname,
-                    port=parsed.port or 6379,
-                    namespace="graph",
-                    serializer=PickleSerializer()
-                )
+                cache = self._get_cache()
                 
                 # Delete the cached graph for this user
                 cache_key = f"{user_id}"
