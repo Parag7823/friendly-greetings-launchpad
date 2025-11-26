@@ -141,7 +141,7 @@ aiometer>=0.5.0  # Rate-limited async execution (replaces manual batching + slee
 tiktoken>=0.5.1
 
 # LangChain Conversational Memory (Production-Ready)
-langchain==0.1.17
+langchain==0.2.16
 langchain-openai==0.1.21
 langchain-groq==0.1.5
 
