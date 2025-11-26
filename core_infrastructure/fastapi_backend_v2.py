@@ -702,9 +702,9 @@ centralized_cache = None
 _supabase_loaded = False
 _supabase_lock = threading.Lock()
 
-def _ensure_supabase_loaded():
+def _ensure_supabase_loaded_sync():
     """
-    Lazy-load Supabase client on first use.
+    Synchronous helper to lazy-load Supabase client on first use.
     This allows the application to start even if Supabase is temporarily unavailable,
     and initializes the connection only when actually needed.
     """
@@ -724,6 +724,13 @@ def _ensure_supabase_loaded():
                     supabase = None
     
     return supabase
+
+async def _ensure_supabase_loaded():
+    """
+    Async wrapper for lazy-loading Supabase client.
+    Runs the synchronous loader in a thread pool to avoid blocking the event loop.
+    """
+    return await asyncio.to_thread(_ensure_supabase_loaded_sync)
 
 # CRITICAL FIX: Define SocketIOWebSocketManager class before lifespan function
 # This was previously at line 11665 but needs to be here to avoid forward reference error
@@ -8271,7 +8278,7 @@ async def get_chat_history(user_id: str):
     """Get chat history for user"""
     try:
         # CRITICAL FIX: Lazy-load Supabase client on first use
-        supabase_client = _ensure_supabase_loaded()
+        supabase_client = await _ensure_supabase_loaded()
         if not supabase_client:
             logger.error(f"❌ CRITICAL: Database connection unavailable for get_chat_history - user_id: {user_id}")
             raise HTTPException(
@@ -8466,7 +8473,7 @@ async def chat_endpoint(request: dict):
             )
         
         # CRITICAL FIX: Lazy-load Supabase client on first use
-        supabase_client = _ensure_supabase_loaded()
+        supabase_client = await _ensure_supabase_loaded()
         if not supabase_client:
             raise HTTPException(
                 status_code=503,
@@ -8552,7 +8559,7 @@ async def chat_health_check():
         
         try:
             # CRITICAL FIX: Lazy-load Supabase client on first use
-            supabase_client = _ensure_supabase_loaded()
+            supabase_client = await _ensure_supabase_loaded()
             if not supabase_client:
                 return {
                     "status": "error",
