@@ -11701,8 +11701,6 @@ sio = socketio.AsyncServer(
     ping_timeout=60,
     ping_interval=25
 )
-
-# Wrap Socket.IO with ASGI app
 socketio_app = socketio.ASGIApp(sio, app)
 
 # Socket.IO event handlers (replaces manual endpoint logic)
@@ -11716,7 +11714,7 @@ async def connect(sid, environ):
         
         user_id = params.get('user_id')
         token = params.get('session_token')
-        job_id = environ.get('PATH_INFO', '').split('/')[-1]
+        job_id = params.get('job_id')  # Get job_id from query params, not PATH_INFO
         
         if not user_id or not token:
             logger.warning(f"Socket.IO connection rejected: missing credentials")
@@ -11724,42 +11722,62 @@ async def connect(sid, environ):
         
         # CRITICAL FIX: Verify job exists and belongs to user BEFORE joining room
         # This prevents race condition where user_id is set lazily after connection
-        try:
-            # CRITICAL FIX: Lazy-load Supabase client on first use
-            supabase_client = await _ensure_supabase_loaded()
-            if not supabase_client:
-                logger.error(f"Socket.IO connection rejected: Database service unavailable")
-                return False
-            
-            job_record = supabase_client.table('ingestion_jobs').select('user_id, status').eq('id', job_id).single().execute()
-            if not job_record.data:
-                logger.warning(f"Socket.IO connection rejected: job {job_id} not found")
-                return False
-            
-            # CRITICAL: Check if user_id is already set in database
-            db_user_id = job_record.data.get('user_id')
-            if db_user_id and db_user_id != user_id:
-                logger.warning(f"Socket.IO connection rejected: job {job_id} belongs to different user")
-                return False
-            
-            # If user_id not set yet, verify token is valid before allowing connection
-            if not db_user_id:
-                # Verify session token is valid for this user
-                try:
-                    auth_response = supabase_client.auth.get_user(token)
-                    if not auth_response or auth_response.user.id != user_id:
-                        logger.warning(f"Socket.IO connection rejected: invalid session token for user {user_id}")
-                        return False
-                except Exception as auth_err:
-                    logger.warning(f"Socket.IO connection rejected: token verification failed: {auth_err}")
+        # Only verify if job_id is provided
+        if job_id:
+            try:
+                # CRITICAL FIX: Lazy-load Supabase client on first use
+                supabase_client = await _ensure_supabase_loaded()
+                if not supabase_client:
+                    logger.error(f"Socket.IO connection rejected: Database service unavailable")
                     return False
-        except Exception as e:
-            logger.error(f"Job verification failed: {e}")
-            return False
+                
+                job_record = supabase_client.table('ingestion_jobs').select('user_id, status').eq('id', job_id).single().execute()
+                if not job_record.data:
+                    logger.warning(f"Socket.IO connection rejected: job {job_id} not found")
+                    return False
+                
+                # CRITICAL: Check if user_id is already set in database
+                db_user_id = job_record.data.get('user_id')
+                if db_user_id and db_user_id != user_id:
+                    logger.warning(f"Socket.IO connection rejected: job {job_id} belongs to different user")
+                    return False
+                
+                # If user_id not set yet, verify token is valid before allowing connection
+                if not db_user_id:
+                    # Verify session token is valid for this user
+                    try:
+                        auth_response = supabase_client.auth.get_user(token)
+                        if not auth_response or auth_response.user.id != user_id:
+                            logger.warning(f"Socket.IO connection rejected: invalid session token for user {user_id}")
+                            return False
+                    except Exception as auth_err:
+                        logger.warning(f"Socket.IO connection rejected: token verification failed: {auth_err}")
+                        return False
+            except Exception as e:
+                logger.error(f"Job verification failed: {e}")
+                return False
+            
+            # Join job room for broadcasting
+            sio.enter_room(sid, job_id)
+            logger.info(f"✅ Socket.IO connected: {sid} -> job {job_id}")
+        else:
+            # No job_id provided - just verify token is valid
+            try:
+                supabase_client = await _ensure_supabase_loaded()
+                if supabase_client:
+                    try:
+                        auth_response = supabase_client.auth.get_user(token)
+                        if not auth_response or auth_response.user.id != user_id:
+                            logger.warning(f"Socket.IO connection rejected: invalid session token for user {user_id}")
+                            return False
+                    except Exception as auth_err:
+                        logger.warning(f"Socket.IO connection rejected: token verification failed: {auth_err}")
+                        return False
+            except Exception as e:
+                logger.warning(f"Token verification skipped due to DB unavailability: {e}")
+            
+            logger.info(f"✅ Socket.IO connected: {sid} (user {user_id})")
         
-        # Join job room for broadcasting
-        sio.enter_room(sid, job_id)
-        logger.info(f"✅ Socket.IO connected: {sid} -> job {job_id}")
         return True
         
     except Exception as e:
