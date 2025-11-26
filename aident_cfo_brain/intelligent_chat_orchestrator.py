@@ -110,7 +110,7 @@ class IntelligentChatOrchestrator:
                 self.embedding_service = EmbeddingService(cache_client=cache_client)
                 logger.info("✅ EmbeddingService initialized for chat orchestrator")
             except Exception as e:
-                logger.warning(f"⚠️ Failed to initialize EmbeddingService: {e}")
+                logger.warning("Failed to initialize EmbeddingService", error=str(e))
                 self.embedding_service = None
         else:
             self.embedding_service = embedding_service
@@ -164,16 +164,16 @@ class IntelligentChatOrchestrator:
             result_dict = {}
             for (name, _), result in zip(queries, results):
                 if isinstance(result, Exception):
-                    logger.error(f"Parallel query '{name}' failed: {result}")
+                    logger.error("Parallel query failed", query_name=name, error=str(result))
                     result_dict[name] = None
                 else:
                     result_dict[name] = result
             
-            logger.info(f"✅ Parallel processing: {len(queries)} queries completed")
+            logger.info("Parallel processing completed", query_count=len(queries))
             return result_dict
             
         except Exception as e:
-            logger.error(f"Parallel processing failed: {e}")
+            logger.error("Parallel processing failed", error=str(e))
             return {}
     
     async def process_question(
@@ -196,7 +196,7 @@ class IntelligentChatOrchestrator:
             ChatResponse with answer and structured data
         """
         try:
-            logger.info(f"Processing question: '{question}' for user_id={user_id}, chat_id={chat_id}")
+            logger.info("Processing question", question=question, user_id=user_id, chat_id=chat_id)
             
             # Step 0a: Initialize per-user memory manager (isolated, no cross-user contamination)
             memory_manager = AidentMemoryManager(
@@ -217,7 +217,7 @@ class IntelligentChatOrchestrator:
                 memory_context=memory_context
             )
             
-            logger.info(f"Question classified as: {question_type.value} (confidence: {confidence:.2f})")
+            logger.info("Question classified", question_type=question_type.value, confidence=round(confidence, 2))
             
             # Step 2: Route to appropriate handler (pass conversation history + memory context)
             if question_type == QuestionType.CAUSAL:
@@ -346,7 +346,7 @@ Question: {question}"""
             return question_type, confidence
             
         except Exception as e:
-            logger.error(f"Question classification failed: {e}")
+            logger.error("Question classification failed", error=str(e))
             return QuestionType.UNKNOWN, 0.0
     
     async def _handle_causal_question(
@@ -401,7 +401,7 @@ Question: {question}"""
             )
             
         except Exception as e:
-            logger.error(f"Causal question handling failed: {e}")
+            logger.error("Causal question handling failed", error=str(e))
             return ChatResponse(
                 answer="I encountered an error analyzing the causal relationships. Please try again.",
                 question_type=QuestionType.CAUSAL,
@@ -454,7 +454,7 @@ Question: {question}"""
             )
             
         except Exception as e:
-            logger.error(f"Temporal question handling failed: {e}")
+            logger.error("Temporal question handling failed", error=str(e))
             return ChatResponse(
                 answer="I encountered an error analyzing temporal patterns. Please try again.",
                 question_type=QuestionType.TEMPORAL,
@@ -516,7 +516,7 @@ Question: {question}"""
             )
             
         except Exception as e:
-            logger.error(f"Relationship question handling failed: {e}")
+            logger.error("Relationship question handling failed", error=str(e))
             return ChatResponse(
                 answer="I encountered an error analyzing relationships. Please try again.",
                 question_type=QuestionType.RELATIONSHIP,
@@ -555,7 +555,7 @@ Question: {question}"""
             )
             
         except Exception as e:
-            logger.error(f"What-if question handling failed: {e}")
+            logger.error("What-if question handling failed", error=str(e))
             return ChatResponse(
                 answer="I encountered an error running the what-if analysis. Please try again.",
                 question_type=QuestionType.WHAT_IF,
@@ -616,7 +616,7 @@ Question: {question}"""
             )
             
         except Exception as e:
-            logger.error(f"Explain question handling failed: {e}")
+            logger.error("Explain question handling failed", error=str(e))
             return ChatResponse(
                 answer="I encountered an error retrieving the explanation. Please try again.",
                 question_type=QuestionType.EXPLAIN,
@@ -666,7 +666,7 @@ Question: {question}"""
             )
             
         except Exception as e:
-            logger.error(f"Data query handling failed: {e}")
+            logger.error("Data query handling failed", error=str(e))
             return ChatResponse(
                 answer="I encountered an error querying the data. Please try again.",
                 question_type=QuestionType.DATA_QUERY,
@@ -955,7 +955,7 @@ Remember: You're not just answering questions - you're running their finance dep
             )
             
         except Exception as e:
-            logger.error(f"General question handling failed: {e}")
+            logger.error("General question handling failed", error=str(e))
             return ChatResponse(
                 answer="I encountered an error processing your question. Please try again.",
                 question_type=QuestionType.GENERAL,
@@ -1231,7 +1231,7 @@ Remember: You're not just answering questions - you're running their finance dep
             return memory
             
         except Exception as e:
-            logger.error(f"Failed to load long-term memory: {e}")
+            logger.error("Failed to load long-term memory", error=str(e))
             return {'preferences': {}, 'past_insights': [], 'recurring_questions': [], 'business_context': {}}
     
     async def _save_user_insight(self, user_id: str, insight: str, category: str):
@@ -1246,7 +1246,7 @@ Remember: You're not just answering questions - you're running their finance dep
                 'updated_at': datetime.utcnow().isoformat()
             }, on_conflict='user_id').execute()
         except Exception as e:
-            logger.error(f"Failed to save insight: {e}")
+            logger.error("Failed to save insight", error=str(e))
     
     async def _fetch_user_data_context(self, user_id: str) -> str:
         """Fetch user's actual data to provide intelligent, personalized responses"""
@@ -1327,7 +1327,7 @@ DATA STATUS: {'Rich data available - provide specific, quantified insights!' if 
             return context
             
         except Exception as e:
-            logger.error(f"Failed to fetch user data context: {e}")
+            logger.error("Failed to fetch user data context", error=str(e))
             return "DATA STATUS: Unable to fetch user data context"
     
     async def _load_conversation_history(
@@ -1370,7 +1370,7 @@ DATA STATUS: {'Rich data available - provide specific, quantified insights!' if 
             
             # If conversation is getting long (>50K tokens), summarize old messages
             if estimated_tokens > 50000 and len(history) > 10:
-                logger.info(f"Context window management: {estimated_tokens} tokens, summarizing old messages")
+                logger.info("Context window management: summarizing old messages", estimated_tokens=estimated_tokens)
                 
                 # Keep last 6 messages (3 Q&A pairs) intact
                 recent_messages = history[-6:]
@@ -1387,11 +1387,11 @@ DATA STATUS: {'Rich data available - provide specific, quantified insights!' if 
                     }
                 ] + recent_messages
             
-            logger.info(f"Loaded {len(history)} messages from conversation history ({estimated_tokens} tokens)")
+            logger.info("Loaded conversation history", message_count=len(history), estimated_tokens=estimated_tokens)
             return history
             
         except Exception as e:
-            logger.error(f"Failed to load conversation history: {e}")
+            logger.error("Failed to load conversation history", error=str(e))
             return []
     
     def _summarize_conversation(self, messages: list[Dict[str, str]]) -> str:
@@ -1714,4 +1714,4 @@ DATA STATUS: {'Rich data available - provide specific, quantified insights!' if 
                 'created_at': datetime.utcnow().isoformat()
             }).execute()
         except Exception as e:
-            logger.error(f"Failed to store chat message: {e}")
+            logger.error("Failed to store chat message", error=str(e))

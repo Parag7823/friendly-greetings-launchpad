@@ -419,6 +419,162 @@ async def detect_relationships(ctx, user_id: str, file_id: str = None) -> Dict[s
             return {"status": "failed", "user_id": user_id, "error": str(e), "retries_exhausted": True}
 
 
+async def build_graph_background(ctx, user_id: str) -> Dict[str, Any]:
+    """
+    PHASE 3: Build and cache knowledge graph after relationships detected.
+    
+    This is a critical background job that:
+    1. Fetches nodes from normalized_entities
+    2. Fetches edges from view_enriched_relationships (with all 9 intelligence layers)
+    3. Builds igraph with full relationship intelligence
+    4. Caches in Redis for instant graph queries
+    
+    FIX #12: Proactive graph building (not lazy on-demand)
+    - Eliminates cold-start delay on first user question
+    - Pre-warms Redis cache for instant queries
+    - Enables Phase 4 (CFO brain initialization)
+    
+    Args:
+        ctx: ARQ context
+        user_id: User ID to build graph for
+    
+    Returns:
+        Dict with status and graph statistics
+    """
+    try:
+        from finley_graph_engine import FinleyGraphEngine
+        
+        logger.info(f"🧠 PHASE 3: Starting graph building for user {user_id}")
+        
+        # Initialize graph engine with Redis caching
+        redis_url = os.getenv('ARQ_REDIS_URL') or os.getenv('REDIS_URL')
+        graph_engine = FinleyGraphEngine(supabase=supabase, redis_url=redis_url)
+        
+        # Build graph from database (force rebuild to ensure fresh data)
+        stats = await graph_engine.build_graph(user_id, force_rebuild=True)
+        
+        logger.info(
+            f"✅ PHASE 3 COMPLETE: Graph built successfully",
+            user_id=user_id,
+            node_count=stats.node_count,
+            edge_count=stats.edge_count,
+            density=round(stats.density, 3),
+            build_time_seconds=round(stats.build_time_seconds, 2)
+        )
+        
+        return {
+            "status": "success",
+            "user_id": user_id,
+            "phase": 3,
+            "node_count": stats.node_count,
+            "edge_count": stats.edge_count,
+            "density": stats.density,
+            "build_time_seconds": stats.build_time_seconds,
+            "message": f"Knowledge graph built: {stats.node_count} nodes, {stats.edge_count} edges"
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ PHASE 3 FAILED: Graph building failed for user {user_id}: {e}", exc_info=True)
+        # Use ARQ's native Retry with exponential backoff
+        retry_count = getattr(ctx, 'retry_count', 0) if ctx else 0
+        if retry_count < 3:
+            delay = 60 * (2 ** retry_count)  # 60s, 120s, 240s
+            logger.info(f"Retrying graph building in {delay}s (attempt {retry_count + 1}/3)")
+            raise Retry(defer=delay)
+        else:
+            logger.error(f"❌ Graph building failed after 3 retries for user {user_id}")
+            return {"status": "failed", "user_id": user_id, "phase": 3, "error": str(e), "retries_exhausted": True}
+
+
+async def initialize_cfo_brain(ctx, user_id: str) -> Dict[str, Any]:
+    """
+    PHASE 4: Initialize all CFO brain engines after graph is ready.
+    
+    This is the final background job that:
+    1. Initializes CausalInferenceEngine
+    2. Initializes TemporalPatternLearner
+    3. Initializes AidentMemoryManager
+    4. Pre-warms all caches for instant responses
+    
+    FIX #13: Proactive CFO brain initialization (not lazy on-demand)
+    - Eliminates cold-start delay on first user question
+    - Pre-computes causal relationships
+    - Pre-learns temporal patterns
+    - Initializes conversation memory
+    
+    Args:
+        ctx: ARQ context
+        user_id: User ID to initialize brain for
+    
+    Returns:
+        Dict with status and initialization results
+    """
+    try:
+        from causal_inference_engine import CausalInferenceEngine
+        from temporal_pattern_learner import TemporalPatternLearner
+        from aident_memory_manager import AidentMemoryManager
+        
+        logger.info(f"🤖 PHASE 4: Starting CFO brain initialization for user {user_id}")
+        
+        redis_url = os.getenv('ARQ_REDIS_URL') or os.getenv('REDIS_URL')
+        
+        # Initialize all engines
+        causal_engine = CausalInferenceEngine(supabase_client=supabase)
+        temporal_learner = TemporalPatternLearner(supabase_client=supabase)
+        memory_manager = AidentMemoryManager(user_id=user_id, redis_url=redis_url)
+        
+        logger.info(f"Engines initialized, pre-warming caches for user {user_id}")
+        
+        # Pre-warm caches by running analysis
+        try:
+            causal_results = await causal_engine.analyze_all_relationships(user_id)
+            logger.info(f"✅ Causal analysis pre-warmed: {causal_results.get('total_causal', 0)} relationships")
+        except Exception as e:
+            logger.warning(f"⚠️ Causal analysis pre-warm failed (non-critical): {e}")
+            causal_results = {"total_causal": 0, "error": str(e)}
+        
+        try:
+            temporal_results = await temporal_learner.learn_all_patterns(user_id)
+            logger.info(f"✅ Temporal patterns pre-warmed: {temporal_results.get('total_patterns', 0)} patterns")
+        except Exception as e:
+            logger.warning(f"⚠️ Temporal learning pre-warm failed (non-critical): {e}")
+            temporal_results = {"total_patterns": 0, "error": str(e)}
+        
+        try:
+            await memory_manager.load_memory()
+            logger.info(f"✅ Memory manager initialized for user {user_id}")
+        except Exception as e:
+            logger.warning(f"⚠️ Memory manager initialization failed (non-critical): {e}")
+        
+        logger.info(
+            f"✅ PHASE 4 COMPLETE: CFO brain fully initialized",
+            user_id=user_id,
+            causal_relationships=causal_results.get('total_causal', 0),
+            temporal_patterns=temporal_results.get('total_patterns', 0)
+        )
+        
+        return {
+            "status": "success",
+            "user_id": user_id,
+            "phase": 4,
+            "causal_relationships": causal_results.get('total_causal', 0),
+            "temporal_patterns": temporal_results.get('total_patterns', 0),
+            "message": "CFO brain fully initialized and ready for questions"
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ PHASE 4 FAILED: CFO brain initialization failed for user {user_id}: {e}", exc_info=True)
+        # Use ARQ's native Retry with exponential backoff
+        retry_count = getattr(ctx, 'retry_count', 0) if ctx else 0
+        if retry_count < 3:
+            delay = 60 * (2 ** retry_count)  # 60s, 120s, 240s
+            logger.info(f"Retrying CFO brain initialization in {delay}s (attempt {retry_count + 1}/3)")
+            raise Retry(defer=delay)
+        else:
+            logger.error(f"❌ CFO brain initialization failed after 3 retries for user {user_id}")
+            return {"status": "failed", "user_id": user_id, "phase": 4, "error": str(e), "retries_exhausted": True}
+
+
 async def generate_prophet_forecasts(ctx) -> None:
     """
     Nightly job: Generate Prophet forecasts for all users.

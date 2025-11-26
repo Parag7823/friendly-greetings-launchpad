@@ -8333,10 +8333,7 @@ async def rename_chat(request: dict):
         
         # For now, just return success since we're grouping by date
         # In a full implementation, you'd update a chat_sessions table
-        structured_logger.info("Chat rename requested", {
-            "chat_id": chat_id,
-            "new_title": new_title
-        })
+        structured_logger.info("Chat rename requested", chat_id=chat_id, new_title=new_title)
         
         return {
             "status": "success",
@@ -8365,10 +8362,7 @@ async def delete_chat(request: dict):
                 # Delete messages from that date
                 supabase.table('chat_messages').delete().eq('user_id', user_id).like('created_at', f'{date_key}%').execute()
         
-        structured_logger.info("Chat deleted", {
-            "chat_id": chat_id,
-            "user_id": user_id
-        })
+        structured_logger.info("Chat deleted", chat_id=chat_id, user_id=user_id)
         
         return {
             "status": "success",
@@ -8394,10 +8388,7 @@ async def generate_chat_title(request: dict):
         if not message or not user_id:
             raise HTTPException(status_code=400, detail="Missing message or user_id")
         
-        structured_logger.info("Generate chat title request", {
-            "user_id": user_id,
-            "message_length": len(message)
-        })
+        structured_logger.info("Generate chat title request", user_id=user_id, message_length=len(message))
         
         # Use Groq for simple title generation (cost-effective)
         # FIX #32: Use unified Groq client initialization helper
@@ -8418,11 +8409,7 @@ async def generate_chat_title(request: dict):
         # Generate chat_id
         chat_id = f"chat_{datetime.utcnow().strftime('%Y%m%d%H%M%S')}_{user_id[:8]}"
         
-        structured_logger.info("Chat title generated", {
-            "user_id": user_id,
-            "chat_id": chat_id,
-            "title": title
-        })
+        structured_logger.info("Chat title generated", user_id=user_id, chat_id=chat_id, title=title)
         
         return {
             "chat_id": chat_id,
@@ -8456,11 +8443,7 @@ async def chat_endpoint(request: dict):
         if not message or not user_id:
             raise HTTPException(status_code=400, detail="Missing message or user_id")
         
-        structured_logger.info("Chat request received", {
-            "user_id": user_id,
-            "chat_id": chat_id,
-            "message_length": len(message)
-        })
+        structured_logger.info("Chat request received", user_id=user_id, chat_id=chat_id, message_length=len(message))
         
         # Initialize intelligent chat orchestrator
         from intelligent_chat_orchestrator import IntelligentChatOrchestrator
@@ -8495,11 +8478,7 @@ async def chat_endpoint(request: dict):
             chat_id=chat_id
         )
         
-        structured_logger.info("Chat response generated", {
-            "user_id": user_id,
-            "question_type": response.question_type.value,
-            "confidence": response.confidence
-        })
+        structured_logger.info("Chat response generated", user_id=user_id, question_type=response.question_type.value, confidence=response.confidence)
         
         # Return response in format expected by frontend
         return {
@@ -8991,13 +8970,7 @@ async def process_excel_endpoint(
         await _stream_file_to_disk()
         
         # Log request with observability
-
-
-        # Log request with observability
-        structured_logger.info("File processing request received", {
-            "user_id": user_id,
-            "filename": filename
-        })
+        structured_logger.info("File processing request received", user_id=user_id, filename=filename)
 
         # Pre-create job status so polling has data even before WS connects
         await websocket_manager.merge_job_state(job_id, {
