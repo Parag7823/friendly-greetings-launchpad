@@ -45,8 +45,8 @@ export const ChatInputMicroInteractions: React.FC<ChatInputMicroInteractionsProp
     <div className="w-full">
       {/* Thinking Indicator */}
       {isLoading && (
-        <div className="mb-3 flex items-center gap-2 px-4 py-2 bg-slate-800/50 rounded-lg border border-slate-700/50">
-          <span className="text-xs text-slate-400 font-medium">Finley is thinking</span>
+        <div className="mb-4 flex items-center gap-2 px-4 py-3 bg-slate-800/50 rounded-lg border border-slate-700/50">
+          <span className="text-sm font-medium text-slate-400">Finley is thinking</span>
           <div className="flex items-center gap-1">
             <div className="w-1.5 h-1.5 bg-primary rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
             <div className="w-1.5 h-1.5 bg-primary rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
@@ -79,7 +79,7 @@ export const ChatInputMicroInteractions: React.FC<ChatInputMicroInteractionsProp
         />
 
         {/* Input Area */}
-        <div className="relative flex items-end gap-3 p-3">
+        <div className="relative flex items-end gap-4 p-4">
           {/* File Upload Button */}
           <button
             onClick={onFileClick}
@@ -101,10 +101,10 @@ export const ChatInputMicroInteractions: React.FC<ChatInputMicroInteractionsProp
             disabled={isLoading}
             rows={1}
             className={`
-              flex-1 bg-transparent text-foreground placeholder-muted-foreground
+              flex-1 bg-transparent text-foreground placeholder:text-slate-600 placeholder:font-normal
               outline-none resize-none max-h-32
               disabled:opacity-50 disabled:cursor-not-allowed
-              text-sm
+              text-sm font-normal
             `}
           />
 
@@ -127,15 +127,15 @@ export const ChatInputMicroInteractions: React.FC<ChatInputMicroInteractionsProp
 
         {/* Character Count (Optional) */}
         {value.length > 0 && (
-          <div className="px-3 pb-2 text-xs text-slate-500 font-medium">
+          <div className="px-4 pb-3 text-xs text-slate-500 font-medium">
             {value.length} characters
           </div>
         )}
       </div>
 
       {/* Helper Text */}
-      <p className="mt-2 text-xs text-slate-500 text-center">
-        Press <kbd className="px-1.5 py-0.5 bg-slate-800 border border-slate-700 rounded text-xs font-mono">Enter</kbd> to send, <kbd className="px-1.5 py-0.5 bg-slate-800 border border-slate-700 rounded text-xs font-mono">Shift+Enter</kbd> for new line
+      <p className="mt-3 text-xs font-medium text-slate-600 text-center">
+        Press <kbd className="px-2 py-1 bg-slate-800 border border-slate-700 rounded text-xs font-mono">Enter</kbd> to send, <kbd className="px-2 py-1 bg-slate-800 border border-slate-700 rounded text-xs font-mono">Shift+Enter</kbd> for new line
       </p>
     </div>
   );

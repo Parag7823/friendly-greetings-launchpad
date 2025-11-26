@@ -349,7 +349,34 @@
   }
 
   .text-timestamp {
-    @apply text-xs text-slate-500;
+    @apply text-xs font-medium text-slate-500;
+  }
+
+  /* FIX #1: Chat message typography hierarchy */
+  .chat-message-user {
+    @apply text-sm font-normal text-foreground;
+  }
+
+  .chat-message-ai {
+    @apply text-sm font-normal text-white;
+  }
+
+  .chat-message-timestamp {
+    @apply text-xs font-medium text-slate-500 mt-2;
+  }
+
+  /* FIX #2: Input placeholder contrast */
+  .input-placeholder {
+    @apply placeholder:text-slate-600 placeholder:font-normal;
+  }
+
+  /* FIX #3: Section headers */
+  .section-header {
+    @apply text-sm font-semibold text-foreground;
+  }
+
+  .section-subheader {
+    @apply text-xs font-medium text-slate-500;
   }
 
   /* Data Visualization Utilities */

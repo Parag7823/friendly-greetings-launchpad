@@ -594,19 +594,19 @@ export const DataSourcesPanel = ({ isOpen, onClose, onFilePreview }: DataSources
   return (
     <div className="h-full w-full finley-dynamic-bg flex flex-col">
       {/* Header - NO X button */}
-      <div className="flex items-center gap-2 p-3 border-b border-border">
+      <div className="flex items-center gap-2 px-4 py-3 border-b border-border">
         <Plug className="w-4 h-4 text-primary" />
-        <h2 className="text-xs font-semibold">Data Sources</h2>
+        <h2 className="text-sm font-semibold">Data Sources</h2>
       </div>
 
       <div className="flex-1 overflow-y-auto">
-        <div className="p-4 space-y-6">
+        <div className="p-4 space-y-8">
           {/* Financial Documents Section - Shows all files with their current state */}
           <div>
-            <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center justify-between mb-4">
               <div className="flex items-center gap-2">
                 <FileSpreadsheet className="w-4 h-4 text-muted-foreground" />
-                <h2 className="text-sm font-semibold">Financial Documents</h2>
+                <h2 className="section-header">Financial Documents</h2>
                 {uploadedFiles.length > 0 && (
                   <Badge variant="secondary" className="text-[9px]">
                     {uploadedFiles.length}
@@ -703,9 +703,9 @@ export const DataSourcesPanel = ({ isOpen, onClose, onFilePreview }: DataSources
 
           {/* Integrations Section */}
           <div>
-            <div className="flex items-center gap-2 mb-3">
+            <div className="flex items-center gap-2 mb-4">
               <Plug className="w-4 h-4 text-muted-foreground" />
-              <h3 className="text-sm font-medium">Integrations</h3>
+              <h3 className="section-header">Integrations</h3>
             </div>
 
             {loading ? (
@@ -713,7 +713,7 @@ export const DataSourcesPanel = ({ isOpen, onClose, onFilePreview }: DataSources
                 <BrandedLoader text="Loading integrations..." size="md" variant="spinner" />
               </div>
             ) : (
-              <div className="space-y-4">
+              <div className="space-y-3">
                 {Object.entries(integrationsByCategory).map(([category, integrations]) => {
                   const categoryInfo = CATEGORY_INFO[category as keyof typeof CATEGORY_INFO];
                   const isExpanded = expandedCategories.has(category);
@@ -723,11 +723,11 @@ export const DataSourcesPanel = ({ isOpen, onClose, onFilePreview }: DataSources
                       {/* Category Header */}
                       <button
                         onClick={() => toggleCategory(category)}
-                        className="w-full flex items-center justify-between p-3 bg-muted/30 hover:bg-muted/50 transition-colors"
+                        className="w-full flex items-center justify-between px-4 py-3 bg-muted/30 hover:bg-muted/50 transition-colors"
                       >
                         <div className="flex items-center gap-2">
                           {categoryInfo.icon}
-                          <span className="text-xs font-medium">{categoryInfo.name}</span>
+                          <span className="text-sm font-medium">{categoryInfo.name}</span>
                           <Badge variant="outline" className="text-[8px]">
                             {integrations.length}
                           </Badge>
@@ -741,7 +741,7 @@ export const DataSourcesPanel = ({ isOpen, onClose, onFilePreview }: DataSources
 
                       {/* Category Content */}
                       {isExpanded && (
-                        <div className="p-3 space-y-2 bg-background">
+                        <div className="p-4 space-y-3 bg-background">
                           {integrations.map((integration) => {
                             const connection = getConnection(integration.provider);
                             const connected = !!connection;
@@ -749,7 +749,7 @@ export const DataSourcesPanel = ({ isOpen, onClose, onFilePreview }: DataSources
                             return (
                               <div
                                 key={integration.id}
-                                className={`flex items-center justify-between p-3 border rounded-md transition-all ${connected
+                                className={`flex items-center justify-between px-4 py-3 border rounded-md transition-all ${connected
                                     ? 'border-2 border-emerald-500/60 bg-gradient-to-r from-emerald-500/10 via-green-500/5 to-emerald-500/10 shadow-md shadow-emerald-500/20 hover:shadow-emerald-500/30'
                                     : 'finley-dynamic-bg hover:bg-muted/20'
                                   }`}

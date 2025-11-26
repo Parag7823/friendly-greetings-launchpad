@@ -897,7 +897,8 @@ async def app_lifespan(app: FastAPI):
         logger.info(f"🔍 Environment diagnostics:")
         logger.info(f"   SUPABASE_URL present: {'✅' if supabase_url else '❌'}")
         logger.info(f"   SUPABASE_SERVICE_ROLE_KEY present: {'✅' if supabase_key else '❌'}")
-        logger.info(f"   Available env vars: {sorted([k for k in os.environ.keys() if 'SUPABASE' in k.upper()])}")
+        supabase_env_vars = sorted([k for k in os.environ.keys() if 'SUPABASE' in k.upper()])
+        logger.info(f"   Available env vars: {supabase_env_vars}")
         
         if supabase_key:
             supabase_key = clean_jwt_token(supabase_key)
@@ -6929,7 +6930,8 @@ async def _fast_classify_row_cached(self, row, platform_info: dict, column_names
                         'source_files': [filename]
                     })
             
-            logger.info(f"Discovered {len(discovered)} new platforms: {[d['platform_name'] for d in discovered]}")
+            platform_names = [d['platform_name'] for d in discovered]
+            logger.info(f"Discovered {len(discovered)} new platforms: {platform_names}")
             return discovered
             
         except Exception as e:
@@ -11723,7 +11725,13 @@ async def connect(sid, environ):
         # CRITICAL FIX: Verify job exists and belongs to user BEFORE joining room
         # This prevents race condition where user_id is set lazily after connection
         try:
-            job_record = supabase.table('ingestion_jobs').select('user_id, status').eq('id', job_id).single().execute()
+            # CRITICAL FIX: Lazy-load Supabase client on first use
+            supabase_client = await _ensure_supabase_loaded()
+            if not supabase_client:
+                logger.error(f"Socket.IO connection rejected: Database service unavailable")
+                return False
+            
+            job_record = supabase_client.table('ingestion_jobs').select('user_id, status').eq('id', job_id).single().execute()
             if not job_record.data:
                 logger.warning(f"Socket.IO connection rejected: job {job_id} not found")
                 return False
@@ -11738,7 +11746,7 @@ async def connect(sid, environ):
             if not db_user_id:
                 # Verify session token is valid for this user
                 try:
-                    auth_response = supabase.auth.get_user(token)
+                    auth_response = supabase_client.auth.get_user(token)
                     if not auth_response or auth_response.user.id != user_id:
                         logger.warning(f"Socket.IO connection rejected: invalid session token for user {user_id}")
                         return False
