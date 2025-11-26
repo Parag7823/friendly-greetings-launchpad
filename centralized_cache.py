@@ -19,7 +19,7 @@ Usage:
 import os
 import structlog
 import asyncio
-from typing import Optional, Any
+from typing import Optional, Any, Dict
 from aiocache import Cache
 from aiocache.serializers import PickleSerializer
 
