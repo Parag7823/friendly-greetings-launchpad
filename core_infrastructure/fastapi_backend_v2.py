@@ -732,6 +732,17 @@ async def _ensure_supabase_loaded():
     """
     return await asyncio.to_thread(_ensure_supabase_loaded_sync)
 
+# CRITICAL FIX: Initialize Supabase client eagerly at module load time
+# This ensures background jobs and helper functions have access to the client
+try:
+    _ensure_supabase_loaded_sync()
+    if supabase:
+        logger.info("✅ Supabase client initialized at module load time")
+    else:
+        logger.warning("⚠️ Supabase client initialization returned None")
+except Exception as e:
+    logger.warning(f"⚠️ Failed to initialize Supabase at module load: {e}")
+
 # CRITICAL FIX: Define SocketIOWebSocketManager class before lifespan function
 # This was previously at line 11665 but needs to be here to avoid forward reference error
 class SocketIOWebSocketManager:
