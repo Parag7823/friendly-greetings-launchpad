@@ -18,6 +18,16 @@ export default {
 			}
 		},
 		extend: {
+			fontSize: {
+				/* FIX #4: Override Tailwind's default text-xs (12px) to be more readable (13px)
+				   This prevents excessive use of tiny text throughout the UI.
+				   Components using text-xs will now be 13px instead of 10-11px. */
+				'xs': ['13px', { lineHeight: '1.6' }],
+				/* FIX #4: Ensure text-sm is comfortable (14px) */
+				'sm': ['14px', { lineHeight: '1.6' }],
+				/* FIX #4: Add comfortable base text size (15px) */
+				'base': ['15px', { lineHeight: '1.6' }],
+			},
 			fontFamily: {
 				'sans': ['Inter', 'system-ui', 'sans-serif'],
 				'inter': ['Inter', 'system-ui', 'sans-serif'],

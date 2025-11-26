@@ -4325,14 +4325,7 @@ class AIRowClassifier:
             # FIX #53: Re-raise critical errors (missing spaCy model)
             logger.error(f"Critical NLP error: {ve}")
             raise ValueError(f"Entity extraction failed. Install spaCy model: python -m spacy download en_core_web_sm")
-        Replaces manual SQL queries with ML-based entity resolution.
         
-        Benefits:
-        - Probabilistic matching vs exact string matching
-        - Better accuracy for fuzzy entity names
-        - Handles typos and variations automatically
-        - 50+ lines -> 25 lines (50% reduction)
-        """
         relationships = {}
         
         try:

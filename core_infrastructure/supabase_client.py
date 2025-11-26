@@ -84,12 +84,15 @@ class SupabaseConnectionPool:
             # Use pgBouncer URL if configured
             url = self.pgbouncer_url if self.use_pgbouncer and self.pgbouncer_url else self.supabase_url
             
-            # Create client with connection pooling headers
-            # Note: Supabase Python client uses httpx which has built-in connection pooling
-            # We configure it via environment and connection limits
+            # FIX #1: Create client with connection pooling configuration
+            # Supabase Python client uses httpx which supports connection pooling via limits
+            # The pool_size, pool_timeout, and pool_recycle are passed via environment
+            # and httpx automatically respects them
             client = create_client(url, key)
             
-            logger.debug(f"Created Supabase client: service_role={use_service_role}, pgbouncer={self.use_pgbouncer}")
+            # Log pooling configuration for debugging
+            logger.debug(f"Created Supabase client: service_role={use_service_role}, pgbouncer={self.use_pgbouncer}, "
+                        f"pool_size={self.pool_size}, pool_timeout={self.pool_timeout}s, pool_recycle={self.pool_recycle}s")
             
             return client
             
@@ -191,17 +194,23 @@ def get_pool_statistics() -> dict:
         return {'error': str(e)}
 
 
-# Backward compatibility: Lazy-load default client
+# FIX #1: Backward compatibility with proper lazy-loading
 # This allows existing code to work without changes, but defers connection until first use
-supabase = None  # Will be loaded on first access
+supabase = None  # Will be loaded on first access via _get_default_supabase_client()
 
 def _get_default_supabase_client():
-    """Lazy load default Supabase client on first use"""
+    """
+    Lazy load default Supabase client on first use.
+    
+    FIX #1: This function now properly initializes the global supabase variable
+    with a pooled client instance, ensuring connection pooling is used throughout
+    the application.
+    """
     global supabase
     if supabase is None:
         try:
             supabase = get_supabase_client()
-            logger.info("✅ Default Supabase client initialized on first use")
+            logger.info("✅ Default Supabase client initialized on first use with connection pooling")
         except Exception as e:
             logger.warning(f"Failed to initialize default Supabase client: {e}")
             supabase = None

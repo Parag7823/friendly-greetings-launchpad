@@ -9,7 +9,10 @@
   --ag-row-hover-color: #1a1a1a;
   --ag-border-color: #222;
   --ag-font-family: 'Inter', sans-serif;
-  --ag-font-size: 12px;
+  /* FIX #4: Increase font size from 12px to 14px for comfortable reading */
+  --ag-font-size: 14px;
+  /* FIX #4: Add line-height for better text spacing in grid cells */
+  --ag-line-height: 1.6;
 }
 
 .ag-header-cell-label {

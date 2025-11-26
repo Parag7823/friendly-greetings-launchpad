@@ -132,6 +132,10 @@
     font-feature-settings: "cv11", "ss01";
     font-variation-settings: "opsz" 32;
     background: linear-gradient(135deg, #020617 0%, #0a1628 100%);
+    /* FIX #3: Add comfortable line-height for readability (1.6x instead of browser default 1.2-1.3) */
+    line-height: 1.6;
+    /* FIX #3: Add letter-spacing for breathing room between characters */
+    letter-spacing: 0.01em;
   }
 
   /* Enforce tabular numbers for grids and tables - ensures columns align perfectly */
