@@ -698,6 +698,31 @@ supabase = None
 optimized_db = None
 security_validator = None
 centralized_cache = None
+_supabase_loaded = False
+_supabase_lock = threading.Lock()
+
+def _ensure_supabase_loaded():
+    """
+    Lazy-load Supabase client on first use.
+    This allows the application to start even if Supabase is temporarily unavailable,
+    and initializes the connection only when actually needed.
+    """
+    global supabase, _supabase_loaded
+    
+    if not _supabase_loaded:
+        with _supabase_lock:
+            if not _supabase_loaded:
+                try:
+                    from supabase_client import get_supabase_client
+                    supabase = get_supabase_client()
+                    _supabase_loaded = True
+                    logger.info("✅ Supabase client lazy-loaded on first use")
+                except Exception as e:
+                    logger.warning(f"⚠️ Failed to lazy-load Supabase client: {e}")
+                    _supabase_loaded = True  # Mark as attempted to avoid repeated retries
+                    supabase = None
+    
+    return supabase
 
 # CRITICAL FIX: Define SocketIOWebSocketManager class before lifespan function
 # This was previously at line 11665 but needs to be here to avoid forward reference error
@@ -877,21 +902,11 @@ async def app_lifespan(app: FastAPI):
                 missing_vars.append("SUPABASE_SERVICE_KEY (or SUPABASE_SERVICE_ROLE_KEY)")
             raise ValueError(f"Missing required environment variables: {', '.join(missing_vars)}. Please check your deployment configuration.")
         
-        # CRITICAL FIX: Use pooled Supabase client to prevent connection exhaustion
-        # Get the client but don't force connection yet
-        try:
-            # Wrap in asyncio.to_thread to prevent blocking the async startup
-            supabase = await asyncio.wait_for(
-                asyncio.to_thread(get_supabase_client),
-                timeout=10.0  # 10 second timeout
-            )
-            logger.info("✅ Supabase pooled client initialized")
-        except asyncio.TimeoutError:
-            logger.error("❌ Supabase client initialization timed out after 10 seconds")
-            supabase = None
-        except Exception as db_err:
-            logger.warning(f"⚠️ Failed to initialize Supabase client during startup: {db_err}")
-            supabase = None
+        # CRITICAL FIX: Defer Supabase client initialization to first use
+        # Don't block startup on database connection - it will be initialized on first API request
+        # This prevents startup timeouts and allows graceful degradation if DB is temporarily unavailable
+        supabase = None
+        logger.info("✅ Supabase client will be lazy-loaded on first use (non-blocking startup)")
         
         # Initialize critical systems (only if Supabase is available)
         if supabase:
