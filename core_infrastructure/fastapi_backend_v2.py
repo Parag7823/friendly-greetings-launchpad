@@ -11236,7 +11236,7 @@ async def list_user_connections(req: UserConnectionsRequest):
     await _validate_security('connectors-user-connections', req.user_id, req.session_token)
     try:
         # CRITICAL FIX: Lazy-load Supabase client on first use
-        supabase_client = _ensure_supabase_loaded()
+        supabase_client = await _ensure_supabase_loaded()
         if not supabase_client:
             raise HTTPException(
                 status_code=503,
