@@ -249,12 +249,12 @@ class IntelligentChatOrchestrator:
             
             # Step 5: Log memory stats for monitoring
             memory_stats = await memory_manager.get_memory_stats()
-            logger.info(f"✅ Question processed successfully: {question_type.value}", memory_stats=memory_stats)
+            logger.info("Question processed successfully", question_type=question_type.value, memory_stats=memory_stats)
             
             return response
             
         except Exception as e:
-            logger.error(f"Error processing question: {e}", exc_info=True)
+            logger.error("Error processing question", error=str(e), exc_info=True)
             return ChatResponse(
                 answer=f"I encountered an error processing your question. Please try rephrasing it or contact support if the issue persists.",
                 question_type=QuestionType.UNKNOWN,
