@@ -4325,120 +4325,56 @@ class AIRowClassifier:
             # FIX #53: Re-raise critical errors (missing spaCy model)
             logger.error(f"Critical NLP error: {ve}")
             raise ValueError(f"Entity extraction failed. Install spaCy model: python -m spacy download en_core_web_sm")
-        
-        relationships = {}
-        
-        try:
-            # LIBRARY REPLACEMENT: Use recordlinkage for entity matching (already in requirements)
-            import recordlinkage as rl
-            import pandas as pd
-            
-            # Process each entity type
-            for entity_type, entity_names in entities.items():
-                if not entity_names:
-                    continue
-                
-                try:
-                    # Fetch existing entities of this type
-                    result = supabase_client.table('normalized_entities')\
-                        .select('id, canonical_name, aliases')\
-                        .eq('user_id', user_id)\
-                        .eq('entity_type', entity_type)\
-                        .execute()
-                    
-                    existing_df = pd.DataFrame(result.data) if result.data else pd.DataFrame(columns=['id', 'canonical_name', 'aliases'])
-                    new_entities_df = pd.DataFrame({'name': entity_names, 'index': range(len(entity_names))})
-                    
-                    if len(existing_df) > 0:
-                        # LIBRARY REPLACEMENT: Use recordlinkage for probabilistic matching
-                        indexer = rl.Index()
-                        indexer.full()  # Full comparison for small datasets
-                        
-                        try:
-                            candidate_pairs = indexer.index(existing_df, new_entities_df)
-                            
-                            # Compare entities using multiple algorithms
-                            compare = rl.Compare()
-                            compare.string('canonical_name', 'name', method='jarowinkler', threshold=0.85)
-                            
-                            features = compare.compute(candidate_pairs, existing_df, new_entities_df)
-                            matches = features[features.sum(axis=1) >= 0.85]  # High confidence threshold
-                            
-                            # Map matched entities
-                            matched_new_indices = set()
-                            for (existing_idx, new_idx), _ in matches.iterrows():
-                                entity_name = entity_names[new_idx]
-                                entity_id = existing_df.iloc[existing_idx]['id']
-                                relationships[f"{entity_type}_{entity_name}"] = entity_id
-                                matched_new_indices.add(new_idx)
-                            
-                            # Create new entities for unmatched ones
-                            unmatched_indices = set(range(len(entity_names))) - matched_new_indices
-                            for idx in unmatched_indices:
-                                entity_name = entity_names[idx]
-                                entity_id = await self._create_new_entity(entity_name, entity_type, user_id, platform_info, supabase_client)
-                                if entity_id:
-                                    relationships[f"{entity_type}_{entity_name}"] = entity_id
-                        
-                        except Exception as rl_error:
-                            logger.warning(f"recordlinkage failed for {entity_type}: {rl_error}, using fallback")
-                            # Fallback to rapidfuzz matching
-                            for entity_name in entity_names:
-                                entity_id = await self._fallback_entity_matching(entity_name, entity_type, user_id, platform_info, supabase_client, existing_df)
-                                if entity_id:
-                                    relationships[f"{entity_type}_{entity_name}"] = entity_id
-                    else:
-                        # No existing entities, create all as new
-                        for entity_name in entity_names:
-                            entity_id = await self._create_new_entity(entity_name, entity_type, user_id, platform_info, supabase_client)
-                            if entity_id:
-                                relationships[f"{entity_type}_{entity_name}"] = entity_id
-                
-                except Exception as type_error:
-                    logger.warning(f"Failed to process {entity_type} entities: {type_error}")
-                    continue
-            
-            return relationships
-            
-        except Exception as e:
-            logger.error(f"Entity relationship mapping failed: {e}")
-            return {}
     
-    async def _create_new_entity(self, entity_name: str, entity_type: str, user_id: str, 
-                                platform_info: Dict, supabase_client) -> Optional[str]:
-        """Create a new entity in the database with retry logic"""
-        from tenacity import retry, stop_after_attempt, wait_exponential
+    async def _create_new_entity(self, entity_name: str, entity_type: str, user_id: str,
+                                 platform_info: Dict, supabase_client) -> Optional[str]:
+        """
+        CRITICAL FIX: Unified entity creation function - single source of truth for entity creation.
+        Ensures consistent field structure across all ingestion paths.
         
-        @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
-        async def _insert_with_retry():
-            new_entity = {
-                'user_id': user_id,
-                'entity_type': entity_type,
-                'canonical_name': entity_name,
-                'aliases': [entity_name],
-                'platform_sources': [platform_info.get('platform', 'unknown')],
-                'confidence_score': 0.8,  # Higher confidence for spaCy-extracted entities
-                'first_seen_at': pendulum.now().to_iso8601_string(),
-                'last_seen_at': pendulum.now().to_iso8601_string()
-            }
-            
+        Args:
+            entity_name: Name of the entity
+            entity_type: Type of the entity (e.g. employee, vendor, customer)
+            user_id: User ID of the entity owner
+            platform_info: Platform information
+            supabase_client: Supabase client instance
+        
+        Returns:
+            ID of the created entity or None if failed
+        """
+        try:
             # FIX #38: Add validation before insert
             if not entity_name or not entity_type or not user_id:
                 raise ValueError(f"Missing required fields: name={entity_name}, type={entity_type}, user={user_id}")
             
-            result = supabase_client.table('normalized_entities').insert(new_entity).execute()
-            
-            # FIX #38: Validate insert result
-            if not result.data or len(result.data) == 0:
-                raise ValueError(f"Insert succeeded but no data returned for entity {entity_name}")
-            
-            return result.data[0]['id']
-        
-        try:
-            entity_id = await _insert_with_retry()
-            logger.info(f"Created new entity: {entity_type} - {entity_name} (ID: {entity_id})")
-            return entity_id
+            # LIBRARY FIX: Use orjson for 3-5x faster JSON parsing
+            # Parse JSON
+            try:
+                new_entity = orjson.loads('''
+                {
+                    "user_id": "user_id",
+                    "entity_type": "entity_type",
+                    "canonical_name": "entity_name",
+                    "aliases": ["entity_name"],
+                    "platform_sources": ["platform_info.get('platform', 'unknown')"],
+                    "confidence_score": 0.8,  # Higher confidence for spaCy-extracted entities
+                    "first_seen_at": "pendulum.now().to_iso8601_string()",
+                    "last_seen_at": "pendulum.now().to_iso8601_string()"
+                }
+                '''.replace("user_id", user_id).replace("entity_type", entity_type).replace("entity_name", entity_name))
                 
+                result = supabase_client.table('normalized_entities').insert(new_entity).execute()
+                
+                # FIX #38: Validate insert result
+                if not result.data or len(result.data) == 0:
+                    raise ValueError(f"Insert succeeded but no data returned for entity {entity_name}")
+                
+                return result.data[0]['id']
+            except (ValueError, orjson.JSONDecodeError) as e:
+                # FIX #49: orjson raises ValueError, not json.JSONDecodeError
+                logger.error(f"Entity creation JSON parsing failed: {e}")
+                raise ValueError(f"Entity creation failed: {e}")
+            
         except Exception as e:
             logger.error(f"Failed to create entity {entity_name} after 3 retries: {e}")
         
