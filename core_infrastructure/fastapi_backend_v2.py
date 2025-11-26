@@ -9,6 +9,7 @@ import uuid
 import secrets
 import time
 import mmap
+import threading
 import structlog
 
 # CRITICAL FIX: Defer database_optimization_utils import to startup event
