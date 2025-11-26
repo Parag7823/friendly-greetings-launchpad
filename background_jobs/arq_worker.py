@@ -12,7 +12,7 @@ from fastapi_backend_v2 import (
     _gmail_sync_run,
     _dropbox_sync_run,
     _gdrive_sync_run,
-    _zohomail_sync_run,
+    _zoho_mail_sync_run,
     start_processing_job,
     start_pdf_processing_job,
     logger,
@@ -102,7 +102,7 @@ async def zoho_mail_sync(ctx, req: Dict[str, Any]) -> Dict[str, Any]:
     """
     nango = NangoClient()
     try:
-        return await _zohomail_sync_run(nango, ConnectorSyncRequest(**req))
+        return await _zoho_mail_sync_run(nango, ConnectorSyncRequest(**req))
     except Exception as e:
         # FIX #7: Log exception before retrying for observability
         logger.error(f"❌ Zoho Mail sync failed: {e}", error_type=type(e).__name__, request=req)
