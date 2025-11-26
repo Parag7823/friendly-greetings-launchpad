@@ -8465,9 +8465,17 @@ async def chat_endpoint(request: dict):
                 detail="Chat service is temporarily unavailable. Please contact support. (Missing GROQ_API_KEY)"
             )
         
+        # CRITICAL FIX: Lazy-load Supabase client on first use
+        supabase_client = _ensure_supabase_loaded()
+        if not supabase_client:
+            raise HTTPException(
+                status_code=503,
+                detail="Database service is temporarily unavailable. Please try again in a moment."
+            )
+        
         # Initialize orchestrator (uses Groq internally, no openai_client needed)
         orchestrator = IntelligentChatOrchestrator(
-            supabase_client=supabase,
+            supabase_client=supabase_client,
             cache_client=safe_get_ai_cache()
         )
         
@@ -8543,8 +8551,17 @@ async def chat_health_check():
         from intelligent_chat_orchestrator import IntelligentChatOrchestrator
         
         try:
+            # CRITICAL FIX: Lazy-load Supabase client on first use
+            supabase_client = _ensure_supabase_loaded()
+            if not supabase_client:
+                return {
+                    "status": "error",
+                    "error": "Database service unavailable",
+                    "groq_api_key_present": True
+                }
+            
             orchestrator = IntelligentChatOrchestrator(
-                supabase_client=supabase,
+                supabase_client=supabase_client,
                 cache_client=safe_get_ai_cache()
             )
             

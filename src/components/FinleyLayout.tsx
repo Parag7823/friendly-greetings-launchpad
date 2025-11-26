@@ -37,7 +37,7 @@ export const FinleyLayout = () => {
   }, [user?.id]);
 
   // Initialize WebSocket connection with auth
-  const { socket, isConnected } = useFileStatusSocket(user?.id, sessionToken);
+  const { socket, isConnected, connectionStatus } = useFileStatusSocket(user?.id, sessionToken);
 
   // Listen for chat events
   useEffect(() => {
@@ -168,17 +168,30 @@ export const FinleyLayout = () => {
         {/* ERROR #5 FIX: Wrap with WebSocketProvider for global access */}
         <WebSocketProvider socket={socket} isConnected={isConnected}>
           {/* ERROR #6 FIX: WebSocket connection status indicator */}
-          {user && !isConnected && (
+          {user && connectionStatus !== 'connected' && (
             <motion.div
               initial={{ opacity: 0, y: -10 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -10 }}
               className="fixed top-4 right-4 z-50"
             >
-              <Badge variant="destructive" className="text-xs gap-1.5 px-2.5 py-1">
-                <Loader2 className="w-3 h-3 animate-spin" />
-                Reconnecting...
-              </Badge>
+              {connectionStatus === 'connecting' && (
+                <Badge variant="destructive" className="text-xs gap-1.5 px-2.5 py-1">
+                  <Loader2 className="w-3 h-3 animate-spin" />
+                  Connecting...
+                </Badge>
+              )}
+              {connectionStatus === 'polling' && (
+                <Badge variant="secondary" className="text-xs gap-1.5 px-2.5 py-1">
+                  <Loader2 className="w-3 h-3 animate-spin" />
+                  Using Polling
+                </Badge>
+              )}
+              {connectionStatus === 'failed' && (
+                <Badge variant="destructive" className="text-xs gap-1.5 px-2.5 py-1">
+                  Connection Failed
+                </Badge>
+              )}
             </motion.div>
           )}
 

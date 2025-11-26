@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback } from 'react';
+import { useEffect, useRef, useCallback, useState } from 'react';
 import { io, Socket } from 'socket.io-client';
 import { useFileStatusStore, ProcessingStep } from '@/stores/useFileStatusStore';
 import { config } from '@/config';
@@ -14,9 +14,16 @@ import { config } from '@/config';
  * - Handles connection errors gracefully
  * - Supports multiple concurrent file uploads
  * - Automatic reconnection with exponential backoff
+ * - FIX: Proper connection status state management (connecting|connected|failed|polling)
  */
 export const useFileStatusSocket = (userId?: string, sessionToken?: string) => {
   const socketRef = useRef<Socket | null>(null);
+  const reconnectAttemptsRef = useRef(0);
+  const maxReconnectAttemptsRef = useRef(config.websocket.reconnectAttempts);
+  
+  // FIX: Add connection status state (not just boolean)
+  const [connectionStatus, setConnectionStatus] = useState<'connecting' | 'connected' | 'failed' | 'polling'>('connecting');
+  
   const addStep = useFileStatusStore((state) => state.addStep);
   const updateProgress = useFileStatusStore((state) => state.updateProgress);
   const setError = useFileStatusStore((state) => state.setError);
@@ -127,14 +134,31 @@ export const useFileStatusSocket = (userId?: string, sessionToken?: string) => {
       // Connection event handlers
       socket.on('connect', () => {
         console.log('✅ File Status WebSocket Connected');
+        setConnectionStatus('connected');
+        reconnectAttemptsRef.current = 0; // Reset attempts on successful connection
       });
 
       socket.on('disconnect', (reason) => {
         console.log(`⚠️ File Status WebSocket Disconnected: ${reason}`);
+        // If disconnected due to server error, mark as failed after max attempts
+        if (reason === 'io server disconnect' || reason === 'transport close') {
+          setConnectionStatus('failed');
+        }
       });
 
       socket.on('connect_error', (error) => {
         console.error('❌ File Status WebSocket Connection Error:', error);
+        reconnectAttemptsRef.current += 1;
+        
+        // FIX: After max reconnect attempts, give up and use polling
+        if (reconnectAttemptsRef.current >= maxReconnectAttemptsRef.current) {
+          console.warn(`❌ WebSocket reconnection failed after ${maxReconnectAttemptsRef.current} attempts - falling back to polling`);
+          setConnectionStatus('polling');
+          // Emit event so UI can show "Using polling" instead of "Reconnecting..."
+          window.dispatchEvent(new CustomEvent('connection_failed_using_polling', { detail: { attempts: reconnectAttemptsRef.current } }));
+        } else {
+          setConnectionStatus('connecting');
+        }
       });
 
       // File processing event handlers
@@ -187,10 +211,11 @@ export const useFileStatusSocket = (userId?: string, sessionToken?: string) => {
   /**
    * Check if WebSocket is connected
    */
-  const isConnected = socketRef.current?.connected ?? false;
+  const isConnected = connectionStatus === 'connected';
 
   return {
     isConnected,
+    connectionStatus, // FIX: Expose full status for UI
     emit,
     socket: socketRef.current,
   };
