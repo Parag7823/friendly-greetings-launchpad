@@ -95,11 +95,16 @@ def _ensure_embedding_service_loaded():
 
 # ✅ NEW: Import ProductionDuplicateDetectionService for consolidated duplicate logic
 try:
-    from duplicate_detection_fraud.production_duplicate_detection_service import ProductionDuplicateDetectionService
+    # Try package import first (local development)
+    try:
+        from duplicate_detection_fraud.production_duplicate_detection_service import ProductionDuplicateDetectionService
+    except ImportError:
+        # Fallback to flat import (Railway deployment)
+        from production_duplicate_detection_service import ProductionDuplicateDetectionService
     DUPLICATE_SERVICE_AVAILABLE = True
-except ImportError:
+except ImportError as e:
     DUPLICATE_SERVICE_AVAILABLE = False
-    logger.warning("ProductionDuplicateDetectionService not available")
+    logger.warning(f"ProductionDuplicateDetectionService not available: {e}")
 
 # ✅ NEW: Add tenacity for retry logic
 try:

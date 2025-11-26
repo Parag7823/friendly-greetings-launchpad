@@ -8263,8 +8263,6 @@ async def connectors_history(connection_id: str, user_id: str, page: int = 1, pa
 # Removed: 2025-10-13
 # Migration: 20251013000000-remove-unused-version-tables.sql
 # ============================================================================
-
-# ============================================================================
 # TEST ENDPOINTS
 # ============================================================================
 
@@ -8272,7 +8270,9 @@ async def connectors_history(connection_id: str, user_id: str, page: int = 1, pa
 async def get_chat_history(user_id: str):
     """Get chat history for user"""
     try:
-        if not supabase:
+        # CRITICAL FIX: Lazy-load Supabase client on first use
+        supabase_client = _ensure_supabase_loaded()
+        if not supabase_client:
             logger.error(f"❌ CRITICAL: Database connection unavailable for get_chat_history - user_id: {user_id}")
             raise HTTPException(
                 status_code=503, 
@@ -8283,7 +8283,7 @@ async def get_chat_history(user_id: str):
         if optimized_db:
             messages = await optimized_db.get_chat_history_optimized(user_id, limit=500)
         else:
-            result = supabase.table('chat_messages').select(
+            result = supabase_client.table('chat_messages').select(
                 'id, chat_id, message, created_at'
             ).eq('user_id', user_id).order('created_at', desc=True).execute()
             messages = result.data or []
@@ -11228,14 +11228,22 @@ async def list_user_connections(req: UserConnectionsRequest):
     """
     await _validate_security('connectors-user-connections', req.user_id, req.session_token)
     try:
+        # CRITICAL FIX: Lazy-load Supabase client on first use
+        supabase_client = _ensure_supabase_loaded()
+        if not supabase_client:
+            raise HTTPException(
+                status_code=503,
+                detail="Database service is temporarily unavailable. Please try again in a moment."
+            )
+        
         # Fetch from database (connections created by webhook handler)
-        res = supabase.table('user_connections').select('id, user_id, nango_connection_id, connector_id, status, last_synced_at, created_at').eq('user_id', req.user_id).limit(1000).execute()
+        res = supabase_client.table('user_connections').select('id, user_id, nango_connection_id, connector_id, status, last_synced_at, created_at').eq('user_id', req.user_id).limit(1000).execute()
         items = []
         for row in (res.data or []):
             integ = None
             try:
                 if row.get('connector_id'):
-                    c = supabase.table('connectors').select('integration_id, provider').eq('id', row['connector_id']).limit(1).execute()
+                    c = supabase_client.table('connectors').select('integration_id, provider').eq('id', row['connector_id']).limit(1).execute()
                     integ = (c.data[0]['integration_id'] if c.data else None)
             except Exception:
                 integ = None
@@ -11247,6 +11255,8 @@ async def list_user_connections(req: UserConnectionsRequest):
                 'created_at': row.get('created_at'),
             })
         return {'connections': items}
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"List user connections failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
