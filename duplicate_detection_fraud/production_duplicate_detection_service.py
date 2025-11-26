@@ -54,7 +54,32 @@ from pydantic_settings import BaseSettings
 from supabase import Client
 from aiocache import cached, Cache
 from aiocache.serializers import JsonSerializer
-from presidio_analyzer import AnalyzerEngine
+
+# ✅ LAZY LOADING: presidio_analyzer is a heavy dependency - load on first use
+_presidio_analyzer_instance = None
+_presidio_loaded = False
+
+def _ensure_presidio_loaded():
+    """Lazy load presidio analyzer on first use - ensures full functionality"""
+    global _presidio_analyzer_instance, _presidio_loaded
+    if not _presidio_loaded:
+        try:
+            from presidio_analyzer import AnalyzerEngine
+            _presidio_analyzer_instance = AnalyzerEngine()
+            _presidio_loaded = True
+            logger.info("✅ presidio_analyzer module loaded successfully")
+        except ImportError as e:
+            logger.error("presidio_analyzer not installed - PII detection unavailable", error=str(e))
+            _presidio_loaded = True  # Mark as attempted to avoid retry
+            _presidio_analyzer_instance = None
+    return _presidio_analyzer_instance
+
+# Import AnalyzerEngine for type hints and direct access
+try:
+    from presidio_analyzer import AnalyzerEngine
+except ImportError:
+    # Fallback - will be loaded lazily
+    AnalyzerEngine = None
 
 # ✅ LAZY LOADING: numpy is a heavy C extension that can cause import-time crashes
 np = None  # Will be loaded on first use
@@ -85,9 +110,8 @@ except ImportError:
     import xxhash
     _HAS_CENTRALIZED_HASHING = False
 
-# FIX #3: Remove duplicate presidio import (already imported at line 54)
-# Use the first import only
-PRESIDIO_AVAILABLE = True if presidio_analyzer else False
+# FIX #3: Check if presidio is available (will be lazy-loaded on first use)
+PRESIDIO_AVAILABLE = AnalyzerEngine is not None
 
 # Configure structured logging with structlog
 logger = structlog.get_logger(__name__)
@@ -268,15 +292,17 @@ class ProductionDuplicateDetectionService:
             raise ValueError(f"Invalid filename length")
         
         # GENIUS v4.0: presidio for PII detection (20% better security)
-        if PRESIDIO_AVAILABLE and presidio_analyzer:
+        # Lazy load presidio on first use to avoid import-time crashes
+        presidio_instance = _ensure_presidio_loaded()
+        if presidio_instance:
             try:
                 # Check if user_id contains PII
-                pii_results = presidio_analyzer.analyze(text=user_id, language='en')
+                pii_results = presidio_instance.analyze(text=user_id, language='en')
                 if pii_results:
                     logger.warning("PII detected in user_id", entities=[r.entity_type for r in pii_results])
                 
                 # Check if filename contains PII
-                pii_in_filename = presidio_analyzer.analyze(text=filename, language='en')
+                pii_in_filename = presidio_instance.analyze(text=filename, language='en')
                 if pii_in_filename:
                     sensitive_types = [r.entity_type for r in pii_in_filename if r.score > 0.7]
                     if sensitive_types:

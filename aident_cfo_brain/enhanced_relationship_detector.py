@@ -62,13 +62,36 @@ except ImportError:
     INSTRUCTOR_AVAILABLE = False
     logger.warning("instructor not available - AI responses won't be auto-validated")
 
-# ✅ NEW: Import embedding service for dependency injection
-try:
-    from data_ingestion_normalization.embedding_service import EmbeddingService
-    EMBEDDING_SERVICE_AVAILABLE = True
-except ImportError:
-    EMBEDDING_SERVICE_AVAILABLE = False
-    logger.warning("EmbeddingService not available - semantic embeddings disabled")
+# ✅ LAZY LOADING: EmbeddingService is a heavy dependency (sentence-transformers ~2GB)
+# Load it only when actually needed to prevent startup delays
+_embedding_service_instance = None
+_embedding_service_loaded = False
+EmbeddingService = None
+EMBEDDING_SERVICE_AVAILABLE = False
+
+def _ensure_embedding_service_loaded():
+    """Lazy load EmbeddingService on first use"""
+    global _embedding_service_instance, _embedding_service_loaded, EmbeddingService, EMBEDDING_SERVICE_AVAILABLE
+    if not _embedding_service_loaded:
+        try:
+            # Try package import first (local development)
+            try:
+                from data_ingestion_normalization.embedding_service import EmbeddingService as EmbeddingServiceClass
+            except ImportError:
+                # Fallback to flat import (Railway deployment)
+                from embedding_service import EmbeddingService as EmbeddingServiceClass
+            
+            EmbeddingService = EmbeddingServiceClass
+            _embedding_service_instance = EmbeddingServiceClass()
+            EMBEDDING_SERVICE_AVAILABLE = True
+            _embedding_service_loaded = True
+            logger.info("✅ EmbeddingService loaded successfully - BGE embeddings enabled")
+        except ImportError as e:
+            logger.warning(f"EmbeddingService not available - semantic embeddings disabled: {e}")
+            _embedding_service_loaded = True
+            EMBEDDING_SERVICE_AVAILABLE = False
+            _embedding_service_instance = None
+    return _embedding_service_instance
 
 # ✅ NEW: Import ProductionDuplicateDetectionService for consolidated duplicate logic
 try:
@@ -290,12 +313,18 @@ class EnhancedRelationshipDetector:
         self.supabase = supabase_client
         self.cache = cache_client  # Use centralized cache, no local cache
         
-        # FIX #6: Inject embedding service instead of loading separately
+        # FIX #6: Inject embedding service or lazy-load on first use
         # This ensures consistent embeddings across API and worker processes
         self.embedding_service = embedding_service
-        if embedding_service is None and EMBEDDING_SERVICE_AVAILABLE:
-            self.embedding_service = EmbeddingService()
-            logger.info("✅ EmbeddingService initialized via dependency injection")
+        if embedding_service is None:
+            # Lazy load embedding service on first use
+            self.embedding_service = _ensure_embedding_service_loaded()
+            if self.embedding_service:
+                logger.info("✅ EmbeddingService lazy-loaded successfully")
+            else:
+                logger.warning("⚠️ EmbeddingService not available - semantic embeddings disabled")
+        else:
+            logger.info("✅ EmbeddingService provided via dependency injection")
         
         # LAZY LOADING: spaCy will be loaded on first use, not at startup
         # This prevents 500MB+ memory consumption during initialization
