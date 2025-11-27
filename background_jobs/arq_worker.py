@@ -29,10 +29,10 @@ try:
     supabase = get_supabase_client()
     logger.info("✅ ARQ worker using centralized Supabase client with connection pooling")
 except ImportError as e:
-    logger.error(f"⚠️ supabase_client.py not found: {e}")
+    logger.error("supabase_client.py not found", error=str(e))
     supabase = None
 except Exception as e:
-    logger.error(f"⚠️ Failed to initialize Supabase client: {e}")
+    logger.error("Failed to initialize Supabase client", error=str(e))
     supabase = None
 
 
@@ -59,7 +59,7 @@ async def gmail_sync(ctx, req: Dict[str, Any]) -> Dict[str, Any]:
         return await _gmail_sync_run(nango, ConnectorSyncRequest(**req))
     except Exception as e:
         # FIX #7: Log exception before retrying for observability
-        logger.error(f"❌ Gmail sync failed: {e}", error_type=type(e).__name__, request=req)
+        logger.error("Gmail sync failed", error=str(e), error_type=type(e).__name__, request=req)
         # Use ARQ's native Retry with exponential backoff
         # ARQ handles retry count internally, no need for custom Redis tracking
         raise Retry(defer=30)  # Initial 30 second delay, ARQ will exponentially backoff
@@ -75,7 +75,7 @@ async def dropbox_sync(ctx, req: Dict[str, Any]) -> Dict[str, Any]:
         return await _dropbox_sync_run(nango, ConnectorSyncRequest(**req))
     except Exception as e:
         # FIX #7: Log exception before retrying for observability
-        logger.error(f"❌ Dropbox sync failed: {e}", error_type=type(e).__name__, request=req)
+        logger.error("Dropbox sync failed", error=str(e), error_type=type(e).__name__, request=req)
         # Use ARQ's native Retry with exponential backoff
         raise Retry(defer=30)
 
@@ -90,7 +90,7 @@ async def gdrive_sync(ctx, req: Dict[str, Any]) -> Dict[str, Any]:
         return await _gdrive_sync_run(nango, ConnectorSyncRequest(**req))
     except Exception as e:
         # FIX #7: Log exception before retrying for observability
-        logger.error(f"❌ Google Drive sync failed: {e}", error_type=type(e).__name__, request=req)
+        logger.error("Google Drive sync failed", error=str(e), error_type=type(e).__name__, request=req)
         # Use ARQ's native Retry with exponential backoff
         raise Retry(defer=30)
 
@@ -105,7 +105,7 @@ async def zoho_mail_sync(ctx, req: Dict[str, Any]) -> Dict[str, Any]:
         return await _zoho_mail_sync_run(nango, ConnectorSyncRequest(**req))
     except Exception as e:
         # FIX #7: Log exception before retrying for observability
-        logger.error(f"❌ Zoho Mail sync failed: {e}", error_type=type(e).__name__, request=req)
+        logger.error("Zoho Mail sync failed", error=str(e), error_type=type(e).__name__, request=req)
         # Use ARQ's native Retry with exponential backoff
         raise Retry(defer=45)  # Initial 45 second delay for Zoho (slower API)
 
@@ -158,12 +158,12 @@ async def process_spreadsheet(ctx, user_id: str, filename: str, storage_path: st
             duplicate_decision=duplicate_decision,
             existing_file_id=existing_file_id
         )
-        logger.info(f"✅ ARQ spreadsheet processing completed for job {job_id}")
+        logger.info("ARQ spreadsheet processing completed", job_id=job_id)
         return {"status": "completed", "job_id": job_id}
             
     except Exception as e:
         # FIX #7: Log full exception details for debugging
-        logger.error(f"❌ ARQ spreadsheet processing failed for job {job_id}", 
+        logger.error("ARQ spreadsheet processing failed", job_id=job_id,
                     error=str(e), error_type=type(e).__name__, user_id=user_id, filename=filename)
         # Transaction auto-rolls back on exception
         # Use ARQ's native Retry with exponential backoff
@@ -171,10 +171,10 @@ async def process_spreadsheet(ctx, user_id: str, filename: str, storage_path: st
         retry_count = getattr(ctx, 'retry_count', 0) if ctx else 0
         if retry_count < 3:
             delay = 60 * (2 ** retry_count)  # 60s, 120s, 240s
-            logger.info(f"Retrying spreadsheet processing in {delay}s (attempt {retry_count + 1}/3)", job_id=job_id)
+            logger.info("Retrying spreadsheet processing", delay_seconds=delay, attempt=retry_count + 1, job_id=job_id)
             raise Retry(defer=delay)
         else:
-            logger.error(f"❌ Spreadsheet processing failed after 3 retries for job {job_id}", error=str(e))
+            logger.error("Spreadsheet processing failed after 3 retries", job_id=job_id, error=str(e))
             return {"status": "failed", "job_id": job_id, "error": str(e), "retries_exhausted": True}
 
 
@@ -183,7 +183,7 @@ async def process_pdf(ctx, user_id: str, filename: str, storage_path: str, job_i
     Added exception logging for observability
     """
     try:
-        from transaction_manager import get_transaction_manager
+        from aident_cfo_brain.transaction_manager import get_transaction_manager
         transaction_manager = get_transaction_manager()
         
         # Wrap entire processing in transaction for atomic operations
@@ -192,22 +192,22 @@ async def process_pdf(ctx, user_id: str, filename: str, storage_path: str, job_i
             operation_type="arq_pdf_processing"
         ) as tx:
             await start_pdf_processing_job(user_id, job_id, storage_path, filename)
-            logger.info(f"✅ ARQ PDF processing completed for job {job_id}")
+            logger.info("ARQ PDF processing completed", job_id=job_id)
             return {"status": "completed", "job_id": job_id}
             
     except Exception as e:
         # FIX #7: Log full exception details for debugging
-        logger.error(f"❌ ARQ PDF processing failed for job {job_id}", 
+        logger.error("ARQ PDF processing failed", job_id=job_id,
                     error=str(e), error_type=type(e).__name__, user_id=user_id, filename=filename)
         # Transaction auto-rolls back on exception
         # Use ARQ's native Retry with exponential backoff
         retry_count = getattr(ctx, 'retry_count', 0) if ctx else 0
         if retry_count < 3:
             delay = 60 * (2 ** retry_count)  # 60s, 120s, 240s
-            logger.info(f"Retrying PDF processing in {delay}s (attempt {retry_count + 1}/3)", job_id=job_id)
+            logger.info("Retrying PDF processing", delay_seconds=delay, attempt=retry_count + 1, job_id=job_id)
             raise Retry(defer=delay)
         else:
-            logger.error(f"❌ PDF processing failed after 3 retries for job {job_id}", error=str(e))
+            logger.error("PDF processing failed after 3 retries", job_id=job_id, error=str(e))
             return {"status": "failed", "job_id": job_id, "error": str(e), "retries_exhausted": True}
 
 
@@ -224,7 +224,7 @@ async def learn_field_mapping_batch(ctx, mappings: List[Dict[str, Any]]) -> Dict
     try:
         from field_mapping_learner import FieldMappingLearner
         
-        logger.info(f"🧠 Processing {len(mappings)} field mapping records via ARQ")
+        logger.info("Processing field mapping records via ARQ", record_count=len(mappings))
         
         learner = FieldMappingLearner(supabase=supabase)
         success_count = 0
@@ -239,10 +239,10 @@ async def learn_field_mapping_batch(ctx, mappings: List[Dict[str, Any]]) -> Dict
                     failed_count += 1
             except Exception as e:
                 # FIX #7: Log mapping details for debugging
-                logger.error(f"Failed to write field mapping", error=str(e), mapping_id=mapping.get('id'))
+                logger.error("Failed to write field mapping", error=str(e), mapping_id=mapping.get('id'))
                 failed_count += 1
         
-        logger.info(f"✅ Field mapping batch completed: {success_count} success, {failed_count} failed")
+        logger.info("Field mapping batch completed", success_count=success_count, failed_count=failed_count)
         return {
             "status": "success",
             "total": len(mappings),
@@ -252,15 +252,15 @@ async def learn_field_mapping_batch(ctx, mappings: List[Dict[str, Any]]) -> Dict
         
     except Exception as e:
         # FIX #7: Log full exception details for debugging
-        logger.error(f"❌ Field mapping batch processing failed", error=str(e), error_type=type(e).__name__)
+        logger.error("Field mapping batch processing failed", error=str(e), error_type=type(e).__name__)
         # Use ARQ's native Retry with exponential backoff
         retry_count = getattr(ctx, 'retry_count', 0) if ctx else 0
         if retry_count < 3:
             delay = 30 * (2 ** retry_count)  # 30s, 60s, 120s
-            logger.info(f"Retrying field mapping batch in {delay}s (attempt {retry_count + 1}/3)")
+            logger.info("Retrying field mapping batch", delay_seconds=delay, attempt=retry_count + 1)
             raise Retry(defer=delay)
         else:
-            logger.error(f"❌ Field mapping batch failed after 3 retries", error=str(e))
+            logger.error("Field mapping batch failed after 3 retries", error=str(e))
             return {"status": "failed", "error": str(e), "retries_exhausted": True}
 
 
@@ -277,13 +277,13 @@ async def detect_relationships(ctx, user_id: str, file_id: str = None) -> Dict[s
         file_id: Optional file_id to scope detection to specific file
     """
     try:
-        from enhanced_relationship_detector import EnhancedRelationshipDetector
+        from aident_cfo_brain.enhanced_relationship_detector import EnhancedRelationshipDetector
         from groq import Groq
-        from transaction_manager import get_transaction_manager
-        from finley_graph_engine import FinleyGraphEngine
+        from aident_cfo_brain.transaction_manager import get_transaction_manager
+        from aident_cfo_brain.finley_graph_engine import FinleyGraphEngine
         from data_ingestion_normalization.embedding_service import EmbeddingService
         
-        logger.info(f"🔍 Starting background relationship detection", user_id=user_id, file_id=file_id)
+        logger.info("Starting background relationship detection", user_id=user_id, file_id=file_id)
         
         # FIX #8: Wrap entire detection in transaction for atomic operations
         transaction_manager = get_transaction_manager()
@@ -306,7 +306,7 @@ async def detect_relationships(ctx, user_id: str, file_id: str = None) -> Dict[s
                 embedding_service = EmbeddingService(cache_client=cache_client)
                 logger.info("✅ EmbeddingService initialized for relationship detection")
             except Exception as e:
-                logger.warning(f"⚠️ Failed to initialize EmbeddingService: {e}")
+                logger.warning("Failed to initialize EmbeddingService", error=str(e))
             
             # CRITICAL FIX: Use Groq client (Llama-3.3-70B) instead of Anthropic
             # This matches the main application's AI configuration
@@ -334,12 +334,12 @@ async def detect_relationships(ctx, user_id: str, file_id: str = None) -> Dict[s
             )
             
             # Relationships are already stored by the detector
-            logger.info(f"✅ Background relationship detection completed: {relationship_results.get('total_relationships', 0)} relationships found")
+            logger.info("Background relationship detection completed", total_relationships=relationship_results.get('total_relationships', 0))
             
             # FIX #4-8: Run advanced analytics AFTER relationship detection
             analytics_results = {}
             try:
-                logger.info(f"🔬 Starting advanced analytics for user_id={user_id}")
+                logger.info("Starting advanced analytics", user_id=user_id)
                 
                 # CRITICAL FIX: Use engines already initialized by EnhancedRelationshipDetector
                 # This eliminates redundant initialization and ensures consistent state
@@ -379,19 +379,40 @@ async def detect_relationships(ctx, user_id: str, file_id: str = None) -> Dict[s
                 counterfactual_results = await causal_engine.analyze_counterfactuals(user_id)
                 analytics_results['counterfactual_analyses'] = counterfactual_results.get('total_scenarios', 0)
                 
-                logger.info(f"✅ Advanced analytics completed: {analytics_results}")
+                logger.info("Advanced analytics completed", results=analytics_results)
                 
             except Exception as analytics_error:
-                logger.error(f"⚠️ Advanced analytics failed (non-critical): {analytics_error}")
+                logger.error("Advanced analytics failed (non-critical)", error=str(analytics_error))
                 analytics_results['error'] = str(analytics_error)
             
             # FIX #11: Invalidate graph cache after successful detection
             try:
                 graph_engine = FinleyGraphEngine(supabase_url=os.getenv('SUPABASE_URL'), redis_url=os.getenv('REDIS_URL'))
                 await graph_engine.clear_graph_cache(user_id)
-                logger.info(f"✅ Graph cache invalidated for user {user_id}")
+                logger.info("Graph cache invalidated", user_id=user_id)
             except Exception as cache_error:
-                logger.warning(f"⚠️ Failed to invalidate graph cache: {cache_error}")
+                logger.warning("Failed to invalidate graph cache", error=str(cache_error))
+            
+            # SEGMENT C: Queue Phase 3 and Phase 4 background jobs
+            # FIX #12: Queue graph building (Phase 3) after relationships detected
+            # FIX #13: Queue CFO brain initialization (Phase 4) after graph built
+            try:
+                from arq.connections import create_pool
+                redis_url = os.getenv('ARQ_REDIS_URL') or os.getenv('REDIS_URL') or 'redis://localhost:6379'
+                arq_pool = await create_pool(redis_url)
+                
+                # Queue Phase 3: Graph building
+                logger.info("Queueing PHASE 3 (graph building)", user_id=user_id)
+                await arq_pool.enqueue_job('build_graph_background', user_id=user_id)
+                
+                # Queue Phase 4: CFO brain initialization
+                # Note: ARQ will execute these sequentially based on queue order
+                logger.info("Queueing PHASE 4 (CFO brain init)", user_id=user_id)
+                await arq_pool.enqueue_job('initialize_cfo_brain', user_id=user_id)
+                
+                logger.info("PHASE 3 & 4 queued", user_id=user_id)
+            except Exception as queue_error:
+                logger.warning("Failed to queue Phase 3/4 jobs", error=str(queue_error))
             
             return {
                 "status": "success",
@@ -402,20 +423,21 @@ async def detect_relationships(ctx, user_id: str, file_id: str = None) -> Dict[s
                 "within_file_relationships": relationship_results.get('within_file_relationships', 0),
                 "method": "database_joins",
                 "complexity": "O(N log N)",
-                "advanced_analytics": analytics_results
+                "advanced_analytics": analytics_results,
+                "phase_3_4_queued": True
             }
         
     except Exception as e:
-        logger.error(f"❌ Background relationship detection failed for user {user_id}: {e}", exc_info=True)
+        logger.error("Background relationship detection failed", user_id=user_id, error=str(e), exc_info=True)
         # FIX #9: Use ARQ's native Retry with exponential backoff (no _retry_or_dlq)
         # Calculate exponential backoff: 60s, 120s, 240s for retries 1, 2, 3
         retry_count = getattr(ctx, 'retry_count', 0) if ctx else 0
         if retry_count < 3:
             delay = 60 * (2 ** retry_count)  # 60s, 120s, 240s
-            logger.info(f"Retrying relationship detection in {delay}s (attempt {retry_count + 1}/3)")
+            logger.info("Retrying relationship detection", delay_seconds=delay, attempt=retry_count + 1)
             raise Retry(defer=delay)
         else:
-            logger.error(f"❌ Relationship detection failed after 3 retries for user {user_id}")
+            logger.error("Relationship detection failed after 3 retries", user_id=user_id)
             return {"status": "failed", "user_id": user_id, "error": str(e), "retries_exhausted": True}
 
 
@@ -442,9 +464,9 @@ async def build_graph_background(ctx, user_id: str) -> Dict[str, Any]:
         Dict with status and graph statistics
     """
     try:
-        from finley_graph_engine import FinleyGraphEngine
+        from aident_cfo_brain.finley_graph_engine import FinleyGraphEngine
         
-        logger.info(f"🧠 PHASE 3: Starting graph building for user {user_id}")
+        logger.info("PHASE 3: Starting graph building for user", user_id=user_id)
         
         # Initialize graph engine with Redis caching
         redis_url = os.getenv('ARQ_REDIS_URL') or os.getenv('REDIS_URL')
@@ -454,7 +476,7 @@ async def build_graph_background(ctx, user_id: str) -> Dict[str, Any]:
         stats = await graph_engine.build_graph(user_id, force_rebuild=True)
         
         logger.info(
-            f"✅ PHASE 3 COMPLETE: Graph built successfully",
+            "PHASE 3 COMPLETE: Graph built successfully",
             user_id=user_id,
             node_count=stats.node_count,
             edge_count=stats.edge_count,
@@ -474,15 +496,15 @@ async def build_graph_background(ctx, user_id: str) -> Dict[str, Any]:
         }
         
     except Exception as e:
-        logger.error(f"❌ PHASE 3 FAILED: Graph building failed for user {user_id}: {e}", exc_info=True)
+        logger.error("PHASE 3 FAILED: Graph building failed", user_id=user_id, error=str(e), exc_info=True)
         # Use ARQ's native Retry with exponential backoff
         retry_count = getattr(ctx, 'retry_count', 0) if ctx else 0
         if retry_count < 3:
             delay = 60 * (2 ** retry_count)  # 60s, 120s, 240s
-            logger.info(f"Retrying graph building in {delay}s (attempt {retry_count + 1}/3)")
+            logger.info("Retrying graph building", delay_seconds=delay, attempt=retry_count + 1)
             raise Retry(defer=delay)
         else:
-            logger.error(f"❌ Graph building failed after 3 retries for user {user_id}")
+            logger.error("Graph building failed after 3 retries", user_id=user_id)
             return {"status": "failed", "user_id": user_id, "phase": 3, "error": str(e), "retries_exhausted": True}
 
 
@@ -514,7 +536,7 @@ async def initialize_cfo_brain(ctx, user_id: str) -> Dict[str, Any]:
         from temporal_pattern_learner import TemporalPatternLearner
         from aident_memory_manager import AidentMemoryManager
         
-        logger.info(f"🤖 PHASE 4: Starting CFO brain initialization for user {user_id}")
+        logger.info("PHASE 4: Starting CFO brain initialization", user_id=user_id)
         
         redis_url = os.getenv('ARQ_REDIS_URL') or os.getenv('REDIS_URL')
         
@@ -523,31 +545,31 @@ async def initialize_cfo_brain(ctx, user_id: str) -> Dict[str, Any]:
         temporal_learner = TemporalPatternLearner(supabase_client=supabase)
         memory_manager = AidentMemoryManager(user_id=user_id, redis_url=redis_url)
         
-        logger.info(f"Engines initialized, pre-warming caches for user {user_id}")
+        logger.info("Engines initialized, pre-warming caches", user_id=user_id)
         
         # Pre-warm caches by running analysis
         try:
             causal_results = await causal_engine.analyze_all_relationships(user_id)
-            logger.info(f"✅ Causal analysis pre-warmed: {causal_results.get('total_causal', 0)} relationships")
+            logger.info("Causal analysis pre-warmed", total_causal=causal_results.get('total_causal', 0))
         except Exception as e:
-            logger.warning(f"⚠️ Causal analysis pre-warm failed (non-critical): {e}")
+            logger.warning("Causal analysis pre-warm failed (non-critical)", error=str(e))
             causal_results = {"total_causal": 0, "error": str(e)}
         
         try:
             temporal_results = await temporal_learner.learn_all_patterns(user_id)
-            logger.info(f"✅ Temporal patterns pre-warmed: {temporal_results.get('total_patterns', 0)} patterns")
+            logger.info("Temporal patterns pre-warmed", total_patterns=temporal_results.get('total_patterns', 0))
         except Exception as e:
-            logger.warning(f"⚠️ Temporal learning pre-warm failed (non-critical): {e}")
+            logger.warning("Temporal learning pre-warm failed (non-critical)", error=str(e))
             temporal_results = {"total_patterns": 0, "error": str(e)}
         
         try:
             await memory_manager.load_memory()
-            logger.info(f"✅ Memory manager initialized for user {user_id}")
+            logger.info("Memory manager initialized", user_id=user_id)
         except Exception as e:
-            logger.warning(f"⚠️ Memory manager initialization failed (non-critical): {e}")
+            logger.warning("Memory manager initialization failed (non-critical)", error=str(e))
         
         logger.info(
-            f"✅ PHASE 4 COMPLETE: CFO brain fully initialized",
+            "PHASE 4 COMPLETE: CFO brain fully initialized",
             user_id=user_id,
             causal_relationships=causal_results.get('total_causal', 0),
             temporal_patterns=temporal_results.get('total_patterns', 0)
@@ -563,15 +585,15 @@ async def initialize_cfo_brain(ctx, user_id: str) -> Dict[str, Any]:
         }
         
     except Exception as e:
-        logger.error(f"❌ PHASE 4 FAILED: CFO brain initialization failed for user {user_id}: {e}", exc_info=True)
+        logger.error("PHASE 4 FAILED: CFO brain initialization failed", user_id=user_id, error=str(e), exc_info=True)
         # Use ARQ's native Retry with exponential backoff
         retry_count = getattr(ctx, 'retry_count', 0) if ctx else 0
         if retry_count < 3:
             delay = 60 * (2 ** retry_count)  # 60s, 120s, 240s
-            logger.info(f"Retrying CFO brain initialization in {delay}s (attempt {retry_count + 1}/3)")
+            logger.info("Retrying CFO brain initialization", delay_seconds=delay, attempt=retry_count + 1)
             raise Retry(defer=delay)
         else:
-            logger.error(f"❌ CFO brain initialization failed after 3 retries for user {user_id}")
+            logger.error("CFO brain initialization failed after 3 retries", user_id=user_id)
             return {"status": "failed", "user_id": user_id, "phase": 4, "error": str(e), "retries_exhausted": True}
 
 
@@ -595,7 +617,7 @@ async def generate_prophet_forecasts(ctx) -> None:
             return
             
         user_ids = list(set(r['user_id'] for r in users_result.data))
-        logger.info(f"Generating forecasts for {len(user_ids)} users")
+        logger.info("Generating forecasts for users", user_count=len(user_ids))
         
         for user_id in user_ids:
             try:
@@ -615,20 +637,20 @@ async def generate_prophet_forecasts(ctx) -> None:
                             relationship_type=rel_type,
                             forecast_days=90
                         )
-                        logger.debug(f"Generated forecast for user={user_id}, type={rel_type}")
+                        logger.debug("Generated forecast", user_id=user_id, relationship_type=rel_type)
                         
                     except Exception as e:
-                        logger.error(f"Forecast failed for user={user_id}, type={rel_type}: {e}")
+                        logger.error("Forecast failed", user_id=user_id, relationship_type=rel_type, error=str(e))
                         continue
                         
             except Exception as user_err:
-                logger.error(f"Forecasting failed for user {user_id}: {user_err}")
+                logger.error("Forecasting failed for user", user_id=user_id, error=str(user_err))
                 continue
                 
         logger.info("✅ Nightly Prophet forecasting job completed")
         
     except Exception as e:
-        logger.error(f"❌ Nightly Prophet forecasting job failed: {e}")
+        logger.error("Nightly Prophet forecasting job failed", error=str(e))
 
 
 # --------------- ARQ Worker Settings ---------------
@@ -650,7 +672,9 @@ class WorkerSettings:
         process_spreadsheet,
         process_pdf,
         learn_field_mapping_batch,  # CRITICAL FIX: Persistent field mapping learning
-        detect_relationships,  # Background task for relationship detection
+        detect_relationships,  # PHASE 2: Background task for relationship detection
+        build_graph_background,  # FIX #12: PHASE 3: Proactive graph building
+        initialize_cfo_brain,  # FIX #13: PHASE 4: CFO brain initialization
         generate_prophet_forecasts,  # Nightly forecasting job
     ]
     
