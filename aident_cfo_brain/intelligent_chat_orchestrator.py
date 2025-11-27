@@ -26,13 +26,36 @@ from enum import Enum
 from dataclasses import dataclass
 import asyncio
 from groq import AsyncGroq  # CHANGED: Using Groq instead of Anthropic
-from causal_inference_engine import CausalInferenceEngine
-from temporal_pattern_learner import TemporalPatternLearner
-from enhanced_relationship_detector import EnhancedRelationshipDetector
-from entity_resolver_optimized import EntityResolverOptimized as EntityResolver
-from finley_graph_engine import FinleyGraphEngine  # NEW: Graph intelligence
-from data_ingestion_normalization.embedding_service import EmbeddingService  # FIX #6: Dependency injection
-from aident_memory_manager import AidentMemoryManager  # NEW: Conversational memory with LangChain
+
+# FIX #15: Use relative imports for modules in same package
+from .finley_graph_engine import FinleyGraphEngine  # NEW: Graph intelligence
+from .aident_memory_manager import AidentMemoryManager  # NEW: Conversational memory with LangChain
+
+# FIX #15: Use try/except for optional modules that may be in different paths
+try:
+    from causal_inference_engine import CausalInferenceEngine
+except ImportError:
+    from .causal_inference_engine import CausalInferenceEngine
+
+try:
+    from temporal_pattern_learner import TemporalPatternLearner
+except ImportError:
+    from .temporal_pattern_learner import TemporalPatternLearner
+
+try:
+    from enhanced_relationship_detector import EnhancedRelationshipDetector
+except ImportError:
+    from .enhanced_relationship_detector import EnhancedRelationshipDetector
+
+try:
+    from entity_resolver_optimized import EntityResolverOptimized as EntityResolver
+except ImportError:
+    from data_ingestion_normalization.entity_resolver_optimized import EntityResolverOptimized as EntityResolver
+
+try:
+    from data_ingestion_normalization.embedding_service import EmbeddingService  # FIX #6: Dependency injection
+except ImportError:
+    from embedding_service import EmbeddingService
 
 logger = structlog.get_logger(__name__)
 
