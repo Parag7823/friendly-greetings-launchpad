@@ -37,9 +37,10 @@ _current_dir = os.path.dirname(os.path.abspath(__file__))
 _parent_dir = os.path.dirname(_current_dir)
 _root_dir = os.path.dirname(_parent_dir)
 
-# Add all potential paths to sys.path
-for _path in [_root_dir, _parent_dir, _current_dir]:
-    if _path not in sys.path:
+# Add all potential paths to sys.path (in order of priority)
+# Priority: current dir (aident_cfo_brain) > parent (project root) > root (/) > app root (/app)
+for _path in [_current_dir, _parent_dir, _root_dir, '/app']:
+    if _path and _path not in sys.path:
         sys.path.insert(0, _path)
 
 # FIX #16: Use absolute imports with try/except fallbacks for different deployment layouts
