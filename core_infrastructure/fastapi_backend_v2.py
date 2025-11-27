@@ -8400,29 +8400,25 @@ async def generate_chat_title(request: dict):
         title_client = get_groq_client()
         
         try:
-            response = await asyncio.wait_for(
-                asyncio.to_thread(
-                    title_client.chat.completions.create,
-                    model="llama-3.3-70b-versatile",
-                    messages=[
-                        {"role": "system", "content": "Generate a concise, descriptive title (max 6 words) for this financial question. Return ONLY the title, no quotes or extra text."},
-                        {"role": "user", "content": f"Question: {message}"}
-                    ],
-                    max_tokens=50,
-                    temperature=0.3
-                ),
-                timeout=15.0  # 15 second timeout for title generation
+            response = title_client.chat.completions.create(
+                model="llama-3.3-70b-versatile",
+                messages=[
+                    {"role": "system", "content": "Generate a concise, descriptive title (max 6 words) for this financial question. Return ONLY the title, no quotes or extra text."},
+                    {"role": "user", "content": f"Question: {message}"}
+                ],
+                max_tokens=50,
+                temperature=0.3,
+                timeout=15.0  # 15 second timeout
             )
-        except asyncio.TimeoutError:
-            structured_logger.warning("Title generation timed out, using fallback")
+            title = response.choices[0].message.content.strip()
+        except Exception as e:
+            structured_logger.warning(f"Title generation failed: {str(e)}, using fallback")
             chat_id = f"chat_{datetime.utcnow().strftime('%Y%m%d%H%M%S')}"
             return {
                 "chat_id": chat_id,
                 "title": f"Chat {datetime.utcnow().strftime('%b %d, %Y')}",
                 "status": "fallback"
             }
-        
-        title = response.choices[0].message.content.strip()
         
         # Generate chat_id
         chat_id = f"chat_{datetime.utcnow().strftime('%Y%m%d%H%M%S')}_{user_id[:8]}"
