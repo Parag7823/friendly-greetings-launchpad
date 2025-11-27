@@ -27,33 +27,31 @@ from dataclasses import dataclass
 import asyncio
 from groq import AsyncGroq  # CHANGED: Using Groq instead of Anthropic
 
-# FIX #15: Use relative imports for modules in same package
-from .finley_graph_engine import FinleyGraphEngine  # NEW: Graph intelligence
-from .aident_memory_manager import AidentMemoryManager  # NEW: Conversational memory with LangChain
+# FIX #16: Use absolute imports with try/except fallbacks for different deployment layouts
+# Supports both: package layout (aident_cfo_brain.module) and flat layout (module)
 
-# FIX #15: Use try/except for optional modules that may be in different paths
 try:
+    # Try package layout first (standard Python package)
+    from aident_cfo_brain.finley_graph_engine import FinleyGraphEngine
+    from aident_cfo_brain.aident_memory_manager import AidentMemoryManager
+    from aident_cfo_brain.causal_inference_engine import CausalInferenceEngine
+    from aident_cfo_brain.temporal_pattern_learner import TemporalPatternLearner
+    from aident_cfo_brain.enhanced_relationship_detector import EnhancedRelationshipDetector
+except ImportError:
+    # Fallback to flat layout (Railway deployment or direct module import)
+    from finley_graph_engine import FinleyGraphEngine
+    from aident_memory_manager import AidentMemoryManager
     from causal_inference_engine import CausalInferenceEngine
-except ImportError:
-    from .causal_inference_engine import CausalInferenceEngine
-
-try:
     from temporal_pattern_learner import TemporalPatternLearner
-except ImportError:
-    from .temporal_pattern_learner import TemporalPatternLearner
-
-try:
     from enhanced_relationship_detector import EnhancedRelationshipDetector
-except ImportError:
-    from .enhanced_relationship_detector import EnhancedRelationshipDetector
 
 try:
-    from entity_resolver_optimized import EntityResolverOptimized as EntityResolver
-except ImportError:
     from data_ingestion_normalization.entity_resolver_optimized import EntityResolverOptimized as EntityResolver
+except ImportError:
+    from entity_resolver_optimized import EntityResolverOptimized as EntityResolver
 
 try:
-    from data_ingestion_normalization.embedding_service import EmbeddingService  # FIX #6: Dependency injection
+    from data_ingestion_normalization.embedding_service import EmbeddingService
 except ImportError:
     from embedding_service import EmbeddingService
 
