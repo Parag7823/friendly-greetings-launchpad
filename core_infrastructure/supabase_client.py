@@ -184,7 +184,11 @@ def get_connection_pool() -> SupabaseConnectionPool:
     if _pool_instance is None:
         with _client_lock:
             if _pool_instance is None:
-                _pool_instance = SupabaseConnectionPool()
+                try:
+                    _pool_instance = SupabaseConnectionPool()
+                except Exception as e:
+                    logger.error(f"❌ Failed to initialize connection pool: {e}")
+                    raise
     
     return _pool_instance
 
