@@ -43,7 +43,11 @@ class SupabaseConnectionPool:
     
     def __init__(self):
         self.supabase_url = os.getenv('SUPABASE_URL')
-        self.service_role_key = os.getenv('SUPABASE_SERVICE_ROLE_KEY')
+        # FIX: Check for both SUPABASE_SERVICE_ROLE_KEY and SUPABASE_SERVICE_KEY (Railway uses the latter)
+        self.service_role_key = (
+            os.getenv('SUPABASE_SERVICE_ROLE_KEY') or 
+            os.getenv('SUPABASE_SERVICE_KEY')
+        )
         self.anon_key = os.getenv('SUPABASE_ANON_KEY')
         
         # Connection pool configuration
@@ -56,7 +60,7 @@ class SupabaseConnectionPool:
         self.pgbouncer_url = os.getenv('PGBOUNCER_URL')
         
         if not self.supabase_url or not self.service_role_key:
-            raise ValueError("SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY must be set")
+            raise ValueError("SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY (or SUPABASE_SERVICE_KEY) must be set")
         
         logger.info(f"✅ Supabase connection pool configured: pool_size={self.pool_size}, "
                    f"timeout={self.pool_timeout}s, recycle={self.pool_recycle}s, "
@@ -213,12 +217,28 @@ def _ensure_supabase_loaded_sync():
         with _supabase_lock:
             if not _supabase_loaded:
                 try:
+                    # Check environment variables first
+                    supabase_url = os.getenv('SUPABASE_URL')
+                    service_key = os.getenv('SUPABASE_SERVICE_ROLE_KEY') or os.getenv('SUPABASE_SERVICE_KEY')
+                    
+                    if not supabase_url:
+                        logger.error("❌ SUPABASE_URL environment variable not set")
+                        _supabase_loaded = True
+                        supabase = None
+                        return None
+                    
+                    if not service_key:
+                        logger.error("❌ SUPABASE_SERVICE_ROLE_KEY or SUPABASE_SERVICE_KEY environment variable not set")
+                        _supabase_loaded = True
+                        supabase = None
+                        return None
+                    
                     # Import directly from this module to avoid circular imports
                     supabase = get_supabase_client()
                     _supabase_loaded = True
                     logger.info("✅ Supabase client lazy-loaded on first use")
                 except Exception as e:
-                    logger.warning(f"⚠️ Failed to lazy-load Supabase client: {e}")
+                    logger.error(f"❌ Failed to lazy-load Supabase client: {e}", exc_info=True)
                     _supabase_loaded = True  # Mark as attempted to avoid repeated retries
                     supabase = None
     
