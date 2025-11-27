@@ -8496,15 +8496,18 @@ async def chat_endpoint(request: dict):
                 detail="Chat service is temporarily unavailable. Please contact support. (Missing GROQ_API_KEY)"
             )
         
-        print(f"[CHAT ENDPOINT] Loading Supabase client...", flush=True)
-        supabase_client = await _ensure_supabase_loaded()
-        if not supabase_client:
-            print(f"[CHAT ENDPOINT] Supabase client failed to load", flush=True)
+        print(f"[CHAT ENDPOINT] Getting lazy Supabase client...", flush=True)
+        try:
+            # Get lazy client - returns immediately without connecting
+            from supabase_client import get_supabase_client
+            supabase_client = get_supabase_client()
+            print(f"[CHAT ENDPOINT] Lazy Supabase client obtained (will connect on first use)", flush=True)
+        except Exception as e:
+            print(f"[CHAT ENDPOINT] Failed to get Supabase client: {e}", flush=True)
             raise HTTPException(
                 status_code=503,
                 detail="Database service is temporarily unavailable. Please try again in a moment."
             )
-        print(f"[CHAT ENDPOINT] Supabase client loaded successfully", flush=True)
         
         # Initialize orchestrator (uses Groq internally, no openai_client needed)
         try:
