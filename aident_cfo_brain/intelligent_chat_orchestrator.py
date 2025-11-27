@@ -21,6 +21,7 @@ import structlog
 import json
 import os
 import sys
+import importlib.util
 from datetime import datetime, timedelta
 from typing import Dict, Any, List, Optional, Tuple
 from enum import Enum
@@ -42,6 +43,19 @@ _root_dir = os.path.dirname(_parent_dir)
 for _path in [_current_dir, _parent_dir, _root_dir, '/app']:
     if _path and _path not in sys.path:
         sys.path.insert(0, _path)
+
+# Helper function to load modules from specific file paths
+def _load_module_from_path(module_name: str, file_path: str):
+    """Load a module from a specific file path using importlib"""
+    if not os.path.exists(file_path):
+        raise ImportError(f"Module file not found: {file_path}")
+    spec = importlib.util.spec_from_file_location(module_name, file_path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"Cannot load spec for {module_name} from {file_path}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    return module
 
 # FIX #16: Use absolute imports with try/except fallbacks for different deployment layouts
 # Supports both: package layout (aident_cfo_brain.module) and flat layout (module)
@@ -66,27 +80,52 @@ except ImportError as e1:
         from enhanced_relationship_detector import EnhancedRelationshipDetector
         logger.debug("✓ Tier 2: Flat layout imports successful (module)")
     except ImportError as e2:
-        logger.debug(f"✗ Tier 2 failed: {e2}. Trying Tier 3 (direct import)...")
-        # Final fallback: import from current directory (aident_cfo_brain/)
-        # This handles the case where the module is imported directly
+        logger.debug(f"✗ Tier 2 failed: {e2}. Trying Tier 3 (direct file load)...")
+        # Final fallback: Load directly from file paths using importlib
+        # This handles Railway deployments where files are in /app
         try:
-            import finley_graph_engine as _fge
-            import aident_memory_manager as _amm
-            import causal_inference_engine as _cie
-            import temporal_pattern_learner as _tpl
-            import enhanced_relationship_detector as _erd
+            _module_paths = [
+                ('finley_graph_engine', [os.path.join(_current_dir, 'finley_graph_engine.py'), 
+                                         os.path.join(_parent_dir, 'finley_graph_engine.py'),
+                                         '/app/finley_graph_engine.py']),
+                ('aident_memory_manager', [os.path.join(_current_dir, 'aident_memory_manager.py'),
+                                          os.path.join(_parent_dir, 'aident_memory_manager.py'),
+                                          '/app/aident_memory_manager.py']),
+                ('causal_inference_engine', [os.path.join(_current_dir, 'causal_inference_engine.py'),
+                                            os.path.join(_parent_dir, 'causal_inference_engine.py'),
+                                            '/app/causal_inference_engine.py']),
+                ('temporal_pattern_learner', [os.path.join(_current_dir, 'temporal_pattern_learner.py'),
+                                             os.path.join(_parent_dir, 'temporal_pattern_learner.py'),
+                                             '/app/temporal_pattern_learner.py']),
+                ('enhanced_relationship_detector', [os.path.join(_current_dir, 'enhanced_relationship_detector.py'),
+                                                   os.path.join(_parent_dir, 'enhanced_relationship_detector.py'),
+                                                   '/app/enhanced_relationship_detector.py']),
+            ]
             
-            FinleyGraphEngine = _fge.FinleyGraphEngine
-            AidentMemoryManager = _amm.AidentMemoryManager
-            CausalInferenceEngine = _cie.CausalInferenceEngine
-            TemporalPatternLearner = _tpl.TemporalPatternLearner
-            EnhancedRelationshipDetector = _erd.EnhancedRelationshipDetector
-            logger.debug("✓ Tier 3: Direct imports successful (current directory)")
+            _modules = {}
+            for _mod_name, _paths in _module_paths:
+                _loaded = False
+                for _path in _paths:
+                    try:
+                        _modules[_mod_name] = _load_module_from_path(_mod_name, _path)
+                        _loaded = True
+                        break
+                    except (ImportError, FileNotFoundError):
+                        continue
+                if not _loaded:
+                    raise ImportError(f"Could not find {_mod_name} in any of {_paths}")
+            
+            FinleyGraphEngine = _modules['finley_graph_engine'].FinleyGraphEngine
+            AidentMemoryManager = _modules['aident_memory_manager'].AidentMemoryManager
+            CausalInferenceEngine = _modules['causal_inference_engine'].CausalInferenceEngine
+            TemporalPatternLearner = _modules['temporal_pattern_learner'].TemporalPatternLearner
+            EnhancedRelationshipDetector = _modules['enhanced_relationship_detector'].EnhancedRelationshipDetector
+            logger.debug("✓ Tier 3: Direct file load imports successful")
         except ImportError as e3:
             logger.error(f"IMPORT FAILURE - All 3 tiers failed. Fix location: aident_cfo_brain/intelligent_chat_orchestrator.py lines 45-78")
             logger.error(f"Tier 1 (package layout): {e1}")
             logger.error(f"Tier 2 (flat layout): {e2}")
-            logger.error(f"Tier 3 (direct import): {e3}")
+            logger.error(f"Tier 3 (direct file load): {e3}")
             logger.error(f"sys.path includes: {sys.path[:3]}")
             raise
 
