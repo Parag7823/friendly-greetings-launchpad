@@ -8445,8 +8445,11 @@ async def chat_endpoint(request: dict):
         
         structured_logger.info("Chat request received", user_id=user_id, chat_id=chat_id, message_length=len(message))
         
-        # Initialize intelligent chat orchestrator
-        from intelligent_chat_orchestrator import IntelligentChatOrchestrator
+        # FIX #16: Import IntelligentChatOrchestrator with fallback for different deployment layouts
+        try:
+            from aident_cfo_brain.intelligent_chat_orchestrator import IntelligentChatOrchestrator
+        except ImportError:
+            from intelligent_chat_orchestrator import IntelligentChatOrchestrator
         
         # Note: Now using Groq/Llama instead of Anthropic for chat
         # Check for Groq API key
@@ -8535,8 +8538,11 @@ async def chat_health_check():
                 "available_env_vars": sorted([k for k in os.environ.keys() if 'GROQ' in k.upper()])
             }
         
-        # Try to initialize orchestrator
-        from intelligent_chat_orchestrator import IntelligentChatOrchestrator
+        # FIX #16: Import IntelligentChatOrchestrator with fallback for different deployment layouts
+        try:
+            from aident_cfo_brain.intelligent_chat_orchestrator import IntelligentChatOrchestrator
+        except ImportError:
+            from intelligent_chat_orchestrator import IntelligentChatOrchestrator
         
         try:
             # CRITICAL FIX: Lazy-load Supabase client on first use
