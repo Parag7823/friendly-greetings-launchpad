@@ -92,13 +92,37 @@ class SupabaseConnectionPool:
             # Supabase Python client uses httpx which supports connection pooling via limits
             # The pool_size, pool_timeout, and pool_recycle are passed via environment
             # and httpx automatically respects them
-            client = create_client(url, key)
+            
+            # FIX #2: Wrap client creation in a thread with timeout to prevent hangs
+            # The Supabase client may hang if network is slow or Supabase is unreachable
+            import threading
+            client_holder = {'client': None, 'error': None}
+            
+            def create_client_thread():
+                try:
+                    client_holder['client'] = create_client(url, key)
+                except Exception as e:
+                    client_holder['error'] = e
+            
+            thread = threading.Thread(target=create_client_thread, daemon=True)
+            thread.start()
+            thread.join(timeout=10.0)  # 10 second timeout for client creation
+            
+            if thread.is_alive():
+                logger.error(f"⏱️ Supabase client creation timed out after 10 seconds - network may be slow or Supabase unreachable")
+                raise TimeoutError("Supabase client creation timed out after 10 seconds")
+            
+            if client_holder['error']:
+                raise client_holder['error']
+            
+            if not client_holder['client']:
+                raise RuntimeError("Failed to create Supabase client - no error but client is None")
             
             # Log pooling configuration for debugging
             logger.debug(f"Created Supabase client: service_role={use_service_role}, pgbouncer={self.use_pgbouncer}, "
                         f"pool_size={self.pool_size}, pool_timeout={self.pool_timeout}s, pool_recycle={self.pool_recycle}s")
             
-            return client
+            return client_holder['client']
             
         except Exception as e:
             logger.error(f"Failed to create pooled Supabase client: {e}")
