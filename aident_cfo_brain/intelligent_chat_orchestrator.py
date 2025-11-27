@@ -788,7 +788,8 @@ Question: {question}"""
         self,
         question: str,
         user_id: str,
-        context: Optional[Dict[str, Any]]
+        context: Optional[Dict[str, Any]] = None,
+        conversation_history: list[Dict[str, str]] = None
     ) -> ChatResponse:
         """
         Handle temporal questions using the Temporal Pattern Learner.
@@ -841,7 +842,8 @@ Question: {question}"""
         self,
         question: str,
         user_id: str,
-        context: Optional[Dict[str, Any]]
+        context: Optional[Dict[str, Any]] = None,
+        conversation_history: list[Dict[str, str]] = None
     ) -> ChatResponse:
         """
         Handle relationship questions using the Relationship Detector.
@@ -903,7 +905,8 @@ Question: {question}"""
         self,
         question: str,
         user_id: str,
-        context: Optional[Dict[str, Any]]
+        context: Optional[Dict[str, Any]] = None,
+        conversation_history: list[Dict[str, str]] = None
     ) -> ChatResponse:
         """
         Handle what-if questions using Counterfactual Analysis.
@@ -942,7 +945,8 @@ Question: {question}"""
         self,
         question: str,
         user_id: str,
-        context: Optional[Dict[str, Any]]
+        context: Optional[Dict[str, Any]] = None,
+        conversation_history: list[Dict[str, str]] = None
     ) -> ChatResponse:
         """
         Handle explain questions using Provenance Tracking.
@@ -1003,7 +1007,8 @@ Question: {question}"""
         self,
         question: str,
         user_id: str,
-        context: Optional[Dict[str, Any]]
+        context: Optional[Dict[str, Any]] = None,
+        conversation_history: list[Dict[str, str]] = None
     ) -> ChatResponse:
         """
         Handle data query questions.

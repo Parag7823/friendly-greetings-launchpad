@@ -47,6 +47,9 @@ from aiocache.serializers import PickleSerializer
 # from pyod.models.iforest import IForest
 # from pyod.models.lof import LOF
 
+# Model explainability (ENHANCEMENT #11)
+# import shap
+
 # Forecasting (NEW CAPABILITY - replaces nothing, adds forecasting)
 # from prophet import Prophet
 
@@ -1006,18 +1009,45 @@ class TemporalPatternLearner:
             anomaly_labels = clf.labels_  # 0 = normal, 1 = anomaly
             anomaly_scores = clf.decision_scores_  # Higher = more anomalous
             
+            # ENHANCEMENT #11: Use SHAP to explain anomalies (if available)
+            shap_values = None
+            try:
+                import shap
+                if algorithm == 'iforest':
+                    # TreeExplainer is fastest for IForest
+                    explainer = shap.TreeExplainer(clf)
+                    shap_values = explainer.shap_values(X)
+                    logger.info("SHAP TreeExplainer initialized for IForest anomaly explanation")
+            except Exception as e:
+                logger.warning(f"SHAP explanation not available for anomalies: {e}")
+            
             # Build anomaly results
             anomalies = []
             for i, (data, label, score) in enumerate(zip(timing_data, anomaly_labels, anomaly_scores)):
                 if label == 1:  # Is anomaly
-                    anomalies.append({
+                    anomaly_dict = {
                         'relationship_id': data['relationship_id'],
                         'relationship_type': data['relationship_type'],
                         'days_between': data['days_between'],
                         'anomaly_score': float(score),
                         'algorithm': algorithm,
                         'description': f"{data['relationship_type']} took {data['days_between']:.1f} days (anomaly score: {score:.2f})"
-                    })
+                    }
+                    
+                    # ENHANCEMENT #11: Add SHAP explanation if available
+                    if shap_values is not None:
+                        try:
+                            anomaly_dict['shap_value'] = float(shap_values[i][0])
+                            anomaly_dict['shap_explanation'] = {
+                                'feature': 'days_between',
+                                'shap_value': float(shap_values[i][0]),
+                                'base_value': float(explainer.expected_value) if hasattr(explainer, 'expected_value') else 0.0,
+                                'interpretation': f"Days between events ({data['days_between']:.1f}) contributed {abs(float(shap_values[i][0])):.3f} to anomaly score"
+                            }
+                        except Exception as e:
+                            logger.debug(f"Failed to add SHAP explanation for anomaly {data['relationship_id']}: {e}")
+                    
+                    anomalies.append(anomaly_dict)
             
             logger.info(f"✅ PyOD detected {len(anomalies)} anomalies using {algorithm}")
             

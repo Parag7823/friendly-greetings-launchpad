@@ -58,7 +58,7 @@ export const ChatInputMicroInteractions: React.FC<ChatInputMicroInteractionsProp
       {/* Chat Input Container with Glassmorphism */}
       <div
         className={`
-          relative rounded-lg border transition-all duration-300
+          relative rounded-lg border transition-all duration-300 mt-2
           ${isFocused || isTyping
             ? 'border-primary/60 shadow-lg shadow-primary/20'
             : 'border-slate-700/50 shadow-md shadow-primary/10'
@@ -132,11 +132,6 @@ export const ChatInputMicroInteractions: React.FC<ChatInputMicroInteractionsProp
           </div>
         )}
       </div>
-
-      {/* Helper Text */}
-      <p className="mt-3 text-xs font-medium text-slate-600 text-center">
-        Press <kbd className="px-2 py-1 bg-slate-800 border border-slate-700 rounded text-xs font-mono">Enter</kbd> to send, <kbd className="px-2 py-1 bg-slate-800 border border-slate-700 rounded text-xs font-mono">Shift+Enter</kbd> for new line
-      </p>
     </div>
   );
 };

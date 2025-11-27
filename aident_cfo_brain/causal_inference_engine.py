@@ -33,6 +33,10 @@ try:
 except ImportError:
     GradientBoostingRegressor = None
     GradientBoostingClassifier = None
+try:
+    import shap
+except ImportError:
+    shap = None
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any, Tuple, Set
 from dataclasses import dataclass, asdict
@@ -276,6 +280,11 @@ class CausalInferenceEngine:
                 'threshold_used': self.config['causal_threshold']
             }
             
+            # ENHANCEMENT #11: Add SHAP explanation for causal score
+            shap_explanation = self._explain_causal_score_with_shap(bradford_hill_scores)
+            if shap_explanation:
+                criteria_details['shap_explanation'] = shap_explanation
+            
             return CausalRelationship(
                 relationship_id=rel_id,
                 source_event_id=source_id,
@@ -312,6 +321,85 @@ class CausalInferenceEngine:
                 return CausalDirection.SOURCE_TO_TARGET  # Default based on temporal precedence
         
         return CausalDirection.NONE
+    
+    def _explain_causal_score_with_shap(
+        self,
+        bradford_hill_scores: BradfordHillScores
+    ) -> Optional[Dict[str, Any]]:
+        """
+        ENHANCEMENT #11: Use SHAP to explain which Bradford Hill criteria drove the causal score.
+        
+        Shows feature importance: which criteria matter most for causality decision.
+        
+        Returns:
+            Dictionary with SHAP explanations or None if SHAP not available
+        """
+        if not shap:
+            logger.warning("SHAP not installed, skipping causal score explanation")
+            return None
+        
+        try:
+            # Convert Bradford Hill scores to array
+            scores_array = np.array([[
+                bradford_hill_scores.temporal_precedence,
+                bradford_hill_scores.strength,
+                bradford_hill_scores.consistency,
+                bradford_hill_scores.specificity,
+                bradford_hill_scores.dose_response,
+                bradford_hill_scores.plausibility
+            ]])
+            
+            # Feature names
+            feature_names = [
+                'Temporal Precedence',
+                'Strength',
+                'Consistency',
+                'Specificity',
+                'Dose Response',
+                'Plausibility'
+            ]
+            
+            # Create simple model: average of scores
+            def model_func(x):
+                return x.mean(axis=1)
+            
+            # Create SHAP explainer with background data
+            background_data = shap.sample(scores_array, min(100, len(scores_array)))
+            explainer = shap.KernelExplainer(model_func, background_data)
+            
+            # Get SHAP values
+            shap_values = explainer.shap_values(scores_array)
+            
+            # Normalize SHAP values to percentages
+            shap_sum = np.abs(shap_values[0]).sum()
+            if shap_sum > 0:
+                shap_percentages = (np.abs(shap_values[0]) / shap_sum * 100).tolist()
+            else:
+                shap_percentages = [0] * len(feature_names)
+            
+            # Build explanation
+            explanation = {
+                'shap_values': shap_values[0].tolist(),
+                'shap_percentages': shap_percentages,
+                'feature_names': feature_names,
+                'base_value': float(explainer.expected_value),
+                'feature_importance': dict(zip(feature_names, shap_percentages)),
+                'top_3_factors': sorted(
+                    zip(feature_names, shap_percentages),
+                    key=lambda x: x[1],
+                    reverse=True
+                )[:3]
+            }
+            
+            logger.info("SHAP explanation generated for causal score", 
+                       causal_score=bradford_hill_scores.causal_score,
+                       top_factor=explanation['top_3_factors'][0][0])
+            
+            return explanation
+            
+        except Exception as e:
+            logger.warning(f"Failed to generate SHAP explanation for causal score: {e}")
+            return None
     
     async def perform_root_cause_analysis(
         self,

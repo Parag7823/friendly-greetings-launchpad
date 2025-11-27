@@ -151,3 +151,7 @@ pytest>=7.0.0
 pytest-bdd>=6.0.0
 pytest-asyncio>=0.21.0
 pytest-cov>=4.0.0
+
+# Model Explainability (SHAP) - ENHANCEMENT #11
+# Explains WHY models make predictions (feature importance)
+shap==0.43.0  # SHAP values for model interpretability (local library, no API key needed)
