@@ -8506,7 +8506,7 @@ async def chat_endpoint(request: dict):
             
             supabase_client = await asyncio.wait_for(
                 asyncio.to_thread(get_client_sync),
-                timeout=2.0
+                timeout=5.0
             )
             print(f"[CHAT ENDPOINT] Lazy Supabase client obtained (will connect on first use)", flush=True)
         except asyncio.TimeoutError:
