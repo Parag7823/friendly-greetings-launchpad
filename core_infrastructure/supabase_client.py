@@ -18,6 +18,7 @@ import structlog
 from typing import Optional
 from supabase import create_client, Client
 import threading
+import signal
 
 logger = structlog.get_logger(__name__)
 
