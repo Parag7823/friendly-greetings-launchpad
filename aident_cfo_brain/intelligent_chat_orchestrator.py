@@ -32,10 +32,12 @@ from groq import AsyncGroq  # CHANGED: Using Groq instead of Anthropic
 # This ensures modules in aident_cfo_brain/ can be imported regardless of how the module is loaded
 _current_dir = os.path.dirname(os.path.abspath(__file__))
 _parent_dir = os.path.dirname(_current_dir)
-if _parent_dir not in sys.path:
-    sys.path.insert(0, _parent_dir)
-if _current_dir not in sys.path:
-    sys.path.insert(0, _current_dir)
+_root_dir = os.path.dirname(_parent_dir)
+
+# Add all potential paths to sys.path
+for _path in [_root_dir, _parent_dir, _current_dir]:
+    if _path not in sys.path:
+        sys.path.insert(0, _path)
 
 # FIX #16: Use absolute imports with try/except fallbacks for different deployment layouts
 # Supports both: package layout (aident_cfo_brain.module) and flat layout (module)
@@ -47,29 +49,33 @@ try:
     from aident_cfo_brain.causal_inference_engine import CausalInferenceEngine
     from aident_cfo_brain.temporal_pattern_learner import TemporalPatternLearner
     from aident_cfo_brain.enhanced_relationship_detector import EnhancedRelationshipDetector
-except ImportError:
+except ImportError as e1:
     try:
         # Fallback to flat layout (Railway deployment or direct module import)
-        # sys.path now includes current directory, so these should work
+        # sys.path now includes current directory and root, so these should work
         from finley_graph_engine import FinleyGraphEngine
         from aident_memory_manager import AidentMemoryManager
         from causal_inference_engine import CausalInferenceEngine
         from temporal_pattern_learner import TemporalPatternLearner
         from enhanced_relationship_detector import EnhancedRelationshipDetector
-    except ImportError:
+    except ImportError as e2:
         # Final fallback: import from current directory (aident_cfo_brain/)
         # This handles the case where the module is imported directly
-        import finley_graph_engine as _fge
-        import aident_memory_manager as _amm
-        import causal_inference_engine as _cie
-        import temporal_pattern_learner as _tpl
-        import enhanced_relationship_detector as _erd
-        
-        FinleyGraphEngine = _fge.FinleyGraphEngine
-        AidentMemoryManager = _amm.AidentMemoryManager
-        CausalInferenceEngine = _cie.CausalInferenceEngine
-        TemporalPatternLearner = _tpl.TemporalPatternLearner
-        EnhancedRelationshipDetector = _erd.EnhancedRelationshipDetector
+        try:
+            import finley_graph_engine as _fge
+            import aident_memory_manager as _amm
+            import causal_inference_engine as _cie
+            import temporal_pattern_learner as _tpl
+            import enhanced_relationship_detector as _erd
+            
+            FinleyGraphEngine = _fge.FinleyGraphEngine
+            AidentMemoryManager = _amm.AidentMemoryManager
+            CausalInferenceEngine = _cie.CausalInferenceEngine
+            TemporalPatternLearner = _tpl.TemporalPatternLearner
+            EnhancedRelationshipDetector = _erd.EnhancedRelationshipDetector
+        except ImportError as e3:
+            logger.error(f"Failed to import core modules. Errors: {e1}, {e2}, {e3}")
+            raise
 
 try:
     from data_ingestion_normalization.entity_resolver_optimized import EntityResolverOptimized as EntityResolver
