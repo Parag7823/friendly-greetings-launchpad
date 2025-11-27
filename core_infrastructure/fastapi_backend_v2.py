@@ -734,8 +734,20 @@ async def _ensure_supabase_loaded():
     """
     Async wrapper for lazy-loading Supabase client.
     Runs the synchronous loader in a thread pool to avoid blocking the event loop.
+    
+    FIX: Added 15-second timeout to prevent indefinite hangs if Supabase is unreachable.
     """
-    return await asyncio.to_thread(_ensure_supabase_loaded_sync)
+    try:
+        return await asyncio.wait_for(
+            asyncio.to_thread(_ensure_supabase_loaded_sync),
+            timeout=15.0
+        )
+    except asyncio.TimeoutError:
+        logger.error("⏱️ Supabase client loading timed out after 15 seconds")
+        return None
+    except Exception as e:
+        logger.error(f"❌ Failed to load Supabase client: {e}")
+        return None
 
 # CRITICAL FIX: Define SocketIOWebSocketManager class before lifespan function
 # This was previously at line 11665 but needs to be here to avoid forward reference error

@@ -315,13 +315,17 @@ class IntelligentChatOrchestrator:
         """
         try:
             logger.info("Processing question", question=question, user_id=user_id, chat_id=chat_id)
+            print(f"[ORCHESTRATOR] Starting process_question for user {user_id}", flush=True)
             
             # Step 0a: Initialize per-user memory manager (isolated, no cross-user contamination)
+            print(f"[ORCHESTRATOR] Initializing memory manager...", flush=True)
             memory_manager = AidentMemoryManager(
                 user_id=user_id,
                 redis_url=os.getenv('ARQ_REDIS_URL') or os.getenv('REDIS_URL')
             )
+            print(f"[ORCHESTRATOR] Loading memory...", flush=True)
             await memory_manager.load_memory()
+            print(f"[ORCHESTRATOR] Memory loaded successfully", flush=True)
             
             # Step 0b: Load conversation history for context
             conversation_history = await self._load_conversation_history(user_id, chat_id) if chat_id else []
@@ -442,6 +446,7 @@ Question: {question}"""
             
             try:
                 # Call AsyncGroq with timeout
+                print(f"[CLASSIFY] Calling Groq API...", flush=True)
                 response = await asyncio.wait_for(
                     self.groq.chat.completions.create(
                         model="llama-3.3-70b-versatile",
@@ -455,10 +460,13 @@ Question: {question}"""
                     ),
                     timeout=30.0  # 30 second timeout on the async operation
                 )
+                print(f"[CLASSIFY] Groq API response received", flush=True)
             except asyncio.TimeoutError:
+                print(f"[CLASSIFY] Groq API call timed out after 30 seconds", flush=True)
                 logger.error("Groq API call timed out after 30 seconds")
                 return QuestionType.UNKNOWN, 0.0
             except Exception as api_error:
+                print(f"[CLASSIFY] Groq API error: {api_error}", flush=True)
                 logger.error("Groq API error during classification", error=str(api_error), error_type=type(api_error).__name__)
                 return QuestionType.UNKNOWN, 0.0
             

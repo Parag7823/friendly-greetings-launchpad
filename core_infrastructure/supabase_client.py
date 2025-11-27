@@ -17,7 +17,6 @@ import os
 import structlog
 from typing import Optional
 from supabase import create_client, Client
-from functools import lru_cache
 import threading
 
 logger = structlog.get_logger(__name__)
@@ -127,7 +126,6 @@ def get_connection_pool() -> SupabaseConnectionPool:
     return _pool_instance
 
 
-@lru_cache(maxsize=1)
 def get_supabase_client(use_service_role: bool = True) -> Client:
     """
     Get a pooled Supabase client (singleton pattern).
@@ -197,21 +195,31 @@ def get_pool_statistics() -> dict:
 # FIX #1: Backward compatibility with proper lazy-loading
 # This allows existing code to work without changes, but defers connection until first use
 supabase = None  # Will be loaded on first access via _get_default_supabase_client()
+_supabase_loaded = False  # Track if we've attempted to load the client
+_supabase_lock = threading.Lock()  # Lock for thread-safe loading
 
-def _get_default_supabase_client():
+def _ensure_supabase_loaded_sync():
     """
-    Lazy load default Supabase client on first use.
+    Synchronous helper to lazy-load Supabase client on first use.
+    This allows the application to start even if Supabase is temporarily unavailable,
+    and initializes the connection only when actually needed.
     
-    FIX #1: This function now properly initializes the global supabase variable
-    with a pooled client instance, ensuring connection pooling is used throughout
-    the application.
+    FIX: Removed lru_cache from get_supabase_client() to prevent async hangs.
+    Using manual singleton pattern with threading lock instead.
     """
-    global supabase
-    if supabase is None:
-        try:
-            supabase = get_supabase_client()
-            logger.info("✅ Default Supabase client initialized on first use with connection pooling")
-        except Exception as e:
-            logger.warning(f"Failed to initialize default Supabase client: {e}")
-            supabase = None
+    global supabase, _supabase_loaded
+    
+    if not _supabase_loaded:
+        with _supabase_lock:
+            if not _supabase_loaded:
+                try:
+                    # Import directly from this module to avoid circular imports
+                    supabase = get_supabase_client()
+                    _supabase_loaded = True
+                    logger.info("✅ Supabase client lazy-loaded on first use")
+                except Exception as e:
+                    logger.warning(f"⚠️ Failed to lazy-load Supabase client: {e}")
+                    _supabase_loaded = True  # Mark as attempted to avoid repeated retries
+                    supabase = None
+    
     return supabase
