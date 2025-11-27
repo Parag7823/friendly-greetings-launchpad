@@ -84,24 +84,53 @@ except ImportError as e1:
         # Final fallback: Load directly from file paths using importlib
         # This handles Railway deployments where files are in various locations
         try:
-            # Build list of potential search directories
-            _search_dirs = [
-                _current_dir,  # aident_cfo_brain/
-                _parent_dir,   # project root
-                _root_dir,     # /
-                '/app',        # Railway default
-                '/app/src',    # Railway src structure
-                '/app/aident_cfo_brain',  # Railway with package structure
-                os.getcwd(),   # current working directory
-            ]
-            _search_dirs = [d for d in _search_dirs if d and os.path.isdir(d)]  # Filter valid dirs
-            
+            # Build list of potential file paths (don't filter - let os.path.exists handle it)
             _module_paths = [
-                ('finley_graph_engine', [os.path.join(d, 'finley_graph_engine.py') for d in _search_dirs]),
-                ('aident_memory_manager', [os.path.join(d, 'aident_memory_manager.py') for d in _search_dirs]),
-                ('causal_inference_engine', [os.path.join(d, 'causal_inference_engine.py') for d in _search_dirs]),
-                ('temporal_pattern_learner', [os.path.join(d, 'temporal_pattern_learner.py') for d in _search_dirs]),
-                ('enhanced_relationship_detector', [os.path.join(d, 'enhanced_relationship_detector.py') for d in _search_dirs]),
+                ('finley_graph_engine', [
+                    os.path.join(_current_dir, 'finley_graph_engine.py'),
+                    os.path.join(_parent_dir, 'finley_graph_engine.py'),
+                    os.path.join(_root_dir, 'finley_graph_engine.py'),
+                    '/app/finley_graph_engine.py',
+                    '/app/src/finley_graph_engine.py',
+                    '/app/aident_cfo_brain/finley_graph_engine.py',
+                    os.path.join(os.getcwd(), 'finley_graph_engine.py'),
+                ]),
+                ('aident_memory_manager', [
+                    os.path.join(_current_dir, 'aident_memory_manager.py'),
+                    os.path.join(_parent_dir, 'aident_memory_manager.py'),
+                    os.path.join(_root_dir, 'aident_memory_manager.py'),
+                    '/app/aident_memory_manager.py',
+                    '/app/src/aident_memory_manager.py',
+                    '/app/aident_cfo_brain/aident_memory_manager.py',
+                    os.path.join(os.getcwd(), 'aident_memory_manager.py'),
+                ]),
+                ('causal_inference_engine', [
+                    os.path.join(_current_dir, 'causal_inference_engine.py'),
+                    os.path.join(_parent_dir, 'causal_inference_engine.py'),
+                    os.path.join(_root_dir, 'causal_inference_engine.py'),
+                    '/app/causal_inference_engine.py',
+                    '/app/src/causal_inference_engine.py',
+                    '/app/aident_cfo_brain/causal_inference_engine.py',
+                    os.path.join(os.getcwd(), 'causal_inference_engine.py'),
+                ]),
+                ('temporal_pattern_learner', [
+                    os.path.join(_current_dir, 'temporal_pattern_learner.py'),
+                    os.path.join(_parent_dir, 'temporal_pattern_learner.py'),
+                    os.path.join(_root_dir, 'temporal_pattern_learner.py'),
+                    '/app/temporal_pattern_learner.py',
+                    '/app/src/temporal_pattern_learner.py',
+                    '/app/aident_cfo_brain/temporal_pattern_learner.py',
+                    os.path.join(os.getcwd(), 'temporal_pattern_learner.py'),
+                ]),
+                ('enhanced_relationship_detector', [
+                    os.path.join(_current_dir, 'enhanced_relationship_detector.py'),
+                    os.path.join(_parent_dir, 'enhanced_relationship_detector.py'),
+                    os.path.join(_root_dir, 'enhanced_relationship_detector.py'),
+                    '/app/enhanced_relationship_detector.py',
+                    '/app/src/enhanced_relationship_detector.py',
+                    '/app/aident_cfo_brain/enhanced_relationship_detector.py',
+                    os.path.join(os.getcwd(), 'enhanced_relationship_detector.py'),
+                ]),
             ]
             
             _modules = {}
