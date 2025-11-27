@@ -440,15 +440,23 @@ Respond with ONLY JSON: {{"type": "question_type", "confidence": 0.0-1.0, "reaso
 
 Question: {question}"""
             
-            response = await self.groq.chat.completions.create(
-                model="llama-3.3-70b-versatile",
-                messages=[
-                    {"role": "system", "content": prompt},
-                    *messages
-                ],
-                max_tokens=150,
-                temperature=0.1
-            )
+            try:
+                # Add timeout to prevent hanging indefinitely
+                response = await asyncio.wait_for(
+                    self.groq.chat.completions.create(
+                        model="llama-3.3-70b-versatile",
+                        messages=[
+                            {"role": "system", "content": prompt},
+                            *messages
+                        ],
+                        max_tokens=150,
+                        temperature=0.1
+                    ),
+                    timeout=30.0  # 30 second timeout
+                )
+            except asyncio.TimeoutError:
+                logger.error("Groq API call timed out after 30 seconds")
+                return QuestionType.UNKNOWN, 0.0
             
             result = json.loads(response.choices[0].message.content)
             question_type_str = result.get('type', 'unknown')
