@@ -327,8 +327,18 @@ class IntelligentChatOrchestrator:
             await memory_manager.load_memory()
             print(f"[ORCHESTRATOR] Memory loaded successfully", flush=True)
             
-            # Step 0b: Load conversation history for context
-            conversation_history = await self._load_conversation_history(user_id, chat_id) if chat_id else []
+            # Step 0b: Load conversation history for context (with timeout to prevent hangs)
+            try:
+                conversation_history = await asyncio.wait_for(
+                    self._load_conversation_history(user_id, chat_id) if chat_id else asyncio.sleep(0),
+                    timeout=5.0
+                ) if chat_id else []
+            except asyncio.TimeoutError:
+                logger.warning("⏱️ Conversation history loading timed out - proceeding without history")
+                conversation_history = []
+            except Exception as e:
+                logger.warning(f"⚠️ Failed to load conversation history: {e} - proceeding without history")
+                conversation_history = []
             
             # Step 1: Classify the question type (with memory context + conversation history)
             memory_context = memory_manager.get_context()
