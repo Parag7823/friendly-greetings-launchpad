@@ -733,21 +733,15 @@ def _ensure_supabase_loaded_sync():
 async def _ensure_supabase_loaded():
     """
     Async wrapper for lazy-loading Supabase client.
-    Runs the synchronous loader in a thread pool to avoid blocking the event loop.
     
-    FIX: Added 12-second timeout to prevent indefinite hangs if Supabase is unreachable.
-    (Client creation itself has 10-second timeout, plus 2 seconds for overhead)
+    NUCLEAR FIX: Returns immediately with lazy client that defers connection until first API call.
+    No timeout needed since we're not actually connecting during this call.
     """
     try:
-        return await asyncio.wait_for(
-            asyncio.to_thread(_ensure_supabase_loaded_sync),
-            timeout=12.0
-        )
-    except asyncio.TimeoutError:
-        logger.error("⏱️ Supabase client loading timed out after 12 seconds - network may be slow or Supabase unreachable")
-        return None
+        # This returns immediately with a lazy proxy client
+        return await asyncio.to_thread(_ensure_supabase_loaded_sync)
     except Exception as e:
-        logger.error(f"❌ Failed to load Supabase client: {e}")
+        logger.error(f"❌ Failed to create lazy Supabase client: {e}")
         return None
 
 # CRITICAL FIX: Define SocketIOWebSocketManager class before lifespan function

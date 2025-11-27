@@ -189,19 +189,53 @@ def get_connection_pool() -> SupabaseConnectionPool:
     return _pool_instance
 
 
+class LazySupabaseClient:
+    """
+    NUCLEAR FIX: Lazy proxy client that defers connection until first actual use.
+    This prevents timeouts during initialization.
+    """
+    def __init__(self, url: str, key: str):
+        self.url = url
+        self.key = key
+        self._real_client = None
+        self._connecting = False
+        self._connect_lock = threading.Lock()
+    
+    def _ensure_connected(self):
+        """Lazily connect on first actual API call"""
+        if self._real_client is None and not self._connecting:
+            with self._connect_lock:
+                if self._real_client is None:
+                    try:
+                        self._connecting = True
+                        logger.info(f"🔗 Lazy-connecting to Supabase on first use...")
+                        self._real_client = create_client(self.url, self.key)
+                        logger.info(f"✅ Lazy-connected to Supabase successfully")
+                    except Exception as e:
+                        logger.error(f"❌ Failed to connect to Supabase on first use: {e}")
+                        raise
+                    finally:
+                        self._connecting = False
+    
+    def __getattr__(self, name):
+        """Proxy all attribute access to real client, connecting if needed"""
+        self._ensure_connected()
+        return getattr(self._real_client, name)
+
+
 def get_supabase_client(use_service_role: bool = True) -> Client:
     """
-    Get a pooled Supabase client (singleton pattern).
+    Get a pooled Supabase client (singleton pattern with lazy connection).
     
-    CRITICAL FIX: This replaces direct create_client() calls throughout the codebase.
-    Uses connection pooling to prevent "too many connections" errors.
+    NUCLEAR FIX: Returns a lazy proxy that defers connection until first actual use.
+    This prevents timeouts during initialization - the chat endpoint responds immediately.
     
     Args:
         use_service_role: If True, uses service role key (bypasses RLS).
                         If False, uses anon key (respects RLS).
     
     Returns:
-        Pooled Supabase client instance
+        Lazy Supabase client instance (connects on first API call)
     
     Usage:
         # In your code, replace:
@@ -209,7 +243,7 @@ def get_supabase_client(use_service_role: bool = True) -> Client:
         
         # With:
         from supabase_client import get_supabase_client
-        supabase = get_supabase_client()
+        supabase = get_supabase_client()  # Returns immediately, connects on first use
     """
     global _client_instance
     
@@ -217,8 +251,13 @@ def get_supabase_client(use_service_role: bool = True) -> Client:
         with _client_lock:
             if _client_instance is None:
                 pool = get_connection_pool()
-                _client_instance = pool.create_pooled_client(use_service_role=use_service_role)
-                logger.info("✅ Initialized singleton Supabase client with connection pooling")
+                
+                # NUCLEAR FIX: Use lazy proxy instead of connecting immediately
+                key = pool.service_role_key if use_service_role else pool.anon_key
+                url = pool.pgbouncer_url if pool.use_pgbouncer and pool.pgbouncer_url else pool.supabase_url
+                
+                _client_instance = LazySupabaseClient(url, key)
+                logger.info("✅ Created lazy Supabase client (will connect on first use)")
     
     return _client_instance
 
@@ -263,12 +302,9 @@ _supabase_lock = threading.Lock()  # Lock for thread-safe loading
 
 def _ensure_supabase_loaded_sync():
     """
-    Synchronous helper to lazy-load Supabase client on first use.
-    This allows the application to start even if Supabase is temporarily unavailable,
-    and initializes the connection only when actually needed.
-    
-    FIX: Removed lru_cache from get_supabase_client() to prevent async hangs.
-    Using manual singleton pattern with threading lock instead.
+    NUCLEAR FIX: Synchronous helper that returns lazy Supabase client immediately.
+    The actual connection happens on first API call, not during initialization.
+    This allows the chat endpoint to respond immediately without waiting for network.
     """
     global supabase, _supabase_loaded
     
@@ -292,12 +328,12 @@ def _ensure_supabase_loaded_sync():
                         supabase = None
                         return None
                     
-                    # Import directly from this module to avoid circular imports
+                    # Get lazy client - returns immediately without connecting
                     supabase = get_supabase_client()
                     _supabase_loaded = True
-                    logger.info("✅ Supabase client lazy-loaded on first use")
+                    logger.info("✅ Lazy Supabase client created (will connect on first API call)")
                 except Exception as e:
-                    logger.error(f"❌ Failed to lazy-load Supabase client: {e}", exc_info=True)
+                    logger.error(f"❌ Failed to create lazy Supabase client: {e}", exc_info=True)
                     _supabase_loaded = True  # Mark as attempted to avoid repeated retries
                     supabase = None
     
