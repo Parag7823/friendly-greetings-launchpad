@@ -28,6 +28,9 @@ from dataclasses import dataclass
 import asyncio
 from groq import AsyncGroq  # CHANGED: Using Groq instead of Anthropic
 
+# Initialize logger early for use in import error handlers
+logger = structlog.get_logger(__name__)
+
 # FIX #16: Add parent directory to sys.path for imports to work in all deployment layouts
 # This ensures modules in aident_cfo_brain/ can be imported regardless of how the module is loaded
 _current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -86,8 +89,6 @@ try:
     from data_ingestion_normalization.embedding_service import EmbeddingService
 except ImportError:
     from embedding_service import EmbeddingService
-
-logger = structlog.get_logger(__name__)
 
 
 class QuestionType(Enum):
