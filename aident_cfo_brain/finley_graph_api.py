@@ -12,7 +12,8 @@ from pydantic import BaseModel, Field
 from supabase import Client
 import structlog
 
-from finley_graph_engine import FinleyGraphEngine, PathResult, GraphStats
+# FIX #15: Use relative imports for modules in same package
+from .finley_graph_engine import FinleyGraphEngine, PathResult, GraphStats
 from core_infrastructure.supabase_client import get_supabase_client
 
 logger = structlog.get_logger(__name__)
