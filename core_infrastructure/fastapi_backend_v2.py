@@ -8449,10 +8449,16 @@ async def chat_endpoint(request: dict):
     
     This is the brain of Finley AI that routes questions to intelligence engines.
     """
+    # CRITICAL: Log immediately on entry
+    print(f"[CHAT ENDPOINT] Request received at {datetime.utcnow().isoformat()}", flush=True)
+    structured_logger.info(" CHAT ENDPOINT CALLED - Request received")
+    
     try:
         message = request.get('message')
         user_id = request.get('user_id')
         chat_id = request.get('chat_id')
+        
+        print(f"[CHAT ENDPOINT] Parsed: message={bool(message)}, user_id={user_id}, chat_id={chat_id}", flush=True)
         
         if not message or not user_id:
             raise HTTPException(status_code=400, detail="Missing message or user_id")
