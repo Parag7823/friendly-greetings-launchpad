@@ -8499,9 +8499,22 @@ async def chat_endpoint(request: dict):
         print(f"[CHAT ENDPOINT] Getting lazy Supabase client...", flush=True)
         try:
             # Get lazy client - returns immediately without connecting
-            from supabase_client import get_supabase_client
-            supabase_client = get_supabase_client()
+            # Wrap in timeout to prevent hangs from connection pool initialization
+            def get_client_sync():
+                from supabase_client import get_supabase_client
+                return get_supabase_client()
+            
+            supabase_client = await asyncio.wait_for(
+                asyncio.to_thread(get_client_sync),
+                timeout=2.0
+            )
             print(f"[CHAT ENDPOINT] Lazy Supabase client obtained (will connect on first use)", flush=True)
+        except asyncio.TimeoutError:
+            print(f"[CHAT ENDPOINT] Supabase client initialization timed out", flush=True)
+            raise HTTPException(
+                status_code=503,
+                detail="Database service is temporarily unavailable. Please try again in a moment."
+            )
         except Exception as e:
             print(f"[CHAT ENDPOINT] Failed to get Supabase client: {e}", flush=True)
             raise HTTPException(
