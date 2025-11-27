@@ -82,24 +82,18 @@ except ImportError as e1:
     except ImportError as e2:
         logger.debug(f"✗ Tier 2 failed: {e2}. Trying Tier 3 (direct file load)...")
         # Final fallback: Load directly from file paths using importlib
-        # This handles Railway deployments where files are in /app
+        # This handles Railway deployments where files are in various locations
         try:
+            # Build list of potential search directories
+            _search_dirs = [_current_dir, _parent_dir, _root_dir, '/app', '/app/src', os.getcwd()]
+            _search_dirs = [d for d in _search_dirs if d and os.path.isdir(d)]  # Filter valid dirs
+            
             _module_paths = [
-                ('finley_graph_engine', [os.path.join(_current_dir, 'finley_graph_engine.py'), 
-                                         os.path.join(_parent_dir, 'finley_graph_engine.py'),
-                                         '/app/finley_graph_engine.py']),
-                ('aident_memory_manager', [os.path.join(_current_dir, 'aident_memory_manager.py'),
-                                          os.path.join(_parent_dir, 'aident_memory_manager.py'),
-                                          '/app/aident_memory_manager.py']),
-                ('causal_inference_engine', [os.path.join(_current_dir, 'causal_inference_engine.py'),
-                                            os.path.join(_parent_dir, 'causal_inference_engine.py'),
-                                            '/app/causal_inference_engine.py']),
-                ('temporal_pattern_learner', [os.path.join(_current_dir, 'temporal_pattern_learner.py'),
-                                             os.path.join(_parent_dir, 'temporal_pattern_learner.py'),
-                                             '/app/temporal_pattern_learner.py']),
-                ('enhanced_relationship_detector', [os.path.join(_current_dir, 'enhanced_relationship_detector.py'),
-                                                   os.path.join(_parent_dir, 'enhanced_relationship_detector.py'),
-                                                   '/app/enhanced_relationship_detector.py']),
+                ('finley_graph_engine', [os.path.join(d, 'finley_graph_engine.py') for d in _search_dirs]),
+                ('aident_memory_manager', [os.path.join(d, 'aident_memory_manager.py') for d in _search_dirs]),
+                ('causal_inference_engine', [os.path.join(d, 'causal_inference_engine.py') for d in _search_dirs]),
+                ('temporal_pattern_learner', [os.path.join(d, 'temporal_pattern_learner.py') for d in _search_dirs]),
+                ('enhanced_relationship_detector', [os.path.join(d, 'enhanced_relationship_detector.py') for d in _search_dirs]),
             ]
             
             _modules = {}
