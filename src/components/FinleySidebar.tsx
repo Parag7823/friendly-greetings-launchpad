@@ -417,11 +417,6 @@ export const FinleySidebar = ({ onClose, onNavigate, currentView = 'chat', isCol
       
       {/* Footer */}
       <div className={`mt-auto pt-6 border-t border-border ${isCollapsed ? 'px-2' : 'px-6'}`}>
-        {!isCollapsed && (
-          <p className="text-xs text-muted-foreground text-center">
-            Powered by Finley AI
-          </p>
-        )}
       </div>
       
       {/* Share Modal */}

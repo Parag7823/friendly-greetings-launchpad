@@ -8368,11 +8368,9 @@ async def delete_chat(request: dict):
             raise HTTPException(status_code=400, detail="Missing chat_id")
         
         if supabase and user_id:
-            # Delete chat messages for this chat/date
-            if chat_id.startswith('chat_'):
-                date_key = chat_id.replace('chat_', '')
-                # Delete messages from that date
-                supabase.table('chat_messages').delete().eq('user_id', user_id).like('created_at', f'{date_key}%').execute()
+            # Delete chat messages for this chat
+            # FIX: Use eq() instead of like() to match exact chat_id instead of timestamp pattern
+            supabase.table('chat_messages').delete().eq('user_id', user_id).eq('chat_id', chat_id).execute()
         
         structured_logger.info("Chat deleted", chat_id=chat_id, user_id=user_id)
         
@@ -8384,7 +8382,6 @@ async def delete_chat(request: dict):
     except Exception as e:
         structured_logger.error("Chat delete error", error=e)
         raise HTTPException(status_code=500, detail=str(e))
-
 
 @app.post("/generate-chat-title")
 async def generate_chat_title(request: dict):

@@ -74,9 +74,9 @@ export const ThreePanelLayout = ({ currentView = 'chat', onNavigate }: ThreePane
         </Panel>
 
         {/* Resize Handle */}
-        <PanelResizeHandle className="w-1 bg-border hover:bg-primary transition-colors relative group">
-          <div className="absolute inset-y-0 left-1/2 -translate-x-1/2 w-4 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-            <GripVertical className="w-4 h-4 text-muted-foreground" />
+        <PanelResizeHandle className="w-0.5 bg-border hover:bg-primary transition-colors relative group">
+          <div className="absolute inset-y-0 left-1/2 -translate-x-1/2 w-3 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+            <GripVertical className="w-3 h-3 text-muted-foreground" />
           </div>
         </PanelResizeHandle>
 
@@ -91,9 +91,9 @@ export const ThreePanelLayout = ({ currentView = 'chat', onNavigate }: ThreePane
         </Panel>
 
         {/* Resize Handle */}
-        <PanelResizeHandle className="w-1 bg-border hover:bg-primary transition-colors relative group">
-          <div className="absolute inset-y-0 left-1/2 -translate-x-1/2 w-4 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-            <GripVertical className="w-4 h-4 text-muted-foreground" />
+        <PanelResizeHandle className="w-0.5 bg-border hover:bg-primary transition-colors relative group">
+          <div className="absolute inset-y-0 left-1/2 -translate-x-1/2 w-3 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+            <GripVertical className="w-3 h-3 text-muted-foreground" />
           </div>
         </PanelResizeHandle>
 

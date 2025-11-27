@@ -613,21 +613,25 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
                       key={msg.id}
                       className={`flex ${msg.isUser ? 'justify-end' : 'justify-start'}`}
                     >
-                      <div
-                        className={`max-w-[80%] rounded-md px-4 py-3 border ${msg.isUser
-                          ? 'bg-gradient-to-b from-background via-background to-muted/50 border-border/60 dark:from-zinc-900 dark:via-zinc-900 dark:to-zinc-800 dark:border-zinc-700 text-foreground'
-                          : 'bg-[#1a1a1a]/90 backdrop-blur-sm text-white border-white/10'
-                          }`}
-                      >
-                        {msg.isUser ? (
+                      {msg.isUser ? (
+                        // User message: Keep in rectangular box
+                        <div
+                          className="max-w-[80%] rounded-md px-4 py-3 border bg-gradient-to-b from-background via-background to-muted/50 border-border/60 dark:from-zinc-900 dark:via-zinc-900 dark:to-zinc-800 dark:border-zinc-700 text-foreground"
+                        >
                           <p className="chat-message-user">{msg.text}</p>
-                        ) : (
+                          <p className="chat-message-timestamp">
+                            {msg.timestamp.toLocaleTimeString()}
+                          </p>
+                        </div>
+                      ) : (
+                        // AI response: No box, plain text
+                        <div className="max-w-[80%] text-foreground">
                           <MarkdownMessage content={msg.text} />
-                        )}
-                        <p className="chat-message-timestamp">
-                          {msg.timestamp.toLocaleTimeString()}
-                        </p>
-                      </div>
+                          <p className="chat-message-timestamp mt-2">
+                            {msg.timestamp.toLocaleTimeString()}
+                          </p>
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>
