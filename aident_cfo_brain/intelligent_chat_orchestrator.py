@@ -167,6 +167,21 @@ class QuestionType(Enum):
     UNKNOWN = "unknown"  # Couldn't classify
 
 
+class DataMode(Enum):
+    """FIX #4: Data availability modes for response differentiation"""
+    NO_DATA = "no_data"  # User has no data connected yet
+    LIMITED_DATA = "limited_data"  # User has <50 transactions
+    RICH_DATA = "rich_data"  # User has >50 transactions
+
+
+class OnboardingState(Enum):
+    """FIX #5: Track onboarding state to prevent repetition"""
+    FIRST_VISIT = "first_visit"  # User's first interaction
+    ONBOARDED = "onboarded"  # User has seen onboarding
+    DATA_CONNECTED = "data_connected"  # User has connected data
+    ACTIVE = "active"  # User is actively using system
+
+
 @dataclass
 class ChatResponse:
     """Structured response from the orchestrator"""
@@ -294,6 +309,212 @@ class IntelligentChatOrchestrator:
             logger.error("Parallel processing failed", error=str(e))
             return {}
     
+    async def _determine_data_mode(self, user_id: str) -> DataMode:
+        """
+        FIX #4: Determine user's data availability mode.
+        
+        Returns:
+            DataMode enum: NO_DATA, LIMITED_DATA, or RICH_DATA
+        """
+        try:
+            # Query transaction count
+            events_result = self.supabase.table('raw_events')\
+                .select('id', count='exact')\
+                .eq('user_id', user_id)\
+                .execute()
+            
+            transaction_count = len(events_result.data) if events_result.data else 0
+            
+            if transaction_count == 0:
+                return DataMode.NO_DATA
+            elif transaction_count < 50:
+                return DataMode.LIMITED_DATA
+            else:
+                return DataMode.RICH_DATA
+        except Exception as e:
+            logger.warning(f"Failed to determine data mode: {e}")
+            return DataMode.NO_DATA
+
+    async def _get_onboarding_state(self, user_id: str) -> OnboardingState:
+        """
+        FIX #5: Get user's onboarding state from Redis/Supabase.
+        
+        Returns:
+            OnboardingState enum: FIRST_VISIT, ONBOARDED, DATA_CONNECTED, or ACTIVE
+        """
+        try:
+            # Check user_preferences table for onboarding state
+            prefs_result = self.supabase.table('user_preferences')\
+                .select('onboarding_state')\
+                .eq('user_id', user_id)\
+                .limit(1)\
+                .execute()
+            
+            if prefs_result.data and len(prefs_result.data) > 0:
+                state_str = prefs_result.data[0].get('onboarding_state', 'first_visit')
+                try:
+                    return OnboardingState(state_str)
+                except ValueError:
+                    return OnboardingState.FIRST_VISIT
+            else:
+                return OnboardingState.FIRST_VISIT
+        except Exception as e:
+            logger.warning(f"Failed to get onboarding state: {e}")
+            return OnboardingState.FIRST_VISIT
+
+    async def _set_onboarding_state(self, user_id: str, state: OnboardingState) -> bool:
+        """
+        FIX #5: Save user's onboarding state to Supabase.
+        
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            self.supabase.table('user_preferences').upsert({
+                'user_id': user_id,
+                'onboarding_state': state.value,
+                'updated_at': datetime.utcnow().isoformat()
+            }, on_conflict='user_id').execute()
+            
+            logger.info(f"Onboarding state updated for user {user_id}: {state.value}")
+            return True
+        except Exception as e:
+            logger.warning(f"Failed to set onboarding state: {e}")
+            return False
+
+    async def _generate_no_data_intelligence(self, user_id: str) -> str:
+        """
+        ENHANCEMENT #10: Generate intelligent questions/insights even without data.
+        
+        Creates a personalized onboarding experience that showcases Finley's intelligence
+        without requiring data, making users excited to connect sources.
+        
+        Returns:
+            Formatted string with intelligent questions and insights
+        """
+        try:
+            # Generate smart business questions using Groq
+            prompt = """You are Finley, an AI finance expert. Generate 3 SMART, SPECIFIC business questions 
+that would help a new user understand what you can do with their financial data.
+
+Requirements:
+- Questions should be insightful and show financial intelligence
+- Each question should highlight a different Finley capability
+- Questions should be relevant to ANY business (not industry-specific)
+- Format: "❓ [Question]"
+
+Example capabilities to showcase:
+1. Causal analysis: "What's causing my cash flow to fluctuate?"
+2. Temporal patterns: "When do my customers typically pay?"
+3. Relationship mapping: "Which vendors represent my biggest costs?"
+4. Anomaly detection: "Are there any unusual transactions I should know about?"
+5. Predictive forecasting: "When will I run out of cash at current burn rate?"
+
+Generate exactly 3 questions now:"""
+            
+            response = await self.groq.chat.completions.create(
+                model="llama-3.3-70b-versatile",
+                messages=[
+                    {"role": "system", "content": "You are a financial intelligence expert generating insightful questions."},
+                    {"role": "user", "content": prompt}
+                ],
+                max_tokens=300,
+                temperature=0.7
+            )
+            
+            intelligent_questions = response.choices[0].message.content
+            
+            # Format the response
+            formatted_response = f"""🧠 **Here are some questions I can answer once you connect your data:**
+
+{intelligent_questions}
+
+**Ready to unlock these insights?** Click "Data Sources" to connect QuickBooks, Xero, or upload your financial files."""
+            
+            return formatted_response
+            
+        except Exception as e:
+            logger.warning(f"Failed to generate intelligent questions: {e}")
+            # Fallback to default questions
+            return """🧠 **Here are some questions I can answer once you connect your data:**
+
+❓ What's causing my cash flow to fluctuate?
+❓ When do my customers typically pay?
+❓ Which vendors represent my biggest costs?
+
+**Ready to unlock these insights?** Click "Data Sources" to connect QuickBooks, Xero, or upload your financial files."""
+
+    async def _generate_dynamic_onboarding_message(self, user_id: str, onboarding_state: OnboardingState) -> str:
+        """
+        ENHANCEMENT #9: Generate dynamic onboarding messages based on user state.
+        
+        Removes hardcoded "60 seconds" urgency and personalizes based on:
+        - User's onboarding state (FIRST_VISIT, ONBOARDED, DATA_CONNECTED, ACTIVE)
+        - Data availability
+        - Previous interactions
+        
+        Returns:
+            Personalized onboarding message
+        """
+        try:
+            if onboarding_state == OnboardingState.FIRST_VISIT:
+                # First time - welcoming, not pushy
+                return """👋 Hi! I'm Finley, your AI finance teammate.
+
+I help small business owners and founders understand their finances better. Think of me as your personal CFO who's always available.
+
+**What I can do:**
+✓ Analyze cash flow patterns
+✓ Predict payment delays
+✓ Find cost-saving opportunities
+✓ Answer any finance question
+
+**Let's get started!** Connect your data sources (QuickBooks, Xero, Stripe, etc.) or upload financial files to begin."""
+            
+            elif onboarding_state == OnboardingState.ONBOARDED:
+                # Already seen onboarding - encourage action
+                return """💡 **Ready to unlock financial insights?**
+
+You've seen what I can do. Now let's connect your actual data so I can provide specific, actionable recommendations for YOUR business.
+
+**Quick options:**
+1. Connect QuickBooks (1 minute)
+2. Connect Xero (1 minute)
+3. Upload Excel/CSV files
+4. Connect Stripe for payment data
+
+Which would you like to try?"""
+            
+            elif onboarding_state == OnboardingState.DATA_CONNECTED:
+                # Has data - focus on capabilities
+                return """🚀 **Your data is connected! Here's what I can do now:**
+
+With your financial data, I can:
+✓ Analyze WHY your metrics changed (causal analysis)
+✓ Predict WHEN events will happen (temporal forecasting)
+✓ Show WHO your key vendors/customers are (relationship mapping)
+✓ Spot WHAT'S unusual (anomaly detection)
+✓ Answer ANY financial question with your actual numbers
+
+**What would you like to explore first?**"""
+            
+            else:  # ACTIVE
+                # Power user - focus on advanced features
+                return """⚡ **You're all set!** I have your financial data and I'm ready to provide deep insights.
+
+**Advanced features available:**
+🔍 Causal inference analysis
+📈 Seasonal pattern detection
+🎯 Predictive forecasting
+💡 Cost optimization opportunities
+⚠️ Risk scoring and alerts
+
+**What would you like to analyze today?**"""
+        
+        except Exception as e:
+            logger.warning(f"Failed to generate dynamic onboarding: {e}")
+            return "Let's connect your financial data to get started!"
+
     async def process_question(
         self,
         question: str,
@@ -317,7 +538,12 @@ class IntelligentChatOrchestrator:
             logger.info("Processing question", question=question, user_id=user_id, chat_id=chat_id)
             print(f"[ORCHESTRATOR] Starting process_question for user {user_id}", flush=True)
             
-            # Step 0a: Initialize per-user memory manager (isolated, no cross-user contamination)
+            # Step 0a: FIX #4: Determine data mode for response differentiation
+            print(f"[ORCHESTRATOR] Determining data mode...", flush=True)
+            data_mode = await self._determine_data_mode(user_id)
+            print(f"[ORCHESTRATOR] Data mode: {data_mode.value}", flush=True)
+            
+            # Step 0b: Initialize per-user memory manager (isolated, no cross-user contamination)
             print(f"[ORCHESTRATOR] Initializing memory manager...", flush=True)
             memory_manager = AidentMemoryManager(
                 user_id=user_id,
@@ -371,7 +597,8 @@ class IntelligentChatOrchestrator:
                 response = await self._handle_data_query(question, user_id, context, conversation_history)
             
             else:
-                response = await self._handle_general_question(question, user_id, context, conversation_history)
+                # FIX #1: Pass memory_manager to general handler for repetition detection
+                response = await self._handle_general_question(question, user_id, context, conversation_history, memory_manager)
             
             # Step 3: Save memory after response (for context in next turn)
             await memory_manager.add_message(question, response.answer)
@@ -822,12 +1049,73 @@ Question: {question}"""
                 data={'error': str(e)}
             )
     
+    async def _detect_follow_up_question(
+        self,
+        question: str,
+        user_id: str,
+        memory_manager: Optional[Any],
+        conversation_history: list[Dict[str, str]] = None
+    ) -> Tuple[bool, Optional[str]]:
+        """
+        FIX #1: Detect if this is a follow-up question to prevent repetition.
+        
+        Returns:
+            Tuple of (is_follow_up: bool, last_response_type: Optional[str])
+        """
+        try:
+            # Check if we have conversation history
+            if not conversation_history or len(conversation_history) < 2:
+                return False, None
+            
+            # Get last assistant response
+            last_messages = [m for m in conversation_history[-4:] if m.get('role') == 'assistant']
+            if not last_messages:
+                return False, None
+            
+            last_response = last_messages[-1].get('content', '').lower()
+            
+            # Detect if last response was onboarding
+            is_last_onboarding = any([
+                'connect your data' in last_response,
+                'quickbooks' in last_response and 'xero' in last_response,
+                'data sources' in last_response,
+                'upload your financial files' in last_response,
+                'let\'s get started' in last_response
+            ])
+            
+            # Detect if current question is asking about capabilities
+            is_capability_question = any([
+                'what can you do' in question.lower(),
+                'what are your capabilities' in question.lower(),
+                'what are your actual capabilities' in question.lower(),
+                'what can you help with' in question.lower(),
+                'what do you do' in question.lower()
+            ])
+            
+            # If last response was onboarding AND user is asking about capabilities, it's a follow-up
+            if is_last_onboarding and is_capability_question:
+                return True, 'onboarding'
+            
+            # Check for simple follow-up patterns
+            follow_up_patterns = ['how?', 'why?', 'tell me more', 'explain', 'what do you mean']
+            is_simple_followup = any(pattern in question.lower() for pattern in follow_up_patterns)
+            
+            if is_simple_followup and len(conversation_history) >= 2:
+                return True, 'clarification'
+            
+            return False, None
+            
+        except Exception as e:
+            logger.warning(f"Failed to detect follow-up question: {e}")
+            return False, None
+
     async def _handle_general_question(
         self,
         question: str,
         user_id: str,
         context: Optional[Dict[str, Any]],
-        conversation_history: list[Dict[str, str]] = None
+        conversation_history: list[Dict[str, str]] = None,
+        memory_manager: Optional[Any] = None
     ) -> ChatResponse:
         """
         Handle general financial questions using Claude with full conversation context.
@@ -835,6 +1123,11 @@ Question: {question}"""
         Examples: "How do I improve cash flow?", "What is EBITDA?"
         """
         try:
+            # FIX #1: Check if this is a follow-up question (prevent repetition)
+            is_follow_up, last_response_type = await self._detect_follow_up_question(
+                question, user_id, memory_manager, conversation_history
+            )
+            
             # INTELLIGENCE LAYER: Fetch user's actual data context
             user_context = await self._fetch_user_data_context(user_id)
             
@@ -865,7 +1158,15 @@ CRITICAL: Reference their ACTUAL data in your response. Be specific with numbers
             # CHANGED: Use Groq/Llama for general financial advice
             system_prompt = """You are Finley - the world's most intelligent AI finance teammate. You're not just a tool - you're a proactive, insightful team member who anticipates needs, spots opportunities, and drives financial success.
 
-🔒 CRITICAL SAFETY GUARDRAILS (ZERO TOLERANCE):
+� CRITICAL ANTI-REPETITION RULES (ZERO TOLERANCE):
+- **NEVER repeat the same message twice** in one conversation
+- **CHECK conversation history** before responding
+- **If user already received onboarding**, provide different response type
+- **If user asks "What can you do?"**, provide detailed capability explanation (not generic list)
+- **If this is a follow-up question**, reference previous context and don't repeat
+- **ALWAYS differentiate** between first visit and returning user
+
+�� CRITICAL SAFETY GUARDRAILS (ZERO TOLERANCE):
 1. **NO Tax Advice**: Never give specific tax advice. Say "Consult a tax professional for [specific situation]"
 2. **NO Legal Advice**: Never give legal advice. Say "Consult a lawyer for legal matters"
 3. **NO Investment Advice**: Never recommend specific investments. Say "Consult a financial advisor"
@@ -943,24 +1244,54 @@ Show your thinking: "Let me break this down: First, I'll look at Q1... Then Q2..
 - **Confident Expert**: Speak with authority but admit uncertainty when appropriate
 - **Results-Obsessed**: Every insight must be actionable and quantified
 
-💪 YOUR CAPABILITIES:
-1. **Auto-Hunt Financial Data** 📥
-   - Connect: QuickBooks, Xero, Zoho Books, Stripe, Razorpay, PayPal, Gusto
-   - Scan: Gmail/Zoho Mail for invoices, receipts, statements
-   - Access: Google Drive, Dropbox for financial files
+💪 FINLEY'S ACTUAL AI CAPABILITIES:
 
-2. **Universal Financial Understanding** 🧠
-   - Read ANY financial document from ANY platform globally
-   - Like a "Financial Rosetta Stone" - understand all formats
+1. **Causal Inference Engine** 🔍
+   - Analyzes WHY financial events happen using Bradford Hill criteria
+   - Provides confidence scores (e.g., "87% confident revenue drop due to...")
+   - Distinguishes root causes from mere correlations
+   - Example: "Why did Q3 revenue drop 15%?" → Identifies specific cause with confidence
 
-3. **Genius-Level Analysis** 💡
-   - **WHY**: Root cause analysis with confidence scores (e.g., "87% confident revenue drop due to...")
-   - **WHEN**: Predictive forecasting with specific dates (e.g., "Cash crunch likely by March 15")
-   - **WHO**: Relationship mapping (e.g., "Top 3 vendors = 67% of costs - concentration risk!")
-   - **WHAT-IF**: Scenario modeling with ROI (e.g., "Delaying payment saves $2.3K in interest")
-   - **ANOMALIES**: Auto-detect unusual patterns (e.g., "⚠️ Invoice #1234 is 3x normal amount")
-   - **OPPORTUNITIES**: Spot savings (e.g., "💰 Switch to annual billing = $4.8K saved")
-   - **BENCHMARKS**: Compare to industry (e.g., "Your CAC is 40% below SaaS average - great!")
+2. **Temporal Pattern Learning** 📈
+   - Detects seasonal patterns (e.g., "Q4 typically 40% higher than Q3")
+   - Identifies cyclical trends (payment cycles, expense patterns, recurring events)
+   - Predicts future patterns with specific dates
+   - Example: "When will cash flow improve?" → "Based on patterns, likely by March 15"
+
+3. **Semantic Relationship Extraction** 🔗
+   - Understands relationships between entities (vendors, customers, platforms)
+   - Maps business connections automatically across all data sources
+   - Identifies concentration risks (e.g., "Top 3 vendors = 67% of costs")
+   - Example: "Show vendor relationships" → Maps all vendor connections and payment patterns
+
+4. **Graph-Based Intelligence** �️
+   - Builds knowledge graph of your entire financial ecosystem
+   - Detects hidden patterns across multiple data sources
+   - Finds opportunities others miss by analyzing connections
+   - Example: "Which vendors are correlated with revenue spikes?" → Identifies patterns
+
+5. **Anomaly Detection with Confidence** ⚠️
+   - Flags unusual transactions automatically
+   - Confidence-scored alerts (HIGH, MEDIUM, LOW)
+   - Prevents fraud and errors before they compound
+   - Example: "⚠️ Invoice #1234 is 3x normal amount from this vendor (HIGH confidence)"
+
+6. **Predictive Relationship Modeling** 🚀
+   - Forecasts cash flow with specific dates
+   - Predicts payment delays based on vendor history
+   - Scenario modeling with ROI calculations
+   - Example: "If I delay this payment by 30 days, I save $2.3K in interest"
+
+7. **Multi-Source Data Fusion** 🔄
+   - Connects: QuickBooks, Xero, Zoho Books, Stripe, Razorpay, PayPal, Gusto
+   - Scans: Gmail/Zoho Mail for invoices, receipts, statements
+   - Accesses: Google Drive, Dropbox for financial files
+   - Understands ALL financial document formats globally
+
+8. **Intelligent Benchmarking** 📊
+   - Compares your metrics to industry standards
+   - Example: "Your gross margin (68%) beats SaaS median (65%)"
+   - Identifies competitive advantages and weaknesses
 
 📊 WORLD-CLASS RESPONSE STRUCTURE:
 
@@ -1442,6 +1773,9 @@ Remember: You're not just answering questions - you're running their finance dep
             entities_result = self.supabase.table('normalized_entities').select('canonical_name, entity_type').eq('user_id', user_id).limit(20).execute()
             top_entities = [e['canonical_name'] for e in entities_result.data[:5]] if entities_result.data else []
             
+            # FIX #2: Check if user has any data before showing financial summary
+            has_data = total_transactions > 0
+            
             # Build context string with financial summary AND long-term memory
             net_income = total_revenue - total_expenses
             
@@ -1458,7 +1792,26 @@ Remember: You're not just answering questions - you're running their finance dep
                 if biz.get('size'):
                     memory_context += f" | SIZE: {biz.get('size')}"
             
-            context = f"""CONNECTED DATA SOURCES: {', '.join(connected_sources) if connected_sources else 'None yet'}
+            # FIX #2: Different context based on data availability
+            if not has_data:
+                # NO DATA - Don't show zeros, show onboarding guidance
+                context = f"""CONNECTED DATA SOURCES: None yet
+RECENT FILES UPLOADED: None yet
+TOTAL TRANSACTIONS (Last 90 days): 0
+PLATFORMS DETECTED: None
+TOP ENTITIES: None yet
+
+DATA STATUS: No data connected yet
+
+NEXT STEPS FOR USER:
+1. Connect a data source (QuickBooks, Xero, Stripe, Razorpay, PayPal, etc.)
+2. OR upload financial files (CSV, Excel, PDF invoices/statements)
+3. OR connect email (Gmail/Zoho Mail) to extract attachments
+
+RECOMMENDATION: Guide user to connect data first before providing financial analysis{memory_context}"""
+            else:
+                # HAS DATA - Show financial summary with actual numbers
+                context = f"""CONNECTED DATA SOURCES: {', '.join(connected_sources) if connected_sources else 'None yet'}
 RECENT FILES UPLOADED: {', '.join(recent_files) if recent_files else 'None yet'}
 TOTAL TRANSACTIONS (Last 90 days): {total_transactions}
 PLATFORMS DETECTED: {', '.join(platforms) if platforms else 'None'}
@@ -1470,7 +1823,7 @@ FINANCIAL SUMMARY (Last 90 days):
 - Net Income: ${net_income:,.2f}
 - Profit Margin: {(net_income / total_revenue * 100) if total_revenue > 0 else 0:.1f}%{memory_context}
 
-DATA STATUS: {'Rich data available - provide specific, quantified insights!' if total_transactions > 50 else 'Limited data - encourage user to connect sources or upload files'}"""
+DATA STATUS: {'Rich data available - provide specific, quantified insights!' if total_transactions > 50 else 'Limited data - encourage user to connect more sources or upload files'}"""
             
             return context
             
