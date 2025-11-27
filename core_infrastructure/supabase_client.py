@@ -193,6 +193,8 @@ class LazySupabaseClient:
     """
     NUCLEAR FIX: Lazy proxy client that defers connection until first actual use.
     This prevents timeouts during initialization.
+    
+    CRITICAL: Uses a thread with timeout to prevent hanging on connection attempts.
     """
     def __init__(self, url: str, key: str):
         self.url = url
@@ -200,16 +202,38 @@ class LazySupabaseClient:
         self._real_client = None
         self._connecting = False
         self._connect_lock = threading.Lock()
+        self._connection_timeout = 5.0  # 5 second timeout for connection
     
     def _ensure_connected(self):
-        """Lazily connect on first actual API call"""
+        """Lazily connect on first actual API call with timeout"""
         if self._real_client is None and not self._connecting:
             with self._connect_lock:
                 if self._real_client is None:
                     try:
                         self._connecting = True
                         logger.info(f"🔗 Lazy-connecting to Supabase on first use...")
-                        self._real_client = create_client(self.url, self.key)
+                        
+                        # Connect in a thread with timeout to prevent hangs
+                        client_holder = {'client': None, 'error': None}
+                        
+                        def connect_thread():
+                            try:
+                                client_holder['client'] = create_client(self.url, self.key)
+                            except Exception as e:
+                                client_holder['error'] = e
+                        
+                        thread = threading.Thread(target=connect_thread, daemon=True)
+                        thread.start()
+                        thread.join(timeout=self._connection_timeout)
+                        
+                        if thread.is_alive():
+                            logger.error(f"⏱️ Supabase connection timed out after {self._connection_timeout} seconds")
+                            raise TimeoutError(f"Supabase connection timed out after {self._connection_timeout} seconds")
+                        
+                        if client_holder['error']:
+                            raise client_holder['error']
+                        
+                        self._real_client = client_holder['client']
                         logger.info(f"✅ Lazy-connected to Supabase successfully")
                     except Exception as e:
                         logger.error(f"❌ Failed to connect to Supabase on first use: {e}")
