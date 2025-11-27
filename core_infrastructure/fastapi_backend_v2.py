@@ -8499,9 +8499,13 @@ async def chat_endpoint(request: dict):
                 ),
                 timeout=60.0  # 60 second timeout for entire chat processing
             )
-        except asyncio.TimeoutError:
-            structured_logger.error("Question processing timed out after 60 seconds")
+            structured_logger.info("✅ Question processing completed successfully")
+        except asyncio.TimeoutError as te:
+            structured_logger.error("❌ Question processing timed out after 60 seconds", timeout_error=str(te))
             raise HTTPException(status_code=504, detail="Chat service is taking too long. Please try again.")
+        except Exception as inner_e:
+            structured_logger.error("❌ Question processing failed with exception", error=str(inner_e), error_type=type(inner_e).__name__)
+            raise
         
         structured_logger.info("Chat response generated", user_id=user_id, question_type=response.question_type.value, confidence=response.confidence)
         
