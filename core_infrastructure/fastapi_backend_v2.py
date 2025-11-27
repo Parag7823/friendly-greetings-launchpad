@@ -8450,8 +8450,12 @@ async def chat_endpoint(request: dict):
         
         structured_logger.info("Chat request received", user_id=user_id, chat_id=chat_id, message_length=len(message))
         
-        # FIX #16: Import IntelligentChatOrchestrator (sys.path already set at module level)
-        from aident_cfo_brain.intelligent_chat_orchestrator import IntelligentChatOrchestrator
+        # FIX #16: Import IntelligentChatOrchestrator with fallback for different deployment layouts
+        try:
+            from aident_cfo_brain.intelligent_chat_orchestrator import IntelligentChatOrchestrator
+        except ImportError:
+            # Fallback to flat layout (Railway deployment)
+            from intelligent_chat_orchestrator import IntelligentChatOrchestrator
         
         # Note: Now using Groq/Llama instead of Anthropic for chat
         # Check for Groq API key
