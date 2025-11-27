@@ -278,13 +278,21 @@ def get_supabase_client(use_service_role: bool = True) -> Client:
     if _client_instance is None:
         with _client_lock:
             if _client_instance is None:
+                import time
+                start = time.time()
+                
                 pool = get_connection_pool()
+                pool_time = time.time() - start
+                logger.info(f"⏱️ get_connection_pool() took {pool_time:.3f}s")
                 
                 # NUCLEAR FIX: Use lazy proxy instead of connecting immediately
                 key = pool.service_role_key if use_service_role else pool.anon_key
                 url = pool.pgbouncer_url if pool.use_pgbouncer and pool.pgbouncer_url else pool.supabase_url
                 
+                lazy_start = time.time()
                 _client_instance = LazySupabaseClient(url, key)
+                lazy_time = time.time() - lazy_start
+                logger.info(f"⏱️ LazySupabaseClient() took {lazy_time:.3f}s")
                 logger.info("✅ Created lazy Supabase client (will connect on first use)")
     
     return _client_instance
