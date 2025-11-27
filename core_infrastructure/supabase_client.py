@@ -63,6 +63,12 @@ class SupabaseConnectionPool:
         if not self.supabase_url or not self.service_role_key:
             raise ValueError("SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY (or SUPABASE_SERVICE_KEY) must be set")
         
+        # Validate Supabase URL format
+        if not self.supabase_url.startswith(('http://', 'https://')):
+            logger.warning(f"⚠️ SUPABASE_URL does not start with http:// or https://: {self.supabase_url}")
+        
+        logger.info(f"✅ Supabase URL configured: {self.supabase_url[:50]}..." if len(self.supabase_url) > 50 else f"✅ Supabase URL configured: {self.supabase_url}")
+        
         logger.info(f"✅ Supabase connection pool configured: pool_size={self.pool_size}, "
                    f"timeout={self.pool_timeout}s, recycle={self.pool_recycle}s, "
                    f"pgbouncer={self.use_pgbouncer}")
@@ -100,8 +106,11 @@ class SupabaseConnectionPool:
             
             def create_client_thread():
                 try:
+                    logger.info(f"🔗 Attempting to connect to Supabase at {url}")
                     client_holder['client'] = create_client(url, key)
+                    logger.info(f"✅ Successfully created Supabase client")
                 except Exception as e:
+                    logger.error(f"❌ Error creating Supabase client: {e}", exc_info=True)
                     client_holder['error'] = e
             
             thread = threading.Thread(target=create_client_thread, daemon=True)
@@ -109,10 +118,17 @@ class SupabaseConnectionPool:
             thread.join(timeout=10.0)  # 10 second timeout for client creation
             
             if thread.is_alive():
-                logger.error(f"⏱️ Supabase client creation timed out after 10 seconds - network may be slow or Supabase unreachable")
+                logger.error(f"⏱️ Supabase client creation timed out after 10 seconds")
+                logger.error(f"   URL: {url}")
+                logger.error(f"   Possible causes:")
+                logger.error(f"   1. Network connectivity issue from Railway to Supabase")
+                logger.error(f"   2. Supabase project is paused or unavailable")
+                logger.error(f"   3. Firewall/security group blocking connection")
+                logger.error(f"   4. DNS resolution issue")
                 raise TimeoutError("Supabase client creation timed out after 10 seconds")
             
             if client_holder['error']:
+                logger.error(f"Failed to create Supabase client: {client_holder['error']}")
                 raise client_holder['error']
             
             if not client_holder['client']:
