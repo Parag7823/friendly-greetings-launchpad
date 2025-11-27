@@ -8538,20 +8538,13 @@ async def chat_health_check():
         # Check Groq API key
         groq_api_key = os.getenv('GROQ_API_KEY')
         if not groq_api_key:
-            return {
-                "status": "error",
-                "error": "GROQ_API_KEY not found in environment"
-            }
-        
-        # FIX #16: Import IntelligentChatOrchestrator (sys.path already set at module level)
-        from aident_cfo_brain.intelligent_chat_orchestrator import IntelligentChatOrchestrator
-        
         # CRITICAL FIX: Lazy-load Supabase client on first use
         supabase_client = await _ensure_supabase_loaded()
         if not supabase_client:
             return {
                 "status": "error",
                 "error": "Database service unavailable",
+                "error_code": "DATABASE_SERVICE_UNAVAILABLE"
                 "groq_api_key_present": True
             }
         
