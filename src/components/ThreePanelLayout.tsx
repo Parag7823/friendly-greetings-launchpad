@@ -1,9 +1,10 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useRef } from 'react';
 import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
-import { GripVertical } from 'lucide-react';
+import { GripVertical, Database } from 'lucide-react';
 import { ChatInterface } from './ChatInterface';
 import { TabbedFilePreview } from './TabbedFilePreview';
 import { DataSourcesPanel } from './DataSourcesPanel';
+import { Button } from './ui/button';
 import { cn } from '@/lib/utils';
 
 interface ThreePanelLayoutProps {
@@ -15,20 +16,11 @@ export const ThreePanelLayout = ({ currentView = 'chat', onNavigate }: ThreePane
   const [openFiles, setOpenFiles] = useState<any[]>([]);
   const [activeFileId, setActiveFileId] = useState<string | null>(null);
   const rightPanelRef = useRef<any>(null);
+  const [isPanelCollapsed, setIsPanelCollapsed] = useState(true);
 
-  // Step 4.1: Hide right panel by default with localStorage memory
-  useEffect(() => {
-    const isFirstVisit = !localStorage.getItem('rightPanelExpanded');
-    const wasExpanded = localStorage.getItem('rightPanelExpanded') === 'true';
-    
-    if (isFirstVisit && rightPanelRef.current) {
-      // On first visit, collapse the right panel
-      rightPanelRef.current?.collapse?.();
-    } else if (wasExpanded && rightPanelRef.current) {
-      // If user previously expanded it, keep it expanded
-      rightPanelRef.current?.expand?.();
-    }
-  }, []);
+  // AUDIT FIX #1: Removed broken useEffect that ran after paint
+  // The Panel component now uses defaultCollapsed={true} to start hidden
+  // This prevents visual flashing and ensures the panel is hidden before first render
 
   // Handle file click from Data Sources
   const handleFileClick = (fileId: string, filename: string, fileData: any) => {
@@ -49,9 +41,33 @@ export const ThreePanelLayout = ({ currentView = 'chat', onNavigate }: ThreePane
     }
   };
 
+  const toggleRightPanel = () => {
+    if (rightPanelRef.current) {
+      if (isPanelCollapsed) {
+        rightPanelRef.current?.expand?.();
+      } else {
+        rightPanelRef.current?.collapse?.();
+      }
+    }
+  };
+
   return (
-    <div className="h-full w-full finley-dynamic-bg">
-      <PanelGroup direction="horizontal" className="h-full">
+    <div className="h-full w-full finley-dynamic-bg flex flex-col">
+      {/* Header with toggle button (AUDIT FIX #4) */}
+      <div className="flex items-center justify-between px-4 py-2 border-b border-border bg-muted/30">
+        <div className="flex-1" />
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={toggleRightPanel}
+          title={isPanelCollapsed ? 'Show Data Sources' : 'Hide Data Sources'}
+          className="h-8 w-8 p-0"
+        >
+          <Database className="w-4 h-4" />
+        </Button>
+      </div>
+
+      <PanelGroup direction="horizontal" className="h-full flex-1">
         {/* Chat Panel - 30% default */}
         <Panel defaultSize={30} minSize={20} maxSize={50} className="relative">
           <ChatInterface currentView={currentView} onNavigate={onNavigate} />
@@ -81,21 +97,29 @@ export const ThreePanelLayout = ({ currentView = 'chat', onNavigate }: ThreePane
           </div>
         </PanelResizeHandle>
 
-        {/* Data Sources Panel - 25% default, collapsible (Step 4.1) */}
+        {/* Data Sources Panel - Hidden by default, collapsible (AUDIT FIX #2) */}
         <Panel
           ref={rightPanelRef}
-          defaultSize={25}
+          defaultSize={0}         // AUDIT FIX #2: Start collapsed (hidden)
+          defaultCollapsed={true}  // AUDIT FIX #2: Start in collapsed state
+          collapsedSize={0}       // AUDIT FIX #2: Fully hidden when collapsed
           minSize={15}
           maxSize={40}
           collapsible
           className="relative"
-          onCollapse={() => localStorage.setItem('rightPanelExpanded', 'false')}
-          onExpand={() => localStorage.setItem('rightPanelExpanded', 'true')}
+          onCollapse={() => {
+            setIsPanelCollapsed(true);
+            localStorage.setItem('rightPanelExpanded', 'false');
+          }}
+          onExpand={() => {
+            setIsPanelCollapsed(false);
+            localStorage.setItem('rightPanelExpanded', 'true');
+          }}
         >
           <div className="h-full border-l border-border">
             <DataSourcesPanel
-              isOpen={true}
-              onClose={() => { }} // Always visible in 3-panel layout
+              isOpen={!isPanelCollapsed}  // AUDIT FIX #3: Dynamic based on panel state
+              onClose={() => rightPanelRef.current?.collapse()}  // AUDIT FIX #3: Actually collapse on close
               onFilePreview={handleFileClick}
             />
           </div>
