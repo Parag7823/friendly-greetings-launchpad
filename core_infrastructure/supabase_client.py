@@ -278,21 +278,20 @@ def get_supabase_client(use_service_role: bool = True) -> Client:
     if _client_instance is None:
         with _client_lock:
             if _client_instance is None:
-                import time
-                start = time.time()
+                # ULTRA-FAST: Just read env vars directly, don't create connection pool
+                # Connection pool creation can be slow - defer it until first use
+                url = os.getenv('SUPABASE_URL')
+                key = (
+                    os.getenv('SUPABASE_SERVICE_ROLE_KEY') or 
+                    os.getenv('SUPABASE_SERVICE_KEY')
+                )
                 
-                pool = get_connection_pool()
-                pool_time = time.time() - start
-                logger.info(f"⏱️ get_connection_pool() took {pool_time:.3f}s")
+                if not url or not key:
+                    logger.error("❌ SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY not set")
+                    raise ValueError("SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY (or SUPABASE_SERVICE_KEY) must be set")
                 
                 # NUCLEAR FIX: Use lazy proxy instead of connecting immediately
-                key = pool.service_role_key if use_service_role else pool.anon_key
-                url = pool.pgbouncer_url if pool.use_pgbouncer and pool.pgbouncer_url else pool.supabase_url
-                
-                lazy_start = time.time()
                 _client_instance = LazySupabaseClient(url, key)
-                lazy_time = time.time() - lazy_start
-                logger.info(f"⏱️ LazySupabaseClient() took {lazy_time:.3f}s")
                 logger.info("✅ Created lazy Supabase client (will connect on first use)")
     
     return _client_instance
