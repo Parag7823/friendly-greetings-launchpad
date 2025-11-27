@@ -8490,13 +8490,17 @@ async def chat_endpoint(request: dict):
         
         structured_logger.info("Starting question processing...", message=message[:100])
         try:
-            response = await orchestrator.process_question(
-                question=message,
-                user_id=user_id,
-                chat_id=chat_id
+            # Wrap entire process_question with timeout to prevent hanging
+            response = await asyncio.wait_for(
+                orchestrator.process_question(
+                    question=message,
+                    user_id=user_id,
+                    chat_id=chat_id
+                ),
+                timeout=60.0  # 60 second timeout for entire chat processing
             )
         except asyncio.TimeoutError:
-            structured_logger.error("Question processing timed out")
+            structured_logger.error("Question processing timed out after 60 seconds")
             raise HTTPException(status_code=504, detail="Chat service is taking too long. Please try again.")
         
         structured_logger.info("Chat response generated", user_id=user_id, question_type=response.question_type.value, confidence=response.confidence)
