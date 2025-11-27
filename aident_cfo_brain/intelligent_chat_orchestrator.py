@@ -48,13 +48,28 @@ try:
     from aident_cfo_brain.temporal_pattern_learner import TemporalPatternLearner
     from aident_cfo_brain.enhanced_relationship_detector import EnhancedRelationshipDetector
 except ImportError:
-    # Fallback to flat layout (Railway deployment or direct module import)
-    # sys.path now includes current directory, so these should work
-    from finley_graph_engine import FinleyGraphEngine
-    from aident_memory_manager import AidentMemoryManager
-    from causal_inference_engine import CausalInferenceEngine
-    from temporal_pattern_learner import TemporalPatternLearner
-    from enhanced_relationship_detector import EnhancedRelationshipDetector
+    try:
+        # Fallback to flat layout (Railway deployment or direct module import)
+        # sys.path now includes current directory, so these should work
+        from finley_graph_engine import FinleyGraphEngine
+        from aident_memory_manager import AidentMemoryManager
+        from causal_inference_engine import CausalInferenceEngine
+        from temporal_pattern_learner import TemporalPatternLearner
+        from enhanced_relationship_detector import EnhancedRelationshipDetector
+    except ImportError:
+        # Final fallback: import from current directory (aident_cfo_brain/)
+        # This handles the case where the module is imported directly
+        import finley_graph_engine as _fge
+        import aident_memory_manager as _amm
+        import causal_inference_engine as _cie
+        import temporal_pattern_learner as _tpl
+        import enhanced_relationship_detector as _erd
+        
+        FinleyGraphEngine = _fge.FinleyGraphEngine
+        AidentMemoryManager = _amm.AidentMemoryManager
+        CausalInferenceEngine = _cie.CausalInferenceEngine
+        TemporalPatternLearner = _tpl.TemporalPatternLearner
+        EnhancedRelationshipDetector = _erd.EnhancedRelationshipDetector
 
 try:
     from data_ingestion_normalization.entity_resolver_optimized import EntityResolverOptimized as EntityResolver
