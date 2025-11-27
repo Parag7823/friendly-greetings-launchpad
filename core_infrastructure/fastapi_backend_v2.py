@@ -8539,11 +8539,7 @@ async def chat_health_check():
                 "error": "GROQ_API_KEY not found in environment"
             }
         
-        # FIX #16: Import IntelligentChatOrchestrator - add parent directory to path
-        parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        if parent_dir not in sys.path:
-            sys.path.insert(0, parent_dir)
-        
+        # FIX #16: Import IntelligentChatOrchestrator (sys.path already set at module level)
         from aident_cfo_brain.intelligent_chat_orchestrator import IntelligentChatOrchestrator
         
         # CRITICAL FIX: Lazy-load Supabase client on first use
