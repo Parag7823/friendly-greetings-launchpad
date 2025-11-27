@@ -8445,11 +8445,12 @@ async def chat_endpoint(request: dict):
         
         structured_logger.info("Chat request received", user_id=user_id, chat_id=chat_id, message_length=len(message))
         
-        # FIX #16: Import IntelligentChatOrchestrator with fallback for different deployment layouts
-        try:
-            from aident_cfo_brain.intelligent_chat_orchestrator import IntelligentChatOrchestrator
-        except ImportError:
-            from intelligent_chat_orchestrator import IntelligentChatOrchestrator
+        # FIX #16: Import IntelligentChatOrchestrator - add parent directory to path
+        parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        if parent_dir not in sys.path:
+            sys.path.insert(0, parent_dir)
+        
+        from aident_cfo_brain.intelligent_chat_orchestrator import IntelligentChatOrchestrator
         
         # Note: Now using Groq/Llama instead of Anthropic for chat
         # Check for Groq API key
@@ -8534,54 +8535,45 @@ async def chat_health_check():
         if not groq_api_key:
             return {
                 "status": "error",
-                "error": "GROQ_API_KEY not found in environment",
-                "available_env_vars": sorted([k for k in os.environ.keys() if 'GROQ' in k.upper()])
+                "error": "GROQ_API_KEY not found in environment"
             }
         
-        # FIX #16: Import IntelligentChatOrchestrator with fallback for different deployment layouts
-        try:
-            from aident_cfo_brain.intelligent_chat_orchestrator import IntelligentChatOrchestrator
-        except ImportError:
-            from intelligent_chat_orchestrator import IntelligentChatOrchestrator
+        # FIX #16: Import IntelligentChatOrchestrator - add parent directory to path
+        parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        if parent_dir not in sys.path:
+            sys.path.insert(0, parent_dir)
         
-        try:
-            # CRITICAL FIX: Lazy-load Supabase client on first use
-            supabase_client = await _ensure_supabase_loaded()
-            if not supabase_client:
-                return {
-                    "status": "error",
-                    "error": "Database service unavailable",
-                    "groq_api_key_present": True
-                }
-            
-            orchestrator = IntelligentChatOrchestrator(
-                supabase_client=supabase_client,
-                cache_client=safe_get_ai_cache()
-            )
-            
-            # Try a simple test question
-            test_response = await orchestrator.process_question(
-                question="Hello",
-                user_id="health_check_user"
-            )
-            
-            return {
-                "status": "healthy",
-                "groq_api_key_present": True,
-                "orchestrator_initialized": True,
-                "test_question_processed": True,
-                "test_response_type": test_response.question_type.value,
-                "test_confidence": test_response.confidence
-            }
-            
-        except Exception as orch_error:
+        from aident_cfo_brain.intelligent_chat_orchestrator import IntelligentChatOrchestrator
+        
+        # CRITICAL FIX: Lazy-load Supabase client on first use
+        supabase_client = await _ensure_supabase_loaded()
+        if not supabase_client:
             return {
                 "status": "error",
-                "groq_api_key_present": True,
-                "orchestrator_error": str(orch_error),
-                "error_type": type(orch_error).__name__
+                "error": "Database service unavailable",
+                "groq_api_key_present": True
             }
-            
+        
+        orchestrator = IntelligentChatOrchestrator(
+            supabase_client=supabase_client,
+            cache_client=safe_get_ai_cache()
+        )
+        
+        # Try a simple test question
+        test_response = await orchestrator.process_question(
+            question="Hello",
+            user_id="health_check_user"
+        )
+        
+        return {
+            "status": "healthy",
+            "groq_api_key_present": True,
+            "orchestrator_initialized": True,
+            "test_question_processed": True,
+            "test_response_type": test_response.question_type.value,
+            "test_confidence": test_response.confidence
+        }
+        
     except Exception as e:
         return {
             "status": "error",
