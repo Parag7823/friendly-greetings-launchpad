@@ -8489,19 +8489,29 @@ async def chat_endpoint(request: dict):
                 detail="Chat service is temporarily unavailable. Please contact support. (Missing GROQ_API_KEY)"
             )
         
-        # CRITICAL FIX: Lazy-load Supabase client on first use
+        print(f"[CHAT ENDPOINT] Loading Supabase client...", flush=True)
         supabase_client = await _ensure_supabase_loaded()
         if not supabase_client:
+            print(f"[CHAT ENDPOINT] Supabase client failed to load", flush=True)
             raise HTTPException(
                 status_code=503,
                 detail="Database service is temporarily unavailable. Please try again in a moment."
             )
+        print(f"[CHAT ENDPOINT] Supabase client loaded successfully", flush=True)
         
         # Initialize orchestrator (uses Groq internally, no openai_client needed)
-        orchestrator = IntelligentChatOrchestrator(
-            supabase_client=supabase_client,
-            cache_client=safe_get_ai_cache()
-        )
+        try:
+            print(f"[CHAT ENDPOINT] Initializing orchestrator...", flush=True)
+            orchestrator = IntelligentChatOrchestrator(
+                supabase_client=supabase_client,
+                cache_client=safe_get_ai_cache()
+            )
+            print(f"[CHAT ENDPOINT] Orchestrator initialized successfully", flush=True)
+            structured_logger.info("✅ Orchestrator initialized successfully")
+        except Exception as orch_init_error:
+            print(f"[CHAT ENDPOINT] Orchestrator initialization failed: {orch_init_error}", flush=True)
+            structured_logger.error("❌ Orchestrator initialization failed", error=str(orch_init_error), error_type=type(orch_init_error).__name__)
+            raise HTTPException(status_code=503, detail=f"Chat service initialization failed: {str(orch_init_error)}")
         
         structured_logger.info("Starting question processing...", message=message[:100])
         try:
