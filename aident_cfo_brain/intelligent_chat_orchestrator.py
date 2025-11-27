@@ -20,12 +20,22 @@ Date: 2025-01-22
 import structlog
 import json
 import os
+import sys
 from datetime import datetime, timedelta
 from typing import Dict, Any, List, Optional, Tuple
 from enum import Enum
 from dataclasses import dataclass
 import asyncio
 from groq import AsyncGroq  # CHANGED: Using Groq instead of Anthropic
+
+# FIX #16: Add parent directory to sys.path for imports to work in all deployment layouts
+# This ensures modules in aident_cfo_brain/ can be imported regardless of how the module is loaded
+_current_dir = os.path.dirname(os.path.abspath(__file__))
+_parent_dir = os.path.dirname(_current_dir)
+if _parent_dir not in sys.path:
+    sys.path.insert(0, _parent_dir)
+if _current_dir not in sys.path:
+    sys.path.insert(0, _current_dir)
 
 # FIX #16: Use absolute imports with try/except fallbacks for different deployment layouts
 # Supports both: package layout (aident_cfo_brain.module) and flat layout (module)
@@ -39,11 +49,27 @@ try:
     from aident_cfo_brain.enhanced_relationship_detector import EnhancedRelationshipDetector
 except ImportError:
     # Fallback to flat layout (Railway deployment or direct module import)
-    from finley_graph_engine import FinleyGraphEngine
-    from aident_memory_manager import AidentMemoryManager
-    from causal_inference_engine import CausalInferenceEngine
-    from temporal_pattern_learner import TemporalPatternLearner
-    from enhanced_relationship_detector import EnhancedRelationshipDetector
+    try:
+        from finley_graph_engine import FinleyGraphEngine
+        from aident_memory_manager import AidentMemoryManager
+        from causal_inference_engine import CausalInferenceEngine
+        from temporal_pattern_learner import TemporalPatternLearner
+        from enhanced_relationship_detector import EnhancedRelationshipDetector
+    except ImportError as e:
+        # Last resort: import from current directory (when module is in same dir)
+        import importlib.util
+        
+        def _load_module(module_name, module_path):
+            spec = importlib.util.spec_from_file_location(module_name, module_path)
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            return module
+        
+        FinleyGraphEngine = _load_module('finley_graph_engine', os.path.join(_current_dir, 'finley_graph_engine.py')).FinleyGraphEngine
+        AidentMemoryManager = _load_module('aident_memory_manager', os.path.join(_current_dir, 'aident_memory_manager.py')).AidentMemoryManager
+        CausalInferenceEngine = _load_module('causal_inference_engine', os.path.join(_current_dir, 'causal_inference_engine.py')).CausalInferenceEngine
+        TemporalPatternLearner = _load_module('temporal_pattern_learner', os.path.join(_current_dir, 'temporal_pattern_learner.py')).TemporalPatternLearner
+        EnhancedRelationshipDetector = _load_module('enhanced_relationship_detector', os.path.join(_current_dir, 'enhanced_relationship_detector.py')).EnhancedRelationshipDetector
 
 try:
     from data_ingestion_normalization.entity_resolver_optimized import EntityResolverOptimized as EntityResolver
