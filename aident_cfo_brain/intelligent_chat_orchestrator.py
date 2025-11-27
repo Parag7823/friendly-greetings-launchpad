@@ -57,6 +57,39 @@ def _load_module_from_path(module_name: str, file_path: str):
     spec.loader.exec_module(module)
     return module
 
+# Nuclear option: Dynamic file search - finds modules anywhere on the system
+def _find_module_file(module_name: str, search_roots: list = None) -> str:
+    """
+    Recursively search for a module file starting from multiple root directories.
+    This is the nuclear option - guaranteed to find the file if it exists anywhere.
+    """
+    if search_roots is None:
+        search_roots = ['/app', '/app/src', '/app/aident_cfo_brain', '/', os.getcwd()]
+    
+    target_file = f"{module_name}.py"
+    
+    for root in search_roots:
+        if not root or not os.path.isdir(root):
+            continue
+        
+        try:
+            # Search up to 5 levels deep to avoid infinite recursion
+            for level in range(5):
+                for dirpath, dirnames, filenames in os.walk(root):
+                    # Skip deep recursion
+                    if dirpath.count(os.sep) - root.count(os.sep) > level:
+                        continue
+                    
+                    if target_file in filenames:
+                        full_path = os.path.join(dirpath, target_file)
+                        logger.debug(f"✓ Found {module_name} at: {full_path}")
+                        return full_path
+        except (OSError, PermissionError):
+            continue
+    
+    # Not found anywhere
+    raise ImportError(f"Could not find {module_name}.py anywhere in {search_roots}")
+
 # FIX #16: Use absolute imports with try/except fallbacks for different deployment layouts
 # Supports both: package layout (aident_cfo_brain.module) and flat layout (module)
 
@@ -80,83 +113,34 @@ except ImportError as e1:
         from enhanced_relationship_detector import EnhancedRelationshipDetector
         logger.debug("✓ Tier 2: Flat layout imports successful (module)")
     except ImportError as e2:
-        logger.debug(f"✗ Tier 2 failed: {e2}. Trying Tier 3 (direct file load)...")
-        # Final fallback: Load directly from file paths using importlib
-        # This handles Railway deployments where files are in various locations
+        logger.debug(f"✗ Tier 2 failed: {e2}. Trying Tier 3 (dynamic file search - NUCLEAR OPTION)...")
+        # Final fallback: Dynamic file search - finds modules anywhere on the system
+        # This is guaranteed to work if the files exist anywhere
         try:
-            # Build list of potential file paths (don't filter - let os.path.exists handle it)
-            _module_paths = [
-                ('finley_graph_engine', [
-                    os.path.join(_current_dir, 'finley_graph_engine.py'),
-                    os.path.join(_parent_dir, 'finley_graph_engine.py'),
-                    os.path.join(_root_dir, 'finley_graph_engine.py'),
-                    '/app/finley_graph_engine.py',
-                    '/app/src/finley_graph_engine.py',
-                    '/app/aident_cfo_brain/finley_graph_engine.py',
-                    os.path.join(os.getcwd(), 'finley_graph_engine.py'),
-                ]),
-                ('aident_memory_manager', [
-                    os.path.join(_current_dir, 'aident_memory_manager.py'),
-                    os.path.join(_parent_dir, 'aident_memory_manager.py'),
-                    os.path.join(_root_dir, 'aident_memory_manager.py'),
-                    '/app/aident_memory_manager.py',
-                    '/app/src/aident_memory_manager.py',
-                    '/app/aident_cfo_brain/aident_memory_manager.py',
-                    os.path.join(os.getcwd(), 'aident_memory_manager.py'),
-                ]),
-                ('causal_inference_engine', [
-                    os.path.join(_current_dir, 'causal_inference_engine.py'),
-                    os.path.join(_parent_dir, 'causal_inference_engine.py'),
-                    os.path.join(_root_dir, 'causal_inference_engine.py'),
-                    '/app/causal_inference_engine.py',
-                    '/app/src/causal_inference_engine.py',
-                    '/app/aident_cfo_brain/causal_inference_engine.py',
-                    os.path.join(os.getcwd(), 'causal_inference_engine.py'),
-                ]),
-                ('temporal_pattern_learner', [
-                    os.path.join(_current_dir, 'temporal_pattern_learner.py'),
-                    os.path.join(_parent_dir, 'temporal_pattern_learner.py'),
-                    os.path.join(_root_dir, 'temporal_pattern_learner.py'),
-                    '/app/temporal_pattern_learner.py',
-                    '/app/src/temporal_pattern_learner.py',
-                    '/app/aident_cfo_brain/temporal_pattern_learner.py',
-                    os.path.join(os.getcwd(), 'temporal_pattern_learner.py'),
-                ]),
-                ('enhanced_relationship_detector', [
-                    os.path.join(_current_dir, 'enhanced_relationship_detector.py'),
-                    os.path.join(_parent_dir, 'enhanced_relationship_detector.py'),
-                    os.path.join(_root_dir, 'enhanced_relationship_detector.py'),
-                    '/app/enhanced_relationship_detector.py',
-                    '/app/src/enhanced_relationship_detector.py',
-                    '/app/aident_cfo_brain/enhanced_relationship_detector.py',
-                    os.path.join(os.getcwd(), 'enhanced_relationship_detector.py'),
-                ]),
-            ]
-            
+            _module_names = ['finley_graph_engine', 'aident_memory_manager', 'causal_inference_engine', 
+                            'temporal_pattern_learner', 'enhanced_relationship_detector']
             _modules = {}
-            for _mod_name, _paths in _module_paths:
-                _loaded = False
-                for _path in _paths:
-                    try:
-                        _modules[_mod_name] = _load_module_from_path(_mod_name, _path)
-                        _loaded = True
-                        break
-                    except (ImportError, FileNotFoundError):
-                        continue
-                if not _loaded:
-                    raise ImportError(f"Could not find {_mod_name} in any of {_paths}")
+            
+            for _mod_name in _module_names:
+                try:
+                    # Use dynamic search to find the module file anywhere on the system
+                    _file_path = _find_module_file(_mod_name)
+                    _modules[_mod_name] = _load_module_from_path(_mod_name, _file_path)
+                except ImportError as e:
+                    logger.error(f"Could not find {_mod_name}: {e}")
+                    raise
             
             FinleyGraphEngine = _modules['finley_graph_engine'].FinleyGraphEngine
             AidentMemoryManager = _modules['aident_memory_manager'].AidentMemoryManager
             CausalInferenceEngine = _modules['causal_inference_engine'].CausalInferenceEngine
             TemporalPatternLearner = _modules['temporal_pattern_learner'].TemporalPatternLearner
             EnhancedRelationshipDetector = _modules['enhanced_relationship_detector'].EnhancedRelationshipDetector
-            logger.debug("✓ Tier 3: Direct file load imports successful")
+            logger.debug("✓ Tier 3: NUCLEAR OPTION - Dynamic file search successful!")
         except ImportError as e3:
-            logger.error(f"IMPORT FAILURE - All 3 tiers failed. Fix location: aident_cfo_brain/intelligent_chat_orchestrator.py lines 45-78")
+            logger.error(f"IMPORT FAILURE - All 3 tiers failed. Fix location: aident_cfo_brain/intelligent_chat_orchestrator.py")
             logger.error(f"Tier 1 (package layout): {e1}")
             logger.error(f"Tier 2 (flat layout): {e2}")
-            logger.error(f"Tier 3 (direct file load): {e3}")
+            logger.error(f"Tier 3 (dynamic search): {e3}")
             logger.error(f"sys.path includes: {sys.path[:3]}")
             raise
 
