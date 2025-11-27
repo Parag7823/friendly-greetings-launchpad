@@ -85,7 +85,15 @@ except ImportError as e1:
         # This handles Railway deployments where files are in various locations
         try:
             # Build list of potential search directories
-            _search_dirs = [_current_dir, _parent_dir, _root_dir, '/app', '/app/src', os.getcwd()]
+            _search_dirs = [
+                _current_dir,  # aident_cfo_brain/
+                _parent_dir,   # project root
+                _root_dir,     # /
+                '/app',        # Railway default
+                '/app/src',    # Railway src structure
+                '/app/aident_cfo_brain',  # Railway with package structure
+                os.getcwd(),   # current working directory
+            ]
             _search_dirs = [d for d in _search_dirs if d and os.path.isdir(d)]  # Filter valid dirs
             
             _module_paths = [
