@@ -11672,46 +11672,9 @@ sio = socketio.AsyncServer(
     logger=False,
     engineio_logger=False,
     ping_timeout=60,
-    ping_interval=25,
-    # CRITICAL FIX: Add error handling for malformed requests
-    engineio_options={
-        'ping_timeout': 60,
-        'ping_interval': 25,
-        'max_http_buffer_size': 1e6,  # 1MB max
-    }
+    ping_interval=25
 )
-
-# CRITICAL FIX: Wrap socketio_app with error handling middleware
-class SocketIOErrorHandler:
-    """Middleware to handle Socket.IO errors gracefully"""
-    def __init__(self, socketio_app, fastapi_app):
-        self.socketio_app = socketio_app
-        self.fastapi_app = fastapi_app
-    
-    async def __call__(self, scope, receive, send):
-        """ASGI interface with error handling"""
-        try:
-            # Try Socket.IO first (handles /socket.io/ paths)
-            await self.socketio_app(scope, receive, send)
-        except Exception as e:
-            logger.error(f"Socket.IO error: {e}", exc_info=True)
-            # Fallback to FastAPI for regular HTTP requests
-            try:
-                await self.fastapi_app(scope, receive, send)
-            except Exception as e2:
-                logger.error(f"FastAPI fallback error: {e2}", exc_info=True)
-                # Send 500 error response
-                await send({
-                    'type': 'http.response.start',
-                    'status': 500,
-                    'headers': [[b'content-type', b'application/json']],
-                })
-                await send({
-                    'type': 'http.response.body',
-                    'body': b'{"error": "Internal server error"}',
-                })
-
-socketio_app = SocketIOErrorHandler(socketio.ASGIApp(sio, app), app)
+socketio_app = socketio.ASGIApp(sio, app)
 
 # Socket.IO event handlers (replaces manual endpoint logic)
 @sio.event
