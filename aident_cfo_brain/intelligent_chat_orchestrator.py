@@ -49,27 +49,12 @@ try:
     from aident_cfo_brain.enhanced_relationship_detector import EnhancedRelationshipDetector
 except ImportError:
     # Fallback to flat layout (Railway deployment or direct module import)
-    try:
-        from finley_graph_engine import FinleyGraphEngine
-        from aident_memory_manager import AidentMemoryManager
-        from causal_inference_engine import CausalInferenceEngine
-        from temporal_pattern_learner import TemporalPatternLearner
-        from enhanced_relationship_detector import EnhancedRelationshipDetector
-    except ImportError as e:
-        # Last resort: import from current directory (when module is in same dir)
-        import importlib.util
-        
-        def _load_module(module_name, module_path):
-            spec = importlib.util.spec_from_file_location(module_name, module_path)
-            module = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(module)
-            return module
-        
-        FinleyGraphEngine = _load_module('finley_graph_engine', os.path.join(_current_dir, 'finley_graph_engine.py')).FinleyGraphEngine
-        AidentMemoryManager = _load_module('aident_memory_manager', os.path.join(_current_dir, 'aident_memory_manager.py')).AidentMemoryManager
-        CausalInferenceEngine = _load_module('causal_inference_engine', os.path.join(_current_dir, 'causal_inference_engine.py')).CausalInferenceEngine
-        TemporalPatternLearner = _load_module('temporal_pattern_learner', os.path.join(_current_dir, 'temporal_pattern_learner.py')).TemporalPatternLearner
-        EnhancedRelationshipDetector = _load_module('enhanced_relationship_detector', os.path.join(_current_dir, 'enhanced_relationship_detector.py')).EnhancedRelationshipDetector
+    # sys.path now includes current directory, so these should work
+    from finley_graph_engine import FinleyGraphEngine
+    from aident_memory_manager import AidentMemoryManager
+    from causal_inference_engine import CausalInferenceEngine
+    from temporal_pattern_learner import TemporalPatternLearner
+    from enhanced_relationship_detector import EnhancedRelationshipDetector
 
 try:
     from data_ingestion_normalization.entity_resolver_optimized import EntityResolverOptimized as EntityResolver
