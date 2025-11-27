@@ -8450,11 +8450,7 @@ async def chat_endpoint(request: dict):
         
         structured_logger.info("Chat request received", user_id=user_id, chat_id=chat_id, message_length=len(message))
         
-        # FIX #16: Import IntelligentChatOrchestrator - add parent directory to path
-        parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        if parent_dir not in sys.path:
-            sys.path.insert(0, parent_dir)
-        
+        # FIX #16: Import IntelligentChatOrchestrator (sys.path already set at module level)
         from aident_cfo_brain.intelligent_chat_orchestrator import IntelligentChatOrchestrator
         
         # Note: Now using Groq/Llama instead of Anthropic for chat
