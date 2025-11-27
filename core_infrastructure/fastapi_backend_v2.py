@@ -12,6 +12,11 @@ import mmap
 import threading
 import structlog
 
+# FIX #16: Add project root to sys.path so aident_cfo_brain package can be imported
+_project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _project_root not in sys.path:
+    sys.path.insert(0, _project_root)
+
 # CRITICAL FIX: Defer database_optimization_utils import to startup event
 # This import was blocking module load - moved to startup event where it's used
 # from database_optimization_utils import OptimizedDatabaseQueries
