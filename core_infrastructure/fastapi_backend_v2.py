@@ -8453,9 +8453,17 @@ async def chat_endpoint(request: dict):
         # FIX #16: Import IntelligentChatOrchestrator with fallback for different deployment layouts
         try:
             from aident_cfo_brain.intelligent_chat_orchestrator import IntelligentChatOrchestrator
-        except ImportError:
-            # Fallback to flat layout (Railway deployment)
-            from intelligent_chat_orchestrator import IntelligentChatOrchestrator
+            structured_logger.debug("✓ Imported IntelligentChatOrchestrator from package layout")
+        except ImportError as e1:
+            structured_logger.debug(f"✗ Package layout failed: {e1}. Trying flat layout...")
+            try:
+                from intelligent_chat_orchestrator import IntelligentChatOrchestrator
+                structured_logger.debug("✓ Imported IntelligentChatOrchestrator from flat layout")
+            except ImportError as e2:
+                structured_logger.error(f"IMPORT FAILURE - Fix location: core_infrastructure/fastapi_backend_v2.py line 8453")
+                structured_logger.error(f"Package layout error: {e1}")
+                structured_logger.error(f"Flat layout error: {e2}")
+                raise
         
         # Note: Now using Groq/Llama instead of Anthropic for chat
         # Check for Groq API key
@@ -8546,9 +8554,17 @@ async def chat_health_check():
         # FIX #16: Import IntelligentChatOrchestrator with fallback for different deployment layouts
         try:
             from aident_cfo_brain.intelligent_chat_orchestrator import IntelligentChatOrchestrator
-        except ImportError:
-            # Fallback to flat layout (Railway deployment)
-            from intelligent_chat_orchestrator import IntelligentChatOrchestrator
+            structured_logger.debug("✓ Imported IntelligentChatOrchestrator from package layout (health check)")
+        except ImportError as e1:
+            structured_logger.debug(f"✗ Package layout failed: {e1}. Trying flat layout...")
+            try:
+                from intelligent_chat_orchestrator import IntelligentChatOrchestrator
+                structured_logger.debug("✓ Imported IntelligentChatOrchestrator from flat layout (health check)")
+            except ImportError as e2:
+                structured_logger.error(f"IMPORT FAILURE - Fix location: core_infrastructure/fastapi_backend_v2.py line 8554")
+                structured_logger.error(f"Package layout error: {e1}")
+                structured_logger.error(f"Flat layout error: {e2}")
+                raise
         
         # CRITICAL FIX: Lazy-load Supabase client on first use
         supabase_client = await _ensure_supabase_loaded()

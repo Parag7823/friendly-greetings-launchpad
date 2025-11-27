@@ -52,7 +52,9 @@ try:
     from aident_cfo_brain.causal_inference_engine import CausalInferenceEngine
     from aident_cfo_brain.temporal_pattern_learner import TemporalPatternLearner
     from aident_cfo_brain.enhanced_relationship_detector import EnhancedRelationshipDetector
+    logger.debug("✓ Tier 1: Package layout imports successful (aident_cfo_brain.module)")
 except ImportError as e1:
+    logger.debug(f"✗ Tier 1 failed: {e1}. Trying Tier 2 (flat layout)...")
     try:
         # Fallback to flat layout (Railway deployment or direct module import)
         # sys.path now includes current directory and root, so these should work
@@ -61,7 +63,9 @@ except ImportError as e1:
         from causal_inference_engine import CausalInferenceEngine
         from temporal_pattern_learner import TemporalPatternLearner
         from enhanced_relationship_detector import EnhancedRelationshipDetector
+        logger.debug("✓ Tier 2: Flat layout imports successful (module)")
     except ImportError as e2:
+        logger.debug(f"✗ Tier 2 failed: {e2}. Trying Tier 3 (direct import)...")
         # Final fallback: import from current directory (aident_cfo_brain/)
         # This handles the case where the module is imported directly
         try:
@@ -76,8 +80,13 @@ except ImportError as e1:
             CausalInferenceEngine = _cie.CausalInferenceEngine
             TemporalPatternLearner = _tpl.TemporalPatternLearner
             EnhancedRelationshipDetector = _erd.EnhancedRelationshipDetector
+            logger.debug("✓ Tier 3: Direct imports successful (current directory)")
         except ImportError as e3:
-            logger.error(f"Failed to import core modules. Errors: {e1}, {e2}, {e3}")
+            logger.error(f"IMPORT FAILURE - All 3 tiers failed. Fix location: aident_cfo_brain/intelligent_chat_orchestrator.py lines 45-78")
+            logger.error(f"Tier 1 (package layout): {e1}")
+            logger.error(f"Tier 2 (flat layout): {e2}")
+            logger.error(f"Tier 3 (direct import): {e3}")
+            logger.error(f"sys.path includes: {sys.path[:3]}")
             raise
 
 try:
