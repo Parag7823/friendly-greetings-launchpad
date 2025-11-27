@@ -19,6 +19,8 @@ from typing import Optional
 from supabase import create_client, Client
 import threading
 import signal
+import socket
+from urllib.parse import urlparse
 
 logger = structlog.get_logger(__name__)
 
@@ -107,6 +109,22 @@ class SupabaseConnectionPool:
             def create_client_thread():
                 try:
                     logger.info(f"🔗 Attempting to connect to Supabase at {url}")
+                    
+                    # Check DNS resolution first
+                    try:
+                        parsed_url = urlparse(url)
+                        hostname = parsed_url.hostname
+                        if hostname:
+                            logger.info(f"🔍 Resolving DNS for {hostname}...")
+                            ip = socket.gethostbyname(hostname)
+                            logger.info(f"✅ DNS resolved: {hostname} -> {ip}")
+                    except socket.gaierror as dns_err:
+                        logger.error(f"❌ DNS resolution failed for {hostname}: {dns_err}")
+                        client_holder['error'] = dns_err
+                        return
+                    except Exception as dns_err:
+                        logger.warning(f"⚠️ DNS check failed (non-critical): {dns_err}")
+                    
                     client_holder['client'] = create_client(url, key)
                     logger.info(f"✅ Successfully created Supabase client")
                 except Exception as e:
