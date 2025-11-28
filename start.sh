@@ -15,18 +15,18 @@ echo "✅ Startup validation passed! Starting application..."
 
 # Start ARQ worker in background
 echo "🔧 Starting ARQ worker in background..."
-python -m arq arq_worker.WorkerSettings &
+python -m arq background_jobs.arq_worker.WorkerSettings &
 ARQ_PID=$!
 echo "✅ ARQ worker started with PID: $ARQ_PID"
 
 # Start FastAPI server in foreground with Socket.IO support
 echo "🚀 Starting Uvicorn server..."
-echo "   Module: fastapi_backend_v2:socketio_app"
+echo "   Module: core_infrastructure.fastapi_backend_v2:socketio_app"
 echo "   Host: 0.0.0.0"
 echo "   Port: $PORT"
 
 # Add timeout and detailed logging
-uvicorn fastapi_backend_v2:socketio_app \
+uvicorn core_infrastructure.fastapi_backend_v2:socketio_app \
     --host 0.0.0.0 \
     --port $PORT \
     --log-level debug \
