@@ -123,7 +123,7 @@ class UniversalPlatformDetectorOptimized:
         }
         
         # FIX #81: Use shared learning system
-        from shared_learning_system import SharedLearningSystem
+        from data_ingestion_normalization.shared_learning_system import SharedLearningSystem
         self.learning_system = SharedLearningSystem()
         self.learning_enabled = True
         

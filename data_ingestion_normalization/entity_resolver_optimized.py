@@ -124,7 +124,7 @@ class EntityResolverOptimized:
         self._instructor_initialized = False
         
         # CRITICAL FIX: Use centralized Redis cache - FAIL FAST if unavailable
-        from centralized_cache import safe_get_cache
+        from core_infrastructure.centralized_cache import safe_get_cache
         self.cache = cache_client or safe_get_cache()
         if self.cache is None:
             raise RuntimeError(

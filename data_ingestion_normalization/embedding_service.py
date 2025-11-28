@@ -119,7 +119,7 @@ class EmbeddingService:
         # FIX #1: Initialize cache if not provided
         if self.cache is None:
             try:
-                from centralized_cache import get_cache
+                from core_infrastructure.centralized_cache import get_cache
                 self.cache = get_cache()
             except (ImportError, RuntimeError):
                 logger.warning("Centralized cache not available - embeddings will not be cached")

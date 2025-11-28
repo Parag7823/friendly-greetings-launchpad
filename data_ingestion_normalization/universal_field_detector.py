@@ -33,7 +33,7 @@ from groq import AsyncGroq
 import os
 
 # CRITICAL FIX: Import centralized cache for aiocache @cached decorator
-from centralized_cache import safe_get_cache
+from core_infrastructure.centralized_cache import safe_get_cache
 
 logger = structlog.get_logger(__name__)
 
