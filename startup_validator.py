@@ -87,22 +87,25 @@ def check_critical_files() -> bool:
     """
     print_header("STEP 1: Validating Python File Syntax")
     
-    # In Docker, all files are copied to /app/ root (see Dockerfile COPY commands)
+    # In Docker, files are copied to subdirectories (see Dockerfile COPY commands)
     critical_files = [
-        "fastapi_backend_v2.py",
-        "supabase_client.py",
-        "database_optimization_utils.py",
-        "temporal_pattern_learner.py",
-        "causal_inference_engine.py",
-        "semantic_relationship_extractor.py",
-        "enhanced_relationship_detector.py",
-        "intelligent_chat_orchestrator.py",
-        "universal_document_classifier_optimized.py",
-        "universal_platform_detector_optimized.py",
-        "universal_extractors_optimized.py",
-        "universal_field_detector.py",
-        "entity_resolver_optimized.py",
-        "production_duplicate_detection_service.py",
+        "core_infrastructure/fastapi_backend_v2.py",
+        "core_infrastructure/supabase_client.py",
+        "core_infrastructure/config_manager.py",
+        "core_infrastructure/rate_limiter.py",
+        "core_infrastructure/database_optimization_utils.py",
+        "aident_cfo_brain/temporal_pattern_learner.py",
+        "aident_cfo_brain/causal_inference_engine.py",
+        "aident_cfo_brain/semantic_relationship_extractor.py",
+        "aident_cfo_brain/enhanced_relationship_detector.py",
+        "aident_cfo_brain/intelligent_chat_orchestrator.py",
+        "data_ingestion_normalization/universal_document_classifier_optimized.py",
+        "data_ingestion_normalization/universal_platform_detector_optimized.py",
+        "data_ingestion_normalization/universal_extractors_optimized.py",
+        "data_ingestion_normalization/universal_field_detector.py",
+        "data_ingestion_normalization/entity_resolver_optimized.py",
+        "duplicate_detection_fraud/production_duplicate_detection_service.py",
+        "background_jobs/arq_worker.py",
     ]
     
     all_valid = True
