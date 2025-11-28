@@ -128,28 +128,28 @@ try:
     print("🔍 DEBUG: Importing StreamedFile...", flush=True)
     from data_ingestion_normalization.streaming_source import StreamedFile
 except ImportError:
-    # Railway/runtime layout: modules flattened to top level
+    # Docker layout: modules in subdirectories
     print("🔍 DEBUG: Importing UniversalFieldDetector (flat)...", flush=True)
-    from universal_field_detector import UniversalFieldDetector
+    from data_ingestion_normalization.universal_field_detector import UniversalFieldDetector
     print("🔍 DEBUG: Importing UniversalPlatformDetector (flat)...", flush=True)
-    from universal_platform_detector_optimized import (
+    from data_ingestion_normalization.universal_platform_detector_optimized import (
         UniversalPlatformDetectorOptimized as UniversalPlatformDetector,
     )
     print("🔍 DEBUG: Importing UniversalDocumentClassifier (flat)...", flush=True)
-    from universal_document_classifier_optimized import (
+    from data_ingestion_normalization.universal_document_classifier_optimized import (
         UniversalDocumentClassifierOptimized as UniversalDocumentClassifier,
     )
     print("🔍 DEBUG: Importing UniversalExtractors (flat)...", flush=True)
-    from universal_extractors_optimized import (
+    from data_ingestion_normalization.universal_extractors_optimized import (
         UniversalExtractorsOptimized as UniversalExtractors,
     )
     print("🔍 DEBUG: Importing EntityResolver (flat)...", flush=True)
-    from entity_resolver_optimized import (
+    from data_ingestion_normalization.entity_resolver_optimized import (
         EntityResolverOptimized as EntityResolver,
     )
     print("🔍 DEBUG: Importing StreamedFile (flat)...", flush=True)
     try:
-        from streaming_source import StreamedFile
+        from data_ingestion_normalization.streaming_source import StreamedFile
         print("🔍 DEBUG: StreamedFile imported successfully", flush=True)
     except Exception as e:
         print(f"❌ CRITICAL ERROR importing StreamedFile: {e}", flush=True)
@@ -157,7 +157,7 @@ except ImportError:
 
 print("🔍 DEBUG: Importing EnhancedRelationshipDetector...", flush=True)
 try:
-    from enhanced_relationship_detector import EnhancedRelationshipDetector
+    from aident_cfo_brain.enhanced_relationship_detector import EnhancedRelationshipDetector
     print("🔍 DEBUG: EnhancedRelationshipDetector imported successfully", flush=True)
 except Exception as e:
     print(f"❌ CRITICAL ERROR importing EnhancedRelationshipDetector: {e}", flush=True)
@@ -166,7 +166,7 @@ except Exception as e:
 
 print("🔍 DEBUG: Importing ProvenanceTracker...", flush=True)
 try:
-    from provenance_tracker import normalize_business_logic, normalize_temporal_causality
+    from core_infrastructure.provenance_tracker import normalize_business_logic, normalize_temporal_causality
     print("🔍 DEBUG: ProvenanceTracker imported successfully", flush=True)
 except Exception as e:
     print(f"❌ CRITICAL ERROR importing ProvenanceTracker: {e}", flush=True)
@@ -184,7 +184,7 @@ try:
         print("🔍 DEBUG: FieldMappingLearner imported successfully (nested)", flush=True)
     except ImportError:
         print("🔍 DEBUG: Importing FieldMappingLearner (flat)...", flush=True)
-        from field_mapping_learner import learn_field_mapping, get_learned_mappings
+        from data_ingestion_normalization.field_mapping_learner import learn_field_mapping, get_learned_mappings
         print("🔍 DEBUG: FieldMappingLearner imported successfully (flat)", flush=True)
 except Exception as e:
     # logger not initialized yet here; use print for diagnostics only
@@ -358,17 +358,17 @@ async def get_arq_pool():
         return _arq_pool
 
 # Using Groq/Llama exclusively for all AI operations
-from nango_client import NangoClient
+from data_ingestion_normalization.nango_client import NangoClient
 
 # Import critical fixes systems
-from transaction_manager import initialize_transaction_manager, get_transaction_manager
-from streaming_processor import (
+from core_infrastructure.transaction_manager import initialize_transaction_manager, get_transaction_manager
+from data_ingestion_normalization.streaming_processor import (
     initialize_streaming_processor,
     get_streaming_processor,
     StreamingConfig,
     StreamingFileProcessor,
 )
-from error_recovery_system import (
+from core_infrastructure.error_recovery_system import (
     initialize_error_recovery_system,
     get_error_recovery_system,
     ErrorContext,
@@ -387,7 +387,7 @@ optimized_db: Optional["OptimizedDatabaseQueries"] = None
 # Global thread pool for CPU-bound operations (set during startup)
 _thread_pool: Optional[ThreadPoolExecutor] = None
 
-from centralized_cache import initialize_cache, get_cache, safe_get_cache
+from core_infrastructure.centralized_cache import initialize_cache, get_cache, safe_get_cache
 
 # Backward compatibility alias
 safe_get_ai_cache = safe_get_cache
@@ -395,7 +395,7 @@ safe_get_ai_cache = safe_get_cache
 import polars as pl
 
 # Import security system for input validation and protection
-from security_system import SecurityValidator, InputSanitizer, SecurityContext
+from core_infrastructure.security_system import SecurityValidator, InputSanitizer, SecurityContext
 
 # REMOVED: Row hashing moved to duplicate detection service only
 # Backend no longer computes row hashes to avoid inconsistencies
@@ -511,7 +511,7 @@ def _db_update(table: str, updates: dict, eq_col: str, eq_val):
 
 # Import production duplicate detection service
 try:
-    from production_duplicate_detection_service import (
+    from duplicate_detection_fraud.production_duplicate_detection_service import (
         ProductionDuplicateDetectionService, 
         FileMetadata, 
         DuplicateType,

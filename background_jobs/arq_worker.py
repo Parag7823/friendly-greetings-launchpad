@@ -7,7 +7,7 @@ from arq import Retry, cron
 from arq.connections import RedisSettings
 
 # Import application code to reuse existing logic end-to-end
-from fastapi_backend_v2 import (
+from core_infrastructure.fastapi_backend_v2 import (
     NangoClient,
     ConnectorSyncRequest,
     _gmail_sync_run,
