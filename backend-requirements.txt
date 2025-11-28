@@ -153,5 +153,5 @@ pytest-asyncio>=0.21.0
 pytest-cov>=4.0.0
 
 # Model Explainability (SHAP) - ENHANCEMENT #11
-# Explains WHY models make predictions (feature importance)
-shap==0.43.0  # SHAP values for model interpretability (local library, no API key needed)
+# TEMPORARILY REMOVED: shap==0.43.0 causes Docker build issues (heavy dependencies)
+# Re-add if needed: pip install shap==0.43.0
