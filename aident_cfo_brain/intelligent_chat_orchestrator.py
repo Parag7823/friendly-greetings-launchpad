@@ -621,6 +621,102 @@ With your financial data, I can:
                 data={'error': str(e)}
             )
     
+    async def process_question_streaming(
+        self,
+        question: str,
+        user_id: str,
+        chat_id: Optional[str] = None,
+        context: Optional[Dict[str, Any]] = None
+    ):
+        """
+        Streaming version of process_question - yields response chunks in real-time.
+        
+        Yields:
+            dict with type: "chunk" (text), "done" (metadata), or "error"
+        """
+        try:
+            logger.info("Processing question (streaming)", question=question, user_id=user_id)
+            
+            # Step 0a: Determine data mode
+            data_mode = await self._determine_data_mode(user_id)
+            
+            # Step 0b: Initialize memory manager
+            memory_manager = AidentMemoryManager(
+                user_id=user_id,
+                redis_url=os.getenv('ARQ_REDIS_URL') or os.getenv('REDIS_URL')
+            )
+            await memory_manager.load_memory()
+            
+            # Step 0c: Load conversation history
+            try:
+                conversation_history = await asyncio.wait_for(
+                    self._load_conversation_history(user_id, chat_id) if chat_id else asyncio.sleep(0),
+                    timeout=5.0
+                ) if chat_id else []
+            except (asyncio.TimeoutError, Exception):
+                conversation_history = []
+            
+            # Step 1: Classify question
+            memory_context = memory_manager.get_context()
+            question_type, confidence = await self._classify_question(
+                question, 
+                user_id, 
+                conversation_history,
+                memory_context=memory_context
+            )
+            
+            logger.info("Question classified (streaming)", question_type=question_type.value)
+            
+            # Step 2: Get response (non-streaming for now, will stream chunks)
+            if question_type == QuestionType.CAUSAL:
+                response = await self._handle_causal_question(question, user_id, context, conversation_history)
+            elif question_type == QuestionType.TEMPORAL:
+                response = await self._handle_temporal_question(question, user_id, context, conversation_history)
+            elif question_type == QuestionType.RELATIONSHIP:
+                response = await self._handle_relationship_question(question, user_id, context, conversation_history)
+            elif question_type == QuestionType.WHAT_IF:
+                response = await self._handle_whatif_question(question, user_id, context, conversation_history)
+            elif question_type == QuestionType.EXPLAIN:
+                response = await self._handle_explain_question(question, user_id, context, conversation_history)
+            elif question_type == QuestionType.DATA_QUERY:
+                response = await self._handle_data_query(question, user_id, context, conversation_history)
+            else:
+                response = await self._handle_general_question(question, user_id, context, conversation_history, memory_manager)
+            
+            # Step 3: Stream response text word by word
+            answer_text = response.answer
+            words = answer_text.split()
+            
+            for word in words:
+                yield {
+                    "type": "chunk",
+                    "text": word + " "
+                }
+                # Small delay to simulate natural typing (optional, can be removed for speed)
+                await asyncio.sleep(0.01)
+            
+            # Step 4: Save memory and database
+            await memory_manager.add_message(question, response.answer)
+            await self._store_chat_message(user_id, chat_id, question, response)
+            
+            # Step 5: Yield completion with metadata
+            yield {
+                "type": "done",
+                "question_type": question_type.value,
+                "confidence": confidence,
+                "data": response.data,
+                "actions": response.actions,
+                "visualizations": response.visualizations,
+                "follow_up_questions": response.follow_up_questions
+            }
+            
+        except Exception as e:
+            logger.error("Error in streaming question processing", error=str(e), exc_info=True)
+            yield {
+                "type": "error",
+                "message": f"I encountered an error processing your question. Please try rephrasing it."
+            }
+    
     async def _classify_question(
         self,
         question: str,
