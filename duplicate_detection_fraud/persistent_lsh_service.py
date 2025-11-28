@@ -74,7 +74,7 @@ class PersistentLSHService:
         Returns:
             True if lock acquired, False otherwise
         """
-        from centralized_cache import safe_get_cache
+        from core_infrastructure.centralized_cache import safe_get_cache
         cache = safe_get_cache()
         
         if not cache or not cache.redis_client:
@@ -107,7 +107,7 @@ class PersistentLSHService:
         Returns:
             True if lock released, False otherwise
         """
-        from centralized_cache import safe_get_cache
+        from core_infrastructure.centralized_cache import safe_get_cache
         cache = safe_get_cache()
         
         if not cache or not cache.redis_client:
@@ -132,7 +132,7 @@ class PersistentLSHService:
         Returns:
             MinHashLSH instance or None
         """
-        from centralized_cache import safe_get_cache
+        from core_infrastructure.centralized_cache import safe_get_cache
         cache = safe_get_cache()
         
         if not cache:
@@ -172,7 +172,7 @@ class PersistentLSHService:
         Returns:
             True if successful
         """
-        from centralized_cache import safe_get_cache
+        from core_infrastructure.centralized_cache import safe_get_cache
         cache = safe_get_cache()
         
         if not cache:
@@ -353,7 +353,7 @@ class PersistentLSHService:
             Shard statistics
         """
         try:
-            from centralized_cache import safe_get_cache
+            from core_infrastructure.centralized_cache import safe_get_cache
             cache = safe_get_cache()
             
             if not cache:

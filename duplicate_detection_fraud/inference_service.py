@@ -130,7 +130,7 @@ class TFIDFService:
             return _tfidf_vectorizer, _doc_type_vectors
         
         # Check Redis cache first
-        from centralized_cache import safe_get_cache
+        from core_infrastructure.centralized_cache import safe_get_cache
         cache = safe_get_cache()
         if cache:
             cached_data = await cache.get('inference:tfidf_vectorizer')
@@ -199,7 +199,7 @@ class AutomatonService:
     @staticmethod
     async def get_platform_automaton():
         """Get or build platform detection automaton"""
-        from centralized_cache import safe_get_cache
+        from core_infrastructure.centralized_cache import safe_get_cache
         cache = safe_get_cache()
         
         # FIX #4: Cache patterns instead of automaton object
@@ -250,7 +250,7 @@ class AutomatonService:
     @staticmethod
     async def get_document_automaton():
         """Get or build document classification automaton"""
-        from centralized_cache import safe_get_cache
+        from core_infrastructure.centralized_cache import safe_get_cache
         cache = safe_get_cache()
         
         # FIX #4: Cache patterns instead of automaton object
@@ -312,7 +312,7 @@ async def health_check() -> Dict[str, Any]:
     }
     
     # Check Redis cache
-    from centralized_cache import safe_get_cache
+    from core_infrastructure.centralized_cache import safe_get_cache
     cache = safe_get_cache()
     health['redis_cache'] = cache is not None
     

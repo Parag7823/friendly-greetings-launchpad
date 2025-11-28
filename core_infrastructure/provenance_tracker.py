@@ -27,7 +27,7 @@ import structlog
 # FIX #4: CENTRALIZED HASHING - Import from database_optimization_utils
 # This ensures provenance_tracker and production_duplicate_detection_service
 # use the same hashing algorithm (xxh3_128) for data integrity verification
-from database_optimization_utils import calculate_row_hash, verify_row_hash, get_normalized_tokens
+from core_infrastructure.database_optimization_utils import calculate_row_hash, verify_row_hash, get_normalized_tokens
 
 logger = structlog.get_logger(__name__)
 

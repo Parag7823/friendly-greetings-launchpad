@@ -27,7 +27,7 @@ from groq import AsyncGroq
 from supabase import create_client, Client
 
 import pendulum
-from provenance_tracker import normalize_business_logic, normalize_temporal_causality
+from core_infrastructure.provenance_tracker import normalize_business_logic, normalize_temporal_causality
 
 # ✅ LAZY LOADING: Heavy C extensions moved to lazy load
 # These are loaded inside methods to prevent startup delays

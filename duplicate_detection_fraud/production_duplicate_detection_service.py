@@ -216,7 +216,7 @@ class ProductionDuplicateDetectionService:
         self.config = config  # Store config instance
         
         # FIX #4: GRACEFUL DEGRADATION - Cache initialization with fallback
-        from centralized_cache import safe_get_cache
+        from core_infrastructure.centralized_cache import safe_get_cache
         self.cache = safe_get_cache()
         if self.cache is None:
             logger.warning(
@@ -1698,7 +1698,7 @@ class ProductionDuplicateDetectionService:
             # Check cache first (cross-process consistency via centralized_cache)
             cache_key = f"row_dup:{user_id}:{row_hash}"
             try:
-                from centralized_cache import safe_get_cache
+                from core_infrastructure.centralized_cache import safe_get_cache
                 cache = safe_get_cache()
                 if cache:
                     cached_result = await cache.get(cache_key)

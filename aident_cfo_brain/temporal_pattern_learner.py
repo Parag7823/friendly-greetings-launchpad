@@ -64,7 +64,7 @@ from scipy import stats
 import pandas as pd
 
 # CRITICAL FIX: Import shared normalization functions
-from provenance_tracker import normalize_business_logic, normalize_temporal_causality
+from core_infrastructure.provenance_tracker import normalize_business_logic, normalize_temporal_causality
 
 logger = structlog.get_logger(__name__)
 

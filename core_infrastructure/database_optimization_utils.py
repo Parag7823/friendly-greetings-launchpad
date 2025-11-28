@@ -46,7 +46,7 @@ def _load_xxhash():
 # FIX #7: Strict dependency on centralized supabase_client.py
 # Fail hard in production if supabase_client module is missing
 try:
-    from supabase_client import get_supabase_client  # type: ignore
+    from core_infrastructure.supabase_client import get_supabase_client  # type: ignore
     _HAS_SUPABASE_HELPER = True
     logger_temp = structlog.get_logger(__name__)
     logger_temp.info("✅ database_optimization_utils using centralized Supabase client")
