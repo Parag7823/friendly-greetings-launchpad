@@ -98,6 +98,12 @@ except ImportError:
     xxhash = None
     print("⚠️ xxhash not installed - dedupe hashing will use fallback", flush=True)
 
+try:
+    from glom import glom, Coalesce, Iterate
+except ImportError:
+    glom = None
+    print("⚠️ glom not installed - nested data extraction will use fallback", flush=True)
+
 # Shared ingestion/normalization modules
 try:
     # Local/package layout
@@ -1659,22 +1665,25 @@ class PlatformIDExtractor:
                         try:
                             result = parse(pattern, col_value_str)
                             if result:
-                                # Successfully parsed - extract the ID
-                                if 'id' in result.named:
-                                    extracted_id = str(result.named['id'])
+                                extracted_data = {}
+                                extracted_id = None
+                                
+                                if result.named:
+                                    extracted_data = result.named
+                                    extracted_id = str(result.named.get('id', result.named.get(list(result.named.keys())[0]) if result.named else col_value_str))
                                 elif len(result.fixed) > 0:
                                     extracted_id = str(result.fixed[0])
                                 else:
                                     extracted_id = col_value_str
                                 
-                                # Higher confidence for ID columns
                                 confidence = 0.9 if is_id_column else 0.7
                                 
-                                # Basic validation
                                 if len(extracted_id) >= 3 and extracted_id.replace('-', '').replace('_', '').isalnum():
                                     extracted_ids[id_type] = extracted_id
                                     confidence_scores[id_type] = confidence
-                                    break  # Found match, stop trying patterns
+                                    if extracted_data:
+                                        extracted_ids[f"{id_type}_parsed"] = extracted_data
+                                    break
                         except Exception as e:
                             logger.debug(f"Parse failed for pattern {pattern}: {e}")
                             continue
@@ -1691,24 +1700,28 @@ class PlatformIDExtractor:
                     
                     for pattern in patterns_to_try:
                         try:
-                            # Search for pattern in text
                             words = all_text.split()
                             for word in words:
                                 result = parse(pattern, word)
                                 if result:
-                                    if 'id' in result.named:
-                                        extracted_id = str(result.named['id'])
+                                    extracted_data = {}
+                                    extracted_id = None
+                                    
+                                    if result.named:
+                                        extracted_data = result.named
+                                        extracted_id = str(result.named.get('id', result.named.get(list(result.named.keys())[0]) if result.named else word))
                                     elif len(result.fixed) > 0:
                                         extracted_id = str(result.fixed[0])
                                     else:
                                         extracted_id = word
                                     
-                                    # Lower confidence for text search
                                     confidence = 0.6
                                     
                                     if len(extracted_id) >= 3 and extracted_id.replace('-', '').replace('_', '').isalnum():
                                         extracted_ids[id_type] = extracted_id
                                         confidence_scores[id_type] = confidence
+                                        if extracted_data:
+                                            extracted_ids[f"{id_type}_parsed"] = extracted_data
                                         break
                             
                             if id_type in extracted_ids:
@@ -2984,16 +2997,20 @@ class DataEnrichmentProcessor:
             patterns = platform_patterns.get(platform.lower(), {})
             
             for id_type, pattern_info in patterns.items():
-                # Handle both single pattern and list of patterns
                 pattern_list = pattern_info if isinstance(pattern_info, list) else [pattern_info]
                 
                 for col_name, col_value in row_data.items():
                     if col_value and isinstance(col_value, str):
                         for pattern in pattern_list:
-                            # Use parse library (inverse of format) for pattern matching
                             result = parse(pattern, col_value)
                             if result:
-                                platform_ids[id_type] = col_value
+                                extracted_data = {}
+                                if result.named:
+                                    extracted_data = result.named
+                                    platform_ids[id_type] = extracted_data.get('id', col_value)
+                                    platform_ids[f"{id_type}_parsed"] = extracted_data
+                                else:
+                                    platform_ids[id_type] = col_value
                                 break
                     if id_type in platform_ids:
                         break
@@ -6123,10 +6140,14 @@ async def _fast_classify_row_cached(self, row, platform_info: dict, column_names
                         if self.entity_resolver:
                             for event in normalized_events_batch:
                                 try:
-                                    # Extract entity names from event
-                                    vendor = event.get('classification_metadata', {}).get('vendor_standard') or event.get('payload', {}).get('vendor_raw')
-                                    customer = event.get('classification_metadata', {}).get('customer_standard') or event.get('payload', {}).get('customer_raw')
-                                    employee = event.get('classification_metadata', {}).get('employee_name')
+                                    if glom:
+                                        vendor = glom(event, Coalesce('classification_metadata.vendor_standard', 'payload.vendor_raw', default=''))
+                                        customer = glom(event, Coalesce('classification_metadata.customer_standard', 'payload.customer_raw', default=''))
+                                        employee = glom(event, Coalesce('classification_metadata.employee_name', default=''))
+                                    else:
+                                        vendor = event.get('classification_metadata', {}).get('vendor_standard') or event.get('payload', {}).get('vendor_raw')
+                                        customer = event.get('classification_metadata', {}).get('customer_standard') or event.get('payload', {}).get('customer_raw')
+                                        employee = event.get('classification_metadata', {}).get('employee_name')
                                     
                                     entity_names = {}
                                     if vendor:
@@ -6773,24 +6794,22 @@ async def _fast_classify_row_cached(self, row, platform_info: dict, column_names
                 events = await optimized_db.get_events_for_entity_extraction(user_id, file_id)
                 filter_desc = f"file_id={file_id}"
             else:
-                # Fallback to manual query for transaction_id (not in optimized_db yet)
                 events_query = supabase.table('raw_events').select('id, payload, kind, source_platform, row_index').eq('user_id', user_id).eq('transaction_id', transaction_id)
                 events_result = events_query.execute()
                 events = events_result.data or []
                 filter_desc = f"transaction_id={transaction_id}"
             
-            logger.info(f"Found {len(events)} events for entity resolution ({filter_desc})")
-            
-            # Extract entity names from events
             entity_names = []
             for event in events:
-                payload = event.get('payload', {})
-                classification = event.get('classification_metadata', {})
-                
-                # Extract vendor/customer/employee names
-                vendor = payload.get('vendor_standard') or payload.get('vendor_raw') or payload.get('vendor') or payload.get('name')
-                customer = payload.get('customer_standard') or payload.get('customer_raw') or payload.get('customer')
-                employee = payload.get('employee_name') or payload.get('employee')
+                if glom:
+                    vendor = glom(event, Coalesce('payload.vendor_standard', 'payload.vendor_raw', 'payload.vendor', 'payload.name', default=''))
+                    customer = glom(event, Coalesce('payload.customer_standard', 'payload.customer_raw', 'payload.customer', default=''))
+                    employee = glom(event, Coalesce('payload.employee_name', 'payload.employee', default=''))
+                else:
+                    payload = event.get('payload', {})
+                    vendor = payload.get('vendor_standard') or payload.get('vendor_raw') or payload.get('vendor') or payload.get('name')
+                    customer = payload.get('customer_standard') or payload.get('customer_raw') or payload.get('customer')
+                    employee = payload.get('employee_name') or payload.get('employee')
                 
                 if vendor:
                     entity_names.append({'name': vendor, 'type': 'vendor', 'event_id': event['id']})
@@ -9942,19 +9961,28 @@ async def _gmail_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> Dict
         
         if req.mode != 'historical':
             try:
-                # Get last historyId from metadata
                 uc_row = supabase.table('user_connections').select('metadata, last_synced_at').eq('nango_connection_id', connection_id).limit(1).execute()
                 if uc_row.data:
-                    uc_metadata = uc_row.data[0].get('metadata') or {}
-                    if isinstance(uc_metadata, str):
-                        try:
-                            uc_metadata = orjson.loads(uc_metadata)
-                        except Exception:
-                            uc_metadata = {}
-                    last_history_id = uc_metadata.get('last_history_id')
+                    if glom:
+                        uc_data = uc_row.data[0]
+                        uc_metadata = glom(uc_data, Coalesce('metadata', default={}))
+                        if isinstance(uc_metadata, str):
+                            try:
+                                uc_metadata = orjson.loads(uc_metadata)
+                            except Exception:
+                                uc_metadata = {}
+                        last_history_id = uc_metadata.get('last_history_id')
+                        last_ts = glom(uc_data, Coalesce('last_synced_at', default=None))
+                    else:
+                        uc_metadata = uc_row.data[0].get('metadata') or {}
+                        if isinstance(uc_metadata, str):
+                            try:
+                                uc_metadata = orjson.loads(uc_metadata)
+                            except Exception:
+                                uc_metadata = {}
+                        last_history_id = uc_metadata.get('last_history_id')
+                        last_ts = uc_row.data[0].get('last_synced_at')
                     
-                    # Only use incremental if we have a recent sync (within 30 days)
-                    last_ts = uc_row.data[0].get('last_synced_at')
                     if last_ts and last_history_id:
                         last_sync_time = pendulum.parse(last_ts).naive()
                         days_since_sync = (datetime.utcnow() - last_sync_time).days
@@ -10305,10 +10333,15 @@ async def _gmail_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> Dict
         raise HTTPException(status_code=500, detail=f"Gmail sync failed: {str(e)}")
 
 async def _zoho_mail_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> Dict[str, Any]:
-    """Placeholder Zoho Mail sync implementation to prevent import errors."""
+    """
+    IMPLEMENTATION #1: Zoho Mail sync using Nango Proxy API.
+    Fetches emails with attachments and processes them through the data pipeline.
+    Uses rate limiting and concurrency control from config_manager.py.
+    """
     provider_key = req.integration_id or NANGO_ZOHO_MAIL_INTEGRATION_ID
     connection_id = req.connection_id
     user_id = req.user_id
+    sync_run_id = str(uuid.uuid4())
 
     stats = {
         'records_fetched': 0,
@@ -10317,49 +10350,243 @@ async def _zoho_mail_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> 
         'queued_jobs': 0,
         'skipped': 0,
     }
-    error_message = (
-        "Zoho Mail sync is currently unavailable. "
-        "Enable the Zoho Mail connector implementation before scheduling jobs."
-    )
-    errors = [error_message]
-    sync_run_id = str(uuid.uuid4())
+    errors: List[str] = []
+    user_connection_id = None
 
-    logger.warning(
-        "Zoho Mail sync invoked for user=%s connection=%s but the implementation is unavailable.",
-        user_id,
-        connection_id,
-    )
+    try:
+        # Upsert connector record
+        try:
+            supabase.table('connectors').insert({
+                'provider': provider_key,
+                'integration_id': provider_key,
+                'auth_type': 'OAUTH2',
+                'scopes': orjson.dumps(["mail.read", "mail.attachment.read"]).decode(),
+                'endpoints_needed': orjson.dumps(["/api/v1/messages", "/api/v1/attachments"]).decode(),
+                'enabled': True
+            }).execute()
+        except Exception:
+            pass  # Connector may already exist
 
-    # Attempt to record the failed sync run for observability.
+        # Upsert user_connection record
+        try:
+            supabase.table('user_connections').insert({
+                'user_id': user_id,
+                'connector_id': provider_key,
+                'nango_connection_id': connection_id,
+                'status': 'active',
+                'sync_mode': 'pull'
+            }).execute()
+        except Exception:
+            pass  # Connection may already exist
+
+        uc_row = supabase.table('user_connections').select('id').eq('nango_connection_id', connection_id).limit(1).execute()
+        user_connection_id = uc_row.data[0]['id'] if uc_row.data else None
+
+    except Exception as e:
+        logger.error(f"Failed to upsert Zoho Mail connector records: {e}")
+
+    # Start sync_run
     try:
         transaction_manager = get_transaction_manager()
         async with transaction_manager.transaction(
             user_id=user_id,
-            operation_type="connector_sync_start",
+            operation_type="connector_sync_start"
         ) as tx:
-            await tx.insert(
-                'sync_runs',
-                {
-                    'id': sync_run_id,
-                    'user_id': user_id,
-                    'user_connection_id': None,
-                    'type': req.mode,
-                    'status': 'failed',
-                    'started_at': pendulum.now().to_iso8601_string(),
-                    'finished_at': pendulum.now().to_iso8601_string(),
-                    'stats': orjson.dumps(stats).decode(),
-                    'error': error_message,
-                },
-            )
-    except Exception as record_err:
-        logger.error(f"Failed to record Zoho Mail sync failure: {record_err}")
+            await tx.insert('sync_runs', {
+                'id': sync_run_id,
+                'user_id': user_id,
+                'user_connection_id': user_connection_id,
+                'type': req.mode,
+                'status': 'running',
+                'started_at': pendulum.now().to_iso8601_string(),
+                'stats': orjson.dumps(stats).decode()
+            })
+    except Exception as e:
+        logger.error(f"Failed to start Zoho Mail sync run: {e}")
 
     try:
-        JOBS_PROCESSED.labels(provider=provider_key, status='failed').inc()
-    except Exception as metrics_err:
-        logger.debug(f"Failed to increment failed metrics: {metrics_err}")
+        # Connectivity check
+        try:
+            profile = await nango.get_zoho_profile(provider_key, connection_id)
+            stats['actions_used'] += 1
+            logger.info(f"✅ Zoho Mail profile check passed: {profile.get('emailAddress', 'unknown')}")
+        except Exception as e:
+            error_msg = f"Zoho Mail profile check failed: {e}"
+            logger.error(error_msg)
+            errors.append(error_msg)
+            raise
 
-    return {'status': 'failed', 'sync_run_id': sync_run_id, 'stats': stats, 'errors': errors}
+        # Rate limiter from config
+        from core_infrastructure.rate_limiter import ConcurrencyLimiter
+        limiter = ConcurrencyLimiter()
+
+        # Fetch messages with attachments
+        lookback_days = max(1, int(req.lookback_days or 30))
+        page_token = None
+        max_per_page = max(1, min(int(req.max_results or 50), 100))
+        message_ids = []
+
+        logger.info(f"📊 Zoho Mail sync: fetching last {lookback_days} days")
+
+        while True:
+            # Stop early if nearing rate limits
+            if stats['actions_used'] > 90 or stats['records_fetched'] > 450:
+                logger.info(f"⚠️ Zoho Mail: Approaching rate limits (actions={stats['actions_used']}, records={stats['records_fetched']})")
+                break
+
+            try:
+                # Fetch messages with attachments
+                messages_response = await nango.list_zoho_messages(
+                    provider_key,
+                    connection_id,
+                    has_attachment=True,
+                    lookback_days=lookback_days,
+                    max_results=max_per_page,
+                    page_token=page_token
+                )
+                stats['actions_used'] += 1
+
+                messages = messages_response.get('messages') or []
+                if not messages:
+                    logger.info("✅ Zoho Mail: No more messages to fetch")
+                    break
+
+                for msg in messages:
+                    msg_id = msg.get('id')
+                    if msg_id:
+                        message_ids.append(msg_id)
+                    stats['records_fetched'] += 1
+
+                page_token = messages_response.get('nextPageToken')
+                if not page_token:
+                    break
+
+            except Exception as e:
+                error_msg = f"Zoho Mail message fetch failed: {e}"
+                logger.error(error_msg)
+                errors.append(error_msg)
+                break
+
+        logger.info(f"✅ Zoho Mail: Fetched {len(message_ids)} messages with attachments")
+
+        # Process attachments concurrently
+        async def process_zoho_attachment(msg_id: str) -> Dict[str, Any]:
+            try:
+                # Get message details
+                msg_detail = await nango.get_zoho_message(provider_key, connection_id, msg_id)
+                stats['actions_used'] += 1
+
+                # Extract attachments
+                attachments = msg_detail.get('attachments') or []
+                for att in attachments:
+                    try:
+                        att_id = att.get('id')
+                        att_name = att.get('name', 'attachment')
+
+                        # Download attachment
+                        att_data = await nango.download_zoho_attachment(
+                            provider_key, connection_id, msg_id, att_id
+                        )
+                        stats['actions_used'] += 1
+
+                        # Store in temp location
+                        temp_path = f"/tmp/zoho_{user_id}_{msg_id}_{att_id}"
+                        with open(temp_path, 'wb') as f:
+                            f.write(att_data)
+
+                        # Queue for processing
+                        try:
+                            arq_pool = await get_arq_pool()
+                            job = await arq_pool.enqueue_job(
+                                'process_spreadsheet',
+                                user_id=user_id,
+                                filename=att_name,
+                                storage_path=temp_path,
+                                job_id=str(uuid.uuid4())
+                            )
+                            stats['queued_jobs'] += 1
+                            stats['attachments_saved'] += 1
+                            logger.info(f"✅ Queued Zoho attachment for processing: {att_name}")
+                        except Exception as queue_err:
+                            logger.error(f"Failed to queue Zoho attachment: {queue_err}")
+                            errors.append(f"Queue error for {att_name}: {queue_err}")
+
+                    except Exception as att_err:
+                        logger.error(f"Failed to process Zoho attachment {att.get('id')}: {att_err}")
+                        errors.append(f"Attachment error: {att_err}")
+
+                return {'status': 'success', 'message_id': msg_id}
+
+            except Exception as e:
+                logger.error(f"Failed to process Zoho message {msg_id}: {e}")
+                errors.append(f"Message error: {e}")
+                return {'status': 'failed', 'message_id': msg_id}
+
+        # Process all messages with concurrency control
+        if message_ids:
+            coros = [process_zoho_attachment(msg_id) for msg_id in message_ids]
+            results = await limiter.run_batch(coros)
+            stats['skipped'] = len([r for r in results if r.get('status') == 'failed'])
+
+        # Update sync_run with final stats
+        try:
+            transaction_manager = get_transaction_manager()
+            async with transaction_manager.transaction(
+                user_id=user_id,
+                operation_type="connector_sync_complete"
+            ) as tx:
+                await tx.update(
+                    'sync_runs',
+                    {'id': sync_run_id},
+                    {
+                        'status': 'completed' if not errors else 'completed_with_errors',
+                        'finished_at': pendulum.now().to_iso8601_string(),
+                        'stats': orjson.dumps(stats).decode(),
+                        'error': ' | '.join(errors) if errors else None
+                    }
+                )
+        except Exception as e:
+            logger.error(f"Failed to update Zoho Mail sync run: {e}")
+
+        try:
+            JOBS_PROCESSED.labels(provider=provider_key, status='completed').inc()
+        except Exception:
+            pass
+
+        logger.info(f"✅ Zoho Mail sync completed: {stats}")
+        return {'status': 'completed', 'sync_run_id': sync_run_id, 'stats': stats, 'errors': errors}
+
+    except Exception as e:
+        error_msg = f"Zoho Mail sync failed: {e}"
+        logger.error(error_msg)
+        errors.append(error_msg)
+
+        # Update sync_run as failed
+        try:
+            transaction_manager = get_transaction_manager()
+            async with transaction_manager.transaction(
+                user_id=user_id,
+                operation_type="connector_sync_failed"
+            ) as tx:
+                await tx.update(
+                    'sync_runs',
+                    {'id': sync_run_id},
+                    {
+                        'status': 'failed',
+                        'finished_at': pendulum.now().to_iso8601_string(),
+                        'stats': orjson.dumps(stats).decode(),
+                        'error': error_msg
+                    }
+                )
+        except Exception as record_err:
+            logger.error(f"Failed to record Zoho Mail sync failure: {record_err}")
+
+        try:
+            JOBS_PROCESSED.labels(provider=provider_key, status='failed').inc()
+        except Exception:
+            pass
+
+        return {'status': 'failed', 'sync_run_id': sync_run_id, 'stats': stats, 'errors': errors}
 
 async def _dropbox_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> Dict[str, Any]:
     provider_key = NANGO_DROPBOX_INTEGRATION_ID
@@ -11075,6 +11302,16 @@ async def _dispatch_connector_sync(
     """
     FIX ISSUE #5: Centralized sync dispatch logic for all providers.
     
+    CRITICAL FIX #1: Global rate limiting across all users
+    - Prevents 50+ users from overwhelming provider APIs
+    - Checks global sync limits before accepting request
+    - Acquires distributed lock to prevent duplicate syncs
+    
+    CRITICAL FIX #2: Distributed sync locking
+    - Prevents user from clicking "Sync" twice and running concurrent jobs
+    - Uses Redis for distributed locking across workers
+    - Auto-cleanup with 30-minute expiry
+    
     Eliminates code duplication across:
     - /api/connectors/sync endpoint
     - /api/connectors/scheduler/run endpoint  
@@ -11091,8 +11328,12 @@ async def _dispatch_connector_sync(
         {"status": "queued", "provider": integration_id, "mode": mode}
         
     Raises:
+        HTTPException(429): If global rate limit exceeded
+        HTTPException(409): If sync already in progress for this connection
         HTTPException(503): If no worker available or dispatch fails
     """
+    from core_infrastructure.rate_limiter import get_global_rate_limiter, get_sync_lock
+    
     # Map integration_id to ARQ task name and sync function
     provider_config = {
         NANGO_GMAIL_INTEGRATION_ID: ('gmail_sync', _gmail_sync_run),
@@ -11112,26 +11353,79 @@ async def _dispatch_connector_sync(
     
     arq_task_name, sync_func = provider_config[integration_id]
     
+    # Extract provider name from integration_id (e.g., 'google-mail' → 'gmail')
+    provider_name = integration_id.replace('google-', '').replace('-sandbox', '')
+    
+    # CRITICAL FIX #1: Check global rate limits
+    rate_limiter = get_global_rate_limiter()
+    can_sync, rate_limit_msg = await rate_limiter.check_global_rate_limit(provider_name, req.user_id)
+    if not can_sync:
+        logger.warning(f"Global rate limit exceeded: {rate_limit_msg}")
+        raise HTTPException(status_code=429, detail=rate_limit_msg)
+    
+    # CRITICAL FIX #2: Check for existing sync lock (prevent duplicate syncs)
+    sync_lock = get_sync_lock()
+    is_locked = await sync_lock.is_locked(req.user_id, provider_name, req.connection_id)
+    if is_locked:
+        msg = (
+            f"Sync already in progress for {provider_name}. "
+            f"Please wait for the current sync to complete before starting a new one."
+        )
+        logger.warning(f"Sync already locked: {msg}")
+        raise HTTPException(status_code=409, detail=msg)
+    
+    # Acquire lock before queuing
+    lock_acquired = await sync_lock.acquire_sync_lock(req.user_id, provider_name, req.connection_id)
+    if not lock_acquired:
+        msg = (
+            f"Failed to acquire sync lock for {provider_name}. "
+            f"Another sync may be starting. Please try again."
+        )
+        logger.warning(f"Lock acquisition failed: {msg}")
+        raise HTTPException(status_code=409, detail=msg)
+    
+    # Acquire rate limit slot
+    slot_acquired = await rate_limiter.acquire_sync_slot(provider_name, req.user_id)
+    if not slot_acquired:
+        # Release lock on rate limit failure
+        await sync_lock.release_sync_lock(req.user_id, provider_name, req.connection_id)
+        msg = (
+            f"Rate limit exceeded for {provider_name}. "
+            f"Too many syncs in progress. Please try again in 1 minute."
+        )
+        logger.warning(f"Rate limit slot acquisition failed: {msg}")
+        raise HTTPException(status_code=429, detail=msg)
+    
     # Queue via ARQ (async task queue)
     if _queue_backend() == 'arq':
         try:
             pool = await get_arq_pool()
             await pool.enqueue_job(arq_task_name, req.model_dump())
             JOBS_ENQUEUED.labels(provider=integration_id, mode=req.mode).inc()
-            logger.info(f"✅ Queued {integration_id} sync via ARQ: {req.correlation_id}")
+            logger.info(
+                f"✅ Queued {integration_id} sync via ARQ: {req.correlation_id}",
+                user_id=req.user_id,
+                connection_id=req.connection_id
+            )
             return {"status": "queued", "provider": integration_id, "mode": req.mode}
         except Exception as e:
+            # Release lock and rate limit slot on queue failure
+            await sync_lock.release_sync_lock(req.user_id, provider_name, req.connection_id)
+            await rate_limiter.release_sync_slot(provider_name, req.user_id)
             logger.error(f"❌ ARQ dispatch failed for {integration_id}: {e}")
             raise HTTPException(
                 status_code=503,
                 detail="Background worker unavailable. Please try again in a few moments."
             )
     else:
-        # Fallback: Run inline if ARQ not configured
-        logger.warning(f"⚠️ ARQ not configured, running {integration_id} sync inline")
-        nango = NangoClient(base_url=NANGO_BASE_URL)
-        asyncio.create_task(sync_func(nango, req))
-        return {"status": "started_inline", "provider": integration_id, "mode": req.mode}
+        # Release lock and rate limit slot if ARQ not configured
+        await sync_lock.release_sync_lock(req.user_id, provider_name, req.connection_id)
+        await rate_limiter.release_sync_slot(provider_name, req.user_id)
+        logger.error(f"❌ ARQ not configured, cannot dispatch {integration_id} sync")
+        raise HTTPException(
+            status_code=503,
+            detail="Background worker not available. Please contact support."
+        )
 
 
 @app.post("/api/connectors/sync")

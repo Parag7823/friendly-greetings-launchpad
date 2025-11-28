@@ -87,6 +87,8 @@ COPY startup_validator.py .
 # Copy all necessary Python files and modules from subdirectories
 COPY core_infrastructure/fastapi_backend_v2.py .
 COPY core_infrastructure/supabase_client.py .
+COPY core_infrastructure/config_manager.py .
+COPY core_infrastructure/rate_limiter.py .
 COPY data_ingestion_normalization/universal_field_detector.py .
 COPY data_ingestion_normalization/universal_document_classifier_optimized.py .
 COPY data_ingestion_normalization/universal_platform_detector_optimized.py .

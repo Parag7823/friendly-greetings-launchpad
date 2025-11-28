@@ -465,7 +465,12 @@ class FinleyGraphEngine:
             if not rel_resp.data:
                 return {}
             
-            rel_types = [r.get('relationship_type') for r in rel_resp.data if r.get('relationship_type')]
+            try:
+                from glom import glom, Iterate, Coalesce
+                rel_types = glom(rel_resp.data, [Coalesce('relationship_type', default=None)], default=[])
+                rel_types = [rt for rt in rel_types if rt]
+            except Exception:
+                rel_types = [r.get('relationship_type') for r in rel_resp.data if r.get('relationship_type')]
             if not rel_types:
                 return {}
             

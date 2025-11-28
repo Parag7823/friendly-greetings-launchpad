@@ -47,9 +47,37 @@ class ConnectorConfig(BaseSettings):
     incremental_sync_enabled: bool = True
     cursor_validity_days: int = 30  # Cursors older than this are discarded
     
-    # Rate limiting
+    # Rate limiting (global defaults)
     rate_limit_per_second: int = 10
     rate_limit_burst: int = 20
+    
+    # CRITICAL FIX #1: Global rate limiting across all users
+    global_max_syncs_per_minute: int = 5  # Max syncs per minute per provider (across ALL users)
+    global_max_queued_syncs_per_provider: int = 100  # Max queued syncs per provider
+    global_max_queued_syncs_per_user: int = 10  # Max queued syncs per user
+    sync_lock_expiry_seconds: int = 1800  # 30 minutes - auto-cleanup for stuck locks
+    
+    # Provider-specific rate limits (requests per second)
+    gmail_rate_limit: int = 10
+    dropbox_rate_limit: int = 5
+    google_drive_rate_limit: int = 10
+    zoho_mail_rate_limit: int = 5
+    quickbooks_rate_limit: int = 3  # QB has stricter limits
+    xero_rate_limit: int = 3  # Xero has strict API limits
+    zoho_books_rate_limit: int = 5
+    stripe_rate_limit: int = 10  # Stripe allows higher concurrency
+    razorpay_rate_limit: int = 4
+    
+    # Provider-specific concurrency limits
+    gmail_concurrency: int = 5
+    dropbox_concurrency: int = 3
+    google_drive_concurrency: int = 5
+    zoho_mail_concurrency: int = 3
+    quickbooks_concurrency: int = 3
+    xero_concurrency: int = 3
+    zoho_books_concurrency: int = 3
+    stripe_concurrency: int = 5
+    razorpay_concurrency: int = 4
     
     class Config:
         env_prefix = "CONNECTOR_"

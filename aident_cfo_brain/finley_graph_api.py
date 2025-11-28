@@ -522,11 +522,17 @@ async def query_temporal_patterns(
                 message="No path found between entities"
             )
         
-        # Extract temporal patterns from edges
         patterns = []
         for edge_data in path.path_edges:
-            if edge_data.get('recurrence_frequency') and edge_data.get('recurrence_frequency') != 'none':
+            try:
+                from glom import glom, Coalesce
+                recurrence_freq = glom(edge_data, Coalesce('recurrence_frequency', default=None))
+                recurrence_score = glom(edge_data, Coalesce('recurrence_score', default=0.0))
+            except Exception:
+                recurrence_freq = edge_data.get('recurrence_frequency')
                 recurrence_score = edge_data.get('recurrence_score', 0.0)
+            
+            if recurrence_freq and recurrence_freq != 'none':
                 if recurrence_score >= request.min_recurrence_score:
                     patterns.append({
                         'relationship_type': edge_data.get('relationship_type'),
