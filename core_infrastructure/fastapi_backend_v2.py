@@ -8554,7 +8554,8 @@ async def chat_endpoint(request: dict):
                 return
             except Exception as inner_e:
                 structured_logger.error("❌ Question processing failed with exception", error=str(inner_e), error_type=type(inner_e).__name__)
-                yield f"data: {orjson.dumps({'error': f'Sorry, I encountered an error: {str(inner_e)}'}).decode()}\n\n"
+                chunk_data = orjson.dumps({'error': f'Sorry, I encountered an error: {str(inner_e)}'}).decode()
+                yield f"data: {chunk_data}\n\n"
                 return
             
             structured_logger.info("Chat response generated", user_id=user_id, question_type=response.question_type.value, confidence=response.confidence)
@@ -8570,7 +8571,8 @@ async def chat_endpoint(request: dict):
                 
                 # Send chunk every 5 words or at the end
                 if (i + 1) % 5 == 0 or i == len(words) - 1:
-                    yield f"data: {orjson.dumps({'type': 'chunk', 'content': accumulated_text}).decode()}\n\n"
+                    chunk_data = orjson.dumps({'type': 'chunk', 'content': accumulated_text}).decode()
+                    yield f"data: {chunk_data}\n\n"
                     await asyncio.sleep(0.01)  # Small delay to prevent overwhelming the client
             
             # Send final response metadata
@@ -8585,14 +8587,24 @@ async def chat_endpoint(request: dict):
                 "follow_up_questions": response.follow_up_questions,
                 "status": "success"
             }
-            yield f"data: {orjson.dumps(final_response).decode()}\n\n"
+            final_data = orjson.dumps(final_response).decode()
+            yield f"data: {final_data}\n\n"
             
         except Exception as e:
             structured_logger.error("Chat streaming error", error=str(e))
             error_response = {"error": f"Sorry, I encountered an error: {str(e)}"}
             yield f"data: {orjson.dumps(error_response).decode()}\n\n"
     
-    return StreamingResponse(stream_response(), media_type="text/event-stream")
+    return StreamingResponse(
+        stream_response(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+            "Content-Encoding": "none"
+        }
+    )
 
 @app.get("/debug/env")
 async def debug_environment():

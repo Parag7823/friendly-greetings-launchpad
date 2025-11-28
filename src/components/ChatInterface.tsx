@@ -2,6 +2,7 @@ import { Send, FileSpreadsheet, Paperclip, Loader2, X } from 'lucide-react';
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useDropzone } from 'react-dropzone';
 import { MarkdownMessage } from './MarkdownMessage';
+import { ThinkingShimmer } from './ThinkingShimmer';
 import { useAuth } from './AuthProvider';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
@@ -307,7 +308,7 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
   useEffect(() => {
     const interval = setInterval(() => {
       setCurrentQuestionIndex((prev) => (prev + 1) % sampleQuestions.length);
-    }, 3000); // Change every 3 seconds
+    }, 5000); // Change every 5 seconds
 
     return () => clearInterval(interval);
   }, [sampleQuestions.length]);
@@ -347,67 +348,79 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
 
       setMessages(prev => [...prev, userMessage]);
       const currentMessage = message;
+      setMessage(''); // Clear input immediately
+      setIsThinking(true);
 
-try {
-let chatId = currentChatId;
+      try {
+        let chatId = currentChatId;
 
-// If this is a new chat, generate a title and create chat entry
-if (isNewChat) {
-try {
-const sessionToken = await getSessionToken();
+        // If this is a new chat, generate a title and create chat entry
+        if (isNewChat) {
+          try {
+            const sessionToken = await getSessionToken();
 
-const titleResponse = await fetch(`${config.apiUrl}/generate-chat-title`, {
-method: 'POST',
-headers: {
-'Content-Type': 'application/json',
-...(sessionToken && { 'Authorization': `Bearer ${sessionToken}` })
-},
-body: JSON.stringify({
-message: currentMessage,
-user_id: user?.id || 'anonymous',
-session_token: sessionToken
-})
-});
+            const titleResponse = await fetch(`${config.apiUrl}/generate-chat-title`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                ...(sessionToken && { 'Authorization': `Bearer ${sessionToken}` })
+              },
+              body: JSON.stringify({
+                message: currentMessage,
+                user_id: user?.id || 'anonymous',
+                session_token: sessionToken
+              })
+            });
 
-if (titleResponse.ok) {
-const titleData = await titleResponse.json();
-chatId = titleData.chat_id;
-const generatedTitle = titleData.title || 'New Chat';
-  
-setCurrentChatId(chatId);
-setIsNewChat(false);
+            if (titleResponse.ok) {
+              const titleData = await titleResponse.json();
+              chatId = titleData.chat_id;
+              const generatedTitle = titleData.title || 'New Chat';
+              
+              setCurrentChatId(chatId);
+              setIsNewChat(false);
 
-// Update URL with the chat ID from backend
-setSearchParams({ chat_id: chatId }, { replace: true });
+              // Update URL with the chat ID from backend
+              setSearchParams({ chat_id: chatId }, { replace: true });
 
-// Trigger a custom event to update sidebar with generated title
-window.dispatchEvent(new CustomEvent('new-chat-created', {
-detail: {
-chatId: chatId,
-title: generatedTitle,
-timestamp: new Date()
-}
-}));
+              // Trigger a custom event to update sidebar with generated title
+              window.dispatchEvent(new CustomEvent('new-chat-created', {
+                detail: {
+                  chatId: chatId,
+                  title: generatedTitle,
+                  timestamp: new Date()
+                }
+              }));
 
-console.log('✅ Chat title generated:', generatedTitle);
-} else {
-console.warn('Title generation response not ok:', titleResponse.status);
-// Continue with chat even if title generation fails
-chatId = `chat_${Date.now()}`;
-setCurrentChatId(chatId);
-setIsNewChat(false);
-}
-} catch (titleError) {
-console.error('Title generation error:', titleError);
-// Continue with chat even if title generation fails
-chatId = `chat_${Date.now()}`;
-setCurrentChatId(chatId);
-setIsNewChat(false);
-}
-}
+              console.log('✅ Chat title generated:', generatedTitle);
+            } else {
+              console.warn('Title generation response not ok:', titleResponse.status);
+              // Continue with chat even if title generation fails
+              chatId = `chat_${Date.now()}`;
+              setCurrentChatId(chatId);
+              setIsNewChat(false);
+            }
+          } catch (titleError) {
+            console.error('Title generation error:', titleError);
+            // Continue with chat even if title generation fails
+            chatId = `chat_${Date.now()}`;
+            setCurrentChatId(chatId);
+            setIsNewChat(false);
+          }
+        }
 
-// Send message to backend
-const sessionToken = await getSessionToken();
+        // Create placeholder AI message for streaming
+        const aiMessageId = `msg-${Date.now()}-ai`;
+        const aiMessage = {
+          id: aiMessageId,
+          text: '',
+          isUser: false,
+          timestamp: new Date()
+        };
+        setMessages(prev => [...prev, aiMessage]);
+
+        // Send message to backend with streaming
+        const sessionToken = await getSessionToken();
         const response = await fetch(`${config.apiUrl}/chat`, {
           method: 'POST',
           headers: {
@@ -422,29 +435,86 @@ const sessionToken = await getSessionToken();
           })
         });
 
-        if (response.ok) {
-          const data = await response.json();
-
-          const aiMessage = {
-            id: `msg-${Date.now()}-ai`,
-            text: data.response,
-            isUser: false,
-            timestamp: new Date(data.timestamp)
-          };
-
-          setMessages(prev => [...prev, aiMessage]);
-        } else {
-          // Get error details from backend
-          let errorDetail = 'Failed to get response from AI';
-          try {
-            const errorData = await response.json();
-            errorDetail = errorData.detail || errorDetail;
-          } catch {
-            // If can't parse JSON, use status text
-            errorDetail = `Server error (${response.status}): ${response.statusText}`;
-          }
-          throw new Error(errorDetail);
+        if (!response.ok) {
+          throw new Error(`Server error (${response.status}): ${response.statusText}`);
         }
+
+        if (!response.body) {
+          throw new Error('Response body is not available');
+        }
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) {
+              console.log('✅ Stream ended');
+              break;
+            }
+
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop() || '';
+
+            for (const line of lines) {
+              if (line.startsWith('data: ')) {
+                try {
+                  const jsonStr = line.slice(6); // Remove 'data: ' prefix
+                  if (!jsonStr.trim()) continue;
+                  
+                  const chunk = JSON.parse(jsonStr);
+                  console.log('📨 Received chunk:', chunk.type);
+
+                  if (chunk.error) {
+                    throw new Error(chunk.error);
+                  }
+
+                  if (chunk.type === 'thinking') {
+                    // Show thinking indicator
+                    setMessages(prev =>
+                      prev.map(msg =>
+                        msg.id === aiMessageId
+                          ? { ...msg, text: 'thinking' } // Special marker for thinking state
+                          : msg
+                      )
+                    );
+                  } else if (chunk.type === 'chunk') {
+                    // Update message with streamed content
+                    setMessages(prev =>
+                      prev.map(msg =>
+                        msg.id === aiMessageId
+                          ? { ...msg, text: chunk.content }
+                          : msg
+                      )
+                    );
+                  } else if (chunk.type === 'complete') {
+                    // Stream complete, update with metadata
+                    setMessages(prev =>
+                      prev.map(msg =>
+                        msg.id === aiMessageId
+                          ? {
+                              ...msg,
+                              timestamp: new Date(chunk.timestamp)
+                            }
+                          : msg
+                      )
+                    );
+                    console.log('✅ Chat response complete');
+                  }
+                } catch (parseError) {
+                  console.error('Error parsing SSE chunk:', parseError, 'Line:', line);
+                }
+              }
+            }
+          }
+        } finally {
+          reader.cancel();
+        }
+
+        setIsThinking(false);
       } catch (error) {
         console.error('Chat error:', error);
 
@@ -459,9 +529,17 @@ const sessionToken = await getSessionToken();
         };
 
         setMessages(prev => [...prev, errorMessage]);
+        setIsThinking(false);
+      } finally {
+        // Scroll to bottom after message sent
+        if (messagesEndRef.current) {
+          messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
+        }
       }
     }
   }, [message, pastedImages, currentChatId, isNewChat, user?.id, onNavigate, setSearchParams]);
+
+  const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const onDrop = useCallback((acceptedFiles: File[]) => {
     if (acceptedFiles.length > 0) {
@@ -631,7 +709,11 @@ const sessionToken = await getSessionToken();
                       ) : (
                         // AI response: No box, plain text
                         <div className="max-w-[80%] text-foreground">
-                          <MarkdownMessage content={msg.text} />
+                          {msg.text === 'thinking' ? (
+                            <ThinkingShimmer children="AI is thinking" />
+                          ) : (
+                            <MarkdownMessage content={msg.text} />
+                          )}
                           <p className="chat-message-timestamp mt-2">
                             {msg.timestamp.toLocaleTimeString()}
                           </p>
