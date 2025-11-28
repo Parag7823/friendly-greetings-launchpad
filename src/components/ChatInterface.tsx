@@ -347,62 +347,67 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
 
       setMessages(prev => [...prev, userMessage]);
       const currentMessage = message;
-      setMessage('');
 
-      try {
-        let chatId = currentChatId;
+try {
+let chatId = currentChatId;
 
-        // If this is a new chat, generate a title and create chat entry
-        if (isNewChat) {
-          try {
-            const sessionToken = await getSessionToken();
+// If this is a new chat, generate a title and create chat entry
+if (isNewChat) {
+try {
+const sessionToken = await getSessionToken();
 
-            const titleResponse = await fetch(`${config.apiUrl}/generate-chat-title`, {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                ...(sessionToken && { 'Authorization': `Bearer ${sessionToken}` })
-              },
-              body: JSON.stringify({
-                message: currentMessage,
-                user_id: user?.id || 'anonymous',
-                session_token: sessionToken
-              })
-            });
+const titleResponse = await fetch(`${config.apiUrl}/generate-chat-title`, {
+method: 'POST',
+headers: {
+'Content-Type': 'application/json',
+...(sessionToken && { 'Authorization': `Bearer ${sessionToken}` })
+},
+body: JSON.stringify({
+message: currentMessage,
+user_id: user?.id || 'anonymous',
+session_token: sessionToken
+})
+});
 
-            if (titleResponse.ok) {
-              const titleData = await titleResponse.json();
-              chatId = titleData.chat_id;
-              setCurrentChatId(chatId);
-              setIsNewChat(false);
+if (titleResponse.ok) {
+const titleData = await titleResponse.json();
+chatId = titleData.chat_id;
+const generatedTitle = titleData.title || 'New Chat';
+  
+setCurrentChatId(chatId);
+setIsNewChat(false);
 
-              // Update URL with the chat ID from backend
-              setSearchParams({ chat_id: chatId }, { replace: true });
+// Update URL with the chat ID from backend
+setSearchParams({ chat_id: chatId }, { replace: true });
 
-              // Notify parent component about new chat
-              if (onNavigate) {
-                // Trigger a custom event to update sidebar
-                window.dispatchEvent(new CustomEvent('new-chat-created', {
-                  detail: {
-                    chatId: chatId,
-                    title: titleData.title,
-                    timestamp: new Date()
-                  }
-                }));
-              }
-            }
-          } catch (titleError) {
-            console.error('Title generation error:', titleError);
-            // Continue with chat even if title generation fails
-            chatId = `chat-${Date.now()}`;
-            setCurrentChatId(chatId);
-            setIsNewChat(false);
-          }
-        }
+// Trigger a custom event to update sidebar with generated title
+window.dispatchEvent(new CustomEvent('new-chat-created', {
+detail: {
+chatId: chatId,
+title: generatedTitle,
+timestamp: new Date()
+}
+}));
 
-        // Send message to backend
-        const sessionToken = await getSessionToken();
+console.log('✅ Chat title generated:', generatedTitle);
+} else {
+console.warn('Title generation response not ok:', titleResponse.status);
+// Continue with chat even if title generation fails
+chatId = `chat_${Date.now()}`;
+setCurrentChatId(chatId);
+setIsNewChat(false);
+}
+} catch (titleError) {
+console.error('Title generation error:', titleError);
+// Continue with chat even if title generation fails
+chatId = `chat_${Date.now()}`;
+setCurrentChatId(chatId);
+setIsNewChat(false);
+}
+}
 
+// Send message to backend
+const sessionToken = await getSessionToken();
         const response = await fetch(`${config.apiUrl}/chat`, {
           method: 'POST',
           headers: {

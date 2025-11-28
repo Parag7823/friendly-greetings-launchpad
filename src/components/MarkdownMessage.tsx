@@ -110,7 +110,7 @@ export const MarkdownMessage: React.FC<MarkdownMessageProps> = ({ content, class
         const before = remaining.substring(0, codeMatch.index);
         if (before) parts.push(<span key={`text-${key++}`}>{before}</span>);
         parts.push(
-          <code key={`code-${key++}`} className="bg-white/10 px-1 py-0.5 rounded text-xs">
+          <code key={`code-${key++}`} className="bg-primary/10 px-1 py-0.5 rounded text-xs text-primary">
             {codeMatch[1]}
           </code>
         );
