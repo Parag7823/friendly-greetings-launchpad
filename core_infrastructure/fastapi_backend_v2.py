@@ -8449,137 +8449,150 @@ async def generate_chat_title(request: dict):
 @app.post("/chat")
 async def chat_endpoint(request: dict):
     """
-    Main chat endpoint - connects frontend to intelligent chat orchestrator.
+    Main chat endpoint with Server-Sent Events (SSE) streaming.
+    Streams response chunks in real-time as they're generated.
     
     This is the brain of Finley AI that routes questions to intelligence engines.
     """
     # CRITICAL: Log immediately on entry
     print(f"[CHAT ENDPOINT] Request received at {datetime.utcnow().isoformat()}", flush=True)
-    structured_logger.info(" CHAT ENDPOINT CALLED - Request received")
+    structured_logger.info("CHAT ENDPOINT CALLED - Request received")
     
-    try:
-        message = request.get('message')
-        user_id = request.get('user_id')
-        chat_id = request.get('chat_id')
-        
-        print(f"[CHAT ENDPOINT] Parsed: message={bool(message)}, user_id={user_id}, chat_id={chat_id}", flush=True)
-        
-        if not message or not user_id:
-            raise HTTPException(status_code=400, detail="Missing message or user_id")
-        
-        structured_logger.info("Chat request received", user_id=user_id, chat_id=chat_id, message_length=len(message))
-        
-        # FIX #16: Import IntelligentChatOrchestrator with fallback for different deployment layouts
+    async def stream_response():
+        """Generator function that streams response chunks"""
         try:
-            from aident_cfo_brain.intelligent_chat_orchestrator import IntelligentChatOrchestrator
-            structured_logger.debug("✓ Imported IntelligentChatOrchestrator from package layout")
-        except ImportError as e1:
-            structured_logger.debug(f"✗ Package layout failed: {e1}. Trying flat layout...")
-            try:
-                from intelligent_chat_orchestrator import IntelligentChatOrchestrator
-                structured_logger.debug("✓ Imported IntelligentChatOrchestrator from flat layout")
-            except ImportError as e2:
-                structured_logger.error(f"IMPORT FAILURE - Fix location: core_infrastructure/fastapi_backend_v2.py line 8453")
-                structured_logger.error(f"Package layout error: {e1}")
-                structured_logger.error(f"Flat layout error: {e2}")
-                raise
-        
-        # Note: Now using Groq/Llama instead of Anthropic for chat
-        # Check for Groq API key
-        groq_api_key = os.getenv('GROQ_API_KEY')
-        if not groq_api_key:
-            raise HTTPException(
-                status_code=503, 
-                detail="Chat service is temporarily unavailable. Please contact support. (Missing GROQ_API_KEY)"
-            )
-        
-        print(f"[CHAT ENDPOINT] Getting lazy Supabase client...", flush=True)
-        try:
-            # Get lazy client - returns immediately without connecting
-            # Wrap in timeout to prevent hangs from connection pool initialization
-            def get_client_sync():
-                from supabase_client import get_supabase_client
-                return get_supabase_client()
+            message = request.get('message')
+            user_id = request.get('user_id')
+            chat_id = request.get('chat_id')
             
-            supabase_client = await asyncio.wait_for(
-                asyncio.to_thread(get_client_sync),
-                timeout=1.0
-            )
-            print(f"[CHAT ENDPOINT] Lazy Supabase client obtained (will connect on first use)", flush=True)
-        except asyncio.TimeoutError:
-            print(f"[CHAT ENDPOINT] Supabase client initialization timed out", flush=True)
-            raise HTTPException(
-                status_code=503,
-                detail="Database service is temporarily unavailable. Please try again in a moment."
-            )
+            print(f"[CHAT ENDPOINT] Parsed: message={bool(message)}, user_id={user_id}, chat_id={chat_id}", flush=True)
+            
+            if not message or not user_id:
+                yield f"data: {orjson.dumps({'error': 'Missing message or user_id'}).decode()}\n\n"
+                return
+            
+            structured_logger.info("Chat request received", user_id=user_id, chat_id=chat_id, message_length=len(message))
+            
+            # Send thinking indicator first
+            yield f"data: {orjson.dumps({'type': 'thinking', 'content': 'AI is thinking...'}).decode()}\n\n"
+            
+            # FIX #16: Import IntelligentChatOrchestrator with fallback for different deployment layouts
+            try:
+                from aident_cfo_brain.intelligent_chat_orchestrator import IntelligentChatOrchestrator
+                structured_logger.debug("✓ Imported IntelligentChatOrchestrator from package layout")
+            except ImportError as e1:
+                structured_logger.debug(f"✗ Package layout failed: {e1}. Trying flat layout...")
+                try:
+                    from intelligent_chat_orchestrator import IntelligentChatOrchestrator
+                    structured_logger.debug("✓ Imported IntelligentChatOrchestrator from flat layout")
+                except ImportError as e2:
+                    structured_logger.error(f"IMPORT FAILURE - Fix location: core_infrastructure/fastapi_backend_v2.py line 8453")
+                    structured_logger.error(f"Package layout error: {e1}")
+                    structured_logger.error(f"Flat layout error: {e2}")
+                    yield f"data: {orjson.dumps({'error': 'Service initialization failed'}).decode()}\n\n"
+                    return
+            
+            # Note: Now using Groq/Llama instead of Anthropic for chat
+            # Check for Groq API key
+            groq_api_key = os.getenv('GROQ_API_KEY')
+            if not groq_api_key:
+                yield f"data: {orjson.dumps({'error': 'Chat service unavailable (Missing GROQ_API_KEY)'}).decode()}\n\n"
+                return
+            
+            print(f"[CHAT ENDPOINT] Getting lazy Supabase client...", flush=True)
+            try:
+                # Get lazy client - returns immediately without connecting
+                # Wrap in timeout to prevent hangs from connection pool initialization
+                def get_client_sync():
+                    from supabase_client import get_supabase_client
+                    return get_supabase_client()
+                
+                supabase_client = await asyncio.wait_for(
+                    asyncio.to_thread(get_client_sync),
+                    timeout=1.0
+                )
+                print(f"[CHAT ENDPOINT] Lazy Supabase client obtained (will connect on first use)", flush=True)
+            except asyncio.TimeoutError:
+                print(f"[CHAT ENDPOINT] Supabase client initialization timed out", flush=True)
+                yield f"data: {orjson.dumps({'error': 'Database service unavailable'}).decode()}\n\n"
+                return
+            except Exception as e:
+                print(f"[CHAT ENDPOINT] Failed to get Supabase client: {e}", flush=True)
+                yield f"data: {orjson.dumps({'error': 'Database service unavailable'}).decode()}\n\n"
+                return
+            
+            # Initialize orchestrator (uses Groq internally, no openai_client needed)
+            try:
+                print(f"[CHAT ENDPOINT] Initializing orchestrator...", flush=True)
+                orchestrator = IntelligentChatOrchestrator(
+                    supabase_client=supabase_client,
+                    cache_client=safe_get_ai_cache()
+                )
+                print(f"[CHAT ENDPOINT] Orchestrator initialized successfully", flush=True)
+                structured_logger.info("✅ Orchestrator initialized successfully")
+            except Exception as orch_init_error:
+                print(f"[CHAT ENDPOINT] Orchestrator initialization failed: {orch_init_error}", flush=True)
+                structured_logger.error("❌ Orchestrator initialization failed", error=str(orch_init_error), error_type=type(orch_init_error).__name__)
+                yield f"data: {orjson.dumps({'error': f'Chat service initialization failed: {str(orch_init_error)}'}).decode()}\n\n"
+                return
+            
+            structured_logger.info("Starting question processing...", message=message[:100])
+            try:
+                # Wrap entire process_question with timeout to prevent hanging
+                response = await asyncio.wait_for(
+                    orchestrator.process_question(
+                        question=message,
+                        user_id=user_id,
+                        chat_id=chat_id
+                    ),
+                    timeout=60.0  # 60 second timeout for entire chat processing
+                )
+                structured_logger.info("✅ Question processing completed successfully")
+            except asyncio.TimeoutError as te:
+                structured_logger.error("❌ Question processing timed out after 60 seconds", timeout_error=str(te))
+                yield f"data: {orjson.dumps({'error': 'Chat service is taking too long. Please try again.'}).decode()}\n\n"
+                return
+            except Exception as inner_e:
+                structured_logger.error("❌ Question processing failed with exception", error=str(inner_e), error_type=type(inner_e).__name__)
+                yield f"data: {orjson.dumps({'error': f'Sorry, I encountered an error: {str(inner_e)}'}).decode()}\n\n"
+                return
+            
+            structured_logger.info("Chat response generated", user_id=user_id, question_type=response.question_type.value, confidence=response.confidence)
+            
+            # Stream response in chunks (split by words for smooth typing effect)
+            answer_text = response.answer
+            words = answer_text.split(' ')
+            
+            # Stream each word with a small delay for visual effect
+            accumulated_text = ""
+            for i, word in enumerate(words):
+                accumulated_text += word + (' ' if i < len(words) - 1 else '')
+                
+                # Send chunk every 5 words or at the end
+                if (i + 1) % 5 == 0 or i == len(words) - 1:
+                    yield f"data: {orjson.dumps({'type': 'chunk', 'content': accumulated_text}).decode()}\n\n"
+                    await asyncio.sleep(0.01)  # Small delay to prevent overwhelming the client
+            
+            # Send final response metadata
+            final_response = {
+                "type": "complete",
+                "timestamp": pendulum.now().to_iso8601_string(),
+                "question_type": response.question_type.value,
+                "confidence": response.confidence,
+                "data": response.data,
+                "actions": response.actions,
+                "visualizations": response.visualizations,
+                "follow_up_questions": response.follow_up_questions,
+                "status": "success"
+            }
+            yield f"data: {orjson.dumps(final_response).decode()}\n\n"
+            
         except Exception as e:
-            print(f"[CHAT ENDPOINT] Failed to get Supabase client: {e}", flush=True)
-            raise HTTPException(
-                status_code=503,
-                detail="Database service is temporarily unavailable. Please try again in a moment."
-            )
-        
-        # Initialize orchestrator (uses Groq internally, no openai_client needed)
-        try:
-            print(f"[CHAT ENDPOINT] Initializing orchestrator...", flush=True)
-            orchestrator = IntelligentChatOrchestrator(
-                supabase_client=supabase_client,
-                cache_client=safe_get_ai_cache()
-            )
-            print(f"[CHAT ENDPOINT] Orchestrator initialized successfully", flush=True)
-            structured_logger.info("✅ Orchestrator initialized successfully")
-        except Exception as orch_init_error:
-            print(f"[CHAT ENDPOINT] Orchestrator initialization failed: {orch_init_error}", flush=True)
-            structured_logger.error("❌ Orchestrator initialization failed", error=str(orch_init_error), error_type=type(orch_init_error).__name__)
-            raise HTTPException(status_code=503, detail=f"Chat service initialization failed: {str(orch_init_error)}")
-        
-        structured_logger.info("Starting question processing...", message=message[:100])
-        try:
-            # Wrap entire process_question with timeout to prevent hanging
-            response = await asyncio.wait_for(
-                orchestrator.process_question(
-                    question=message,
-                    user_id=user_id,
-                    chat_id=chat_id
-                ),
-                timeout=60.0  # 60 second timeout for entire chat processing
-            )
-            structured_logger.info("✅ Question processing completed successfully")
-        except asyncio.TimeoutError as te:
-            structured_logger.error("❌ Question processing timed out after 60 seconds", timeout_error=str(te))
-            raise HTTPException(status_code=504, detail="Chat service is taking too long. Please try again.")
-        except Exception as inner_e:
-            structured_logger.error("❌ Question processing failed with exception", error=str(inner_e), error_type=type(inner_e).__name__)
-            raise
-        
-        structured_logger.info("Chat response generated", user_id=user_id, question_type=response.question_type.value, confidence=response.confidence)
-        
-        # Return response in format expected by frontend
-        return {
-            "response": response.answer,
-            "timestamp": pendulum.now().to_iso8601_string(),
-            "question_type": response.question_type.value,
-            "confidence": response.confidence,
-            "data": response.data,
-            "actions": response.actions,
-            "visualizations": response.visualizations,
-            "follow_up_questions": response.follow_up_questions,
-            "status": "success"
-        }
-        
-    except HTTPException:
-        # Re-raise HTTP exceptions (like 503 from missing API key)
-        raise
-    except Exception as e:
-        structured_logger.error("Chat endpoint error", error=e)
-        # Return more helpful error message
-        error_message = str(e)
-        if "ANTHROPIC_API_KEY" in error_message or "api_key" in error_message.lower():
-            raise HTTPException(
-                status_code=503, 
-                detail="Chat service is temporarily unavailable. Please contact support."
-            )
-        raise HTTPException(status_code=500, detail=f"Sorry, I encountered an error: {error_message}")
+            structured_logger.error("Chat streaming error", error=str(e))
+            error_response = {"error": f"Sorry, I encountered an error: {str(e)}"}
+            yield f"data: {orjson.dumps(error_response).decode()}\n\n"
+    
+    return StreamingResponse(stream_response(), media_type="text/event-stream")
 
 @app.get("/debug/env")
 async def debug_environment():

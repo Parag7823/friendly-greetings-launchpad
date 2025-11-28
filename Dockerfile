@@ -57,9 +57,6 @@ WORKDIR /app
 # Copy Python requirements and install
 COPY backend-requirements.txt .
 
-# OPTIMIZATION: Configure pip to use faster PyPI mirror (Aliyun) for faster package downloads
-RUN mkdir -p ~/.pip && echo "[global]\nindex-url = https://mirrors.aliyun.com/pypi/simple/\ntrusted-host = mirrors.aliyun.com" > ~/.pip/pip.conf
-
 # Verify Python version and upgrade pip
 RUN python --version && echo "Python version check passed" && pip install --upgrade pip wheel setuptools
 
