@@ -1643,12 +1643,12 @@ Return ONLY valid JSON, no markdown blocks or explanations."""
 
     async def _get_or_create_pattern_id(self, pattern_signature: str, relationship_type: str, key_factors: List[str], user_id: str) -> Optional[str]:
         """
-        FIX #1: Atomic UPSERT pattern using client-side retry logic with unique constraint.
+        FIX #1: Atomic UPSERT pattern using tenacity retry for unique constraint handling.
         
         Implements robust "select-insert-select" pattern to prevent race conditions:
         1. Try to SELECT existing pattern
         2. If not found, INSERT new pattern
-        3. Handle unique constraint violations with retry
+        3. Handle unique constraint violations with tenacity retry
         4. Return pattern ID
         
         This ensures atomicity without requiring custom PostgreSQL RPC.
@@ -1663,62 +1663,60 @@ Return ONLY valid JSON, no markdown blocks or explanations."""
             Pattern ID (UUID string) or None if creation fails
         """
         import asyncio
-        max_retries = 3
-        retry_count = 0
+        from tenacity import AsyncRetrying, stop_after_attempt, wait_exponential, retry_if_exception_type
         
-        while retry_count < max_retries:
-            try:
-                # FIX #5: Wrap synchronous Supabase calls in asyncio.to_thread() to avoid blocking event loop
-                # Step 1: Try to SELECT existing pattern
-                select_result = await asyncio.to_thread(
-                    lambda: self.supabase.table('temporal_patterns').select('id').eq(
-                        'pattern_signature', pattern_signature
-                    ).eq('user_id', user_id).limit(1).execute()
-                )
-                
-                if select_result.data and len(select_result.data) > 0:
-                    pattern_id = select_result.data[0]['id']
-                    logger.info(f"Found existing pattern: {pattern_id}")
-                    return pattern_id
-                
-                # Step 2: Pattern doesn't exist, try to INSERT
-                insert_result = await asyncio.to_thread(
-                    lambda: self.supabase.table('temporal_patterns').insert({
-                        'user_id': user_id,
-                        'pattern_signature': pattern_signature,
-                        'relationship_type': relationship_type,
-                        'key_factors': key_factors,
-                        'created_at': datetime.utcnow().isoformat(),
-                        'updated_at': datetime.utcnow().isoformat(),
-                        'pattern_count': 1,
-                        'std_dev_days': 5.0,  # Default value
-                        'confidence_score': 0.5  # Default value
-                    }).execute()
-                )
-                
-                if insert_result.data and len(insert_result.data) > 0:
-                    pattern_id = insert_result.data[0]['id']
-                    logger.info(f"Created new pattern: {pattern_id}")
-                    return pattern_id
-                
-                # If we get here, something went wrong
-                logger.error("Insert returned no data")
-                retry_count += 1
-                
-            except Exception as e:
-                # Handle unique constraint violations (race condition)
-                if 'unique' in str(e).lower() or 'duplicate' in str(e).lower():
-                    logger.warning(f"Unique constraint violation (race condition), retrying... ({retry_count + 1}/{max_retries})")
-                    retry_count += 1
-                    # Small backoff before retry
-                    await asyncio.sleep(0.1 * (retry_count ** 2))
-                    continue
-                else:
-                    logger.error(f"Failed to get/create pattern: {e}")
-                    return None
+        async def _upsert_pattern():
+            # FIX #5: Wrap synchronous Supabase calls in asyncio.to_thread() to avoid blocking event loop
+            # Step 1: Try to SELECT existing pattern
+            select_result = await asyncio.to_thread(
+                lambda: self.supabase.table('temporal_patterns').select('id').eq(
+                    'pattern_signature', pattern_signature
+                ).eq('user_id', user_id).limit(1).execute()
+            )
+            
+            if select_result.data and len(select_result.data) > 0:
+                pattern_id = select_result.data[0]['id']
+                logger.info(f"Found existing pattern: {pattern_id}")
+                return pattern_id
+            
+            # Step 2: Pattern doesn't exist, try to INSERT
+            insert_result = await asyncio.to_thread(
+                lambda: self.supabase.table('temporal_patterns').insert({
+                    'user_id': user_id,
+                    'pattern_signature': pattern_signature,
+                    'relationship_type': relationship_type,
+                    'key_factors': key_factors,
+                    'created_at': datetime.utcnow().isoformat(),
+                    'updated_at': datetime.utcnow().isoformat(),
+                    'pattern_count': 1,
+                    'std_dev_days': 5.0,  # Default value
+                    'confidence_score': 0.5  # Default value
+                }).execute()
+            )
+            
+            if insert_result.data and len(insert_result.data) > 0:
+                pattern_id = insert_result.data[0]['id']
+                logger.info(f"Created new pattern: {pattern_id}")
+                return pattern_id
+            
+            # If we get here, something went wrong
+            logger.error("Insert returned no data")
+            raise RuntimeError("Insert returned no data")
         
-        logger.error(f"Failed to get/create pattern after {max_retries} retries")
-        return None
+        try:
+            retrying = AsyncRetrying(
+                stop=stop_after_attempt(3),
+                wait=wait_exponential(multiplier=0.1, min=0.1, max=1),
+                retry=retry_if_exception_type((Exception,)),
+                reraise=True
+            )
+            
+            async for attempt in retrying:
+                with attempt:
+                    return await _upsert_pattern()
+        except Exception as e:
+            logger.error(f"Failed to get/create pattern: {e}")
+            return None
 
 
 # Test function

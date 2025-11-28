@@ -601,7 +601,7 @@ async def health_check() -> dict:
 
 async def validate_redis_connection(redis_url: str, max_retries: int = 3, retry_delay: float = 1.0) -> bool:
     """
-    Validate Redis connection before initializing cache with retry logic.
+    Validate Redis connection before initializing cache with retry logic using tenacity.
     
     Args:
         redis_url: Redis connection URL
@@ -612,29 +612,31 @@ async def validate_redis_connection(redis_url: str, max_retries: int = 3, retry_
         True if connection successful, False otherwise
     """
     import redis.asyncio as redis
+    from tenacity import AsyncRetrying, stop_after_attempt, wait_exponential, retry_if_exception_type
     
-    for attempt in range(max_retries):
-        try:
-            # Parse Redis URL
-            client = redis.from_url(redis_url, decode_responses=True, socket_connect_timeout=5)
-            
-            # Test connection with ping
-            await client.ping()
-            await client.close()
-            
-            logger.info("redis_connection_validated", url=redis_url, attempt=attempt + 1)
-            return True
-        except Exception as e:
-            if attempt < max_retries - 1:
-                logger.warning("redis_connection_failed_retrying", 
-                             url=redis_url, attempt=attempt + 1, 
-                             max_retries=max_retries, error=str(e))
-                await asyncio.sleep(retry_delay * (attempt + 1))  # Exponential backoff
-            else:
-                logger.error("redis_connection_failed_exhausted_retries", 
-                           url=redis_url, max_retries=max_retries, error=str(e))
+    async def _validate():
+        client = redis.from_url(redis_url, decode_responses=True, socket_connect_timeout=5)
+        await client.ping()
+        await client.close()
     
-    return False
+    try:
+        retrying = AsyncRetrying(
+            stop=stop_after_attempt(max_retries),
+            wait=wait_exponential(multiplier=retry_delay, min=retry_delay, max=retry_delay * 5),
+            retry=retry_if_exception_type((Exception,)),
+            reraise=True
+        )
+        
+        async for attempt in retrying:
+            with attempt:
+                await _validate()
+        
+        logger.info("redis_connection_validated", url=redis_url)
+        return True
+    except Exception as e:
+        logger.error("redis_connection_failed_exhausted_retries", 
+                   url=redis_url, max_retries=max_retries, error=str(e))
+        return False
 
 
 def require_redis_cache() -> bool:

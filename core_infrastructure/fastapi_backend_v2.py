@@ -313,11 +313,12 @@ from prometheus_client import Counter, Histogram, Gauge, generate_latest, CONTEN
 
 
 
-def _queue_backend() -> str:
+def get_queue_backend() -> str:
     """Return the queue backend mode: 'sync' or 'arq' (default)."""
     # Default to ARQ so background workers handle heavy processing.
     # Set QUEUE_BACKEND=sync in environments without an ARQ worker (e.g. local dev).
-    return (os.environ.get("QUEUE_BACKEND") or "arq").lower()
+    from core_infrastructure.config_manager import get_queue_config
+    return get_queue_config().backend.lower()
 
 # Global ARQ pool (singleton pattern for connection reuse)
 _arq_pool = None
@@ -340,9 +341,11 @@ async def get_arq_pool():
         # Import inside function to avoid import overhead when not using ARQ
         from arq import create_pool
         from arq.connections import RedisSettings
-        url = os.environ.get("ARQ_REDIS_URL") or os.environ.get("REDIS_URL")
+        from core_infrastructure.config_manager import get_queue_config
+        queue_cfg = get_queue_config()
+        url = queue_cfg.redis_url
         if not url:
-            raise RuntimeError("ARQ_REDIS_URL (or REDIS_URL) not set for QUEUE_BACKEND=arq")
+            raise RuntimeError("QUEUE_REDIS_URL not set for QUEUE_BACKEND=arq")
         
         _arq_pool = await create_pool(RedisSettings.from_dsn(url))
         logger.info(f"✅ ARQ connection pool created and cached for reuse")
@@ -9961,9 +9964,9 @@ async def _gmail_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> Dict
             except Exception as e:
                 logger.warning(f"Failed to check incremental sync eligibility: {e}")
         
-        # Concurrency for attachment downloads
-        max_concurrency = int(os.environ.get('CONNECTOR_CONCURRENCY', '5') or '5')
-        sem = asyncio.Semaphore(max(1, min(max_concurrency, 10)))
+        # Concurrency for attachment downloads (using aiometer library)
+        from core_infrastructure.rate_limiter import ConcurrencyLimiter
+        limiter = ConcurrencyLimiter()
         
         message_ids = []
         
@@ -10131,45 +10134,45 @@ async def _gmail_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> Dict
                         if score < 0.5:
                             stats['skipped'] += 1
                             return None
-                        async with sem:
-                            content = await nango.get_gmail_attachment(provider_key, connection_id, mid, attach_id)
-                            stats['actions_used'] += 1
-                            if not content:
-                                return None
-                            storage_path, file_hash = await _store_external_item_attachment(user_id, 'gmail', mid, filename, content)
-                            stats['attachments_saved'] += 1
-                            
-                            provider_attachment_id = f"{mid}:{attach_id}"
-                            item = {
-                                'user_id': user_id,
-                                'user_connection_id': user_connection_id,
-                                'provider_id': provider_attachment_id,
-                                'kind': 'email',
-                                'source_ts': source_ts or pendulum.now().to_iso8601_string(),
-                                'hash': file_hash,
-                                'storage_path': storage_path,
-                                'metadata': {'subject': subject, 'filename': filename, 'mime_type': mime_type, 'correlation_id': req.correlation_id},
-                                'relevance_score': score,
-                                'status': 'stored'
-                            }
-                            
-                            # Check for duplicate and enqueue processing
-                            try:
-                                # CRITICAL FIX: Use optimized duplicate check
-                                dup = await optimized_db.check_duplicate_by_hash(user_id, file_hash)
-                                is_dup = bool(dup)
-                            except Exception as e:
-                                logger.debug(f"Failed to check duplicate: {e}")
-                                is_dup = False
-                            if not is_dup:
-                                if any(name_l.endswith(ext) for ext in ['.csv', '.xlsx', '.xls']):
-                                    await _enqueue_file_processing(user_id, filename, storage_path)
-                                    stats['queued_jobs'] += 1
-                                elif name_l.endswith('.pdf'):
-                                    await _enqueue_pdf_processing(user_id, filename, storage_path)
-                                    stats['queued_jobs'] += 1
-                            
-                            return item
+                        # Download with concurrency control
+                        content = await limiter.run(nango.get_gmail_attachment(provider_key, connection_id, mid, attach_id))
+                        stats['actions_used'] += 1
+                        if not content:
+                            return None
+                        storage_path, file_hash = await _store_external_item_attachment(user_id, 'gmail', mid, filename, content)
+                        stats['attachments_saved'] += 1
+                        
+                        provider_attachment_id = f"{mid}:{attach_id}"
+                        item = {
+                            'user_id': user_id,
+                            'user_connection_id': user_connection_id,
+                            'provider_id': provider_attachment_id,
+                            'kind': 'email',
+                            'source_ts': source_ts or pendulum.now().to_iso8601_string(),
+                            'hash': file_hash,
+                            'storage_path': storage_path,
+                            'metadata': {'subject': subject, 'filename': filename, 'mime_type': mime_type, 'correlation_id': req.correlation_id},
+                            'relevance_score': score,
+                            'status': 'stored'
+                        }
+                        
+                        # Check for duplicate and enqueue processing
+                        try:
+                            # CRITICAL FIX: Use optimized duplicate check
+                            dup = await optimized_db.check_duplicate_by_hash(user_id, file_hash)
+                            is_dup = bool(dup)
+                        except Exception as e:
+                            logger.debug(f"Failed to check duplicate: {e}")
+                            is_dup = False
+                        if not is_dup:
+                            if any(name_l.endswith(ext) for ext in ['.csv', '.xlsx', '.xls']):
+                                await _enqueue_file_processing(user_id, filename, storage_path)
+                                stats['queued_jobs'] += 1
+                            elif name_l.endswith('.pdf'):
+                                await _enqueue_pdf_processing(user_id, filename, storage_path)
+                                stats['queued_jobs'] += 1
+                        
+                        return item
                     except Exception as part_e:
                         logger.warning(f"Failed to process attachment: {part_e}")
                         return None
