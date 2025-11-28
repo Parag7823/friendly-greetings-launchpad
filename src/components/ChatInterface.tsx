@@ -401,45 +401,54 @@ setIsNewChat(false);
 console.error('Title generation error:', titleError);
 // Continue with chat even if title generation fails
 chatId = `chat_${Date.now()}`;
+setCurrentChatId(chatId);
+setIsNewChat(false);
+}
+}
+
+// Send message to backend
+const sessionToken = await getSessionToken();
+        const response = await fetch(`${config.apiUrl}/chat`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(sessionToken && { 'Authorization': `Bearer ${sessionToken}` })
+          },
+          body: JSON.stringify({
+            message: currentMessage,
+            user_id: user?.id || 'anonymous',
+            chat_id: chatId,
+            session_token: sessionToken
+          })
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+
+          const aiMessage = {
+            id: `msg-${Date.now()}-ai`,
+            text: data.response,
+            isUser: false,
+            timestamp: new Date(data.timestamp)
+          };
+
+          setMessages(prev => [...prev, aiMessage]);
+        } else {
+          // Get error details from backend
+          let errorDetail = 'Failed to get response from AI';
           try {
-            const chunk = JSON.parse(line.slice(6));
-            
-            if (chunk.type === 'thinking') {
-              // Show thinking indicator
-              setMessages(prev => 
-                prev.map(msg => 
-                  msg.id === aiMessageId 
-                    ? { ...msg, text: '🤔 Thinking...', isThinking: true }
-                    : msg
-                )
-              );
-            } else if (chunk.type === 'chunk') {
-              // Append text chunk
-              streamedText += chunk.text;
-              setMessages(prev => 
-                prev.map(msg => 
-                  msg.id === aiMessageId 
-                    ? { ...msg, text: streamedText, isThinking: false }
-                    : msg
-                )
-              );
-            } else if (chunk.type === 'done') {
-              // Stream complete - update with metadata
-              setMessages(prev => 
-                prev.map(msg => 
-                  msg.id === aiMessageId 
-                    ? { ...msg, isStreaming: false, metadata: chunk }
-                    : msg
-                )
-              );
-            } else if (chunk.type === 'error') {
-              // Error occurred
-              throw new Error(chunk.message || 'Stream error');
-            }
-          } catch (parseError) {
-            console.error('Failed to parse chunk:', parseError);
+            const errorData = await response.json();
+            errorDetail = errorData.detail || errorDetail;
+          } catch {
+            // If can't parse JSON, use status text
+            errorDetail = `Server error (${response.status}): ${response.statusText}`;
           }
+          throw new Error(errorDetail);
         }
+      } catch (error) {
+        console.error('Chat error:', error);
+
+        // Show actual error message from backend
         const errorText = error instanceof Error ? error.message : 'Sorry, I encountered an error. Please try again.';
 
         const errorMessage = {
