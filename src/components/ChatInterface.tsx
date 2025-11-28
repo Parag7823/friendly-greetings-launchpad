@@ -677,7 +677,7 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
             {/* Chat Messages Area */}
             <div className="flex-1 overflow-y-auto p-4 pt-2">
               {messages.length === 0 ? (
-                <div className="h-full flex items-center justify-center min-h-[300px]">
+                <div className="flex items-center justify-center min-h-full">
                   <div className="max-w-2xl w-full space-y-6 px-4">
                     <div className="text-center">
                       <h1 className="text-lg font-semibold text-foreground tracking-tight mb-2">
@@ -690,7 +690,7 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
                   </div>
                 </div>
               ) : (
-                <div className="max-w-5xl mx-auto space-y-4">
+                <div className="max-w-5xl mx-auto space-y-4 pb-4">
                   {messages.map((msg) => (
                     <div
                       key={msg.id}
