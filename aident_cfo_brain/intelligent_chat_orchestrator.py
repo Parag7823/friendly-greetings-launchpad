@@ -29,6 +29,17 @@ from dataclasses import dataclass
 import asyncio
 from groq import AsyncGroq  # CHANGED: Using Groq instead of Anthropic
 
+# FIX #19: Import intent classification and output guard components
+from intent_and_guard_engine import (
+    IntentClassifier,
+    OutputGuard,
+    ResponseVariationEngine,
+    UserIntent,
+    get_intent_classifier,
+    get_output_guard,
+    get_response_variation_engine
+)
+
 # Initialize logger early for use in import error handlers
 logger = structlog.get_logger(__name__)
 
@@ -274,7 +285,13 @@ class IntelligentChatOrchestrator:
             redis_url=os.getenv('ARQ_REDIS_URL') or os.getenv('REDIS_URL')
         )
         
+        # FIX #19: Initialize intent classification and output guard components
+        self.intent_classifier = get_intent_classifier()
+        self.output_guard = get_output_guard()
+        self.response_variation_engine = get_response_variation_engine(self.groq)
+        
         logger.info("✅ IntelligentChatOrchestrator initialized with all engines including FinleyGraph")
+        logger.info("✅ FIX #19: Intent Classifier, OutputGuard, and ResponseVariation initialized")
     
     async def _parallel_query(self, queries: List[Tuple[str, callable]]) -> Dict[str, Any]:
         """
@@ -553,21 +570,44 @@ With your financial data, I can:
             await memory_manager.load_memory()
             print(f"[ORCHESTRATOR] Memory loaded successfully", flush=True)
             
-            # Step 0b: Load conversation history for context (with timeout to prevent hangs)
-            try:
-                conversation_history = await asyncio.wait_for(
-                    self._load_conversation_history(user_id, chat_id) if chat_id else asyncio.sleep(0),
-                    timeout=5.0
-                ) if chat_id else []
-            except asyncio.TimeoutError:
-                logger.warning("⏱️ Conversation history loading timed out - proceeding without history")
-                conversation_history = []
-            except Exception as e:
-                logger.warning(f"⚠️ Failed to load conversation history: {e} - proceeding without history")
-                conversation_history = []
+            # Step 0c: FIX #18 - MEMORY-FIRST ARCHITECTURE
+            # Get memory as PRIMARY context source (includes auto-summarized old messages + recent messages)
+            memory_context = memory_manager.get_context()
+            memory_messages = memory_manager.get_messages()
+            
+            # Use memory messages as primary conversation history
+            # Memory has intelligent summarization built-in by LangChain
+            if memory_messages:
+                conversation_history = memory_messages
+                logger.info("Using memory as primary context source", message_count=len(memory_messages))
+            else:
+                # Fallback: Load from database only if memory is empty (new conversation)
+                try:
+                    conversation_history = await asyncio.wait_for(
+                        self._load_conversation_history(user_id, chat_id) if chat_id else asyncio.sleep(0),
+                        timeout=5.0
+                    ) if chat_id else []
+                except asyncio.TimeoutError:
+                    logger.warning("⏱️ Conversation history loading timed out - proceeding without history")
+                    conversation_history = []
+                except Exception as e:
+                    logger.warning(f"⚠️ Failed to load conversation history: {e} - proceeding without history")
+                    conversation_history = []
+            
+            # Step 0d: FIX #19 - CLASSIFY USER INTENT (separate from financial question type)
+            # This prevents checking Supabase for meta questions like "What can you do?"
+            print(f"[ORCHESTRATOR] Classifying user intent...", flush=True)
+            intent_result = await self.intent_classifier.classify(question)
+            print(f"[ORCHESTRATOR] User intent: {intent_result.intent.value} (confidence: {intent_result.confidence:.2f})", flush=True)
+            logger.info(
+                "User intent classified",
+                intent=intent_result.intent.value,
+                confidence=round(intent_result.confidence, 2),
+                method=intent_result.method,
+                reasoning=intent_result.reasoning
+            )
             
             # Step 1: Classify the question type (with memory context + conversation history)
-            memory_context = memory_manager.get_context()
             question_type, confidence = await self._classify_question(
                 question, 
                 user_id, 
@@ -600,13 +640,25 @@ With your financial data, I can:
                 # FIX #1: Pass memory_manager to general handler for repetition detection
                 response = await self._handle_general_question(question, user_id, context, conversation_history, memory_manager)
             
-            # Step 3: Save memory after response (for context in next turn)
+            # Step 3: FIX #19 - OUTPUT GUARD (Check for repetition and fix if needed)
+            print(f"[ORCHESTRATOR] Running output guard...", flush=True)
+            safe_response = await self.output_guard.check_and_fix(
+                proposed_response=response.answer,
+                recent_responses=memory_messages[-5:] if memory_messages else [],
+                question=question,
+                llm_client=self.groq,
+                frustration_level=memory_manager.conversation_state.get('frustration_level', 0)
+            )
+            response.answer = safe_response
+            logger.info("Output guard check completed", repetition_detected=(safe_response != response.answer))
+            
+            # Step 4: Save memory after response (for context in next turn)
             await memory_manager.add_message(question, response.answer)
             
-            # Step 4: Store in database
+            # Step 5: Store in database
             await self._store_chat_message(user_id, chat_id, question, response)
             
-            # Step 5: Log memory stats for monitoring
+            # Step 6: Log memory stats for monitoring
             memory_stats = await memory_manager.get_memory_stats()
             logger.info("Question processed successfully", question_type=question_type.value, memory_stats=memory_stats)
             
@@ -1843,10 +1895,15 @@ DATA STATUS: {'Rich data available - provide specific, quantified insights!' if 
         limit: int = 20
     ) -> list[Dict[str, str]]:
         """
-        Load conversation history from database with SMART CONTEXT WINDOW MANAGEMENT.
+        Load conversation history from database as FALLBACK ONLY.
         
-        If conversation is too long (>100K tokens), intelligently summarize old messages
-        while keeping recent ones intact. This prevents hitting Claude's 200K token limit.
+        FIX #18: This is now a fallback for new conversations.
+        Primary context comes from AidentMemoryManager which has:
+        - Auto-summarization via LangChain
+        - Intelligent token management
+        - Persistent context across sessions
+        
+        This method is only called if memory is empty (new conversation).
         """
         try:
             # Query last N messages from this chat
@@ -1861,7 +1918,7 @@ DATA STATUS: {'Rich data available - provide specific, quantified insights!' if 
             if not result.data:
                 return []
             
-            # Convert to Claude message format
+            # Convert to message format
             history = []
             for msg in result.data:
                 history.append({
@@ -1869,67 +1926,17 @@ DATA STATUS: {'Rich data available - provide specific, quantified insights!' if 
                     'content': msg['message']
                 })
             
-            # CONTEXT WINDOW MANAGEMENT: Estimate token count
-            # Rough estimate: 1 token ≈ 4 characters
-            total_chars = sum(len(msg['content']) for msg in history)
-            estimated_tokens = total_chars // 4
-            
-            # If conversation is getting long (>50K tokens), summarize old messages
-            if estimated_tokens > 50000 and len(history) > 10:
-                logger.info("Context window management: summarizing old messages", estimated_tokens=estimated_tokens)
-                
-                # Keep last 6 messages (3 Q&A pairs) intact
-                recent_messages = history[-6:]
-                old_messages = history[:-6]
-                
-                # Create summary of old conversation
-                old_summary = self._summarize_conversation(old_messages)
-                
-                # Return: [summary] + recent messages
-                return [
-                    {
-                        'role': 'assistant',
-                        'content': f"[Previous conversation summary: {old_summary}]"
-                    }
-                ] + recent_messages
-            
-            logger.info("Loaded conversation history", message_count=len(history), estimated_tokens=estimated_tokens)
+            logger.info("Loaded conversation history from database (fallback)", message_count=len(history))
             return history
             
         except Exception as e:
             logger.error("Failed to load conversation history", error=str(e))
             return []
     
-    def _summarize_conversation(self, messages: list[Dict[str, str]]) -> str:
-        """
-        Summarize old conversation messages to save context window space.
-        Extracts key topics, decisions, and insights.
-        """
-        if not messages:
-            return "No previous context"
-        
-        # Extract key topics from user questions
-        user_questions = [msg['content'] for msg in messages if msg['role'] == 'user']
-        
-        # Simple keyword extraction
-        topics = set()
-        for q in user_questions:
-            q_lower = q.lower()
-            if 'revenue' in q_lower:
-                topics.add('revenue analysis')
-            if 'expense' in q_lower or 'cost' in q_lower:
-                topics.add('expense tracking')
-            if 'cash flow' in q_lower:
-                topics.add('cash flow')
-            if 'vendor' in q_lower or 'supplier' in q_lower:
-                topics.add('vendor relationships')
-            if 'profit' in q_lower:
-                topics.add('profitability')
-        
-        if topics:
-            return f"User discussed: {', '.join(topics)}"
-        else:
-            return f"User asked {len(user_questions)} questions about their finances"
+    # REMOVED: _summarize_conversation() method
+    # FIX #18: Summarization is now handled by LangChain's ConversationSummaryBufferMemory
+    # which uses the LLM to intelligently summarize old messages when token limit is exceeded.
+    # This eliminates duplicate summarization logic and ensures consistent, intelligent summaries.
     
     # ========================================================================
     # NEW PHASE 3: FINLEY GRAPH INTELLIGENCE INTEGRATION

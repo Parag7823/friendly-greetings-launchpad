@@ -96,6 +96,7 @@ COPY aident_cfo_brain/enhanced_relationship_detector.py .
 COPY aident_cfo_brain/semantic_relationship_extractor.py .
 COPY aident_cfo_brain/finley_graph_engine.py .
 COPY aident_cfo_brain/aident_memory_manager.py .
+COPY aident_cfo_brain/intent_and_guard_engine.py .
 COPY data_ingestion_normalization/field_mapping_learner.py .
 COPY data_ingestion_normalization/embedding_service.py .
 COPY aident_cfo_brain/causal_inference_engine.py .
