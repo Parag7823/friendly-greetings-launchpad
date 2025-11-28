@@ -373,3 +373,200 @@ async def rate_limited_batch(
     limiter = ConcurrencyLimiter(max_concurrency)
     coros = [async_fn(item) for item in items]
     return await limiter.run_batch(coros)
+
+
+# ISSUE #8: Sync deduplication using idempotency keys
+class SyncDeduplicator:
+    """
+    Prevents duplicate sync requests using idempotency keys.
+    Tracks recent syncs (last 5 minutes) in Redis.
+    
+    Example:
+        dedup = SyncDeduplicator()
+        idempotency_key = dedup.generate_key(user_id, provider, connection_id, mode)
+        
+        # Check if sync already in progress
+        cached_result = await dedup.get_cached_result(idempotency_key)
+        if cached_result:
+            return cached_result  # Return cached result
+        
+        # Run sync...
+        await dedup.cache_result(idempotency_key, result)
+    """
+    
+    def __init__(self):
+        self.cache = safe_get_cache()
+        self.config = get_connector_config()
+    
+    def generate_key(
+        self, 
+        user_id: str, 
+        provider: str, 
+        connection_id: str, 
+        mode: str = 'incremental'
+    ) -> str:
+        """Generate idempotency key for sync request."""
+        return f"sync:dedup:{user_id}:{provider}:{connection_id}:{mode}"
+    
+    async def get_cached_result(self, idempotency_key: str) -> Optional[dict]:
+        """Get cached result if sync was recently completed."""
+        if not self.cache:
+            return None
+        
+        try:
+            result = await self.cache.get(idempotency_key)
+            if result:
+                logger.info("sync_dedup_cache_hit", key=idempotency_key)
+                return result
+            return None
+        except Exception as e:
+            logger.error("sync_dedup_get_failed", error=str(e))
+            return None
+    
+    async def cache_result(
+        self, 
+        idempotency_key: str, 
+        result: dict,
+        ttl_seconds: int = 300
+    ) -> None:
+        """Cache sync result for 5 minutes."""
+        if not self.cache:
+            return
+        
+        try:
+            await self.cache.set(idempotency_key, result, ex=ttl_seconds)
+            logger.info("sync_dedup_result_cached", key=idempotency_key, ttl=ttl_seconds)
+        except Exception as e:
+            logger.error("sync_dedup_cache_failed", error=str(e))
+
+
+# ISSUE #9: Scheduler rate limiting with exponential backoff
+class SchedulerRateLimiter:
+    """
+    Rate limits scheduler dispatch to prevent overwhelming workers.
+    Implements exponential backoff on failures.
+    
+    Example:
+        scheduler_limiter = SchedulerRateLimiter()
+        can_dispatch, msg = await scheduler_limiter.check_scheduler_rate_limit(provider)
+        if not can_dispatch:
+            return {"status": "rate_limited", "message": msg}
+        
+        # Dispatch syncs...
+        await scheduler_limiter.record_dispatch(provider, count=5)
+        await scheduler_limiter.record_failure(provider)  # On error
+    """
+    
+    def __init__(self):
+        self.cache = safe_get_cache()
+        self.config = get_connector_config()
+    
+    async def check_scheduler_rate_limit(self, provider: str) -> Tuple[bool, str]:
+        """
+        Check if scheduler can dispatch syncs for provider.
+        Limit: 5 syncs per minute per provider
+        
+        Returns:
+            (can_dispatch: bool, message: str)
+        """
+        if not self.cache:
+            return True, "OK"
+        
+        try:
+            # Key for tracking scheduler dispatches
+            dispatch_key = f"scheduler:dispatch:{provider}"
+            failure_key = f"scheduler:failure:{provider}"
+            
+            # Get current dispatch count and failure count
+            dispatch_count = await self.cache.get(dispatch_key) or 0
+            failure_count = await self.cache.get(failure_key) or 0
+            
+            # Calculate backoff: exponential backoff on failures
+            # 0 failures: allow 5 syncs/min
+            # 1 failure: allow 4 syncs/min
+            # 2 failures: allow 3 syncs/min
+            # 3+ failures: allow 1 sync/min
+            max_dispatches = max(1, 5 - int(failure_count))
+            
+            if dispatch_count >= max_dispatches:
+                msg = (
+                    f"Scheduler rate limit for {provider}: "
+                    f"{dispatch_count}/{max_dispatches} syncs dispatched this minute. "
+                    f"Failures: {failure_count}. Backoff active."
+                )
+                logger.warning("scheduler_rate_limit_exceeded", provider=provider, 
+                             dispatch_count=dispatch_count, failure_count=failure_count)
+                return False, msg
+            
+            return True, "OK"
+            
+        except Exception as e:
+            logger.error("scheduler_rate_limit_check_failed", error=str(e))
+            return True, "OK"  # Fail open
+    
+    async def record_dispatch(self, provider: str, count: int = 1) -> None:
+        """Record scheduler dispatch."""
+        if not self.cache:
+            return
+        
+        try:
+            dispatch_key = f"scheduler:dispatch:{provider}"
+            current = await self.cache.get(dispatch_key) or 0
+            new_count = current + count
+            
+            # Reset counter every minute
+            await self.cache.set(dispatch_key, new_count, ex=60)
+            
+            logger.info("scheduler_dispatch_recorded", provider=provider, count=count, total=new_count)
+        except Exception as e:
+            logger.error("scheduler_dispatch_record_failed", error=str(e))
+    
+    async def record_failure(self, provider: str) -> None:
+        """Record scheduler failure for exponential backoff."""
+        if not self.cache:
+            return
+        
+        try:
+            failure_key = f"scheduler:failure:{provider}"
+            current = await self.cache.get(failure_key) or 0
+            new_count = current + 1
+            
+            # Keep failure count for 5 minutes
+            await self.cache.set(failure_key, new_count, ex=300)
+            
+            logger.warning("scheduler_failure_recorded", provider=provider, failure_count=new_count)
+        except Exception as e:
+            logger.error("scheduler_failure_record_failed", error=str(e))
+    
+    async def reset_failure_count(self, provider: str) -> None:
+        """Reset failure count on successful dispatch."""
+        if not self.cache:
+            return
+        
+        try:
+            failure_key = f"scheduler:failure:{provider}"
+            await self.cache.delete(failure_key)
+            logger.info("scheduler_failure_count_reset", provider=provider)
+        except Exception as e:
+            logger.error("scheduler_failure_reset_failed", error=str(e))
+
+
+# Singleton instances
+_sync_deduplicator: Optional[SyncDeduplicator] = None
+_scheduler_rate_limiter: Optional[SchedulerRateLimiter] = None
+
+
+def get_sync_deduplicator() -> SyncDeduplicator:
+    """Get or create sync deduplicator."""
+    global _sync_deduplicator
+    if _sync_deduplicator is None:
+        _sync_deduplicator = SyncDeduplicator()
+    return _sync_deduplicator
+
+
+def get_scheduler_rate_limiter() -> SchedulerRateLimiter:
+    """Get or create scheduler rate limiter."""
+    global _scheduler_rate_limiter
+    if _scheduler_rate_limiter is None:
+        _scheduler_rate_limiter = SchedulerRateLimiter()
+    return _scheduler_rate_limiter

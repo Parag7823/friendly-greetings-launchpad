@@ -498,6 +498,192 @@ async def create_sync_run(
     return sync_run_id
 
 
+# FIX #21: SYNC CURSOR MANAGEMENT (Issue #1)
+# Read and update sync cursors for incremental syncs
+async def get_sync_cursor(
+    supabase_client: Any,
+    user_connection_id: str,
+    resource: str,
+    cursor_type: str = 'time'
+) -> Optional[str]:
+    """Get the last sync cursor for incremental syncs."""
+    try:
+        cursor_row = supabase_client.table('sync_cursors').select('value').eq(
+            'user_connection_id', user_connection_id
+        ).eq('resource', resource).eq('cursor_type', cursor_type).limit(1).execute()
+        
+        if cursor_row.data:
+            return cursor_row.data[0]['value']
+        return None
+    except Exception as e:
+        logger.warning(f"Failed to get sync cursor: {e}")
+        return None
+
+
+async def update_sync_cursor(
+    transaction_manager: Any,
+    user_id: str,
+    user_connection_id: str,
+    resource: str,
+    cursor_value: str,
+    cursor_type: str = 'time'
+) -> bool:
+    """Update the sync cursor after successful sync."""
+    try:
+        async with transaction_manager.transaction(
+            user_id=user_id,
+            operation_type="sync_cursor_update"
+        ) as tx:
+            # Try insert first (new cursor)
+            try:
+                await tx.insert('sync_cursors', {
+                    'user_id': user_id,
+                    'user_connection_id': user_connection_id,
+                    'resource': resource,
+                    'cursor_type': cursor_type,
+                    'value': cursor_value,
+                    'updated_at': __import__('pendulum').now().to_iso8601_string()
+                })
+            except Exception:
+                # If insert fails (duplicate), update instead
+                await tx.update('sync_cursors', {
+                    'value': cursor_value,
+                    'updated_at': __import__('pendulum').now().to_iso8601_string()
+                }, {
+                    'user_connection_id': user_connection_id,
+                    'resource': resource,
+                    'cursor_type': cursor_type
+                })
+        return True
+    except Exception as e:
+        logger.error(f"Failed to update sync cursor: {e}")
+        return False
+
+
+# FIX #22: SYNC COMPLETION TRACKING (Issue #6)
+# Track sync completion with status and duration
+async def complete_sync_run(
+    transaction_manager: Any,
+    supabase_client: Any,
+    user_id: str,
+    sync_run_id: str,
+    user_connection_id: str,
+    status: str,
+    stats: Dict[str, Any],
+    errors: List[str],
+    start_time: Any
+) -> bool:
+    """Complete a sync run and update user_connection with completion info."""
+    try:
+        import pendulum
+        end_time = pendulum.now()
+        duration_seconds = (end_time - start_time).total_seconds()
+        
+        async with transaction_manager.transaction(
+            user_id=user_id,
+            operation_type="sync_completion"
+        ) as tx:
+            # Update sync_runs with completion status
+            await tx.update('sync_runs', {
+                'status': status,
+                'finished_at': end_time.to_iso8601_string(),
+                'stats': __import__('orjson').dumps({**stats, 'duration_seconds': duration_seconds}).decode(),
+                'error': '; '.join(errors[:5])[:500] if errors else None
+            }, {'id': sync_run_id})
+            
+            # Update user_connections with last sync info
+            await tx.update('user_connections', {
+                'last_synced_at': end_time.to_iso8601_string(),
+                'metadata': __import__('orjson').dumps({
+                    'last_sync_status': status,
+                    'last_sync_duration_seconds': duration_seconds,
+                    'last_sync_records': stats.get('records_fetched', 0),
+                    'last_sync_errors': len(errors)
+                }).decode()
+            }, {'id': user_connection_id})
+        
+        return True
+    except Exception as e:
+        logger.error(f"Failed to complete sync run: {e}")
+        return False
+
+
+# FIX #23: WEBHOOK RETRY MECHANISM (Issue #5)
+# Retry failed webhooks with exponential backoff
+async def retry_failed_webhook(
+    transaction_manager: Any,
+    supabase_client: Any,
+    user_id: str,
+    webhook_event_id: str,
+    retry_count: int = 0,
+    max_retries: int = 3
+) -> bool:
+    """Retry a failed webhook with exponential backoff."""
+    try:
+        import asyncio
+        import pendulum
+        
+        # Exponential backoff: 2^retry_count seconds (2s, 4s, 8s)
+        delay_seconds = 2 ** retry_count
+        
+        if retry_count >= max_retries:
+            logger.warning(f"Webhook {webhook_event_id} exceeded max retries ({max_retries})")
+            async with transaction_manager.transaction(
+                user_id=user_id,
+                operation_type="webhook_final_failure"
+            ) as tx:
+                await tx.update('webhook_events', {
+                    'status': 'failed',
+                    'error': f'Max retries ({max_retries}) exceeded'
+                }, {'id': webhook_event_id})
+            return False
+        
+        # Schedule retry
+        next_retry_at = pendulum.now().add(seconds=delay_seconds)
+        async with transaction_manager.transaction(
+            user_id=user_id,
+            operation_type="webhook_retry_schedule"
+        ) as tx:
+            await tx.update('webhook_events', {
+                'status': 'queued',
+                'metadata': __import__('orjson').dumps({
+                    'retry_count': retry_count + 1,
+                    'next_retry_at': next_retry_at.to_iso8601_string()
+                }).decode()
+            }, {'id': webhook_event_id})
+        
+        logger.info(f"Webhook {webhook_event_id} scheduled for retry in {delay_seconds}s (attempt {retry_count + 1}/{max_retries})")
+        return True
+    except Exception as e:
+        logger.error(f"Failed to schedule webhook retry: {e}")
+        return False
+
+
+# FIX #24: EXTERNAL ITEM ERROR TRACKING (Issue #3)
+# Track errors when external items fail to process
+async def store_external_item_with_error(
+    transaction_manager: Any,
+    user_id: str,
+    item_data: Dict[str, Any],
+    error_message: Optional[str] = None
+) -> bool:
+    """Store external item with error tracking."""
+    try:
+        async with transaction_manager.transaction(
+            user_id=user_id,
+            operation_type="external_item_store"
+        ) as tx:
+            if error_message:
+                item_data['status'] = 'failed'
+                item_data['error'] = error_message[:500]
+            
+            await tx.insert('external_items', item_data)
+        return True
+    except Exception as e:
+        logger.error(f"Failed to store external item: {e}")
+        return False
+
+
 # FIX #79: SHARED CACHE KEY GENERATION
 # Replaces 3x duplicate code in:
 # - universal_platform_detector_optimized.py (_generate_detection_id)

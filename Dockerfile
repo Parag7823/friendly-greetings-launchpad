@@ -84,42 +84,12 @@ RUN find /app -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
 # Copy startup validator (runs before main app to catch errors early)
 COPY startup_validator.py .
 
-# Copy all necessary Python files and modules from subdirectories
-COPY core_infrastructure/fastapi_backend_v2.py .
-COPY core_infrastructure/supabase_client.py .
-COPY core_infrastructure/config_manager.py .
-COPY core_infrastructure/rate_limiter.py .
-COPY data_ingestion_normalization/universal_field_detector.py .
-COPY data_ingestion_normalization/universal_document_classifier_optimized.py .
-COPY data_ingestion_normalization/universal_platform_detector_optimized.py .
-COPY data_ingestion_normalization/universal_extractors_optimized.py .
-COPY data_ingestion_normalization/entity_resolver_optimized.py .
-COPY aident_cfo_brain/enhanced_relationship_detector.py .
-COPY aident_cfo_brain/semantic_relationship_extractor.py .
-COPY aident_cfo_brain/finley_graph_engine.py .
-COPY aident_cfo_brain/aident_memory_manager.py .
-COPY aident_cfo_brain/intent_and_guard_engine.py .
-COPY data_ingestion_normalization/field_mapping_learner.py .
-COPY data_ingestion_normalization/embedding_service.py .
-COPY aident_cfo_brain/causal_inference_engine.py .
-COPY aident_cfo_brain/temporal_pattern_learner.py .
-COPY aident_cfo_brain/intelligent_chat_orchestrator.py .
-COPY core_infrastructure/database_optimization_utils.py .
-COPY duplicate_detection_fraud/production_duplicate_detection_service.py .
-COPY core_infrastructure/transaction_manager.py .
-COPY data_ingestion_normalization/streaming_processor.py .
-COPY core_infrastructure/error_recovery_system.py .
-COPY core_infrastructure/centralized_cache.py .
-COPY core_infrastructure/security_system.py .
-COPY data_ingestion_normalization/nango_client.py .
-COPY background_jobs/arq_worker.py .
-COPY background_jobs/worker_entry.py .
-COPY core_infrastructure/provenance_tracker.py .
-COPY duplicate_detection_fraud/inference_service.py .
-COPY duplicate_detection_fraud/persistent_lsh_service.py .
-COPY data_ingestion_normalization/streaming_source.py .
-COPY data_ingestion_normalization/shared_learning_system.py .
-COPY core_infrastructure/utils/helpers.py ./core_infrastructure/utils/
+# Copy entire directory structures to preserve module paths
+COPY core_infrastructure/ ./core_infrastructure/
+COPY data_ingestion_normalization/ ./data_ingestion_normalization/
+COPY aident_cfo_brain/ ./aident_cfo_brain/
+COPY duplicate_detection_fraud/ ./duplicate_detection_fraud/
+COPY background_jobs/ ./background_jobs/
 COPY start.sh .
 
 # CRITICAL FIX: Copy all configuration files (YAML configs for platform mappings, exchange rates, etc.)

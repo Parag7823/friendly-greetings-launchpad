@@ -9875,75 +9875,30 @@ async def _gmail_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> Dict
     provider_key = req.integration_id or NANGO_GMAIL_INTEGRATION_ID
     connection_id = req.connection_id
     user_id = req.user_id
-
-    # FIX #4: Ensure connector + user_connection rows exist (async transaction for non-blocking)
-    try:
-        transaction_manager = get_transaction_manager()
-        async with transaction_manager.transaction(
-            user_id=user_id,
-            operation_type="connector_upsert"
-        ) as tx:
-            # Upsert connector definition
-            try:
-                await tx.insert('connectors', {
-                    'provider': provider_key,
-                    'integration_id': provider_key,
-                    'auth_type': 'OAUTH2',
-                    'scopes': orjson.dumps(["https://mail.google.com/"]).decode(),
-                    'endpoints_needed': orjson.dumps(["/emails", "/labels", "/attachment"]).decode(),
-                    'enabled': True
-                })
-            except Exception as conn_insert_err:
-                # FIX #4a: Log duplicate key errors for debugging (expected on subsequent syncs)
-                if 'duplicate' in str(conn_insert_err).lower() or 'unique' in str(conn_insert_err).lower():
-                    logger.debug(f"Connector already exists for {provider_key}: {conn_insert_err}")
-                else:
-                    logger.warning(f"Unexpected error inserting connector: {conn_insert_err}")
-            
-            # Fetch connector id (still need sync for query)
-            connector_row = supabase.table('connectors').select('id').eq('provider', provider_key).limit(1).execute()
-            connector_id = connector_row.data[0]['id'] if connector_row.data else None
-            
-            # Upsert user_connection
-            try:
-                await tx.insert('user_connections', {
-                    'user_id': user_id,
-                    'connector_id': connector_id,
-                    'nango_connection_id': connection_id,
-                    'status': 'active',
-                    'sync_mode': 'pull'
-                })
-            except Exception as uc_err:
-                logger.debug(f"User connection already exists: {uc_err}")
-            
-            uc_row = supabase.table('user_connections').select('id').eq('nango_connection_id', connection_id).limit(1).execute()
-            user_connection_id = uc_row.data[0]['id'] if uc_row.data else None
-    except Exception as e:
-        logger.error(f"Failed to upsert connector records: {e}")
-        user_connection_id = None
-
-    # Start sync_run
-    sync_run_id = str(uuid.uuid4())
-    try:
-        transaction_manager = get_transaction_manager()
-        async with transaction_manager.transaction(
-            user_id=user_id,
-            operation_type="connector_sync_start"
-        ) as tx:
-            await tx.insert('sync_runs', {
-                'id': sync_run_id,
-                'user_id': user_id,
-                'user_connection_id': user_connection_id,
-                'type': req.mode,
-                'status': 'running',
-                'started_at': pendulum.now().to_iso8601_string(),
-                'stats': orjson.dumps({'records_fetched': 0, 'actions_used': 0}).decode()
-            })
-    except Exception as e:
-        logger.error(f"Failed to start sync run: {e}")
-
+    
+    # FIX #2: Use consolidated helper for connector/connection upsert
+    from core_infrastructure.utils.helpers import (
+        upsert_connector_and_connection, create_sync_run, 
+        get_sync_cursor, update_sync_cursor, complete_sync_run,
+        store_external_item_with_error
+    )
+    
+    transaction_manager = get_transaction_manager()
+    start_time = pendulum.now()
+    
+    # FIX #2: Use consolidated helper
+    connector_id, user_connection_id = await upsert_connector_and_connection(
+        supabase, transaction_manager, user_id, connection_id, provider_key,
+        scopes=["https://mail.google.com/"],
+        endpoints_needed=["/emails", "/labels", "/attachment"]
+    )
+    
+    # FIX #6: Create sync run with proper tracking
     stats = {'records_fetched': 0, 'actions_used': 0, 'attachments_saved': 0, 'queued_jobs': 0, 'skipped': 0}
     errors: List[str] = []
+    sync_run_id = await create_sync_run(
+        supabase, transaction_manager, user_id, user_connection_id, req.mode, stats
+    )
 
     try:
         # Connectivity check
@@ -10216,85 +10171,34 @@ async def _gmail_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> Dict
 
         # Batch insert all items from this page using transaction
         if page_batch_items:
-            pass  # Batch insert logic would go here
+            try:
+                transaction_manager = get_transaction_manager()
+                async with transaction_manager.transaction(
+                    user_id=user_id,
+                    operation_type="connector_sync_batch_insert"
+                ) as tx:
+                    for item in page_batch_items:
+                        await tx.insert('external_items', item)
+                        stats['records_fetched'] += 1
+            except Exception as batch_err:
+                logger.error(f"Batch insert failed: {batch_err}")
+                errors.append(f"Batch insert: {str(batch_err)[:100]}")
         
         # Determine final sync status before updating database
         run_status = 'succeeded' if not errors else ('partial' if stats['records_fetched'] > 0 else 'failed')
         
-        # Update sync_runs, user_connections, and sync_cursors atomically in transaction
-        try:
-            transaction_manager = get_transaction_manager()
-            async with transaction_manager.transaction(
-                user_id=user_id,
-                operation_type="connector_sync_completion"
-            ) as tx:
-                # Update sync_run status
-                await tx.update('sync_runs', {
-                    'status': run_status,
-                    'finished_at': pendulum.now().to_iso8601_string(),
-                    'stats': orjson.dumps(stats).decode(),
-                    'error': '; '.join(errors)[:500] if errors else None
-                }, {'id': sync_run_id})
-                
-                # FIX #3: Update last_synced_at and save historyId for incremental sync
-                # If we didn't get historyId from History API, fetch from profile
-                if not current_history_id:
-                    try:
-                        profile = await nango.get_gmail_profile(provider_key, connection_id)
-                        current_history_id = profile.get('historyId')
-                    except Exception as profile_err:
-                        logger.debug(f"Failed to get current Gmail profile: {profile_err}")
-                
-                # Fetch current metadata
-                uc_current = supabase.table('user_connections').select('metadata').eq('nango_connection_id', connection_id).limit(1).execute()
-                current_meta = {}
-                if uc_current.data:
-                    uc_metadata = uc_current.data[0].get('metadata') or {}
-                    if isinstance(uc_metadata, str):
-                        try:
-                            uc_metadata = orjson.loads(uc_metadata)
-                        except Exception:
-                            uc_metadata = {}
-                    current_meta = uc_metadata
-                
-                # Update with new historyId
-                updated_meta = {**current_meta}
-                if current_history_id:
-                    updated_meta['last_history_id'] = current_history_id
-                    logger.info(f"✅ Saved Gmail historyId for incremental sync: {current_history_id}")
-                
-                await tx.update('user_connections', {
-                    'last_synced_at': pendulum.now().to_iso8601_string(),
-                    'metadata': updated_meta
-                }, {'nango_connection_id': connection_id})
-                
-                # Upsert sync cursor
-                cursor_data = {
-                    'user_id': user_id,
-                    'user_connection_id': user_connection_id,
-                    'resource': 'emails',
-                    'cursor_type': 'time',
-                    'value': pendulum.now().to_iso8601_string()
-                }
-                try:
-                    await tx.insert('sync_cursors', cursor_data)
-                except Exception as e:
-                    logger.debug(f"Failed to insert sync cursor: {e}")
-                    # If insert fails (duplicate), update instead
-                    await tx.update('sync_cursors', {
-                        'value': pendulum.now().to_iso8601_string(),
-                        'updated_at': pendulum.now().to_iso8601_string()
-                    }, {
-                        'user_connection_id': user_connection_id,
-                        'resource': 'emails',
-                        'cursor_type': 'time'
-                    })
-                
-                # Transaction will commit automatically when context exits
-                logger.info(f"✅ Gmail sync completed in transaction: {stats['records_fetched']} items, status={run_status}")
-        except Exception as completion_err:
-            logger.error(f"Failed to update sync completion status: {completion_err}")
-            # Don't fail the entire sync just because status update failed
+        # FIX #6: Use consolidated helper for sync completion tracking
+        await complete_sync_run(
+            transaction_manager, supabase, user_id, sync_run_id, user_connection_id,
+            run_status, stats, errors, start_time
+        )
+        
+        # FIX #1: Update sync cursor for incremental syncs
+        if current_history_id:
+            await update_sync_cursor(
+                transaction_manager, user_id, user_connection_id, 'emails',
+                current_history_id, cursor_type='history_id'
+            )
         
         # Metrics: mark job processed (outside transaction, fire-and-forget)
         try:
@@ -10302,10 +10206,17 @@ async def _gmail_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> Dict
         except Exception as metrics_err:
             logger.debug(f"Failed to increment metrics for {run_status}: {metrics_err}")
 
+        logger.info(f"✅ Gmail sync completed: {stats['records_fetched']} items, status={run_status}, duration={start_time.diff(pendulum.now()).in_seconds()}s")
         return {'status': run_status, 'sync_run_id': sync_run_id, 'stats': stats, 'errors': errors[:5]}
 
     except Exception as e:
         logger.error(f"Gmail sync failed: {e}")
+        
+        # FIX #6: Mark sync as failed with error tracking
+        await complete_sync_run(
+            transaction_manager, supabase, user_id, sync_run_id, user_connection_id,
+            'failed', stats, [str(e)], start_time
+        )
         
         # Error recovery: clean up partial data
         try:
@@ -10332,6 +10243,7 @@ async def _gmail_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> Dict
         
         raise HTTPException(status_code=500, detail=f"Gmail sync failed: {str(e)}")
 
+
 async def _zoho_mail_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> Dict[str, Any]:
     """
     IMPLEMENTATION #1: Zoho Mail sync using Nango Proxy API.
@@ -10343,6 +10255,7 @@ async def _zoho_mail_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> 
     user_id = req.user_id
     sync_run_id = str(uuid.uuid4())
 
+    # ... (rest of the code remains the same)
     stats = {
         'records_fetched': 0,
         'actions_used': 0,
@@ -11910,101 +11823,9 @@ def _require_scheduler_auth(request: Request):
     if not provided or not hmac.compare_digest(provided, token):
         raise HTTPException(status_code=403, detail='Invalid scheduler token')
 
-async def _dispatch_connector_sync(
-    provider: str,
-    user_id: str,
-    connection_id: str,
-    mode: str = 'incremental',
-    max_results: int = 100,
-    correlation_id: Optional[str] = None
-) -> bool:
-    """
-    CRITICAL FIX: Centralized sync dispatch logic to eliminate 240+ lines of duplication.
-    
-    Dispatches connector sync to ARQ queue or runs inline if ARQ unavailable.
-    Supports: Gmail, Dropbox, Google Drive, Zoho Mail, QuickBooks, Xero
-    
-    Args:
-        provider: Integration ID (NANGO_GMAIL_INTEGRATION_ID, etc.)
-        user_id: User ID
-        connection_id: Nango connection ID
-        mode: Sync mode ('incremental' or 'full')
-        max_results: Max results to fetch
-        correlation_id: Optional correlation ID for tracing
-        
-    Returns:
-        True if dispatch successful, False otherwise
-    """
-    try:
-        # Map provider to job name and sync function
-        provider_config = {
-            NANGO_GMAIL_INTEGRATION_ID: {
-                'job_name': 'gmail_sync',
-                'sync_func': _gmail_sync_run,
-                'max_results': 100
-            },
-            NANGO_DROPBOX_INTEGRATION_ID: {
-                'job_name': 'dropbox_sync',
-                'sync_func': _dropbox_sync_run,
-                'max_results': 500
-            },
-            NANGO_GOOGLE_DRIVE_INTEGRATION_ID: {
-                'job_name': 'gdrive_sync',
-                'sync_func': _gdrive_sync_run,
-                'max_results': 500
-            },
-            NANGO_ZOHO_MAIL_INTEGRATION_ID: {
-                'job_name': 'zoho_mail_sync',
-                'sync_func': _zohomail_sync_run,
-                'max_results': 100
-            },
-            NANGO_QUICKBOOKS_INTEGRATION_ID: {
-                'job_name': 'quickbooks_sync',
-                'sync_func': _quickbooks_sync_run,
-                'max_results': 100
-            },
-            NANGO_XERO_INTEGRATION_ID: {
-                'job_name': 'xero_sync',
-                'sync_func': _xero_sync_run,
-                'max_results': 100
-            }
-        }
-        
-        config = provider_config.get(provider)
-        if not config:
-            logger.warning(f"Unknown provider for dispatch: {provider}")
-            return False
-        
-        # Create sync request
-        req = ConnectorSyncRequest(
-            user_id=user_id,
-            connection_id=connection_id,
-            integration_id=provider,
-            mode=mode,
-            max_results=max_results,
-            correlation_id=correlation_id or str(uuid.uuid4())
-        )
-        
-        # Dispatch to ARQ or run inline
-        if _queue_backend() == 'arq':
-            try:
-                pool = await get_arq_pool()
-                await pool.enqueue_job(config['job_name'], req.model_dump())
-                logger.info(f"✅ Enqueued {config['job_name']}: user={user_id}, connection={connection_id}")
-                return True
-            except Exception as e:
-                logger.warning(f"ARQ dispatch failed for {config['job_name']}: {e}. Falling back to inline.")
-                # Fall through to inline execution
-        
-        # Fallback: Run inline if ARQ unavailable
-        logger.info(f"Running {config['job_name']} inline (ARQ unavailable)")
-        nango = NangoClient(base_url=NANGO_BASE_URL)
-        asyncio.create_task(config['sync_func'](nango, req))
-        return True
-        
-    except Exception as e:
-        logger.error(f"Sync dispatch failed: {e}")
-        return False
+# DEPRECATED: Old _dispatch_connector_sync function removed (was duplicate)
+# Use the new version at line 11297 which includes rate limiting and distributed locking
+# The new version signature: _dispatch_connector_sync(integration_id, req, nango)
 
 @app.post('/api/connectors/scheduler/run')
 async def run_scheduled_syncs(request: Request, provider: Optional[str] = None, limit: int = 25):
@@ -12041,16 +11862,39 @@ async def run_scheduled_syncs(request: Request, provider: Optional[str] = None, 
             if provider and conn_provider and provider != conn_provider:
                 continue
 
-            # CRITICAL FIX: Use centralized dispatch function to eliminate duplication
+            # ISSUE #9: Check scheduler rate limit before dispatching
+            from core_infrastructure.rate_limiter import get_scheduler_rate_limiter
+            scheduler_limiter = get_scheduler_rate_limiter()
+            
             provider_to_dispatch = conn_provider or NANGO_GMAIL_INTEGRATION_ID
-            success = await _dispatch_connector_sync(
-                provider=provider_to_dispatch,
-                user_id=row['user_id'],
-                connection_id=row['nango_connection_id'],
-                mode='incremental'
-            )
-            if success:
-                dispatched.append(row['nango_connection_id'])
+            can_dispatch, rate_limit_msg = await scheduler_limiter.check_scheduler_rate_limit(provider_to_dispatch)
+            if not can_dispatch:
+                logger.warning(f"Scheduler rate limit: {rate_limit_msg}")
+                continue
+            
+            # Use centralized dispatch function with rate limiting and locking
+            try:
+                nango = NangoClient(base_url=NANGO_BASE_URL)
+                req = ConnectorSyncRequest(
+                    user_id=row['user_id'],
+                    connection_id=row['nango_connection_id'],
+                    integration_id=provider_to_dispatch,
+                    mode='incremental',
+                    correlation_id=str(uuid.uuid4())
+                )
+                result = await _dispatch_connector_sync(provider_to_dispatch, req, nango)
+                if result.get('status') == 'queued':
+                    dispatched.append(row['nango_connection_id'])
+                    # Record successful dispatch
+                    await scheduler_limiter.record_dispatch(provider_to_dispatch, count=1)
+                    # Reset failure count on success
+                    await scheduler_limiter.reset_failure_count(provider_to_dispatch)
+                else:
+                    # Record failure for exponential backoff
+                    await scheduler_limiter.record_failure(provider_to_dispatch)
+            except Exception as e:
+                logger.error(f"Scheduler dispatch failed for {provider_to_dispatch}: {e}")
+                await scheduler_limiter.record_failure(provider_to_dispatch)
 
         return {"status": "ok", "dispatched": dispatched, "count": len(dispatched)}
     except Exception as e:
