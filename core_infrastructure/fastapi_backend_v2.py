@@ -9277,18 +9277,23 @@ async def get_component_metrics():
 # CONNECTORS (NANGO) - PHASE 1 GMAIL
 # ============================================================================
 
-# Nango configuration (dev by default; override via env for prod)
-NANGO_BASE_URL = os.environ.get("NANGO_BASE_URL", "https://api.nango.dev")
-NANGO_GMAIL_INTEGRATION_ID = os.environ.get("NANGO_GMAIL_INTEGRATION_ID", "google-mail")
-NANGO_DROPBOX_INTEGRATION_ID = os.environ.get("NANGO_DROPBOX_INTEGRATION_ID", "dropbox")
-NANGO_GOOGLE_DRIVE_INTEGRATION_ID = os.environ.get("NANGO_GOOGLE_DRIVE_INTEGRATION_ID", "google-drive")
-NANGO_ZOHO_MAIL_INTEGRATION_ID = os.environ.get("NANGO_ZOHO_MAIL_INTEGRATION_ID", "zoho-mail")
-NANGO_ZOHO_BOOKS_INTEGRATION_ID = os.environ.get("NANGO_ZOHO_BOOKS_INTEGRATION_ID", "zoho-books")
-NANGO_QUICKBOOKS_INTEGRATION_ID = os.environ.get("NANGO_QUICKBOOKS_INTEGRATION_ID", "quickbooks-sandbox")
-NANGO_XERO_INTEGRATION_ID = os.environ.get("NANGO_XERO_INTEGRATION_ID", "xero")
-NANGO_STRIPE_INTEGRATION_ID = os.environ.get("NANGO_STRIPE_INTEGRATION_ID", "stripe")
-NANGO_RAZORPAY_INTEGRATION_ID = os.environ.get("NANGO_RAZORPAY_INTEGRATION_ID", "razorpay")
-NANGO_PAYPAL_INTEGRATION_ID = os.environ.get("NANGO_PAYPAL_INTEGRATION_ID", "paypal")
+# Import centralized configuration (replaces scattered os.environ.get calls)
+from core_infrastructure.config_manager import get_nango_config
+
+_nango_cfg = get_nango_config()
+
+# Nango configuration (now type-safe and centralized)
+NANGO_BASE_URL = _nango_cfg.base_url
+NANGO_GMAIL_INTEGRATION_ID = _nango_cfg.gmail_integration_id
+NANGO_DROPBOX_INTEGRATION_ID = _nango_cfg.dropbox_integration_id
+NANGO_GOOGLE_DRIVE_INTEGRATION_ID = _nango_cfg.google_drive_integration_id
+NANGO_ZOHO_MAIL_INTEGRATION_ID = _nango_cfg.zoho_mail_integration_id
+NANGO_ZOHO_BOOKS_INTEGRATION_ID = _nango_cfg.zoho_books_integration_id
+NANGO_QUICKBOOKS_INTEGRATION_ID = _nango_cfg.quickbooks_integration_id
+NANGO_XERO_INTEGRATION_ID = _nango_cfg.xero_integration_id
+NANGO_STRIPE_INTEGRATION_ID = _nango_cfg.stripe_integration_id
+NANGO_RAZORPAY_INTEGRATION_ID = _nango_cfg.razorpay_integration_id
+NANGO_PAYPAL_INTEGRATION_ID = _nango_cfg.paypal_integration_id
 
 class ConnectorInitiateRequest(BaseModel):
     provider: str  # expect 'google-mail' for Gmail
@@ -10441,9 +10446,9 @@ async def _dropbox_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> Di
         else:
             logger.info(f"📊 Dropbox full sync: fetching all files")
 
-        # Concurrency control for downloads
-        max_concurrency = int(os.environ.get('CONNECTOR_CONCURRENCY', '5') or '5')
-        sem = asyncio.Semaphore(max(1, min(max_concurrency, 10)))
+        # Concurrency control for downloads (using aiometer library)
+        from core_infrastructure.rate_limiter import ConcurrencyLimiter
+        limiter = ConcurrencyLimiter()
 
         async def process_entry(ent: Dict[str, Any]):
             try:
@@ -10461,45 +10466,44 @@ async def _dropbox_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> Di
                 if score < 0.5:
                     stats['skipped'] += 1
                     return None
-                async with sem:
-                    # Download
-                    dl = await nango.proxy_post('dropbox', '2/files/download', json_body=None, connection_id=connection_id, provider_config_key=provider_key, headers={"Dropbox-API-Arg": orjson.dumps({"path": path_lower}).decode()})
-                    stats['actions_used'] += 1
-                    raw = dl.get('_raw')
-                    if not raw:
-                        return None
-                    storage_path, file_hash = await _store_external_item_attachment(user_id, 'dropbox', path_lower.strip('/').replace('/', '_')[:50], name, raw)
-                    stats['attachments_saved'] += 1
-                    
-                    item = {
-                        'user_id': user_id,
-                        'user_connection_id': user_connection_id,
-                        'provider_id': path_lower,
-                        'kind': 'file',
-                        'source_ts': server_modified or pendulum.now().to_iso8601_string(),
-                        'hash': file_hash,
-                        'storage_path': storage_path,
-                        'metadata': {'name': name, 'correlation_id': req.correlation_id},
-                        'relevance_score': score,
-                        'status': 'stored'
-                    }
-                    
-                    try:
-                        # CRITICAL FIX: Use optimized duplicate check
-                        dup = await optimized_db.check_duplicate_by_hash(user_id, file_hash)
-                        is_dup = bool(dup)
-                    except Exception as e:
-                        logger.error(f"Failed to check duplicate for Dropbox file: {e}")
-                        is_dup = False
-                    if not is_dup:
-                        if any(nl.endswith(ext) for ext in ['.csv', '.xlsx', '.xls']):
-                            await _enqueue_file_processing(user_id, name, storage_path)
-                            stats['queued_jobs'] += 1
-                        elif nl.endswith('.pdf'):
-                            await _enqueue_pdf_processing(user_id, name, storage_path)
-                            stats['queued_jobs'] += 1
-                    
-                    return item
+                # Download with concurrency control
+                dl = await limiter.run(nango.proxy_post('dropbox', '2/files/download', json_body=None, connection_id=connection_id, provider_config_key=provider_key, headers={"Dropbox-API-Arg": orjson.dumps({"path": path_lower}).decode()}))
+                stats['actions_used'] += 1
+                raw = dl.get('_raw')
+                if not raw:
+                    return None
+                storage_path, file_hash = await _store_external_item_attachment(user_id, 'dropbox', path_lower.strip('/').replace('/', '_')[:50], name, raw)
+                stats['attachments_saved'] += 1
+                
+                item = {
+                    'user_id': user_id,
+                    'user_connection_id': user_connection_id,
+                    'provider_id': path_lower,
+                    'kind': 'file',
+                    'source_ts': server_modified or pendulum.now().to_iso8601_string(),
+                    'hash': file_hash,
+                    'storage_path': storage_path,
+                    'metadata': {'name': name, 'correlation_id': req.correlation_id},
+                    'relevance_score': score,
+                    'status': 'stored'
+                }
+                
+                try:
+                    # CRITICAL FIX: Use optimized duplicate check
+                    dup = await optimized_db.check_duplicate_by_hash(user_id, file_hash)
+                    is_dup = bool(dup)
+                except Exception as e:
+                    logger.error(f"Failed to check duplicate for Dropbox file: {e}")
+                    is_dup = False
+                if not is_dup:
+                    if any(nl.endswith(ext) for ext in ['.csv', '.xlsx', '.xls']):
+                        await _enqueue_file_processing(user_id, name, storage_path)
+                        stats['queued_jobs'] += 1
+                    elif nl.endswith('.pdf'):
+                        await _enqueue_pdf_processing(user_id, name, storage_path)
+                        stats['queued_jobs'] += 1
+                
+                return item
 
             except Exception as e:
                 errors.append(str(e))
@@ -10706,9 +10710,10 @@ async def _gdrive_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> Dic
             except Exception:
                 pass
         page_token = None
-        # Concurrency for downloads
-        max_concurrency = int(os.environ.get('CONNECTOR_CONCURRENCY', '5') or '5')
-        sem = asyncio.Semaphore(max(1, min(max_concurrency, 10)))
+        # Concurrency for downloads (using aiometer library)
+        from core_infrastructure.rate_limiter import ConcurrencyLimiter
+        limiter = ConcurrencyLimiter()
+        
         while True:
             q = "(mimeType contains 'pdf' or mimeType contains 'spreadsheet' or name contains '.csv' or name contains '.xlsx' or name contains '.xls') and trashed = false and modifiedTime > '" + modified_after + "'"
             params = {'q': q, 'pageSize': 200, 'fields': 'files(id,name,mimeType,modifiedTime),nextPageToken'}
@@ -10733,41 +10738,41 @@ async def _gdrive_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> Dic
                     if score < 0.5:
                         stats['skipped'] += 1
                         return None
-                    async with sem:
-                        raw = await nango.proxy_get_bytes('google-drive', f'drive/v3/files/{fid}', params={'alt': 'media'}, connection_id=connection_id, provider_config_key=provider_key)
-                        if not raw:
-                            return None
-                        storage_path, file_hash = await _store_external_item_attachment(user_id, 'gdrive', fid, name, raw)
-                        stats['attachments_saved'] += 1
-                        
-                        item = {
-                            'user_id': user_id,
-                            'user_connection_id': user_connection_id,
-                            'provider_id': fid,
-                            'kind': 'file',
-                            'source_ts': f.get('modifiedTime') or pendulum.now().to_iso8601_string(),
-                            'hash': file_hash,
-                            'storage_path': storage_path,
-                            'metadata': {'name': name, 'mime': mime, 'correlation_id': req.correlation_id},
-                            'relevance_score': score,
-                            'status': 'stored'
-                        }
-                        
-                        try:
-                            # CRITICAL FIX: Use optimized duplicate check
-                            dup = await optimized_db.check_duplicate_by_hash(user_id, file_hash)
-                            is_dup = bool(dup)
-                        except Exception:
-                            is_dup = False
-                        if not is_dup:
-                            if any(nl.endswith(ext) for ext in ['.csv', '.xlsx', '.xls']):
-                                await _enqueue_file_processing(user_id, name, storage_path)
-                                stats['queued_jobs'] += 1
-                            elif nl.endswith('.pdf'):
-                                await _enqueue_pdf_processing(user_id, name, storage_path)
-                                stats['queued_jobs'] += 1
-                        
-                        return item
+                    # Download with concurrency control
+                    raw = await limiter.run(nango.proxy_get_bytes('google-drive', f'drive/v3/files/{fid}', params={'alt': 'media'}, connection_id=connection_id, provider_config_key=provider_key))
+                    if not raw:
+                        return None
+                    storage_path, file_hash = await _store_external_item_attachment(user_id, 'gdrive', fid, name, raw)
+                    stats['attachments_saved'] += 1
+                    
+                    item = {
+                        'user_id': user_id,
+                        'user_connection_id': user_connection_id,
+                        'provider_id': fid,
+                        'kind': 'file',
+                        'source_ts': f.get('modifiedTime') or pendulum.now().to_iso8601_string(),
+                        'hash': file_hash,
+                        'storage_path': storage_path,
+                        'metadata': {'name': name, 'mime': mime, 'correlation_id': req.correlation_id},
+                        'relevance_score': score,
+                        'status': 'stored'
+                    }
+                    
+                    try:
+                        # CRITICAL FIX: Use optimized duplicate check
+                        dup = await optimized_db.check_duplicate_by_hash(user_id, file_hash)
+                        is_dup = bool(dup)
+                    except Exception:
+                        is_dup = False
+                    if not is_dup:
+                        if any(nl.endswith(ext) for ext in ['.csv', '.xlsx', '.xls']):
+                            await _enqueue_file_processing(user_id, name, storage_path)
+                            stats['queued_jobs'] += 1
+                        elif nl.endswith('.pdf'):
+                            await _enqueue_pdf_processing(user_id, name, storage_path)
+                            stats['queued_jobs'] += 1
+                    
+                    return item
                 except Exception as e:
                     errors.append(str(e))
                     return None

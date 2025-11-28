@@ -1,13 +1,19 @@
-import os
 import base64
 from typing import Any, Dict, Optional
 
 import httpx
 import time
-import asyncio
-import random
 from prometheus_client import Counter, Histogram
 import structlog
+from tenacity import (
+    retry,
+    stop_after_attempt,
+    wait_exponential,
+    retry_if_exception_type,
+    AsyncRetrying,
+)
+
+from core_infrastructure.config_manager import get_nango_config
 
 logger = structlog.get_logger(__name__)
 
@@ -17,44 +23,23 @@ class NangoClient:
 
     Uses the Proxy to hit underlying provider APIs (Gmail here) and the Connect Session API
     to generate session tokens for the hosted auth UI.
+    
+    Retry logic is handled by tenacity library with exponential backoff.
     """
 
-    def __init__(
-        self,
-        base_url: Optional[str] = None,
-        secret_key: Optional[str] = None,
-        default_timeout: float = 30.0,
-        connect_session_timeout: float = 30.0,
-        gmail_profile_timeout: float = 30.0,
-        gmail_list_timeout: float = 60.0,
-        gmail_attachment_timeout: float = 120.0,
-        gmail_history_timeout: float = 60.0
-    ):
-        """
-        Initialize Nango client with configurable timeouts.
+    def __init__(self):
+        """Initialize Nango client from centralized configuration."""
+        config = get_nango_config()
+        self.base_url = config.base_url
+        self.secret_key = config.secret_key
         
-        Args:
-            base_url: Nango API base URL
-            secret_key: Nango secret key
-            default_timeout: Default timeout for requests (seconds)
-            connect_session_timeout: Timeout for connect session creation
-            gmail_profile_timeout: Timeout for Gmail profile requests
-            gmail_list_timeout: Timeout for Gmail list requests
-            gmail_attachment_timeout: Timeout for Gmail attachment requests
-            gmail_history_timeout: Timeout for Gmail history requests
-        """
-        self.base_url = base_url or os.environ.get("NANGO_BASE_URL", "https://api.nango.dev")
-        self.secret_key = secret_key or os.environ.get("NANGO_SECRET_KEY")
-        if not self.secret_key:
-            raise ValueError("NANGO_SECRET_KEY env var not set")
-        
-        # Store configurable timeouts
-        self.default_timeout = default_timeout
-        self.connect_session_timeout = connect_session_timeout
-        self.gmail_profile_timeout = gmail_profile_timeout
-        self.gmail_list_timeout = gmail_list_timeout
-        self.gmail_attachment_timeout = gmail_attachment_timeout
-        self.gmail_history_timeout = gmail_history_timeout
+        # Store configurable timeouts from config
+        self.default_timeout = config.default_timeout
+        self.connect_session_timeout = config.connect_session_timeout
+        self.gmail_profile_timeout = config.gmail_profile_timeout
+        self.gmail_list_timeout = config.gmail_list_timeout
+        self.gmail_attachment_timeout = config.gmail_attachment_timeout
+        self.gmail_history_timeout = config.gmail_history_timeout
 
     def _headers(self, provider_config_key: Optional[str] = None, connection_id: Optional[str] = None) -> Dict[str, str]:
         if not self.secret_key:
@@ -261,44 +246,37 @@ class NangoClient:
     NANGO_API_CALLS = Counter('nango_api_calls_total', 'Nango proxy API calls', ['provider', 'method', 'status'])
     NANGO_API_LATENCY = Histogram('nango_api_latency_seconds', 'Latency for Nango proxy API calls', ['provider', 'method'])
 
-    async def _request_with_retry(self, method: str, url: str, timeout: float, max_attempts: int = 3, backoff_base: float = 1.0, **kwargs) -> httpx.Response:
-        """Perform an HTTP request with simple exponential backoff on transient errors.
+    async def _request_with_retry(self, method: str, url: str, timeout: float, **kwargs) -> httpx.Response:
+        """Perform an HTTP request with exponential backoff retry using tenacity.
 
         Retries on network errors and 429/5xx HTTP responses.
+        Tenacity handles all retry logic, backoff, and jitter automatically.
         """
-        attempt = 0
-        last_exc: Exception | None = None
-        while attempt < max_attempts:
-            try:
-                async with httpx.AsyncClient(timeout=timeout) as client:
-                    resp = await client.request(method, url, **kwargs)
-                    try:
-                        resp.raise_for_status()
-                    except httpx.HTTPStatusError as e:
-                        code = e.response.status_code if e.response is not None else 0
-                        if code == 429 or 500 <= code < 600:
-                            raise
-                        # Non-retryable
+        async def _make_request():
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                resp = await client.request(method, url, **kwargs)
+                try:
+                    resp.raise_for_status()
+                except httpx.HTTPStatusError as e:
+                    code = e.response.status_code if e.response is not None else 0
+                    # Retry on rate limit (429) and server errors (5xx)
+                    if code == 429 or 500 <= code < 600:
                         raise
-                    return resp
-            except httpx.HTTPStatusError as e:
-                last_exc = e
-            except httpx.RequestError as e:
-                # Includes timeouts, connection errors, read errors (e.g., wsarecv on Windows)
-                last_exc = e
-            except Exception as e:
-                last_exc = e
-            attempt += 1
-            # Exponential backoff with decorrelated jitter (prevents retry storms)
-            # Formula: base * 2^attempt + random(0, base * 2^attempt)
-            exponential_delay = backoff_base * (2 ** (attempt - 1))
-            jitter = random.uniform(0, exponential_delay)
-            total_delay = exponential_delay + jitter
-            await asyncio.sleep(total_delay)
-        # Exhausted retries
-        if last_exc:
-            raise last_exc
-        raise RuntimeError("request failed with unknown error")
+                    # Non-retryable errors (4xx except 429)
+                    raise
+                return resp
+
+        # Use tenacity for retry logic with exponential backoff
+        retrying = AsyncRetrying(
+            stop=stop_after_attempt(3),
+            wait=wait_exponential(multiplier=1, min=1, max=10),
+            retry=retry_if_exception_type((httpx.HTTPStatusError, httpx.RequestError, httpx.TimeoutException)),
+            reraise=True
+        )
+        
+        async for attempt in retrying:
+            with attempt:
+                return await _make_request()
 
     async def proxy_get(
         self,
