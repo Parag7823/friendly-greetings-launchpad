@@ -273,18 +273,18 @@ export const FinleySidebar = ({ onClose, onNavigate, currentView = 'chat', isCol
   return (
     <TooltipProvider>
       <div className="finley-sidebar flex flex-col h-full overflow-y-auto bg-muted/30">
-      {/* Header */}
+        {/* Header */}
         <div className={`mb-4 ${isCollapsed ? 'p-3' : 'p-4'}`}>
           <div className="flex items-center justify-between">
             {!isCollapsed && (
               <div>
-        <h1 className="text-xl font-semibold text-foreground tracking-tight">
-          Finley AI
-        </h1>
-        <p className="text-xs text-muted-foreground mt-0.5">
-          Intelligent Financial Analyst
-        </p>
-      </div>
+                <h1 className="text-xl font-semibold text-foreground tracking-tight">
+                  Finley AI
+                </h1>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Intelligent Financial Analyst
+                </p>
+              </div>
             )}
             {isCollapsed && (
               <div className="w-7 h-7 bg-primary rounded-md flex items-center justify-center">
@@ -300,130 +300,133 @@ export const FinleySidebar = ({ onClose, onNavigate, currentView = 'chat', isCol
             >
               <X className="h-3.5 w-3.5" />
             </Button>
-      {/* Navigation Items */}
-      <div className={`flex-1 space-y-1.5 ${isCollapsed ? 'px-1.5' : 'px-4'}`}>
-        {/* New Chat */}
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              variant="ghost"
-              className={`w-full h-9 rounded-lg border-2 border-primary hover:bg-primary/10 transition-all duration-200 ${isCollapsed ? 'justify-center px-0' : 'justify-start px-2'} gradient-copper-border`}
-              onClick={handleNewChat}
-            >
-              <MessageSquarePlus className="w-4 h-4" />
-              {!isCollapsed && <span className="font-medium text-sm ml-2">New Chat</span>}
-            </Button>
-          </TooltipTrigger>
-          {isCollapsed && <TooltipContent side="right"><p>New Chat</p></TooltipContent>}
-        </Tooltip>
+          </div>
+        </div>
 
-        {/* Chat History Section */}
-        {chatHistory.length > 0 && (
-          <div className="mt-4">
-            {!isCollapsed && (
-              <h3 className="text-xs font-medium text-muted-foreground mb-2 px-2">
-                Chat History
-              </h3>
-            )}
-            <div className="space-y-1">
-              {chatHistory.map((chat) => (
-                <div key={chat.id} className="group relative">
-                  {editingChatId === chat.id ? (
-                    // Inline editing mode
-                    <div className="flex items-center space-x-2 p-1.5">
-                      <Input
-                        value={editingTitle}
-                        onChange={(e) => setEditingTitle(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') {
-                            handleRenameSave();
-                          } else if (e.key === 'Escape') {
-                            handleRenameCancel();
-                          }
-                        }}
-                        onBlur={handleRenameSave}
-                        className="flex-1 h-7 text-xs"
-                        autoFocus
-                      />
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        className="h-5 w-5"
-                        onClick={handleRenameSave}
-                      >
-                        <Check className="h-3 w-3" />
-                      </Button>
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        className="h-5 w-5"
-                        onClick={handleRenameCancel}
-                      >
-                        <XIcon className="h-3 w-3" />
-                      </Button>
-                    </div>
-                  ) : (
-                    // Normal display mode
-                    <Tooltip>
-                      <TooltipTrigger asChild>
+        {/* Navigation Items */}
+        <div className={`flex-1 space-y-1.5 ${isCollapsed ? 'px-1.5' : 'px-4'}`}>
+          {/* New Chat */}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                className={`w-full h-9 rounded-lg border-2 border-primary hover:bg-primary/10 transition-all duration-200 ${isCollapsed ? 'justify-center px-0' : 'justify-start px-2'} gradient-copper-border`}
+                onClick={handleNewChat}
+              >
+                <MessageSquarePlus className="w-4 h-4" />
+                {!isCollapsed && <span className="font-medium text-sm ml-2">New Chat</span>}
+              </Button>
+            </TooltipTrigger>
+            {isCollapsed && <TooltipContent side="right"><p>New Chat</p></TooltipContent>}
+          </Tooltip>
+
+          {/* Chat History Section */}
+          {chatHistory.length > 0 && (
+            <div className="mt-4">
+              {!isCollapsed && (
+                <h3 className="text-xs font-medium text-muted-foreground mb-2 px-2">
+                  Chat History
+                </h3>
+              )}
+              <div className="space-y-1">
+                {chatHistory.map((chat) => (
+                  <div key={chat.id} className="group relative">
+                    {editingChatId === chat.id ? (
+                      // Inline editing mode
+                      <div className="flex items-center space-x-2 p-1.5">
+                        <Input
+                          value={editingTitle}
+                          onChange={(e) => setEditingTitle(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              handleRenameSave();
+                            } else if (e.key === 'Escape') {
+                              handleRenameCancel();
+                            }
+                          }}
+                          onBlur={handleRenameSave}
+                          className="flex-1 h-7 text-xs"
+                          autoFocus
+                        />
                         <Button
-                          variant={currentChatId === chat.id ? "secondary" : "ghost"}
-                          className={`w-full h-8 rounded-lg text-left group ${isCollapsed ? 'justify-center px-0' : 'justify-start px-2'}`}
-                          onClick={() => handleChatSelect(chat.id)}
+                          size="icon"
+                          variant="ghost"
+                          className="h-5 w-5"
+                          onClick={handleRenameSave}
                         >
-                          <MessageSquare className="w-3.5 h-3.5 flex-shrink-0" />
-                          {!isCollapsed && (
-                            <div className="flex-1 min-w-0 ml-3">
-                              <div className="text-xs font-medium truncate">
-                                {truncateTitle(chat.title)}
-                              </div>
-                              <div className="text-[10px] text-muted-foreground">
-                                {chat.timestamp.toLocaleDateString()}
-                              </div>
-                            </div>
-                          )}
-                          {!isCollapsed && (
-                            <ChatContextMenu
-                              chatId={chat.id}
-                              onRename={handleRename}
-                              onDelete={handleDelete}
-                              onShare={handleShare}
-                              isCollapsed={isCollapsed}
-                            />
-                          )}
+                          <Check className="h-3 w-3" />
                         </Button>
-                      </TooltipTrigger>
-                      {isCollapsed && (
-                        <TooltipContent side="right">
-                          <div>
-                            <p className="font-medium">{chat.title}</p>
-                            <p className="text-xs text-muted-foreground">
-                              {chat.timestamp.toLocaleDateString()}
-                </p>
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          className="h-5 w-5"
+                          onClick={handleRenameCancel}
+                        >
+                          <XIcon className="h-3 w-3" />
+                        </Button>
+                      </div>
+                    ) : (
+                      // Normal display mode
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            variant={currentChatId === chat.id ? "secondary" : "ghost"}
+                            className={`w-full h-8 rounded-lg text-left group ${isCollapsed ? 'justify-center px-0' : 'justify-start px-2'}`}
+                            onClick={() => handleChatSelect(chat.id)}
+                          >
+                            <MessageSquare className="w-3.5 h-3.5 flex-shrink-0" />
+                            {!isCollapsed && (
+                              <div className="flex-1 min-w-0 ml-3">
+                                <div className="text-xs font-medium truncate">
+                                  {truncateTitle(chat.title, 15)}
+                                </div>
+                                <div className="text-[10px] text-muted-foreground">
+                                  {chat.timestamp.toLocaleDateString()}
+                                </div>
+                              </div>
+                            )}
+                            {!isCollapsed && (
+                              <ChatContextMenu
+                                chatId={chat.id}
+                                onRename={handleRename}
+                                onDelete={handleDelete}
+                                onShare={handleShare}
+                                isCollapsed={isCollapsed}
+                              />
+                            )}
+                          </Button>
+                        </TooltipTrigger>
+                        {isCollapsed && (
+                          <TooltipContent side="right">
+                            <div>
+                              <p className="font-medium">{chat.title}</p>
+                              <p className="text-xs text-muted-foreground">
+                                {chat.timestamp.toLocaleDateString()}
+                              </p>
+                            </div>
+                          </TooltipContent>
+                        )}
+                      </Tooltip>
+                    )}
+                  </div>
+                ))}
               </div>
-                        </TooltipContent>
-                      )}
-                    </Tooltip>
-                  )}
-                </div>
-              ))}
+            </div>
+          )}
         </div>
+
+        {/* Footer */}
+        <div className={`mt-auto pt-6 border-t border-border ${isCollapsed ? 'px-2' : 'px-6'}`}>
+          {/* Footer space reserved for future use */}
         </div>
-        )}
-      </div>
-      
-      {/* Footer */}
-      <div className={`mt-auto pt-6 border-t border-border ${isCollapsed ? 'px-2' : 'px-6'}`}>
-        {/* Footer space reserved for future use */}
-      </div>
-      
-      {/* Share Modal */}
-      <ShareModal
-        isOpen={shareModal.isOpen}
-        onClose={() => setShareModal({ isOpen: false, chatId: '', title: '' })}
-        chatId={shareModal.chatId}
-        chatTitle={shareModal.title}
-      />
+
+        {/* Share Modal */}
+        <ShareModal
+          isOpen={shareModal.isOpen}
+          onClose={() => setShareModal({ isOpen: false, chatId: '', title: '' })}
+          chatId={shareModal.chatId}
+          chatTitle={shareModal.title}
+        />
       </div>
     </TooltipProvider>
   );
