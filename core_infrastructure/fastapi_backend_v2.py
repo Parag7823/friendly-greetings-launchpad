@@ -298,23 +298,31 @@ class DocumentClassificationRequest(BaseModel):
     file_content: Optional[str] = None  # base64 or text content
     user_id: Optional[str] = None
     platform: Optional[str] = None
+    document_type: Optional[str] = None  # New field added
 
 # Database and external services
-# FIX #7: CENTRALIZED SUPABASE CLIENT - Strict dependency on supabase_client.py
-# Use the pooled client from supabase_client.py for all Supabase operations
-# NOTE: In container, files are copied flat to /app/, so absolute import is used
+get_supabase_client = None
+import_errors = []
+
+# Try 1: Relative import (local development)
 try:
-    from supabase_client import get_supabase_client  # type: ignore
-except ImportError:
-    # Fallback for local development with package structure
+    from .supabase_client import get_supabase_client  # type: ignore
+except ImportError as e1:
+    import_errors.append(f"Relative import failed: {e1}")
+    # Try 2: Package import (container with proper Python path)
     try:
-        from .supabase_client import get_supabase_client  # type: ignore
-    except ImportError as e:
-        raise RuntimeError(
-            "FATAL: supabase_client module not found. FastAPI backend requires centralized Supabase client. "
-            "Ensure supabase_client.py exists in core_infrastructure/ and SUPABASE_URL, "
-            "SUPABASE_SERVICE_ROLE_KEY environment variables are set."
-        ) from e
+        from core_infrastructure.supabase_client import get_supabase_client  # type: ignore
+    except ImportError as e2:
+        import_errors.append(f"Package import failed: {e2}")
+        # Try 3: Absolute import (flat layout in container)
+        try:
+            from supabase_client import get_supabase_client  # type: ignore
+        except ImportError as e3:
+            import_errors.append(f"Absolute import failed: {e3}")
+            get_supabase_client = None
+
+# Note: Logger will be initialized later, so we just track import errors for now
+_supabase_import_errors = import_errors if get_supabase_client is None else None
 from prometheus_client import Counter, Histogram, Gauge, generate_latest, CONTENT_TYPE_LATEST
 
 
@@ -426,6 +434,16 @@ structlog.configure(
 
 # Use structlog as PRIMARY logger (not fallback)
 logger = structlog.get_logger(__name__)
+
+# Log any supabase_client import errors now that logger is initialized
+if _supabase_import_errors:
+    logger.error(
+        "supabase_client_import_failed",
+        errors=_supabase_import_errors,
+        hint="Ensure supabase_client.py exists in core_infrastructure/ and SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY env vars are set"
+    )
+elif get_supabase_client:
+    logger.info("✅ supabase_client imported successfully")
 
 # Declare global variables
 security_validator = None
