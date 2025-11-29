@@ -1749,7 +1749,15 @@ class ProductionDuplicateDetectionService:
             
             # Phase 2: Near-duplicate detection using Persistent LSH (Redis-backed)
             try:
-                from persistent_lsh_service import PersistentLSHService
+                # Try multiple import paths for different deployment layouts
+                try:
+                    from .persistent_lsh_service import PersistentLSHService
+                except ImportError:
+                    try:
+                        from duplicate_detection_fraud.persistent_lsh_service import PersistentLSHService
+                    except ImportError:
+                        from persistent_lsh_service import PersistentLSHService
+                
                 from datasketch import MinHash
                 
                 lsh_service = PersistentLSHService()

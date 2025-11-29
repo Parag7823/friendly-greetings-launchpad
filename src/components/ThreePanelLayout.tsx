@@ -1,10 +1,9 @@
 import { useState, useRef } from 'react';
 import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
-import { GripVertical, Database } from 'lucide-react';
+import { GripVertical } from 'lucide-react';
 import { ChatInterface } from './ChatInterface';
 import { TabbedFilePreview } from './TabbedFilePreview';
 import { DataSourcesPanel } from './DataSourcesPanel';
-import { Button } from './ui/button';
 import { cn } from '@/lib/utils';
 
 interface ThreePanelLayoutProps {
@@ -18,11 +17,22 @@ export const ThreePanelLayout = ({ currentView = 'chat', onNavigate }: ThreePane
   const rightPanelRef = useRef<any>(null);
   const [isPanelCollapsed, setIsPanelCollapsed] = useState(true);
 
+  // AUDIT FIX #5: Expose toggleRightPanel to TabbedFilePreview via callback
+  const toggleRightPanel = () => {
+    if (rightPanelRef.current) {
+      if (isPanelCollapsed) {
+        rightPanelRef.current?.expand?.();
+      } else {
+        rightPanelRef.current?.collapse?.();
+      }
+    }
+  };
+
   // AUDIT FIX #1: Removed broken useEffect that ran after paint
   // The Panel component now uses defaultCollapsed={true} to start hidden
   // This prevents visual flashing and ensures the panel is hidden before first render
 
-  // Handle file click from Data Sources
+  // Handle file click from Data Sources (from DataSourcesPanel)
   const handleFileClick = (fileId: string, filename: string, fileData: any) => {
     // Add to open files if not already open
     if (!openFiles.find(f => f.id === fileId)) {
@@ -41,32 +51,9 @@ export const ThreePanelLayout = ({ currentView = 'chat', onNavigate }: ThreePane
     }
   };
 
-  const toggleRightPanel = () => {
-    if (rightPanelRef.current) {
-      if (isPanelCollapsed) {
-        rightPanelRef.current?.expand?.();
-      } else {
-        rightPanelRef.current?.collapse?.();
-      }
-    }
-  };
-
   return (
     <div className="h-full w-full finley-dynamic-bg flex flex-col">
-      {/* Header with toggle button (AUDIT FIX #4) */}
-      <div className="flex items-center justify-between px-4 py-2 border-b border-border bg-muted/30">
-        <div className="flex-1" />
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={toggleRightPanel}
-          title={isPanelCollapsed ? 'Show Data Sources' : 'Hide Data Sources'}
-          className="h-8 w-8 p-0"
-        >
-          <Database className="w-4 h-4" />
-        </Button>
-      </div>
-
+      {/* AUDIT FIX #5: Removed wasteful 48px header bar - Database button moved to TabbedFilePreview */}
       <PanelGroup direction="horizontal" className="h-full flex-1">
         {/* Chat Panel - 30% default */}
         <Panel defaultSize={30} minSize={20} maxSize={50} className="relative">
@@ -87,6 +74,8 @@ export const ThreePanelLayout = ({ currentView = 'chat', onNavigate }: ThreePane
             activeFileId={activeFileId}
             onFileSelect={setActiveFileId}
             onFileClose={handleFileClose}
+            onToggleDataSources={toggleRightPanel}
+            isDataSourcesCollapsed={isPanelCollapsed}
           />
         </Panel>
 

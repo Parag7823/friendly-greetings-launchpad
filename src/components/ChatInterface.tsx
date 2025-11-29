@@ -530,16 +530,17 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
 
         setMessages(prev => [...prev, errorMessage]);
         setIsThinking(false);
-      } finally {
-        // Scroll to bottom after message sent
-        if (messagesEndRef.current) {
-          messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
-        }
       }
     }
   }, [message, pastedImages, currentChatId, isNewChat, user?.id, onNavigate, setSearchParams]);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (messagesEndRef.current) {
+      messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [messages]);
 
   const onDrop = useCallback((acceptedFiles: File[]) => {
     if (acceptedFiles.length > 0) {
@@ -730,6 +731,7 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
                       </div>
                     );
                   })}
+                  <div ref={messagesEndRef} />
                 </div>
               )}
             </div>
