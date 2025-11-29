@@ -565,8 +565,8 @@ class DateTimeEncoder(json.JSONEncoder):
 
 def safe_json_dumps(obj, default=None):
     """
-    FIX #18: orjson-based JSON serialization (3-5x faster than stdlib json)
-    Complements safe_json_parse for complete orjson migration.
+    orjson-based JSON serialization (3-5x faster than stdlib json)
+    Hard dependency - no fallback to stdlib json.
     
     Benefits:
     - 3-5x faster serialization
@@ -574,17 +574,15 @@ def safe_json_dumps(obj, default=None):
     - Better performance for large objects
     - Consistent with safe_json_parse
     """
-    if orjson is None:
-        # Fallback to json if orjson not available
-        return json.dumps(obj, cls=DateTimeEncoder, default=default)
-    
     try:
-        # Use serialize_datetime_objects for datetime handling
         serialized = serialize_datetime_objects(obj)
         return orjson.dumps(serialized).decode('utf-8')
+    except TypeError as e:
+        logger.error(f"orjson serialization failed - object not JSON serializable: {e}")
+        raise ValueError(f"Object cannot be serialized to JSON: {e}") from e
     except Exception as e:
-        logger.warning(f"orjson serialization failed: {e}, falling back to json")
-        return json.dumps(obj, cls=DateTimeEncoder, default=default)
+        logger.error(f"orjson serialization failed: {e}")
+        raise
 
 # ============================================================================
 # HELPER FUNCTIONS - Consolidated in utils/helpers.py
@@ -600,20 +598,18 @@ from core_infrastructure.utils.helpers import (
 
 def safe_json_parse(json_str, fallback=None):
     """
-    PHASE 1.3: orjson-based JSON parsing (3-5x faster than standard json)
-    Replaces 51 lines of custom parsing with battle-tested library.
+    orjson-based JSON parsing (3-5x faster than standard json)
+    Hard dependency - no fallback to stdlib json.
     
     Benefits:
     - 3-5x faster parsing
     - Better error messages
     - Handles Unicode correctly
-    - 51 lines → 15 lines (70% reduction)
     """
     if not json_str or not isinstance(json_str, str):
         return fallback
     
     try:
-        # Clean markdown code blocks if present
         cleaned = json_str.strip()
         if '```json' in cleaned:
             start = cleaned.find('```json') + 7
@@ -626,16 +622,15 @@ def safe_json_parse(json_str, fallback=None):
             if end != -1:
                 cleaned = cleaned[start:end].strip()
         
-        # orjson.loads() is 3-5x faster than json.loads()
         return orjson.loads(cleaned)
         
     except (orjson.JSONDecodeError, ValueError) as e:
-        logger.error(f"orjson parsing failed: {e}")
+        logger.error(f"JSON parsing failed: {e}")
         logger.error(f"Input string: {json_str[:200]}...")
-        return fallback
+        raise ValueError(f"Invalid JSON: {e}") from e
     except Exception as e:
         logger.error(f"Unexpected error in JSON parsing: {e}")
-        return fallback
+        raise
 
 # PHASE 3.1: pendulum for datetime (Better timezone handling)
 import pendulum
@@ -755,7 +750,7 @@ def _ensure_supabase_loaded_sync():
                     _supabase_loaded = True
                     logger.info("✅ Supabase client lazy-loaded on first use")
                 except Exception as e:
-                    logger.warning(f"⚠️ Failed to lazy-load Supabase client: {e}")
+                    logger.error(f"❌ Failed to lazy-load Supabase client: {e.__class__.__name__}: {e}")
                     _supabase_loaded = True  # Mark as attempted to avoid repeated retries
                     supabase = None
     
@@ -772,7 +767,7 @@ async def _ensure_supabase_loaded():
         # This returns immediately with a lazy proxy client
         return await asyncio.to_thread(_ensure_supabase_loaded_sync)
     except Exception as e:
-        logger.error(f"❌ Failed to create lazy Supabase client: {e}")
+        logger.error(f"❌ Failed to create lazy Supabase client: {e.__class__.__name__}: {e}")
         return None
 
 # CRITICAL FIX: Define SocketIOWebSocketManager class before lifespan function
@@ -1465,8 +1460,9 @@ class VendorStandardizer:
     
     Benefits:
     - 40% more accurate than simple fuzzy matching (using rapidfuzz token_set_ratio)
-    - ML-based deduplication via dedupe library
+    - ML-based deduplication via dedupe library (battle-tested, production-grade)
     - Consistent with EntityResolverOptimized
+    - Zero maintenance - battle-tested libraries only
     """
     
     # Centralized suffix list (single source of truth)
@@ -1475,8 +1471,12 @@ class VendorStandardizer:
         'incorporated', 'limited', 'corporation', 'limited liability company'
     ]
     
+    # Lazy-loaded dedupe matcher
+    _dedupe_matcher = None
+    
     def __init__(self, cache_client=None):
         self.cache = cache_client or safe_get_cache()
+        self._vendor_cache = {}  # In-memory cache for dedupe matches
         
     def _is_effectively_empty(self, text: str) -> bool:
         """Check if text is effectively empty (None, empty, or only whitespace)"""
@@ -1577,12 +1577,7 @@ class VendorStandardizer:
             
         except Exception as e:
             logger.error(f"Vendor standardization failed: {e}")
-            return {
-                "vendor_raw": vendor_name,
-                "vendor_standard": vendor_name,
-                "confidence": 0.5,
-                "cleaning_method": "error_fallback"
-            }
+            raise ValueError(f"Vendor standardization failed - no fallback allowed: {e}") from e
     
     async def get_cache_stats(self) -> Dict[str, Any]:
         """Get cache statistics from centralized cache"""

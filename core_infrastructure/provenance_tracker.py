@@ -186,10 +186,11 @@ class ProvenanceTracker:
         metadata: Dict[str, Any]
     ) -> Dict[str, Any]:
         """Build a single lineage step with timestamp"""
+        from core_infrastructure.utils.helpers import get_iso8601_timestamp
         return {
             'step': step,
             'operation': operation,
-            'timestamp': datetime.utcnow().isoformat() + 'Z',
+            'timestamp': get_iso8601_timestamp(),
             'metadata': metadata
         }
     

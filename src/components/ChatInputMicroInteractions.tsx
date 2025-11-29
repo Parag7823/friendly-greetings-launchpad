@@ -46,7 +46,7 @@ export const ChatInputMicroInteractions: React.FC<ChatInputMicroInteractionsProp
       {/* Chat Input Container with Glassmorphism */}
       <div
         className={`
-          relative rounded-lg border transition-all duration-300 mt-2
+          relative rounded-lg border transition-all duration-300
           ${isFocused || isTyping
             ? 'border-primary/60 shadow-lg shadow-primary/20'
             : 'border-slate-700/50 shadow-md shadow-primary/10'

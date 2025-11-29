@@ -166,7 +166,8 @@ class ErrorRecoverySystem:
                         else:
                             updated_time = updated_at
                         
-                        time_since_update = datetime.utcnow() - updated_time.replace(tzinfo=None)
+                        from core_infrastructure.utils.helpers import get_utc_now
+                        time_since_update = get_utc_now() - updated_time.replace(tzinfo=None)
                         is_stale = time_since_update > timedelta(hours=stale_threshold_hours)
                         
                         if not is_stale:
@@ -229,9 +230,10 @@ class ErrorRecoverySystem:
                 await self._cleanup_transaction_data(transaction_id, cleaned_records)
             
             # Step 5: Update job status to failed
+            from core_infrastructure.utils.helpers import get_iso8601_timestamp
             self.supabase.table('ingestion_jobs').update({
                 'status': 'failed',
-                'updated_at': datetime.utcnow().isoformat(),
+                'updated_at': get_iso8601_timestamp(),
                 'error_details': 'Cleaned up due to processing failure'
             }).eq('id', job_id).execute()
             
@@ -266,7 +268,8 @@ class ErrorRecoverySystem:
         try:
             logger.info(f"Starting orphaned data cleanup for user {user_id}")
             
-            cutoff_time = datetime.utcnow() - timedelta(hours=older_than_hours)
+            from core_infrastructure.utils.helpers import get_utc_now
+            cutoff_time = get_utc_now() - timedelta(hours=older_than_hours)
             cutoff_iso = cutoff_time.isoformat()
             
             # Step 1: Find orphaned raw_events (no associated job or failed job)
@@ -338,7 +341,8 @@ class ErrorRecoverySystem:
             active_connections = getattr(connection_manager, 'active_connections', {})
             job_status = getattr(connection_manager, 'job_status', {})
             
-            current_time = datetime.utcnow()
+            from core_infrastructure.utils.helpers import get_utc_now
+            current_time = get_utc_now()
             
             for job_id, websocket in list(active_connections.items()):
                 try:
@@ -413,12 +417,13 @@ class ErrorRecoverySystem:
                     fixed_issues.append(f"marked_invalid_event:{event['id']}")
             
             # Check 2: Ingestion jobs without proper status
+            from core_infrastructure.utils.helpers import get_utc_now, get_iso8601_timestamp
             stale_jobs = self.supabase.table('ingestion_jobs').select(
                 'id, user_id, status, created_at'
             ).eq(
                 'user_id', user_id
             ).eq('status', 'processing').lt(
-                'created_at', (datetime.utcnow() - timedelta(hours=2)).isoformat()
+                'created_at', (get_utc_now() - timedelta(hours=2)).isoformat()
             ).execute()
             
             if stale_jobs.data:
@@ -426,7 +431,7 @@ class ErrorRecoverySystem:
                     # Mark job as failed
                     self.supabase.table('ingestion_jobs').update({
                         'status': 'failed',
-                        'updated_at': datetime.utcnow().isoformat(),
+                        'updated_at': get_iso8601_timestamp(),
                         'error_details': 'Job timed out - marked as failed during consistency check'
                     }).eq('id', job['id']).execute()
                     
@@ -560,7 +565,8 @@ class ErrorRecoverySystem:
     async def _cleanup_expired_locks(self):
         """Clean up expired processing locks"""
         try:
-            expired_time = datetime.utcnow().isoformat()
+            from core_infrastructure.utils.helpers import get_iso8601_timestamp
+            expired_time = get_iso8601_timestamp()
             self.supabase.table('processing_locks').delete().lt('expires_at', expired_time).execute()
         
         except Exception as e:
@@ -577,9 +583,10 @@ class ErrorRecoverySystem:
                 await self._cleanup_transaction_data(transaction['id'], cleaned_records)
                 
                 # Update transaction status
+                from core_infrastructure.utils.helpers import get_iso8601_timestamp
                 self.supabase.table('processing_transactions').update({
                     'status': 'cleaned_up',
-                    'updated_at': datetime.utcnow().isoformat()
+                    'updated_at': get_iso8601_timestamp()
                 }).eq('id', transaction['id']).execute()
         
         except Exception as e:

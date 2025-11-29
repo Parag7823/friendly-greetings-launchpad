@@ -15,6 +15,7 @@ import os
 import hashlib
 from typing import Optional, Any, Dict, List
 from datetime import datetime
+import pendulum
 
 logger = structlog.get_logger(__name__)
 
@@ -351,7 +352,7 @@ async def send_websocket_progress(
             "step": step,
             "message": friendly_message,
             "progress": progress,
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": get_iso8601_timestamp()
         }
         
         # Add extra data if provided
@@ -737,3 +738,82 @@ def initialize_centralized_cache(cache_client=None):
         )
     
     return cache
+
+
+def get_utc_now() -> datetime:
+    """
+    LIBRARY REPLACEMENT: Get current UTC time using pendulum (100+ date formats supported).
+    
+    Replaces: datetime.utcnow()
+    Benefits:
+    - Proper timezone handling (UTC explicit)
+    - Better parsing (100+ formats)
+    - Consistent across all modules
+    
+    Returns:
+        Current UTC time as datetime object
+    """
+    return pendulum.now('UTC').datetime
+
+
+def get_now() -> datetime:
+    """
+    LIBRARY REPLACEMENT: Get current local time using pendulum.
+    
+    Replaces: datetime.now()
+    Benefits:
+    - Proper timezone handling (local timezone)
+    - Better parsing (100+ formats)
+    - Consistent across all modules
+    
+    Returns:
+        Current local time as datetime object
+    """
+    return pendulum.now().datetime
+
+
+def parse_date(date_value: Any, default_to_today: bool = True) -> str:
+    """
+    LIBRARY REPLACEMENT: Parse any date format using pendulum (100+ formats).
+    
+    Replaces: dateutil.parser.parse() + custom strptime logic
+    Benefits:
+    - Handles 100+ date formats automatically
+    - Robust error handling
+    - Timezone-aware parsing
+    - Single source of truth for date parsing
+    
+    Args:
+        date_value: Date in any format (str, datetime, pd.Timestamp, etc.)
+        default_to_today: If True, return today's date on parse failure
+        
+    Returns:
+        Date as YYYY-MM-DD string
+    """
+    try:
+        if date_value is None or date_value == '':
+            return pendulum.now().format('YYYY-MM-DD') if default_to_today else ''
+        
+        # Pendulum handles all common date types automatically
+        parsed = pendulum.parse(str(date_value))
+        return parsed.format('YYYY-MM-DD')
+        
+    except Exception as e:
+        logger.warning(f"Date parsing failed for '{date_value}': {e}")
+        return pendulum.now().format('YYYY-MM-DD') if default_to_today else ''
+
+
+def get_iso8601_timestamp() -> str:
+    """
+    LIBRARY REPLACEMENT: Get current timestamp in ISO8601 format using pendulum.
+    
+    Replaces: datetime.utcnow().isoformat() + 'Z'
+    Benefits:
+    - Proper timezone handling
+    - Consistent ISO8601 format
+    - Single source of truth
+    
+    Returns:
+        Current UTC time as ISO8601 string
+    """
+    return pendulum.now('UTC').to_iso8601_string()

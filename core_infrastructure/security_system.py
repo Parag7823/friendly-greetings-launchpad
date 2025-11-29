@@ -59,7 +59,8 @@ class SecurityViolation(BaseModel):  # v4.0: pydantic for validation
     
     @validator('timestamp', pre=True, always=True)
     def set_timestamp(cls, v):
-        return v or datetime.utcnow()
+        from core_infrastructure.utils.helpers import get_utc_now
+        return v or get_utc_now()
 
 class SecurityContext(BaseModel):  # v4.0: pydantic for validation
     """Security context for requests"""
@@ -145,13 +146,13 @@ class InputSanitizer:
         return filename or "unnamed_file"
     
     def sanitize_json(self, json_data: Union[str, dict]) -> dict:
-        """Sanitize JSON input"""
+        """Sanitize JSON input - hard dependency on orjson"""
         if isinstance(json_data, str):
             try:
-                # LIBRARY REPLACEMENT: orjson for 3-5x faster JSON parsing
                 json_data = json.loads(json_data)
-            except (orjson.JSONDecodeError, ValueError):
-                return {}
+            except (orjson.JSONDecodeError, ValueError) as e:
+                logger.error(f"JSON parsing failed in sanitize_json: {e}")
+                raise ValueError(f"Invalid JSON input: {e}") from e
         
         if not isinstance(json_data, dict):
             return {}
@@ -269,25 +270,29 @@ class AuthenticationValidator:
             return False, "Invalid session token"
 
         # Check session expiry
-        if datetime.utcnow() > session_data.get('expires_at', datetime.min):
+        from core_infrastructure.utils.helpers import get_utc_now
+        current_time = get_utc_now()
+        if current_time > session_data.get('expires_at', datetime.min):
             del self.active_sessions[user_id]
             return False, "Session expired"
 
         # Update last activity
-        session_data['last_activity'] = datetime.utcnow()
+        session_data['last_activity'] = current_time
 
         return True, "Session valid"
     
     def create_user_session(self, user_id: str, additional_data: Dict[str, Any] = None) -> str:
         """Create new user session"""
+        from core_infrastructure.utils.helpers import get_utc_now
         session_token = self._generate_session_token()
-        expires_at = datetime.utcnow() + timedelta(seconds=self.session_timeout)
+        current_time = get_utc_now()
+        expires_at = current_time + timedelta(seconds=self.session_timeout)
         
         self.active_sessions[user_id] = {
             'token': session_token,
-            'created_at': datetime.utcnow(),
+            'created_at': current_time,
             'expires_at': expires_at,
-            'last_activity': datetime.utcnow(),
+            'last_activity': current_time,
             'ip_address': additional_data.get('ip_address') if additional_data else None,
             'user_agent': additional_data.get('user_agent') if additional_data else None
         }
@@ -307,7 +312,8 @@ class AuthenticationValidator:
             return True, "No failed attempts"
         
         attempts = self.failed_attempts[user_id]
-        current_time = datetime.utcnow()
+        from core_infrastructure.utils.helpers import get_utc_now
+        current_time = get_utc_now()
         
         # Remove old attempts
         attempts = [attempt for attempt in attempts 
@@ -324,7 +330,8 @@ class AuthenticationValidator:
         if user_id not in self.failed_attempts:
             self.failed_attempts[user_id] = []
         
-        self.failed_attempts[user_id].append(datetime.utcnow())
+        from core_infrastructure.utils.helpers import get_utc_now
+        self.failed_attempts[user_id].append(get_utc_now())
     
     def clear_failed_logins(self, user_id: str) -> None:
         """Clear failed login attempts"""
@@ -420,7 +427,8 @@ class SecurityValidator:
         except Exception as e:
             logger.warning(f"slowapi rate limit check failed: {e}, using fallback")
             
-            current_time = datetime.utcnow()
+            from core_infrastructure.utils.helpers import get_utc_now
+            current_time = get_utc_now()
             window_start = current_time - timedelta(minutes=1)
             
             if security_context.ip_address not in self.rate_limits:
@@ -610,7 +618,8 @@ class SecurityValidator:
         cleaned = 0
         
         # Clean up expired sessions
-        current_time = datetime.utcnow()
+        from core_infrastructure.utils.helpers import get_utc_now
+        current_time = get_utc_now()
         expired_sessions = [
             user_id for user_id, session_data in self.auth_validator.active_sessions.items()
             if current_time > session_data.get('expires_at', datetime.min)
