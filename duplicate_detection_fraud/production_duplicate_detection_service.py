@@ -229,10 +229,20 @@ class ProductionDuplicateDetectionService:
         # FIX #5: LSH SERVICE INITIALIZATION WITH ERROR HANDLING
         self.lsh_service = None
         try:
-            from persistent_lsh_service import get_lsh_service
+            # Try multiple import paths for different deployment layouts
+            try:
+                from .persistent_lsh_service import get_lsh_service
+            except ImportError:
+                try:
+                    from duplicate_detection_fraud.persistent_lsh_service import get_lsh_service
+                except ImportError:
+                    from persistent_lsh_service import get_lsh_service
+            
             self.lsh_service = get_lsh_service()
             if self.lsh_service is None:
                 logger.warning("⚠️ LSH service returned None - near-duplicate detection disabled")
+            else:
+                logger.info("✅ Persistent LSH service initialized successfully")
         except ImportError as e:
             logger.warning(f"⚠️ persistent_lsh_service not available: {e} - near-duplicate detection disabled")
         except Exception as e:
