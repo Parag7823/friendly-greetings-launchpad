@@ -43,18 +43,6 @@ export const ChatInputMicroInteractions: React.FC<ChatInputMicroInteractionsProp
 
   return (
     <div className="w-full">
-      {/* Thinking Indicator */}
-      {isLoading && (
-        <div className="mb-4 flex items-center gap-2 px-4 py-3 bg-slate-800/50 rounded-lg border border-slate-700/50">
-          <span className="text-sm font-medium text-slate-400">Finley is thinking</span>
-          <div className="flex items-center gap-1">
-            <div className="w-1.5 h-1.5 bg-primary rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-            <div className="w-1.5 h-1.5 bg-primary rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-            <div className="w-1.5 h-1.5 bg-primary rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
-          </div>
-        </div>
-      )}
-
       {/* Chat Input Container with Glassmorphism */}
       <div
         className={`

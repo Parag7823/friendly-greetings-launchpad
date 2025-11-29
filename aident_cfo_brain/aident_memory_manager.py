@@ -64,6 +64,15 @@ class AidentMemoryManager:
         self.memory_key = f"memory:{user_id}"
         self.lock_key = f"memory_lock:{user_id}"
         
+        # FIX #18: Conversation state tracking for repetition detection
+        self.conversation_state = {
+            'topics_discussed': set(),
+            'response_types_used': [],
+            'phrases_used': set(),
+            'frustration_level': 0,
+            'last_response_type': None
+        }
+        
         # Initialize LLM for summary generation
         import os
         api_key = groq_api_key or os.getenv('GROQ_API_KEY')
@@ -311,6 +320,94 @@ class AidentMemoryManager:
         except Exception as e:
             logger.error(f"Failed to get memory stats: {e}")
             return {"error": str(e)}
+    
+    def detect_frustration(self, user_message: str) -> int:
+        """
+        Detect frustration signals in user message.
+        
+        Returns:
+            Frustration level (0-5)
+        """
+        frustration_signals = [
+            'why', 'again', 'same', 'repeat', 'still', 'not helping',
+            'confused', 'don\'t understand', 'what?', 'huh?', 'seriously',
+            'come on', 'enough', 'stop', 'annoyed', 'frustrated'
+        ]
+        
+        message_lower = user_message.lower()
+        signal_count = sum(1 for signal in frustration_signals if signal in message_lower)
+        
+        # Increment frustration level if signals detected
+        if signal_count > 0:
+            self.conversation_state['frustration_level'] = min(
+                self.conversation_state['frustration_level'] + signal_count,
+                5  # Cap at 5
+            )
+            logger.info(
+                "frustration_detected",
+                user_id=self.user_id,
+                frustration_level=self.conversation_state['frustration_level']
+            )
+        
+        return self.conversation_state['frustration_level']
+    
+    def get_conversation_state(self) -> Dict[str, Any]:
+        """
+        Get current conversation state for repetition detection.
+        
+        Returns:
+            Dict with topics, response types, phrases, and frustration level
+        """
+        return {
+            'topics_discussed': list(self.conversation_state['topics_discussed']),
+            'response_types_used': self.conversation_state['response_types_used'][-5:],  # Last 5
+            'phrases_used': list(self.conversation_state['phrases_used']),
+            'frustration_level': self.conversation_state['frustration_level'],
+            'last_response_type': self.conversation_state['last_response_type']
+        }
+    
+    def update_conversation_state(self, user_message: str, assistant_response: str) -> None:
+        """
+        Update conversation state after each exchange.
+        
+        Tracks topics, response types, and phrases for repetition detection.
+        """
+        # Extract topics from user message
+        topic_keywords = {
+            'revenue': ['revenue', 'sales', 'income', 'earnings'],
+            'expenses': ['expense', 'cost', 'spending', 'outflow'],
+            'cash_flow': ['cash flow', 'liquidity', 'cash position'],
+            'profitability': ['profit', 'margin', 'ebitda', 'net income'],
+            'vendors': ['vendor', 'supplier', 'payment', 'invoice'],
+            'trends': ['trend', 'pattern', 'growth', 'decline'],
+            'comparison': ['compare', 'vs', 'versus', 'difference'],
+        }
+        
+        user_lower = user_message.lower()
+        for topic, keywords in topic_keywords.items():
+            if any(kw in user_lower for kw in keywords):
+                self.conversation_state['topics_discussed'].add(topic)
+        
+        # Extract response type from assistant response
+        response_type = 'general'
+        response_lower = assistant_response.lower()
+        
+        if any(phrase in response_lower for phrase in ['here are', 'let me break', 'step 1', 'first,']):
+            response_type = 'explanation'
+        elif any(phrase in response_lower for phrase in ['your', 'data shows', 'based on', 'analysis']):
+            response_type = 'data_query'
+        elif any(phrase in response_lower for phrase in ['recommend', 'suggest', 'should', 'consider']):
+            response_type = 'strategy'
+        elif any(phrase in response_lower for phrase in ['why', 'because', 'reason', 'caused']):
+            response_type = 'causal'
+        
+        self.conversation_state['response_types_used'].append(response_type)
+        self.conversation_state['last_response_type'] = response_type
+        
+        # Extract opening phrase from response (first 15 words)
+        words = assistant_response.split()[:15]
+        phrase = ' '.join(words).lower()
+        self.conversation_state['phrases_used'].add(phrase)
 
 
 class _AsyncLock:

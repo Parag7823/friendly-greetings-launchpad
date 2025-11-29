@@ -362,7 +362,7 @@
   }
 
   .chat-message-timestamp {
-    @apply text-xs font-medium text-slate-500;
+    @apply text-[10px] font-medium text-slate-500;
   }
 
   /* FIX #2: Input placeholder contrast */
