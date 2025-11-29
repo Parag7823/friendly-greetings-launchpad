@@ -574,15 +574,8 @@ def safe_json_dumps(obj, default=None):
     - Better performance for large objects
     - Consistent with safe_json_parse
     """
-    try:
-        serialized = serialize_datetime_objects(obj)
-        return orjson.dumps(serialized).decode('utf-8')
-    except TypeError as e:
-        logger.error(f"orjson serialization failed - object not JSON serializable: {e}")
-        raise ValueError(f"Object cannot be serialized to JSON: {e}") from e
-    except Exception as e:
-        logger.error(f"orjson serialization failed: {e}")
-        raise
+    serialized = serialize_datetime_objects(obj)
+    return orjson.dumps(serialized).decode('utf-8')
 
 # ============================================================================
 # HELPER FUNCTIONS - Consolidated in utils/helpers.py

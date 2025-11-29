@@ -325,7 +325,6 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
   }, [sampleQuestions.length]);
 
   // PERF FIX #1: Wrap handleSendMessage in useCallback to prevent unnecessary re-renders
-  // This prevents child components from re-rendering when parent state changes
   const handleSendMessage = useCallback(async () => {
     if (message.trim() || pastedImages.length > 0) {
       // CRITICAL FIX: Process pasted images before sending message
@@ -343,6 +342,11 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
         // Upload pasted images immediately
         await processFiles(pastedImages);
         setPastedImages([]); // Clear pasted images after processing
+
+        toast({
+          title: 'Files Attached',
+          description: `${pastedImages.length} file(s) ready to send`
+        });
       }
 
       // Only send text message if there's text content
@@ -540,12 +544,21 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
         };
 
         setMessages(prev => [...prev, errorMessage]);
+        setIsThinking(false);
+      }
+    }
+  }, [message, pastedImages, currentChatId, isNewChat, user?.id, setSearchParams, toast]);
+
+  // Define onDrop handler for dropzone
+  const onDrop = useCallback((acceptedFiles: File[]) => {
+    if (acceptedFiles.length > 0) {
+      setPastedImages(prev => [...prev, ...acceptedFiles]);
       toast({
         title: 'Files Attached',
         description: `${acceptedFiles.length} file(s) ready to send`
       });
     }
-  }, []);
+  }, [toast]);
 
   const { getRootProps, getInputProps, isDragActive, open } = useDropzone({
     onDrop,
