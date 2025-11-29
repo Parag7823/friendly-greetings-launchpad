@@ -13,10 +13,10 @@ interface ThinkingShimmerProps {
 /**
  * ThinkingShimmer Component
  * Displays an animated shimmer effect while AI is thinking
- * Uses branding colors (primary color) for the shimmer gradient
+ * FIX #3: Uses metallic grey color for motion, reduced font size, smooth animation
  */
 export function ThinkingShimmer({
-  children = 'AI is thinking',
+  children = 'Thinking',
   className,
   duration = 2,
   spread = 2,
@@ -31,13 +31,13 @@ export function ThinkingShimmer({
     <MotionComponent
       className={cn(
         'relative inline-block bg-[length:250%_100%,auto] bg-clip-text',
-        'text-transparent',
-        // Light mode: uses muted color for base, primary for shimmer
+        'text-transparent text-xs font-medium',
+        // Light mode: uses muted color for base, metallic grey for shimmer
         '[--base-color:hsl(var(--muted-foreground))]',
-        '[--base-gradient-color:hsl(var(--primary))]',
-        // Dark mode: uses muted color for base, primary for shimmer
+        '[--base-gradient-color:#9ca3af]', // Metallic grey (gray-400)
+        // Dark mode: uses muted color for base, metallic grey for shimmer
         'dark:[--base-color:hsl(var(--muted-foreground))]',
-        'dark:[--base-gradient-color:hsl(var(--primary))]',
+        'dark:[--base-gradient-color:#6b7280]', // Metallic grey (gray-500) for dark mode
         '[--bg:linear-gradient(90deg,#0000_calc(50%-var(--spread)),var(--base-gradient-color),#0000_calc(50%+var(--spread)))]',
         'dark:[--bg:linear-gradient(90deg,#0000_calc(50%-var(--spread)),var(--base-gradient-color),#0000_calc(50%+var(--spread)))]',
         className

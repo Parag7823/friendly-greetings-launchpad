@@ -11656,12 +11656,13 @@ async def _process_webhook_delta_items(user_id: str, user_connection_id: str, pr
                     'status': 'fetched'
                 }
                 
-                try:
-                    await tx.insert('external_items', ext_item)
+                # FIX #22: Use error handling helper to store failed items with error details
+                stats_dict = {'records_fetched': 0, 'skipped': 0}
+                success = await insert_external_item_with_error_handling(
+                    transaction_manager, user_id, user_connection_id, ext_item, stats_dict
+                )
+                if success or stats_dict['records_fetched'] > 0:
                     processed += 1
-                except Exception as e:
-                    if 'duplicate' not in str(e).lower():
-                        logger.warning(f"Delta item insert failed: {e}")
             
             # Trigger normalization for delta items
             if processed > 0:
@@ -11754,11 +11755,22 @@ async def nango_webhook(request: Request):
             logger.error(f"Webhook signature validation failed in production - rejecting webhook: event_type={event_type}, event_id={event_id}")
             raise HTTPException(status_code=403, detail='Invalid webhook signature')
 
+        # FIX #3: Lookup user_connection_id from connection_id for audit trail
+        webhook_user_connection_id = None
+        if connection_id:
+            try:
+                uc_row = supabase.table('user_connections').select('id').eq(
+                    'nango_connection_id', connection_id
+                ).limit(1).execute()
+                webhook_user_connection_id = uc_row.data[0]['id'] if uc_row.data else None
+            except Exception as lookup_err:
+                logger.debug(f"Failed to lookup user_connection_id for webhook: {lookup_err}")
+        
         # Persist webhook for audit/idempotency
         try:
             supabase.table('webhook_events').insert({
                 'user_id': user_id or 'unknown',
-                'user_connection_id': None,
+                'user_connection_id': webhook_user_connection_id,
                 'event_type': event_type,
                 'payload': payload,  # supabase-py will json encode
                 'signature_valid': bool(signature_valid),

@@ -690,37 +690,46 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
                   </div>
                 </div>
               ) : (
-                <div className="max-w-5xl mx-auto space-y-4 pb-4">
-                  {messages.map((msg) => (
-                    <div
-                      key={msg.id}
-                      className={`flex ${msg.isUser ? 'justify-end' : 'justify-start'}`}
-                    >
-                      {msg.isUser ? (
-                        // User message: Keep in rectangular box
-                        <div
-                          className="max-w-[80%] rounded-md px-4 py-3 border bg-gradient-to-b from-background via-background to-muted/50 border-border/60 dark:from-zinc-900 dark:via-zinc-900 dark:to-zinc-800 dark:border-zinc-700 text-foreground"
-                        >
-                          <p className="chat-message-user">{msg.text}</p>
-                          <p className="chat-message-timestamp">
-                            {msg.timestamp.toLocaleTimeString()}
-                          </p>
-                        </div>
-                      ) : (
-                        // AI response: No box, plain text
-                        <div className="max-w-[80%] text-foreground">
-                          {msg.text === 'thinking' ? (
-                            <ThinkingShimmer children="AI is thinking" />
-                          ) : (
-                            <MarkdownMessage content={msg.text} />
-                          )}
-                          <p className="chat-message-timestamp mt-2">
-                            {msg.timestamp.toLocaleTimeString()}
-                          </p>
-                        </div>
-                      )}
-                    </div>
-                  ))}
+                <div className="max-w-3xl mx-auto space-y-1 pb-4">
+                  {messages.map((msg, index) => {
+                    // FIX #4: Message grouping logic
+                    const prevMsg = messages[index - 1];
+                    const isGroupStart = !prevMsg || prevMsg.isUser !== msg.isUser;
+                    const isGroupEnd = !messages[index + 1] || messages[index + 1].isUser !== msg.isUser;
+                    
+                    return (
+                      <div
+                        key={msg.id}
+                        className={`flex ${msg.isUser ? 'justify-end' : 'justify-start'} ${
+                          isGroupStart ? 'mt-4' : 'mt-1'
+                        }`}
+                      >
+                        {msg.isUser ? (
+                          // User message: Keep in rectangular box with timestamp inside
+                          <div
+                            className="max-w-[70%] rounded-md px-4 py-2 border bg-gradient-to-b from-background via-background to-muted/50 border-border/60 dark:from-zinc-900 dark:via-zinc-900 dark:to-zinc-800 dark:border-zinc-700 text-foreground group"
+                          >
+                            <p className="chat-message-user">{msg.text}</p>
+                            <p className="chat-message-timestamp text-xs opacity-0 group-hover:opacity-100 transition-opacity duration-200 mt-1">
+                              {msg.timestamp.toLocaleTimeString()}
+                            </p>
+                          </div>
+                        ) : (
+                          // AI response: No box, plain text with timestamp on hover
+                          <div className="max-w-[70%] text-foreground group">
+                            {msg.text === 'thinking' ? (
+                              <ThinkingShimmer children="Thinking" />
+                            ) : (
+                              <MarkdownMessage content={msg.text} />
+                            )}
+                            <p className="chat-message-timestamp text-xs opacity-0 group-hover:opacity-100 transition-opacity duration-200 mt-1">
+                              {msg.timestamp.toLocaleTimeString()}
+                            </p>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </div>
