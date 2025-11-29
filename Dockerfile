@@ -95,8 +95,8 @@ COPY start.sh .
 # CRITICAL FIX: Copy all configuration files (YAML configs for platform mappings, exchange rates, etc.)
 COPY config/ ./config/
 
-# Copy built frontend from frontend stage
-COPY --from=frontend-builder /app/frontend/dist ./dist
+# Copy built frontend from frontend stage to core_infrastructure for backend to serve
+COPY --from=frontend-builder /app/frontend/dist ./core_infrastructure/dist
 
 # Make start.sh executable
 RUN chmod +x start.sh
