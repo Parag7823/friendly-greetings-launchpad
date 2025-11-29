@@ -573,7 +573,11 @@ def safe_json_dumps(obj, default=None):
 # ============================================================================
 # Moved to: core_infrastructure/utils/helpers.py
 # Imports below:
-from core_infrastructure.utils.helpers import clean_jwt_token, safe_decode_base64, sanitize_for_json, get_groq_client, generate_friendly_status, send_websocket_progress
+from core_infrastructure.utils.helpers import (
+    clean_jwt_token, safe_decode_base64, sanitize_for_json, get_groq_client, 
+    generate_friendly_status, send_websocket_progress,
+    get_sync_cursor, save_sync_cursor, insert_external_item_with_error_handling
+)
 # NOTE: safe_openai_call removed - use instructor library for structured AI responses instead
 
 def safe_json_parse(json_str, fallback=None):
@@ -10755,20 +10759,11 @@ async def _dropbox_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> Di
                     if batch_items:
                         try:
                             transaction_manager = get_transaction_manager()
-                            async with transaction_manager.transaction(
-                                user_id=user_id,
-                                operation_type="connector_sync_batch"
-                            ) as tx:
-                                for item in batch_items:
-                                    try:
-                                        await tx.insert('external_items', item)
-                                        stats['records_fetched'] += 1
-                                    except Exception as insert_err:
-                                        if 'duplicate key' in str(insert_err).lower() or 'unique' in str(insert_err).lower():
-                                            stats['skipped'] += 1
-                                        else:
-                                            logger.error(f"Dropbox item insert failed: {insert_err}")
-                                            stats['skipped'] += 1
+                            for item in batch_items:
+                                # FIX #22: Use error handling helper to store failed items with error details
+                                await insert_external_item_with_error_handling(
+                                    transaction_manager, user_id, user_connection_id, item, stats
+                                )
                         except Exception as batch_err:
                             logger.error(f"Dropbox batch insert transaction failed: {batch_err}")
                             errors.append(f"Batch insert failed: {str(batch_err)[:100]}")
@@ -11015,20 +11010,11 @@ async def _gdrive_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> Dic
                 if batch_items:
                     try:
                         transaction_manager = get_transaction_manager()
-                        async with transaction_manager.transaction(
-                            user_id=user_id,
-                            operation_type="connector_sync_batch"
-                        ) as tx:
-                            for item in batch_items:
-                                try:
-                                    await tx.insert('external_items', item)
-                                    stats['records_fetched'] += 1
-                                except Exception as insert_err:
-                                    if 'duplicate key' in str(insert_err).lower() or 'unique' in str(insert_err).lower():
-                                        stats['skipped'] += 1
-                                    else:
-                                        logger.error(f"GDrive item insert failed: {insert_err}")
-                                        stats['skipped'] += 1
+                        for item in batch_items:
+                            # FIX #22: Use error handling helper to store failed items with error details
+                            await insert_external_item_with_error_handling(
+                                transaction_manager, user_id, user_connection_id, item, stats
+                            )
                     except Exception as batch_err:
                         logger.error(f"GDrive batch insert transaction failed: {batch_err}")
                         errors.append(f"Batch insert failed: {str(batch_err)[:100]}")

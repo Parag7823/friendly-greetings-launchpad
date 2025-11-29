@@ -30,15 +30,28 @@ import asyncio
 from groq import AsyncGroq  # CHANGED: Using Groq instead of Anthropic
 
 # FIX #19: Import intent classification and output guard components
-from intent_and_guard_engine import (
-    IntentClassifier,
-    OutputGuard,
-    ResponseVariationEngine,
-    UserIntent,
-    get_intent_classifier,
-    get_output_guard,
-    get_response_variation_engine
-)
+try:
+    # Try package layout first
+    from aident_cfo_brain.intent_and_guard_engine import (
+        IntentClassifier,
+        OutputGuard,
+        ResponseVariationEngine,
+        UserIntent,
+        get_intent_classifier,
+        get_output_guard,
+        get_response_variation_engine
+    )
+except ImportError:
+    # Fallback to relative import
+    from .intent_and_guard_engine import (
+        IntentClassifier,
+        OutputGuard,
+        ResponseVariationEngine,
+        UserIntent,
+        get_intent_classifier,
+        get_output_guard,
+        get_response_variation_engine
+    )
 
 # Initialize logger early for use in import error handlers
 logger = structlog.get_logger(__name__)

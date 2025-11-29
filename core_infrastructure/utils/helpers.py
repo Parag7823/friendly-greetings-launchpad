@@ -498,6 +498,157 @@ async def create_sync_run(
     return sync_run_id
 
 
+# FIX #21: SYNC CURSOR MANAGEMENT (Incremental Sync Support)
+# Replaces hardcoded date filters with dynamic cursor-based fetching
+async def get_sync_cursor(
+    supabase_client: Any,
+    user_connection_id: str,
+    resource: str,
+    cursor_type: str = 'time',
+    default_lookback_days: int = 90
+) -> str:
+    """
+    FIX #21: Retrieve sync cursor for incremental fetching.
+    
+    Enables true incremental sync by reading the last cursor value from sync_cursors table.
+    Falls back to default lookback period if no cursor exists.
+    
+    Args:
+        supabase_client: Supabase client instance
+        user_connection_id: User connection ID
+        resource: Resource type (e.g., 'emails', 'files', 'invoices')
+        cursor_type: Cursor type (e.g., 'time', 'page', 'history_id')
+        default_lookback_days: Default lookback if no cursor (default 90 days)
+    
+    Returns:
+        Cursor value (timestamp, page token, history_id, etc.) or default lookback timestamp
+    """
+    try:
+        cursor_row = supabase_client.table('sync_cursors').select('value').eq(
+            'user_connection_id', user_connection_id
+        ).eq('resource', resource).eq('cursor_type', cursor_type).limit(1).execute()
+        
+        if cursor_row.data and cursor_row.data[0].get('value'):
+            logger.info(f"✅ Found sync cursor for {resource}: {cursor_row.data[0]['value'][:50]}")
+            return cursor_row.data[0]['value']
+    except Exception as e:
+        logger.warning(f"Failed to retrieve sync cursor for {resource}: {e}")
+    
+    # Fallback: return default lookback timestamp
+    default_ts = (__import__('pendulum').now() - __import__('datetime').timedelta(days=default_lookback_days)).to_iso8601_string()
+    logger.info(f"Using default lookback ({default_lookback_days} days) for {resource}")
+    return default_ts
+
+
+async def save_sync_cursor(
+    transaction_manager: Any,
+    user_id: str,
+    user_connection_id: str,
+    resource: str,
+    cursor_value: str,
+    cursor_type: str = 'time'
+) -> bool:
+    """
+    FIX #21: Save sync cursor for next incremental fetch.
+    
+    Updates or inserts cursor value in sync_cursors table using upsert pattern.
+    Handles conflicts gracefully.
+    
+    Args:
+        transaction_manager: Transaction manager instance
+        user_id: User ID
+        user_connection_id: User connection ID
+        resource: Resource type (e.g., 'emails', 'files', 'invoices')
+        cursor_value: New cursor value to save
+        cursor_type: Cursor type (e.g., 'time', 'page', 'history_id')
+    
+    Returns:
+        True if successful, False otherwise
+    """
+    try:
+        async with transaction_manager.transaction(
+            user_id=user_id,
+            operation_type="sync_cursor_update"
+        ) as tx:
+            await tx.insert('sync_cursors', {
+                'user_id': user_id,
+                'user_connection_id': user_connection_id,
+                'resource': resource,
+                'cursor_type': cursor_type,
+                'value': cursor_value,
+                'updated_at': __import__('pendulum').now().to_iso8601_string()
+            }, on_conflict='(user_connection_id, resource, cursor_type)')
+        
+        logger.info(f"✅ Saved sync cursor for {resource}: {cursor_value[:50]}")
+        return True
+    except Exception as e:
+        logger.error(f"Failed to save sync cursor for {resource}: {e}")
+        return False
+
+
+# FIX #22: EXTERNAL ITEMS ERROR TRACKING
+# Ensures failed items are stored with error details for audit trail
+async def insert_external_item_with_error_handling(
+    transaction_manager: Any,
+    user_id: str,
+    user_connection_id: str,
+    item: Dict[str, Any],
+    stats: Dict[str, int]
+) -> bool:
+    """
+    FIX #22: Insert external item with comprehensive error handling.
+    
+    Attempts to insert item. On failure, creates a failed record with error details
+    instead of silently dropping the item. Enables audit trail and debugging.
+    
+    Args:
+        transaction_manager: Transaction manager instance
+        user_id: User ID
+        user_connection_id: User connection ID
+        item: Item to insert (should have user_id, user_connection_id, provider_id, etc.)
+        stats: Stats dict to update (increments records_fetched or skipped)
+    
+    Returns:
+        True if inserted successfully, False if failed but error record created
+    """
+    try:
+        async with transaction_manager.transaction(
+            user_id=user_id,
+            operation_type="external_item_insert"
+        ) as tx:
+            await tx.insert('external_items', item)
+            stats['records_fetched'] = stats.get('records_fetched', 0) + 1
+            return True
+    except Exception as insert_err:
+        error_msg = str(insert_err)
+        
+        # Handle duplicate key errors (expected for idempotency)
+        if 'duplicate key' in error_msg.lower() or 'unique' in error_msg.lower():
+            logger.debug(f"Duplicate external item (idempotent): {item.get('provider_id')}")
+            stats['skipped'] = stats.get('skipped', 0) + 1
+            return True  # Treat as success since item already exists
+        
+        # Store failed item with error details for audit trail
+        try:
+            async with transaction_manager.transaction(
+                user_id=user_id,
+                operation_type="external_item_error_record"
+            ) as tx:
+                error_item = {
+                    **item,
+                    'status': 'failed',
+                    'error': error_msg[:500]  # Truncate to schema limit
+                }
+                await tx.insert('external_items', error_item)
+                logger.error(f"Stored failed item with error: {item.get('provider_id')} - {error_msg[:100]}")
+                stats['skipped'] = stats.get('skipped', 0) + 1
+                return False
+        except Exception as error_record_err:
+            logger.error(f"Failed to store error record for item {item.get('provider_id')}: {error_record_err}")
+            stats['skipped'] = stats.get('skipped', 0) + 1
+            return False
+
+
 # FIX #79: SHARED CACHE KEY GENERATION
 # Replaces 3x duplicate code in:
 # - universal_platform_detector_optimized.py (_generate_detection_id)
