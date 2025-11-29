@@ -8530,7 +8530,7 @@ async def chat_endpoint(request: dict):
                 # Get lazy client - returns immediately without connecting
                 # Wrap in timeout to prevent hangs from connection pool initialization
                 def get_client_sync():
-                    from supabase_client import get_supabase_client
+                    # Use the already-imported get_supabase_client function from module level
                     return get_supabase_client()
                 
                 supabase_client = await asyncio.wait_for(
