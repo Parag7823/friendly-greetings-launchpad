@@ -20,6 +20,7 @@ from dataclasses import dataclass
 import pandas as pd
 import psutil
 import io
+from core_infrastructure.rate_limiter import get_rate_limiter
 
 logger = structlog.get_logger(__name__)
 
@@ -109,6 +110,9 @@ class StreamingExcelProcessor:
         self.config = config
         # Initialize with default; will be updated per sheet based on column count
         self.memory_monitor = MemoryMonitor(config.memory_limit_mb, estimated_row_width=1)
+        # FIX #15: Use aiometer rate limiter from centralized rate_limiter module
+        # Replaces ThreadPoolExecutor(max_workers=2) with library-based rate limiting
+        self.rate_limiter = get_rate_limiter()
     
     async def process_excel_stream(self, file_path: str, 
                                  progress_callback: Optional[Callable] = None) -> AsyncGenerator[pd.DataFrame, None]:
