@@ -140,8 +140,10 @@ class AidentMemoryManager:
                 if raw:
                     try:
                         saved = pickle.loads(raw)
-                        self.memory.buffer = saved.get("buffer", "")
-                        self.memory.chat_memory.messages = saved.get("messages", [])
+                        # Load messages into the memory object
+                        messages = saved.get("messages", [])
+                        if messages:
+                            self.memory.chat_memory.messages = messages
                         
                         logger.info(
                             "memory_loaded_from_redis",
@@ -151,6 +153,7 @@ class AidentMemoryManager:
                         return saved
                     except Exception as e:
                         logger.error(f"Failed to deserialize memory: {e}")
+                        # Continue with empty memory instead of failing
                         return {"buffer": "", "messages": []}
                 else:
                     logger.debug("No existing memory found in Redis", user_id=self.user_id)
@@ -177,8 +180,13 @@ class AidentMemoryManager:
             
             # Acquire lock to prevent concurrent modifications
             async with self._get_lock():
+                # Get buffer safely - handle both string and list types
+                buffer = getattr(self.memory, 'buffer', '')
+                if isinstance(buffer, list):
+                    buffer = str(buffer)
+                
                 obj = {
-                    "buffer": self.memory.buffer,
+                    "buffer": buffer,
                     "messages": self.memory.chat_memory.messages,
                     "saved_at": datetime.utcnow().isoformat()
                 }
@@ -195,7 +203,7 @@ class AidentMemoryManager:
                     "memory_saved_to_redis",
                     user_id=self.user_id,
                     message_count=len(self.memory.chat_memory.messages),
-                    buffer_size=len(self.memory.buffer)
+                    buffer_size=len(str(buffer))
                 )
                 return True
         
@@ -304,13 +312,21 @@ class AidentMemoryManager:
         """
         try:
             messages = self.memory.chat_memory.messages
+            
+            # Get buffer - handle both string and list types
             buffer = self.memory.buffer
+            if isinstance(buffer, list):
+                buffer_size = len(buffer)
+                buffer_tokens = sum(len(str(item).split()) for item in buffer)
+            else:
+                buffer_size = len(str(buffer))
+                buffer_tokens = len(str(buffer).split())
             
             return {
                 "user_id": self.user_id,
                 "message_count": len(messages),
-                "buffer_size": len(buffer),
-                "buffer_tokens": len(buffer.split()),  # Rough estimate
+                "buffer_size": buffer_size,
+                "buffer_tokens": buffer_tokens,
                 "max_token_limit": self.max_token_limit,
                 "recent_messages": [
                     {"role": "user" if m.type == "human" else "assistant", "content": m.content[:100]}
