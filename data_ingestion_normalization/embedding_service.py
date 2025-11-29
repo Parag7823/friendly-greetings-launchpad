@@ -29,8 +29,9 @@ import structlog
 from typing import List, Optional
 import asyncio
 from functools import lru_cache
-import hashlib
 import os
+from aiocache import cached
+from aiocache.serializers import JsonSerializer
 
 logger = structlog.get_logger(__name__)
 
@@ -125,6 +126,7 @@ class EmbeddingService:
                 logger.warning("Centralized cache not available - embeddings will not be cached")
                 self.cache = None
     
+    @cached(ttl=86400, namespace="embeddings")
     async def embed_text(self, text: str) -> List[float]:
         """
         Generate embedding for a single text.
@@ -136,45 +138,21 @@ class EmbeddingService:
             List of floats representing the embedding (1024 dimensions)
             
         FIX #6: Returns empty embedding if enable_embeddings=False to prevent RAM trap.
+        FIX #16: Uses aiocache @cached decorator instead of manual cache.get/set (saves 20 lines)
         """
         if not self.enable_embeddings:
             logger.debug("Embeddings disabled - returning zero vector")
-            return [0.0] * 1024  # Return zero vector instead of loading model
-        
+            return [0.0] * 1024
+
         if not self.model:
             await self.initialize()
-        
-        # FIX #1: Use SHA256 hash for cache key (deterministic, collision-resistant)
-        text_hash = f"emb:{hashlib.sha256(text.encode()).hexdigest()[:16]}"
-        
-        # Try Redis cache first
-        if self.cache:
-            try:
-                cached = await self.cache.get(text_hash)
-                if cached is not None:
-                    self.cache_hits += 1
-                    logger.debug(f"Cache hit for embedding: {text[:50]}...")
-                    return cached
-            except Exception as e:
-                logger.warning(f"Cache get failed: {e}")
-        
-        self.cache_misses += 1
-        
+
         try:
-            # Generate embedding
             embedding = self.model.encode(text, convert_to_tensor=False)
             
-            # Convert to list if numpy array (lazy load numpy)
             numpy_module = _load_numpy()
             if isinstance(embedding, numpy_module.ndarray):
                 embedding = embedding.tolist()
-            
-            # FIX #1: Store in Redis with 24-hour TTL (prevents unbounded growth)
-            if self.cache:
-                try:
-                    await self.cache.set(text_hash, embedding, ttl=86400)  # 24 hours
-                except Exception as e:
-                    logger.warning(f"Cache set failed: {e}")
             
             logger.debug(f"Generated embedding for text: {text[:50]}...")
             return embedding
@@ -192,54 +170,19 @@ class EmbeddingService:
             
         Returns:
             List of embeddings
+            
+        FIX #16: Uses aiocache @cached decorator for individual texts (saves 30 lines of manual caching)
         """
         if not self.model:
             await self.initialize()
         
         try:
             embeddings = []
-            texts_to_embed = []
-            cache_indices = []
+            for text in texts:
+                embedding = await self.embed_text(text)
+                embeddings.append(embedding)
             
-            # FIX #1: Check cache for each text first
-            for i, text in enumerate(texts):
-                text_hash = f"emb:{hashlib.sha256(text.encode()).hexdigest()[:16]}"
-                
-                if self.cache:
-                    try:
-                        cached = await self.cache.get(text_hash)
-                        if cached is not None:
-                            embeddings.append(cached)
-                            self.cache_hits += 1
-                            continue
-                    except Exception as e:
-                        logger.warning(f"Cache get failed for batch: {e}")
-                
-                # Not in cache, need to embed
-                texts_to_embed.append(text)
-                cache_indices.append((i, text_hash, text))
-                self.cache_misses += 1
-            
-            # Generate embeddings for uncached texts
-            if texts_to_embed:
-                new_embeddings = self.model.encode(texts_to_embed, convert_to_tensor=False)
-                
-                # Convert to list if numpy array (lazy load numpy)
-                numpy_module = _load_numpy()
-                if isinstance(new_embeddings, numpy_module.ndarray):
-                    new_embeddings = new_embeddings.tolist()
-                
-                # FIX #1: Store in cache with TTL
-                for (orig_idx, text_hash, text), embedding in zip(cache_indices, new_embeddings):
-                    embeddings.insert(orig_idx, embedding)
-                    
-                    if self.cache:
-                        try:
-                            await self.cache.set(text_hash, embedding, ttl=86400)
-                        except Exception as e:
-                            logger.warning(f"Cache set failed for batch: {e}")
-            
-            logger.info(f"Generated {len(embeddings)} embeddings in batch (cache hits: {self.cache_hits}, misses: {self.cache_misses})")
+            logger.info(f"Generated {len(embeddings)} embeddings in batch")
             return embeddings
             
         except Exception as e:

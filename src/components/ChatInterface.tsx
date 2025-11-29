@@ -398,13 +398,14 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
               // Update URL with the chat ID from backend
               setSearchParams({ chat_id: chatId }, { replace: true });
 
-              // Trigger a custom event to update sidebar with generated title
+              const eventDetail = {
+                chatId: chatId,
+                title: generatedTitle,
+                timestamp: new Date()
+              };
+              console.log('📤 Dispatching new-chat-created event:', eventDetail);
               window.dispatchEvent(new CustomEvent('new-chat-created', {
-                detail: {
-                  chatId: chatId,
-                  title: generatedTitle,
-                  timestamp: new Date()
-                }
+                detail: eventDetail
               }));
 
               console.log('✅ Chat title generated:', generatedTitle);
@@ -435,18 +436,18 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
         setMessages(prev => [...prev, aiMessage]);
 
         // Send message to backend with streaming
-        const sessionToken = await getSessionToken();
+        const sessionToken2 = await getSessionToken();
         const response = await fetch(`${config.apiUrl}/chat`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            ...(sessionToken && { 'Authorization': `Bearer ${sessionToken}` })
+            ...(sessionToken2 && { 'Authorization': `Bearer ${sessionToken2}` })
           },
           body: JSON.stringify({
             message: currentMessage,
             user_id: user?.id || 'anonymous',
             chat_id: chatId,
-            session_token: sessionToken
+            session_token: sessionToken2
           })
         });
 
