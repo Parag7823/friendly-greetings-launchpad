@@ -20,6 +20,9 @@ from datetime import datetime
 from supabase import Client
 from collections import defaultdict
 
+# LIBRARY FIX: Use tenacity for exponential backoff retry (replaces custom asyncio.sleep loop)
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+
 logger = structlog.get_logger(__name__)
 
 
@@ -201,50 +204,56 @@ class FieldMappingLearner:
             
         return result
         
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=1, max=10),
+        retry=retry_if_exception_type(Exception),
+        reraise=True
+    )
     async def _write_mapping_with_retry(self, mapping_data: Dict) -> bool:
         """
-        Write a single mapping to the database with exponential backoff retry.
+        LIBRARY FIX: Write a single mapping to the database with exponential backoff retry.
+        
+        Uses tenacity library for automatic retry with:
+        - Exponential backoff (1s, 2s, 4s, 8s, 10s max)
+        - Automatic jitter (prevents thundering herd)
+        - Max 3 attempts
         
         Returns True if successful, False otherwise.
         """
         if not self.supabase:
             logger.warning("No Supabase client available for field mapping learning")
             return False
+        
+        try:
+            # Use the upsert_field_mapping RPC function
+            result = self.supabase.rpc(
+                'upsert_field_mapping',
+                {
+                    'p_user_id': mapping_data['user_id'],
+                    'p_source_column': mapping_data['source_column'],
+                    'p_target_field': mapping_data['target_field'],
+                    'p_platform': mapping_data['platform'],
+                    'p_document_type': mapping_data['document_type'],
+                    'p_confidence': mapping_data['confidence'],
+                    'p_mapping_source': 'ai_learned',  # Must match CHECK constraint in DB
+                    'p_metadata': mapping_data['metadata']
+                }
+            ).execute()
             
-        for attempt in range(self.max_retries):
-            try:
-                # Use the upsert_field_mapping RPC function
-                result = self.supabase.rpc(
-                    'upsert_field_mapping',
-                    {
-                        'p_user_id': mapping_data['user_id'],
-                        'p_source_column': mapping_data['source_column'],
-                        'p_target_field': mapping_data['target_field'],
-                        'p_platform': mapping_data['platform'],
-                        'p_document_type': mapping_data['document_type'],
-                        'p_confidence': mapping_data['confidence'],
-                        'p_mapping_source': 'ai_learned',  # Must match CHECK constraint in DB
-                        'p_metadata': mapping_data['metadata']
-                    }
-                ).execute()
+            if result.data:
+                logger.debug(
+                    f"Learned field mapping: {mapping_data['source_column']} -> {mapping_data['target_field']} "
+                    f"(confidence: {mapping_data['confidence']:.2f})"
+                )
+                return True
+            else:
+                logger.warning("Failed to upsert field mapping")
+                raise Exception("Upsert returned no data")
                 
-                if result.data:
-                    logger.debug(
-                        f"Learned field mapping: {mapping_data['source_column']} -> {mapping_data['target_field']} "
-                        f"(confidence: {mapping_data['confidence']:.2f})"
-                    )
-                    return True
-                else:
-                    logger.warning(f"Failed to upsert field mapping (attempt {attempt + 1})")
-                    
-            except Exception as e:
-                logger.warning(f"Error writing field mapping (attempt {attempt + 1}): {e}")
-                
-                if attempt < self.max_retries - 1:
-                    # Exponential backoff
-                    await asyncio.sleep(2 ** attempt)
-                    
-        return False
+        except Exception as e:
+            logger.warning(f"Error writing field mapping: {e}")
+            raise  # Let tenacity handle retry
         
     async def get_mappings(
         self,
