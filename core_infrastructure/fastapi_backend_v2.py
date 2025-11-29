@@ -8340,41 +8340,6 @@ async def get_chat_history(user_id: str):
             )
         
         # Get chat messages from database using optimized client when available
-        if optimized_db:
-            messages = await optimized_db.get_chat_history_optimized(user_id, limit=500)
-        else:
-            result = supabase_client.table('chat_messages').select(
-                'id, chat_id, message, created_at'
-            ).eq('user_id', user_id).order('created_at', desc=True).execute()
-            messages = result.data or []
-        # For now, create one chat per day or group by session
-        chat_groups = {}
-        for msg in messages:
-            created_at = msg.get('created_at', '') or ''
-            date_key = created_at[:10] if created_at else 'unknown'
-            if date_key not in chat_groups:
-                chat_groups[date_key] = {
-                    "id": f"chat_{date_key}",
-                    "title": f"Chat {date_key}",
-                    "created_at": created_at,
-                    "message_count": 0
-                }
-            chat_groups[date_key]["message_count"] += 1
-        
-        chats = list(chat_groups.values())
-        
-        return {
-            "chats": chats,
-            "user_id": user_id,
-            "status": "success"
-        }
-    except Exception as e:
-        structured_logger.error("Chat history error", error=e)
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.put("/chat/rename")
-async def rename_chat(request: dict):
-    """Rename chat"""
     try:
         chat_id = request.get('chat_id')
         new_title = request.get('title')

@@ -24,6 +24,7 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
   const { toast } = useToast();
   const { processFileWithFastAPI } = useFastAPIProcessor();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
   const [searchParams, setSearchParams] = useSearchParams();
   const [message, setMessage] = useState('');
   const [messages, setMessages] = useState<Array<{ id: string; text: string; isUser: boolean; timestamp: Date }>>([]);
@@ -116,6 +117,16 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
 
     loadChatHistory();
   }, [user?.id, currentChatId]);
+
+  // Auto-scroll to bottom when new messages arrive
+  useEffect(() => {
+    // Use setTimeout to ensure DOM has fully rendered before scrolling
+    const scrollTimer = setTimeout(() => {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }, 0);
+    
+    return () => clearTimeout(scrollTimer);
+  }, [messages]);
 
   // Load connector providers when opening marketplace
   useEffect(() => {
@@ -529,22 +540,6 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
         };
 
         setMessages(prev => [...prev, errorMessage]);
-        setIsThinking(false);
-      }
-    }
-  }, [message, pastedImages, currentChatId, isNewChat, user?.id, onNavigate, setSearchParams]);
-
-  const messagesEndRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (messagesEndRef.current) {
-      messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
-    }
-  }, [messages]);
-
-  const onDrop = useCallback((acceptedFiles: File[]) => {
-    if (acceptedFiles.length > 0) {
-      setPastedImages(prev => [...prev, ...acceptedFiles]);
       toast({
         title: 'Files Attached',
         description: `${acceptedFiles.length} file(s) ready to send`
