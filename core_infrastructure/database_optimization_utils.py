@@ -59,18 +59,30 @@ def _load_datasketch():
 
 # FIX #7: Use inlined get_supabase_client from fastapi_backend_v2
 # The supabase_client.py file has been merged into fastapi_backend_v2.py
-try:
-    from core_infrastructure.fastapi_backend_v2 import get_supabase_client
-    _HAS_SUPABASE_HELPER = True
-    logger_temp = structlog.get_logger(__name__)
-    logger_temp.info("✅ database_optimization_utils using inlined Supabase client from fastapi_backend_v2")
-except ImportError as e:
-    logger_temp = structlog.get_logger(__name__)
-    logger_temp.critical(f"❌ FATAL: Cannot import get_supabase_client from fastapi_backend_v2: {e}")
-    raise RuntimeError(
-        "database_optimization_utils requires get_supabase_client from fastapi_backend_v2. "
-        "Ensure fastapi_backend_v2.py is available and the inlined get_supabase_client function exists."
-    ) from e
+# CRITICAL FIX: Defer import to avoid circular dependency during module initialization
+_get_supabase_client_func = None
+_HAS_SUPABASE_HELPER = True
+
+def _lazy_import_get_supabase_client():
+    """Lazy import to avoid circular dependency at module load time"""
+    global _get_supabase_client_func
+    if _get_supabase_client_func is None:
+        try:
+            from core_infrastructure.fastapi_backend_v2 import get_supabase_client
+            _get_supabase_client_func = get_supabase_client
+            logger.info("✅ database_optimization_utils using inlined Supabase client from fastapi_backend_v2")
+        except ImportError as e:
+            logger.critical(f"❌ FATAL: Cannot import get_supabase_client from fastapi_backend_v2: {e}")
+            raise RuntimeError(
+                "database_optimization_utils requires get_supabase_client from fastapi_backend_v2. "
+                "Ensure fastapi_backend_v2.py is available and the inlined get_supabase_client function exists."
+            ) from e
+    return _get_supabase_client_func
+
+def get_supabase_client(use_service_role: bool = True) -> Client:
+    """Wrapper that lazily imports and calls the real get_supabase_client"""
+    func = _lazy_import_get_supabase_client()
+    return func(use_service_role=use_service_role)
 
 import asyncio
 from dataclasses import dataclass
@@ -286,55 +298,6 @@ def estimate_jaccard_similarity(minhash_hex1: str, minhash_hex2: str) -> float:
     except Exception as e:
         logger.error(f"Jaccard similarity estimation failed: {e}")
         return 0.0
-
-
-if not _HAS_SUPABASE_HELPER:
-    # PRODUCTION FIX #4: Enforce inlined get_supabase_client in production
-    # Fallback is for development only - production MUST use pooled client
-    import os as _os_check
-    environment = _os_check.getenv('ENVIRONMENT', 'development').lower()
-    
-    if environment == 'production':
-        raise RuntimeError(
-            "🚨 CRITICAL: get_supabase_client not found in PRODUCTION environment.\n"
-            "Production deployments MUST use the inlined Supabase client from fastapi_backend_v2.py\n"
-            "to ensure connection pooling and prevent connection exhaustion.\n"
-            "Fallback un-pooled clients are for development only.\n"
-            "Action: Ensure fastapi_backend_v2.py is deployed with the inlined get_supabase_client function."
-        )
-    
-    # Development fallback (with warning)
-    _FALLBACK_SUPABASE_CLIENTS: Dict[bool, Optional[Client]] = {True: None, False: None}
-
-    def get_supabase_client(use_service_role: bool = True) -> Client:  # type: ignore
-        """
-        Fallback Supabase client creator (DEVELOPMENT ONLY).
-        
-        WARNING: This creates un-pooled clients. Each worker gets its own connection.
-        For production, use the inlined get_supabase_client from fastapi_backend_v2.py.
-        """
-        client = _FALLBACK_SUPABASE_CLIENTS[use_service_role]
-        if client is not None:
-            return client
-
-        supabase_url = os.getenv('SUPABASE_URL')
-        service_role_key = os.getenv('SUPABASE_SERVICE_ROLE_KEY')
-        anon_key = os.getenv('SUPABASE_ANON_KEY')
-        key = service_role_key if use_service_role else anon_key
-
-        if not supabase_url or not key:
-            raise RuntimeError(
-                "Supabase client fallback requires SUPABASE_URL and the appropriate API key environment variables."
-            )
-
-        logger.warning(
-            "⚠️ DEVELOPMENT MODE: Using un-pooled Supabase client fallback. "
-            "This is NOT suitable for production. Deploy fastapi_backend_v2.py with inlined get_supabase_client for connection pooling."
-        )
-
-        client = create_client(supabase_url, key)
-        _FALLBACK_SUPABASE_CLIENTS[use_service_role] = client
-        return client
 
 @dataclass
 class QueryResult:
