@@ -269,20 +269,21 @@ mixed_platform_indicators:
 # ============================================================================
 # Column name patterns that indicate ID fields (higher confidence extraction)
 id_column_indicators:
-  - "id"
-  - "reference"
-  - "number"
-  - "ref"
-  - "num"
-  - "code"
-  - "key"
-  - "identifier"
-  - "transaction_id"
-  - "order_id"
-  - "invoice_id"
-  - "payment_id"
-  - "customer_id"
-  - "vendor_id"
+  patterns:
+    - "id"
+    - "reference"
+    - "number"
+    - "ref"
+    - "num"
+    - "code"
+    - "key"
+    - "identifier"
+    - "transaction_id"
+    - "order_id"
+    - "invoice_id"
+    - "payment_id"
+    - "customer_id"
+    - "vendor_id"
   similarity_threshold: 80  # Fuzzy match threshold
 
 # ============================================================================
