@@ -310,7 +310,7 @@ export const FinleySidebar = ({ onClose, onNavigate, currentView = 'chat', isCol
             <TooltipTrigger asChild>
               <Button
                 variant="ghost"
-                className={`w-full h-9 rounded-lg border-2 border-primary hover:bg-primary/10 transition-all duration-200 ${isCollapsed ? 'justify-center px-0' : 'justify-start px-2'} gradient-copper-border`}
+                className={`w-full h-9 rounded-lg border border-primary/30 hover:border-primary/50 hover:bg-primary/5 transition-all duration-200 ${isCollapsed ? 'justify-center px-0' : 'justify-start px-2'}`}
                 onClick={handleNewChat}
               >
                 <MessageSquarePlus className="w-4 h-4" />

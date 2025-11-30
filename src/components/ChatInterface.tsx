@@ -725,16 +725,18 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfac
                             </p>
                           </div>
                         ) : (
-                          // AI response: No box, plain text with timestamp visible
+                          // AI response: No box, plain text with timestamp visible only after answer
                           <div className="max-w-[70%] text-foreground group">
                             {msg.text === 'thinking' ? (
                               <ThinkingShimmer children="Thinking" />
                             ) : (
-                              <MarkdownMessage content={msg.text} />
+                              <>
+                                <MarkdownMessage content={msg.text} />
+                                <p className="chat-message-timestamp text-xs opacity-60 group-hover:opacity-100 transition-opacity duration-200 mt-1">
+                                  {msg.timestamp.toLocaleTimeString()}
+                                </p>
+                              </>
                             )}
-                            <p className="chat-message-timestamp text-xs opacity-60 group-hover:opacity-100 transition-opacity duration-200 mt-1">
-                              {msg.timestamp.toLocaleTimeString()}
-                            </p>
                           </div>
                         )}
                       </div>

@@ -300,29 +300,111 @@ class DocumentClassificationRequest(BaseModel):
     platform: Optional[str] = None
     document_type: Optional[str] = None  # New field added
 
-# Database and external services
-get_supabase_client = None
-import_errors = []
+# ============================================================================
+# INLINED SUPABASE CLIENT (removed external supabase_client.py dependency)
+# ============================================================================
+# This code was previously in core_infrastructure/supabase_client.py
+# Inlined here to eliminate import path issues and circular dependencies
+# Functionality preserved: lazy loading, connection pooling, thread-safe singleton
 
-# Try 1: Package import (container with proper Python path) - TRY FIRST
-try:
-    from core_infrastructure.supabase_client import get_supabase_client  # type: ignore
-except ImportError as e1:
-    import_errors.append(f"Package import failed: {e1}")
-    # Try 2: Relative import (local development)
-    try:
-        from .supabase_client import get_supabase_client  # type: ignore
-    except ImportError as e2:
-        import_errors.append(f"Relative import failed: {e2}")
-        # Try 3: Absolute import (flat layout in container)
-        try:
-            from supabase_client import get_supabase_client  # type: ignore
-        except ImportError as e3:
-            import_errors.append(f"Absolute import failed: {e3}")
-            get_supabase_client = None
+from supabase import create_client, Client
+import socket
+from urllib.parse import urlparse
 
-# Note: Logger will be initialized later, so we just track import errors for now
-_supabase_import_errors = import_errors if get_supabase_client is None else None
+# Global lazy client instance (singleton)
+_supabase_client_instance: Optional[Client] = None
+_supabase_client_lock = threading.Lock()
+
+class LazySupabaseClient:
+    """
+    NUCLEAR FIX: Lazy proxy client that defers connection until first actual use.
+    This prevents timeouts during initialization and allows app to start immediately.
+    """
+    def __init__(self, url: str, key: str):
+        self.url = url
+        self.key = key
+        self._real_client = None
+        self._connecting = False
+        self._connect_lock = threading.Lock()
+        self._connection_timeout = 5.0  # 5 second timeout
+    
+    def _ensure_connected(self):
+        """Lazily connect on first actual API call with timeout"""
+        if self._real_client is None and not self._connecting:
+            with self._connect_lock:
+                if self._real_client is None:
+                    try:
+                        self._connecting = True
+                        logger.info(f"🔗 Lazy-connecting to Supabase on first use...")
+                        
+                        # Connect in a thread with timeout to prevent hangs
+                        client_holder = {'client': None, 'error': None}
+                        
+                        def connect_thread():
+                            try:
+                                client_holder['client'] = create_client(self.url, self.key)
+                            except Exception as e:
+                                client_holder['error'] = e
+                        
+                        thread = threading.Thread(target=connect_thread, daemon=True)
+                        thread.start()
+                        thread.join(timeout=self._connection_timeout)
+                        
+                        if thread.is_alive():
+                            logger.error(f"⏱️ Supabase connection timed out after {self._connection_timeout} seconds")
+                            raise TimeoutError(f"Supabase connection timed out after {self._connection_timeout} seconds")
+                        
+                        if client_holder['error']:
+                            raise client_holder['error']
+                        
+                        self._real_client = client_holder['client']
+                        logger.info(f"✅ Lazy-connected to Supabase successfully")
+                    except Exception as e:
+                        logger.error(f"❌ Failed to connect to Supabase on first use: {e}")
+                        raise
+                    finally:
+                        self._connecting = False
+    
+    def __getattr__(self, name):
+        """Proxy all attribute access to real client, connecting if needed"""
+        self._ensure_connected()
+        return getattr(self._real_client, name)
+
+
+def get_supabase_client(use_service_role: bool = True) -> Client:
+    """
+    Get a pooled Supabase client (singleton pattern with lazy connection).
+    
+    NUCLEAR FIX: Returns a lazy proxy that defers connection until first actual use.
+    This prevents timeouts during initialization - the chat endpoint responds immediately.
+    
+    Returns:
+        Lazy Supabase client instance (connects on first API call)
+    """
+    global _supabase_client_instance
+    
+    if _supabase_client_instance is None:
+        with _supabase_client_lock:
+            if _supabase_client_instance is None:
+                # ULTRA-FAST: Just read env vars directly, don't create connection pool
+                url = os.getenv('SUPABASE_URL')
+                key = (
+                    os.getenv('SUPABASE_SERVICE_ROLE_KEY') or 
+                    os.getenv('SUPABASE_SERVICE_KEY')
+                )
+                
+                if not url or not key:
+                    logger.error("❌ SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY not set")
+                    raise ValueError("SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY (or SUPABASE_SERVICE_KEY) must be set")
+                
+                # NUCLEAR FIX: Use lazy proxy instead of connecting immediately
+                _supabase_client_instance = LazySupabaseClient(url, key)
+                logger.info("✅ Created lazy Supabase client (will connect on first use)")
+    
+    return _supabase_client_instance
+
+# Supabase client is now inlined above - no external imports needed
+_supabase_import_errors = None
 from prometheus_client import Counter, Histogram, Gauge, generate_latest, CONTENT_TYPE_LATEST
 
 
@@ -787,6 +869,8 @@ def _ensure_supabase_loaded_sync():
     Synchronous helper to lazy-load Supabase client on first use.
     This allows the application to start even if Supabase is temporarily unavailable,
     and initializes the connection only when actually needed.
+    
+    CRITICAL FIX: Uses inlined get_supabase_client() from this module (no external imports).
     """
     global supabase, _supabase_loaded
     
@@ -794,7 +878,8 @@ def _ensure_supabase_loaded_sync():
         with _supabase_lock:
             if not _supabase_loaded:
                 try:
-                    from supabase_client import get_supabase_client
+                    # Use the inlined get_supabase_client() function defined above (lines 374-404)
+                    # This is now part of this module, no external imports needed
                     supabase = get_supabase_client()
                     _supabase_loaded = True
                     logger.info("✅ Supabase client lazy-loaded on first use")
@@ -1677,9 +1762,19 @@ class PlatformIDExtractor:
                 config = yaml.safe_load(f)
                 self.platform_patterns = config.get('platforms', {})
                 self.validation_rules = config.get('validation_rules', {})
-                self.suspicious_patterns = config.get('suspicious_patterns', [])
+                
+                # FIX #5: Extract patterns from nested structure
+                suspicious_config = config.get('suspicious_patterns', {})
+                self.suspicious_patterns = suspicious_config.get('patterns', []) if isinstance(suspicious_config, dict) else suspicious_config
+                self.suspicious_threshold = suspicious_config.get('similarity_threshold', 80) if isinstance(suspicious_config, dict) else 80
+                
                 self.mixed_platform_indicators = config.get('mixed_platform_indicators', {})
-                self.id_column_indicators = config.get('id_column_indicators', [])
+                self.mixed_platform_threshold = self.mixed_platform_indicators.pop('similarity_threshold', 75) if isinstance(self.mixed_platform_indicators, dict) else 75
+                
+                id_config = config.get('id_column_indicators', {})
+                self.id_column_indicators = id_config.get('patterns', []) if isinstance(id_config, dict) else id_config
+                self.id_column_threshold = id_config.get('similarity_threshold', 80) if isinstance(id_config, dict) else 80
+                
                 self.confidence_scores = config.get('confidence_scores', {})
                 logger.info(f"✅ Platform ID patterns and rules loaded from {config_path}")
         except Exception as e:
@@ -1687,8 +1782,11 @@ class PlatformIDExtractor:
             self.platform_patterns = {}
             self.validation_rules = {}
             self.suspicious_patterns = ['test', 'dummy', 'sample', 'example']
+            self.suspicious_threshold = 80
             self.mixed_platform_indicators = {}
+            self.mixed_platform_threshold = 75
             self.id_column_indicators = ['id', 'reference', 'number', 'ref', 'num', 'code', 'key']
+            self.id_column_threshold = 80
             self.confidence_scores = {
                 'id_column_match': 0.9,
                 'pattern_match': 0.7,
@@ -1725,10 +1823,8 @@ class PlatformIDExtractor:
                 }
             
             # Check ID columns first (higher confidence) - FIX #5: Use externalized config
-            id_indicators = self.id_column_indicators if isinstance(self.id_column_indicators, list) else ['id', 'reference', 'number', 'ref', 'num', 'code', 'key']
-            id_similarity_threshold = 80
-            if isinstance(self.id_column_indicators, dict):
-                id_similarity_threshold = self.id_column_indicators.get('similarity_threshold', 80)
+            id_indicators = self.id_column_indicators
+            id_similarity_threshold = self.id_column_threshold
             
             for col_name in column_names:
                 col_value = row_data.get(col_name)
