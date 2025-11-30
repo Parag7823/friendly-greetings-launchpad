@@ -13,26 +13,23 @@ import asyncio
 import time
 import structlog
 from typing import Callable, Any, TypeVar, Coroutine, Optional, Tuple
-from aiometer import AsyncRateLimiter
 from core_infrastructure.config_manager import get_connector_config
 from core_infrastructure.centralized_cache import safe_get_cache
 
 T = TypeVar('T')
 logger = structlog.get_logger(__name__)
 
-# Singleton rate limiter instance
-_rate_limiter: AsyncRateLimiter = None
+# Singleton rate limiter instance using asyncio.Semaphore
+_rate_limiter: asyncio.Semaphore = None
 
 
-def get_rate_limiter() -> AsyncRateLimiter:
-    """Get or create singleton rate limiter."""
+def get_rate_limiter() -> asyncio.Semaphore:
+    """Get or create singleton rate limiter using asyncio.Semaphore."""
     global _rate_limiter
     if _rate_limiter is None:
         config = get_connector_config()
-        _rate_limiter = AsyncRateLimiter(
-            max_rate=config.rate_limit_per_second,
-            time_period=1
-        )
+        # Semaphore limits concurrent operations (max_rate per second)
+        _rate_limiter = asyncio.Semaphore(config.rate_limit_per_second)
     return _rate_limiter
 
 
