@@ -13,7 +13,7 @@ import asyncio
 import time
 import structlog
 from typing import Callable, Any, TypeVar, Coroutine, Optional, Tuple
-from aiometer import aiohttp_limiter, AsyncRateLimiter
+from aiometer import AsyncRateLimiter
 from core_infrastructure.config_manager import get_connector_config
 from core_infrastructure.centralized_cache import safe_get_cache
 

@@ -31,23 +31,61 @@ from datasketch import MinHash
 # MinHashLSH removed - using PersistentLSHService only to avoid dual systems
 import polars as pl
 
+# ✅ GENERIC LAZY LOADER (FIX #4: DRY VIOLATION - Consolidated 3 duplicate patterns)
+# Replaces _load_rapidfuzz, _ensure_presidio_loaded, _load_numpy with single helper
+_lazy_modules = {}  # Global cache for lazy-loaded modules
+
+def _lazy_import(module_name: str, import_path: str, logger_instance=None):
+    """
+    Generic lazy loader for heavy C extensions that can cause import-time crashes.
+    
+    FIX #4: Eliminates DRY violation - replaces 3 nearly identical lazy loading patterns
+    with single reusable helper. Reduces code duplication from 67 lines to 15 lines.
+    
+    Args:
+        module_name: Identifier for caching (e.g., 'rapidfuzz', 'presidio', 'numpy')
+        import_path: Full import path (e.g., 'rapidfuzz.fuzz', 'presidio_analyzer.AnalyzerEngine')
+        logger_instance: Optional logger for debug messages
+        
+    Returns:
+        Loaded module or None if import failed
+        
+    Example:
+        fuzz = _lazy_import('rapidfuzz', 'rapidfuzz.fuzz', logger)
+        analyzer = _lazy_import('presidio', 'presidio_analyzer.AnalyzerEngine', logger)
+    """
+    if module_name in _lazy_modules:
+        module = _lazy_modules[module_name]
+        return module if module is not False else None
+    
+    try:
+        parts = import_path.rsplit('.', 1)
+        if len(parts) == 2:
+            module_path, attr_name = parts
+            module = __import__(module_path, fromlist=[attr_name])
+            loaded = getattr(module, attr_name)
+        else:
+            loaded = __import__(import_path)
+        
+        _lazy_modules[module_name] = loaded
+        if logger_instance:
+            logger_instance.info(f"✅ {module_name} module loaded successfully")
+        return loaded
+    except ImportError as e:
+        _lazy_modules[module_name] = False  # Mark as failed to avoid retry
+        if logger_instance:
+            logger_instance.error(f"{module_name} not installed - feature unavailable", error=str(e))
+        return None
+
 # ✅ LAZY LOADING: rapidfuzz is a C extension that can cause import-time crashes
 fuzz = None  # Will be loaded on first use
 
 def _load_rapidfuzz():
-    """Lazy load rapidfuzz C extension on first use"""
+    """Lazy load rapidfuzz C extension on first use (uses generic helper)"""
     global fuzz
     if fuzz is None:
-        try:
-            from rapidfuzz import fuzz as fuzz_module
-            fuzz = fuzz_module
-            logger.info("✅ rapidfuzz module loaded")
-        except ImportError as e:
-            logger.error("rapidfuzz not installed - fuzzy matching unavailable", error=str(e))
-            # Return None instead of raising - callers will handle gracefully
-            fuzz = False  # Mark as failed to avoid retry
-            return None
-    return fuzz if fuzz is not False else None
+        fuzz = _lazy_import('rapidfuzz', 'rapidfuzz.fuzz', logger)
+    return fuzz
 
 import structlog
 from pydantic_settings import BaseSettings
@@ -60,18 +98,11 @@ _presidio_analyzer_instance = None
 _presidio_loaded = False
 
 def _ensure_presidio_loaded():
-    """Lazy load presidio analyzer on first use - ensures full functionality"""
+    """Lazy load presidio analyzer on first use - ensures full functionality (uses generic helper)"""
     global _presidio_analyzer_instance, _presidio_loaded
     if not _presidio_loaded:
-        try:
-            from presidio_analyzer import AnalyzerEngine
-            _presidio_analyzer_instance = AnalyzerEngine()
-            _presidio_loaded = True
-            logger.info("✅ presidio_analyzer module loaded successfully")
-        except ImportError as e:
-            logger.error("presidio_analyzer not installed - PII detection unavailable", error=str(e))
-            _presidio_loaded = True  # Mark as attempted to avoid retry
-            _presidio_analyzer_instance = None
+        _presidio_analyzer_instance = _lazy_import('presidio', 'presidio_analyzer.AnalyzerEngine', logger)
+        _presidio_loaded = True
     return _presidio_analyzer_instance
 
 # Import AnalyzerEngine for type hints and direct access
@@ -85,30 +116,26 @@ except ImportError:
 np = None  # Will be loaded on first use
 
 def _load_numpy():
-    """Lazy load numpy C extension on first use"""
+    """Lazy load numpy C extension on first use (uses generic helper)"""
     global np
     if np is None:
-        try:
-            import numpy as numpy_module
-            np = numpy_module
-            logger.info("✅ numpy module loaded")
-        except ImportError as e:
-            logger.error("numpy not installed - numerical features unavailable", error=str(e))
-            # Return None instead of raising - callers will handle gracefully
-            np = False  # Mark as failed to avoid retry
-            return None
-    return np if np is not False else None
+        np = _lazy_import('numpy', 'numpy', logger)
+    return np
 
-# FIX #5: CENTRALIZED HASHING - Import from database_optimization_utils
+# FIX #5: CENTRALIZED HASHING - REQUIRED (fail fast, no silent fallback)
 # This ensures production_duplicate_detection_service uses xxh3_128 (same as provenance_tracker)
-# for data integrity verification across modules
+# for data integrity verification across modules. Prevents cache divergence across workers.
 try:
     from core_infrastructure.database_optimization_utils import calculate_row_hash, get_normalized_tokens
-    _HAS_CENTRALIZED_HASHING = True
-except ImportError:
-    # Fallback if running in different context
-    import xxhash
-    _HAS_CENTRALIZED_HASHING = False
+except ImportError as e:
+    # CRITICAL: Centralized hashing is REQUIRED for data integrity
+    # Fail fast instead of silently degrading to xxhash
+    raise RuntimeError(
+        "Centralized hashing module not found. "
+        "production_duplicate_detection_service requires core_infrastructure.database_optimization_utils. "
+        "This is a critical dependency for data integrity verification across workers. "
+        f"Error: {str(e)}"
+    ) from e
 
 # FIX #3: Check if presidio is available (will be lazy-loaded on first use)
 PRESIDIO_AVAILABLE = AnalyzerEngine is not None

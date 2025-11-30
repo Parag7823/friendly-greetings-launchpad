@@ -30,6 +30,7 @@ import ahocorasick
 import structlog
 import numpy as np
 from sklearn.metrics.pairwise import cosine_similarity
+from sklearn.feature_extraction.text import TfidfVectorizer
 from pydantic import BaseModel, Field, validator
 from pydantic_settings import BaseSettings
 from aiocache import cached, Cache

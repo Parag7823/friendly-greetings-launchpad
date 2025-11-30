@@ -6,7 +6,7 @@ This keeps process startup simple so Railway can run:
 
 from arq import run_worker
 
-from arq_worker import WorkerSettings
+from background_jobs.arq_worker import WorkerSettings
 
 
 if __name__ == "__main__":

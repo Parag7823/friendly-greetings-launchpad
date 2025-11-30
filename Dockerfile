@@ -84,9 +84,6 @@ RUN find /app -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
 # Copy startup validator (runs before main app to catch errors early)
 COPY startup_validator.py .
 
-# Copy worker entry point for ARQ
-COPY background_jobs/worker_entry.py .
-
 # Copy entire directory structures to preserve module paths
 COPY core_infrastructure/ ./core_infrastructure/
 COPY data_ingestion_normalization/ ./data_ingestion_normalization/
