@@ -90,3 +90,208 @@ platforms:
     invoice_id: "INV-{year:4d}-{number:6d}"
     contact_id: "{part1:8w}-{part2:4w}-{part3:4w}"
     bank_transaction_id: "BT-{id:8d}"
+
+# ============================================================================
+# VALIDATION RULES (Externalized from code - FIX #5)
+# ============================================================================
+# Platform-specific ID format validation rules
+# Replaces 200+ lines of custom validation code with declarative YAML
+
+validation_rules:
+  # QuickBooks ID format validation
+  quickbooks:
+    transaction_id:
+      regex: "^(?:TXN-?|INV-?|VEN-?|CUST-?|BILL-?|PAY-?|ACC-?|CLASS-?|ITEM-?|JE-?)?\\d{1,8}$"
+      flags: "IGNORECASE"
+      min_length: 1
+      max_length: 50
+    invoice_id:
+      regex: "^(?:INV-?)?\\d{1,8}$"
+      flags: "IGNORECASE"
+      min_length: 1
+      max_length: 50
+    vendor_id:
+      regex: "^(?:VEN-?)?\\d{1,8}$"
+      flags: "IGNORECASE"
+      min_length: 1
+      max_length: 50
+    customer_id:
+      regex: "^(?:CUST-?)?\\d{1,8}$"
+      flags: "IGNORECASE"
+      min_length: 1
+      max_length: 50
+    bill_id:
+      regex: "^(?:BILL-?)?\\d{1,8}$"
+      flags: "IGNORECASE"
+      min_length: 1
+      max_length: 50
+    payment_id:
+      regex: "^(?:PAY-?)?\\d{1,8}$"
+      flags: "IGNORECASE"
+      min_length: 1
+      max_length: 50
+    account_id:
+      regex: "^(?:ACC-?)?\\d{1,8}$"
+      flags: "IGNORECASE"
+      min_length: 1
+      max_length: 50
+    class_id:
+      regex: "^(?:CLASS-?)?\\d{1,8}$"
+      flags: "IGNORECASE"
+      min_length: 1
+      max_length: 50
+    item_id:
+      regex: "^(?:ITEM-?)?\\d{1,8}$"
+      flags: "IGNORECASE"
+      min_length: 1
+      max_length: 50
+    journal_entry_id:
+      regex: "^(?:JE-?)?\\d{1,8}$"
+      flags: "IGNORECASE"
+      min_length: 1
+      max_length: 50
+
+  # Stripe ID format validation
+  stripe:
+    charge_id:
+      regex: "^ch_[a-zA-Z0-9]{14,24}$"
+      min_length: 17
+      max_length: 27
+    payment_intent:
+      regex: "^pi_[a-zA-Z0-9]{14,24}$"
+      min_length: 17
+      max_length: 27
+    customer_id:
+      regex: "^cus_[a-zA-Z0-9]{14,24}$"
+      min_length: 18
+      max_length: 28
+    invoice_id:
+      regex: "^in_[a-zA-Z0-9]{14,24}$"
+      min_length: 17
+      max_length: 27
+
+  # Razorpay ID format validation
+  razorpay:
+    payment_id:
+      regex: "^pay_[a-zA-Z0-9]{14,}$"
+      min_length: 18
+      max_length: 50
+    order_id:
+      regex: "^order_[a-zA-Z0-9]{14,}$"
+      min_length: 20
+      max_length: 50
+    refund_id:
+      regex: "^rfnd_[a-zA-Z0-9]{14,}$"
+      min_length: 19
+      max_length: 50
+    settlement_id:
+      regex: "^setl_[a-zA-Z0-9]{14,}$"
+      min_length: 19
+      max_length: 50
+
+  # Xero ID format validation
+  xero:
+    invoice_id:
+      regex: "^INV-\\d{4}-\\d{6}$"
+      min_length: 14
+      max_length: 14
+    contact_id:
+      regex: "^[a-zA-Z0-9]{8}-[a-zA-Z0-9]{4}-[a-zA-Z0-9]{4}$"
+      min_length: 19
+      max_length: 19
+    bank_transaction_id:
+      regex: "^BT-\\d{8}$"
+      min_length: 11
+      max_length: 11
+
+  # Gusto ID format validation
+  gusto:
+    employee_id:
+      regex: "^emp_[a-zA-Z0-9]{8,}$"
+      min_length: 12
+      max_length: 50
+    payroll_id:
+      regex: "^pay_[a-zA-Z0-9]{8,}$"
+      min_length: 12
+      max_length: 50
+    timesheet_id:
+      regex: "^ts_[a-zA-Z0-9]{8,}$"
+      min_length: 11
+      max_length: 50
+
+# ============================================================================
+# SUSPICIOUS PATTERNS (Externalized from code - FIX #5)
+# ============================================================================
+# Patterns that indicate test/dummy data (not production IDs)
+suspicious_patterns:
+  - "test"
+  - "dummy"
+  - "sample"
+  - "example"
+  - "demo"
+  - "staging"
+  - "dev"
+  - "sandbox"
+  - "mock"
+  - "fake"
+  similarity_threshold: 80  # Fuzzy match threshold
+
+# ============================================================================
+# MIXED PLATFORM DETECTION (Externalized from code - FIX #5)
+# ============================================================================
+# Platforms that might be mixed in ID values (indicates data quality issue)
+mixed_platform_indicators:
+  quickbooks:
+    - "stripe"
+    - "paypal"
+    - "square"
+    - "razorpay"
+    - "xero"
+  stripe:
+    - "quickbooks"
+    - "paypal"
+    - "razorpay"
+  razorpay:
+    - "stripe"
+    - "quickbooks"
+    - "paypal"
+  xero:
+    - "quickbooks"
+    - "stripe"
+  gusto:
+    - "quickbooks"
+    - "stripe"
+  similarity_threshold: 75  # Fuzzy match threshold
+
+# ============================================================================
+# ID COLUMN INDICATORS (Externalized from code - FIX #5)
+# ============================================================================
+# Column name patterns that indicate ID fields (higher confidence extraction)
+id_column_indicators:
+  - "id"
+  - "reference"
+  - "number"
+  - "ref"
+  - "num"
+  - "code"
+  - "key"
+  - "identifier"
+  - "transaction_id"
+  - "order_id"
+  - "invoice_id"
+  - "payment_id"
+  - "customer_id"
+  - "vendor_id"
+  similarity_threshold: 80  # Fuzzy match threshold
+
+# ============================================================================
+# CONFIDENCE SCORING (Externalized from code - FIX #5)
+# ============================================================================
+# Confidence scores for different extraction scenarios
+confidence_scores:
+  id_column_match: 0.9      # Found in column with ID-like name
+  pattern_match: 0.7        # Pattern matched in regular column
+  full_text_search: 0.6     # Found via full text search
+  generated_fallback: 0.1   # Generated deterministic ID
+  suspicious_pattern: 0.5   # Contains test/dummy indicators
+  mixed_platform: 0.3       # Contains mixed platform indicators

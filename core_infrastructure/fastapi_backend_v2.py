@@ -1617,20 +1617,37 @@ class PlatformIDExtractor:
     """
     
     def __init__(self):
-        """Initialize with patterns from config file"""
+        """Initialize with patterns and rules from config file"""
         import yaml
         import os
         
-        # Load patterns from YAML config
+        # Load all configuration from YAML
         config_path = os.path.join(os.path.dirname(__file__), '..', 'config', 'platform_id_patterns.yaml')
         try:
             with open(config_path, 'r') as f:
                 config = yaml.safe_load(f)
                 self.platform_patterns = config.get('platforms', {})
-                logger.info(f"✅ Platform ID patterns loaded from {config_path}")
+                self.validation_rules = config.get('validation_rules', {})
+                self.suspicious_patterns = config.get('suspicious_patterns', [])
+                self.mixed_platform_indicators = config.get('mixed_platform_indicators', {})
+                self.id_column_indicators = config.get('id_column_indicators', [])
+                self.confidence_scores = config.get('confidence_scores', {})
+                logger.info(f"✅ Platform ID patterns and rules loaded from {config_path}")
         except Exception as e:
-            logger.warning(f"⚠️ Failed to load platform patterns from config: {e}. Using empty patterns.")
+            logger.warning(f"⚠️ Failed to load platform patterns from config: {e}. Using defaults.")
             self.platform_patterns = {}
+            self.validation_rules = {}
+            self.suspicious_patterns = ['test', 'dummy', 'sample', 'example']
+            self.mixed_platform_indicators = {}
+            self.id_column_indicators = ['id', 'reference', 'number', 'ref', 'num', 'code', 'key']
+            self.confidence_scores = {
+                'id_column_match': 0.9,
+                'pattern_match': 0.7,
+                'full_text_search': 0.6,
+                'generated_fallback': 0.1,
+                'suspicious_pattern': 0.5,
+                'mixed_platform': 0.3
+            }
     
     async def extract_platform_ids(self, row_data: Dict, platform: str, column_names: List[str]) -> Dict[str, Any]:
         """
@@ -1658,8 +1675,11 @@ class PlatformIDExtractor:
                     "warnings": ["No patterns defined for platform"]
                 }
             
-            # Check ID columns first (higher confidence)
-            id_indicators = ['id', 'reference', 'number', 'ref', 'num', 'code', 'key']
+            # Check ID columns first (higher confidence) - FIX #5: Use externalized config
+            id_indicators = self.id_column_indicators if isinstance(self.id_column_indicators, list) else ['id', 'reference', 'number', 'ref', 'num', 'code', 'key']
+            id_similarity_threshold = 80
+            if isinstance(self.id_column_indicators, dict):
+                id_similarity_threshold = self.id_column_indicators.get('similarity_threshold', 80)
             
             for col_name in column_names:
                 col_value = row_data.get(col_name)
@@ -1670,8 +1690,8 @@ class PlatformIDExtractor:
                 if not col_value_str:
                     continue
                 
-                # Check if this looks like an ID column
-                is_id_column = any(fuzz.token_sort_ratio(col_name.lower(), indicator) > 80 for indicator in id_indicators)
+                # Check if this looks like an ID column - FIX #5: Use externalized threshold
+                is_id_column = any(fuzz.token_sort_ratio(col_name.lower(), indicator) > id_similarity_threshold for indicator in id_indicators)
                 
                 # Try to parse with each pattern
                 for id_type, pattern_list in patterns.items():
