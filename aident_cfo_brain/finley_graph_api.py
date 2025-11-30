@@ -18,7 +18,18 @@ try:
 except ImportError:
     from finley_graph_engine import FinleyGraphEngine, PathResult, GraphStats
 
-from core_infrastructure.supabase_client import get_supabase_client
+# Import inlined get_supabase_client from fastapi_backend_v2
+try:
+    from core_infrastructure.fastapi_backend_v2 import get_supabase_client
+except ImportError:
+    # Fallback for different deployment layouts
+    try:
+        from fastapi_backend_v2 import get_supabase_client
+    except ImportError as e:
+        raise ImportError(
+            "Cannot import get_supabase_client. Ensure fastapi_backend_v2.py is available. "
+            f"Error: {e}"
+        )
 
 logger = structlog.get_logger(__name__)
 

@@ -26,11 +26,11 @@ from core_infrastructure.fastapi_backend_v2 import (
 
 # FIX #6: Supabase client initialization with graceful degradation
 try:
-    from supabase_client import get_supabase_client
+    from core_infrastructure.fastapi_backend_v2 import get_supabase_client
     supabase = get_supabase_client()
-    logger.info("✅ ARQ worker using centralized Supabase client with connection pooling")
+    logger.info("✅ ARQ worker using inlined Supabase client from fastapi_backend_v2")
 except ImportError as e:
-    logger.error("supabase_client.py not found", error=str(e))
+    logger.error("Cannot import get_supabase_client from fastapi_backend_v2", error=str(e))
     supabase = None
 except Exception as e:
     logger.error("Failed to initialize Supabase client", error=str(e))

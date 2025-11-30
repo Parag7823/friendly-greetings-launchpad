@@ -90,7 +90,6 @@ def check_critical_files() -> bool:
     # In Docker, files are copied to subdirectories (see Dockerfile COPY commands)
     critical_files = [
         "core_infrastructure/fastapi_backend_v2.py",
-        "core_infrastructure/supabase_client.py",
         "core_infrastructure/config_manager.py",
         "core_infrastructure/rate_limiter.py",
         "core_infrastructure/database_optimization_utils.py",

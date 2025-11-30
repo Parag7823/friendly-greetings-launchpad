@@ -57,20 +57,19 @@ def _load_datasketch():
             raise ImportError("datasketch is required. Install with: pip install datasketch")
     return datasketch_minhash
 
-# FIX #7: Strict dependency on centralized supabase_client.py
-# Fail hard in production if supabase_client module is missing
+# FIX #7: Use inlined get_supabase_client from fastapi_backend_v2
+# The supabase_client.py file has been merged into fastapi_backend_v2.py
 try:
-    from core_infrastructure.supabase_client import get_supabase_client  # type: ignore
+    from core_infrastructure.fastapi_backend_v2 import get_supabase_client
     _HAS_SUPABASE_HELPER = True
     logger_temp = structlog.get_logger(__name__)
-    logger_temp.info("✅ database_optimization_utils using centralized Supabase client")
+    logger_temp.info("✅ database_optimization_utils using inlined Supabase client from fastapi_backend_v2")
 except ImportError as e:
     logger_temp = structlog.get_logger(__name__)
-    logger_temp.critical(f"❌ FATAL: supabase_client.py not found. database_optimization_utils cannot initialize: {e}")
+    logger_temp.critical(f"❌ FATAL: Cannot import get_supabase_client from fastapi_backend_v2: {e}")
     raise RuntimeError(
-        "database_optimization_utils requires supabase_client module for connection pooling. "
-        "Ensure supabase_client.py is in core_infrastructure/ and SUPABASE_URL, "
-        "SUPABASE_SERVICE_ROLE_KEY environment variables are set."
+        "database_optimization_utils requires get_supabase_client from fastapi_backend_v2. "
+        "Ensure fastapi_backend_v2.py is available and the inlined get_supabase_client function exists."
     ) from e
 
 import asyncio
@@ -290,18 +289,18 @@ def estimate_jaccard_similarity(minhash_hex1: str, minhash_hex2: str) -> float:
 
 
 if not _HAS_SUPABASE_HELPER:
-    # PRODUCTION FIX #4: Enforce supabase_client.py in production
+    # PRODUCTION FIX #4: Enforce inlined get_supabase_client in production
     # Fallback is for development only - production MUST use pooled client
     import os as _os_check
     environment = _os_check.getenv('ENVIRONMENT', 'development').lower()
     
     if environment == 'production':
         raise RuntimeError(
-            "🚨 CRITICAL: supabase_client.py module not found in PRODUCTION environment.\n"
-            "Production deployments MUST use the pooled Supabase client from supabase_client.py\n"
+            "🚨 CRITICAL: get_supabase_client not found in PRODUCTION environment.\n"
+            "Production deployments MUST use the inlined Supabase client from fastapi_backend_v2.py\n"
             "to ensure connection pooling and prevent connection exhaustion.\n"
             "Fallback un-pooled clients are for development only.\n"
-            "Action: Ensure supabase_client.py is deployed with the application."
+            "Action: Ensure fastapi_backend_v2.py is deployed with the inlined get_supabase_client function."
         )
     
     # Development fallback (with warning)
@@ -312,7 +311,7 @@ if not _HAS_SUPABASE_HELPER:
         Fallback Supabase client creator (DEVELOPMENT ONLY).
         
         WARNING: This creates un-pooled clients. Each worker gets its own connection.
-        For production, use supabase_client.py which provides proper connection pooling.
+        For production, use the inlined get_supabase_client from fastapi_backend_v2.py.
         """
         client = _FALLBACK_SUPABASE_CLIENTS[use_service_role]
         if client is not None:
@@ -330,7 +329,7 @@ if not _HAS_SUPABASE_HELPER:
 
         logger.warning(
             "⚠️ DEVELOPMENT MODE: Using un-pooled Supabase client fallback. "
-            "This is NOT suitable for production. Deploy supabase_client.py for connection pooling."
+            "This is NOT suitable for production. Deploy fastapi_backend_v2.py with inlined get_supabase_client for connection pooling."
         )
 
         client = create_client(supabase_url, key)
