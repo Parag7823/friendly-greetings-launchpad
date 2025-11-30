@@ -522,7 +522,7 @@ if _supabase_import_errors:
     logger.error(
         "supabase_client_import_failed",
         errors=_supabase_import_errors,
-        hint="Ensure supabase_client.py exists in core_infrastructure/ and SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY env vars are set"
+        hint="Supabase client is now inlined in fastapi_backend_v2.py - ensure SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY env vars are set"
     )
 elif get_supabase_client:
     logger.info("✅ supabase_client imported successfully")
