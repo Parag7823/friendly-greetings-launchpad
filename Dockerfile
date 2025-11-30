@@ -72,7 +72,11 @@ RUN echo "Installing pandas with Python $(python --version)" && \
     echo "Pandas installation completed successfully"
 
 # Install remaining dependencies (torch/torchvision already installed above)
-RUN pip install --no-cache-dir -r backend-requirements.txt
+# CRITICAL: Install glom separately first to ensure it's installed
+RUN pip install --no-cache-dir glom==23.5.0 && echo "✅ glom installed successfully"
+
+# Then install all remaining dependencies
+RUN pip install --no-cache-dir -r backend-requirements.txt && echo "✅ All dependencies installed successfully"
 
 # CRITICAL FIX: Force cache invalidation for Python file copies
 ARG CACHEBUST=20251107-v22-SECURITY-INTEGRATION-FIXES

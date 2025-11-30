@@ -224,16 +224,17 @@ validation_rules:
 # ============================================================================
 # Patterns that indicate test/dummy data (not production IDs)
 suspicious_patterns:
-  - "test"
-  - "dummy"
-  - "sample"
-  - "example"
-  - "demo"
-  - "staging"
-  - "dev"
-  - "sandbox"
-  - "mock"
-  - "fake"
+  patterns:
+    - "test"
+    - "dummy"
+    - "sample"
+    - "example"
+    - "demo"
+    - "staging"
+    - "dev"
+    - "sandbox"
+    - "mock"
+    - "fake"
   similarity_threshold: 80  # Fuzzy match threshold
 
 # ============================================================================

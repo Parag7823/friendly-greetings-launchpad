@@ -304,16 +304,16 @@ class DocumentClassificationRequest(BaseModel):
 get_supabase_client = None
 import_errors = []
 
-# Try 1: Relative import (local development)
+# Try 1: Package import (container with proper Python path) - TRY FIRST
 try:
-    from .supabase_client import get_supabase_client  # type: ignore
+    from core_infrastructure.supabase_client import get_supabase_client  # type: ignore
 except ImportError as e1:
-    import_errors.append(f"Relative import failed: {e1}")
-    # Try 2: Package import (container with proper Python path)
+    import_errors.append(f"Package import failed: {e1}")
+    # Try 2: Relative import (local development)
     try:
-        from core_infrastructure.supabase_client import get_supabase_client  # type: ignore
+        from .supabase_client import get_supabase_client  # type: ignore
     except ImportError as e2:
-        import_errors.append(f"Package import failed: {e2}")
+        import_errors.append(f"Relative import failed: {e2}")
         # Try 3: Absolute import (flat layout in container)
         try:
             from supabase_client import get_supabase_client  # type: ignore
