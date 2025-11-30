@@ -11,7 +11,7 @@ from typing import Optional
 class NangoConfig(BaseSettings):
     """Nango OAuth connector configuration."""
     base_url: str = "https://api.nango.dev"
-    secret_key: str
+    secret_key: str = ""  # Optional - will be set via NANGO_SECRET_KEY env var or default to empty
     
     # Integration IDs
     gmail_integration_id: str = "google-mail"
