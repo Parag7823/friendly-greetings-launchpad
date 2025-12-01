@@ -4629,15 +4629,22 @@ class AIRowClassifier:
         try:
             # LIBRARY REPLACEMENT: Use spaCy for NER (already in requirements)
             import spacy
+            from aident_cfo_brain.intent_and_guard_engine import _model_cache, _model_lock
             
-            # Load spaCy model (cached after first load)
-            try:
-                nlp = spacy.load("en_core_web_sm")
-            except OSError:
-                logger.error("spaCy model 'en_core_web_sm' not found. Run: python -m spacy download en_core_web_sm")
-                # FIX #53: CRITICAL - Don't fallback to regex (causes false positives like "New York" as person)
-                # If major NLP functionality fails, platform should report error clearly
-                raise ValueError("spaCy NER model required for entity extraction. Install with: python -m spacy download en_core_web_sm")
+            # Load spaCy model from global cache (prevents re-downloading on every call)
+            with _model_lock:
+                if 'spacy_nlp' not in _model_cache:
+                    try:
+                        _model_cache['spacy_nlp'] = spacy.load("en_core_web_sm")
+                        logger.info("✅ spaCy model loaded and cached for entity extraction")
+                    except OSError:
+                        logger.error("spaCy model 'en_core_web_sm' not found. Run: python -m spacy download en_core_web_sm")
+                        raise ValueError("spaCy NER model required for entity extraction. Install with: python -m spacy download en_core_web_sm")
+                
+                nlp = _model_cache['spacy_nlp']
+            
+            if nlp is None:
+                raise ValueError("spaCy model failed to load")
             
             # Process text with spaCy
             doc = nlp(text)
