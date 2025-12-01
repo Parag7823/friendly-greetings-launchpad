@@ -1,6 +1,5 @@
 import { useState, useRef } from 'react';
 import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
-import { GripVertical } from 'lucide-react';
 import { ChatInterface } from './ChatInterface';
 import { TabbedFilePreview } from './TabbedFilePreview';
 import { DataSourcesPanel } from './DataSourcesPanel';
@@ -60,12 +59,8 @@ export const ThreePanelLayout = ({ currentView = 'chat', onNavigate }: ThreePane
           <ChatInterface currentView={currentView} onNavigate={onNavigate} />
         </Panel>
 
-        {/* Resize Handle */}
-        <PanelResizeHandle className="w-0.5 bg-border hover:bg-primary transition-colors relative group">
-          <div className="absolute inset-y-0 left-1/2 -translate-x-1/2 w-3 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-            <GripVertical className="w-3 h-3 text-muted-foreground" />
-          </div>
-        </PanelResizeHandle>
+        {/* Resize Handle - Single copper line */}
+        <PanelResizeHandle className="w-0.5 bg-primary/60 hover:bg-primary transition-colors" />
 
         {/* File Preview Panel - 50% default (wider now) */}
         <Panel defaultSize={50} minSize={30} className="relative p-2">
@@ -81,12 +76,8 @@ export const ThreePanelLayout = ({ currentView = 'chat', onNavigate }: ThreePane
           </div>
         </Panel>
 
-        {/* Resize Handle */}
-        <PanelResizeHandle className="w-0.5 bg-border hover:bg-primary transition-colors relative group">
-          <div className="absolute inset-y-0 left-1/2 -translate-x-1/2 w-3 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-            <GripVertical className="w-3 h-3 text-muted-foreground" />
-          </div>
-        </PanelResizeHandle>
+        {/* Resize Handle - Single copper line */}
+        <PanelResizeHandle className="w-0.5 bg-primary/60 hover:bg-primary transition-colors" />
 
         {/* Data Sources Panel - Hidden by default, collapsible (AUDIT FIX #2) */}
         <Panel
