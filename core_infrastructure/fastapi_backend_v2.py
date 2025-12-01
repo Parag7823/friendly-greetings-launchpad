@@ -8632,12 +8632,6 @@ async def get_chat_history(user_id: str):
             "status": "success"
         }
     except HTTPException:
-
-@app.put("/chat/rename")
-async def rename_chat(request: dict):
-    """Rename chat - DEPRECATED, use PUT /chat/{chat_id}/title instead"""
-    try:
-        chat_id = request.get('chat_id')
         new_title = request.get('title')
         user_id = request.get('user_id')
         
