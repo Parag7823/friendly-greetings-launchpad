@@ -18,6 +18,7 @@ import logging
 from enum import Enum
 from typing import Optional, Dict, Any, List, Tuple
 from dataclasses import dataclass
+import threading
 
 import spacy
 from sentence_transformers import SentenceTransformer
@@ -25,6 +26,10 @@ from sklearn.metrics.pairwise import cosine_similarity
 from groq import AsyncGroq
 
 logger = logging.getLogger(__name__)
+
+# CRITICAL: Global model cache to prevent re-downloading on every orchestrator init
+_model_cache = {}
+_model_lock = threading.Lock()
 
 
 class UserIntent(Enum):
@@ -67,18 +72,27 @@ class IntentClassifier:
     """
     
     def __init__(self):
-        """Initialize classifier with spaCy model and embeddings"""
-        try:
-            # Load spaCy model
-            self.nlp = spacy.load("en_core_web_sm")
-            logger.info("✅ spaCy model loaded for intent classification")
-        except OSError:
-            logger.error("spaCy model not found. Install with: python -m spacy download en_core_web_sm")
-            self.nlp = None
+        """Initialize classifier with spaCy model and embeddings (cached)"""
+        global _model_cache
         
-        # Load sentence-transformers for semantic fallback
-        self.embedder = SentenceTransformer('all-MiniLM-L6-v2')
-        logger.info("✅ SentenceTransformer loaded for semantic intent matching")
+        with _model_lock:
+            # Load spaCy model from cache or disk (only once)
+            if 'spacy_nlp' not in _model_cache:
+                try:
+                    _model_cache['spacy_nlp'] = spacy.load("en_core_web_sm")
+                    logger.info("✅ spaCy model loaded and cached for intent classification")
+                except OSError:
+                    logger.error("spaCy model not found. Install with: python -m spacy download en_core_web_sm")
+                    _model_cache['spacy_nlp'] = None
+            
+            self.nlp = _model_cache['spacy_nlp']
+            
+            # Load sentence-transformers from cache or disk (only once)
+            if 'sentence_transformer' not in _model_cache:
+                _model_cache['sentence_transformer'] = SentenceTransformer('all-MiniLM-L6-v2')
+                logger.info("✅ SentenceTransformer loaded and cached for semantic intent matching")
+            
+            self.embedder = _model_cache['sentence_transformer']
         
         # Intent templates for semantic matching
         self.intent_templates = {
@@ -269,10 +283,19 @@ class OutputGuard:
     """
     
     def __init__(self):
-        """Initialize guard with embedder"""
-        self.embedder = SentenceTransformer('all-MiniLM-L6-v2')
+        """Initialize guard with cached embedder"""
+        global _model_cache
+        
+        with _model_lock:
+            # Reuse cached sentence-transformer (loaded by IntentClassifier or at startup)
+            if 'sentence_transformer' not in _model_cache:
+                _model_cache['sentence_transformer'] = SentenceTransformer('all-MiniLM-L6-v2')
+                logger.info("✅ SentenceTransformer loaded and cached for OutputGuard")
+            
+            self.embedder = _model_cache['sentence_transformer']
+        
         self.similarity_threshold = 0.85  # 85% similarity = repetition
-        logger.info("✅ OutputGuard initialized")
+        logger.info("✅ OutputGuard initialized (using cached embedder)")
     
     async def check_and_fix(
         self,
@@ -317,9 +340,7 @@ class OutputGuard:
             
             # Response is repetitive - generate variation
             logger.warning(
-                "Repetitive response detected",
-                similarity_score=similarity_score,
-                frustration_level=frustration_level
+                f"Repetitive response detected (similarity: {similarity_score:.2f}, frustration: {frustration_level})"
             )
             
             varied_response = await self._generate_variation(
