@@ -52,7 +52,10 @@ class ConnectorConfig(BaseSettings):
     rate_limit_burst: int = 20
     
     # CRITICAL FIX #1: Global rate limiting across all users
-    global_max_syncs_per_minute: int = 5  # Max syncs per minute per provider (across ALL users)
+    # UPDATED (Dec 1, 2025): Increased from 5 to 20 to support 50 concurrent users
+    # Math: 50 users × 100 queries/sync = 5000 concurrent queries
+    # With 20 syncs/min: All 50 users can start within 2.5 minutes (vs 10 minutes at 5/min)
+    global_max_syncs_per_minute: int = 20  # Max syncs per minute per provider (across ALL users)
     global_max_queued_syncs_per_provider: int = 100  # Max queued syncs per provider
     global_max_queued_syncs_per_user: int = 10  # Max queued syncs per user
     sync_lock_expiry_seconds: int = 1800  # 30 minutes - auto-cleanup for stuck locks

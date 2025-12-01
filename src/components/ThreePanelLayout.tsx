@@ -68,15 +68,17 @@ export const ThreePanelLayout = ({ currentView = 'chat', onNavigate }: ThreePane
         </PanelResizeHandle>
 
         {/* File Preview Panel - 45% default */}
-        <Panel defaultSize={45} minSize={30} className="relative rounded-lg overflow-hidden mx-2">
-          <TabbedFilePreview
-            openFiles={openFiles}
-            activeFileId={activeFileId}
-            onFileSelect={setActiveFileId}
-            onFileClose={handleFileClose}
-            onToggleDataSources={toggleRightPanel}
-            isDataSourcesCollapsed={isPanelCollapsed}
-          />
+        <Panel defaultSize={45} minSize={30} className="relative">
+          <div className="h-full w-full rounded-lg overflow-hidden" style={{ borderRadius: '0.5rem' }}>
+            <TabbedFilePreview
+              openFiles={openFiles}
+              activeFileId={activeFileId}
+              onFileSelect={setActiveFileId}
+              onFileClose={handleFileClose}
+              onToggleDataSources={toggleRightPanel}
+              isDataSourcesCollapsed={isPanelCollapsed}
+            />
+          </div>
         </Panel>
 
         {/* Resize Handle */}
