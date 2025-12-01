@@ -42,16 +42,17 @@ export const ChatInputMicroInteractions: React.FC<ChatInputMicroInteractionsProp
   };
 
   return (
-    <div className="w-full">
-      {/* Chat Input Container - Simplified */}
-      <div
-        className={`
-          relative border-t border-border transition-all duration-300
-          ${isLoading ? 'opacity-60 pointer-events-none' : ''}
-        `}
-      >
-        {/* Input Area */}
-        <div className="relative flex items-end gap-4 p-4">
+    <div
+      className={`
+        w-full relative flex items-end gap-3 p-3 border border-border rounded-lg
+        bg-transparent transition-all duration-300
+        ${isFocused || isTyping
+          ? 'border-slate-600/80'
+          : 'border-slate-700/50'
+        }
+        ${isLoading ? 'opacity-60 pointer-events-none' : ''}
+      `}
+    >
           {/* File Upload Button */}
           <button
             onClick={onFileClick}
@@ -95,8 +96,6 @@ export const ChatInputMicroInteractions: React.FC<ChatInputMicroInteractionsProp
           >
             <Send className="w-4 h-4" />
           </button>
-        </div>
-      </div>
     </div>
   );
 };

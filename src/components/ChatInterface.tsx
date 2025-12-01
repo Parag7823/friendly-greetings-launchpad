@@ -341,6 +341,7 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate, isEmbedded, ch
     setMessages([]);
     const newChatId = `chat_${Date.now()}`;
     setCurrentChatId(newChatId);
+    setCurrentChatTitle('New Chat');
     setSearchParams({ chat_id: newChatId });
     setIsNewChat(true);
   };
@@ -443,9 +444,12 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate, isEmbedded, ch
 
             if (titleResponse.ok) {
               const titleData = await titleResponse.json();
-              chatId = titleData.chat_id;
+              console.log('📥 Title response:', titleData);
+              chatId = titleData.chat_id || `chat_${Date.now()}`;
               const generatedTitle = titleData.title || 'New Chat';
               
+              console.log('🎯 Setting title to:', generatedTitle);
+              setCurrentChatTitle(generatedTitle);
               setCurrentChatId(chatId);
               setIsNewChat(false);
 
@@ -462,17 +466,15 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate, isEmbedded, ch
                 detail: eventDetail
               }));
 
-              // Update local state
-              setCurrentChatTitle(generatedTitle);
-
-              // Dispatch title update event to TabbedFilePreview
+              // Dispatch title update event
               window.dispatchEvent(new CustomEvent('chat-title-updated', {
                 detail: { title: generatedTitle }
               }));
 
               console.log('✅ Chat title generated:', generatedTitle);
             } else {
-              console.warn('Title generation response not ok:', titleResponse.status);
+              const errorText = await titleResponse.text();
+              console.error('❌ Title generation failed:', titleResponse.status, errorText);
               // Continue with chat even if title generation fails
               chatId = `chat_${Date.now()}`;
               setCurrentChatId(chatId);
