@@ -68,7 +68,7 @@ export const ThreePanelLayout = ({ currentView = 'chat', onNavigate }: ThreePane
         </PanelResizeHandle>
 
         {/* File Preview Panel - 45% default */}
-        <Panel defaultSize={45} minSize={30} className="relative">
+        <Panel defaultSize={45} minSize={30} className="relative rounded-lg overflow-hidden mx-2">
           <TabbedFilePreview
             openFiles={openFiles}
             activeFileId={activeFileId}
