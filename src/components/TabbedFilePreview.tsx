@@ -9,7 +9,6 @@ import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from './AuthProvider';
 import { cn } from '@/lib/utils';
 import { getFileIcon } from '@/utils/fileHelpers';
-import { ChatTitleBar } from './ChatTitleBar';
 import { ChatHistoryModal } from './ChatHistoryModal';
 
 // Ag-Grid Imports
@@ -229,13 +228,6 @@ export const TabbedFilePreview = ({
   if (openFiles.length === 0) {
     return (
       <div className="h-full flex flex-col finley-dynamic-bg">
-        {/* Chat Title Bar - Always show */}
-        <ChatTitleBar
-          title={chatTitle}
-          onHistoryClick={() => setShowChatHistory(true)}
-          isLoading={false}
-        />
-
         {/* Empty State Toolbar */}
         <div className="border-b border-border bg-background/80 backdrop-blur-sm px-4 py-3">
           <div className="flex items-center justify-between">
@@ -280,13 +272,6 @@ export const TabbedFilePreview = ({
 
   return (
     <div className="h-full flex flex-col finley-dynamic-bg">
-      {/* Chat Title Bar - NEW */}
-      <ChatTitleBar
-        title={chatTitle}
-        onHistoryClick={() => setShowChatHistory(true)}
-        isLoading={false}
-      />
-
       {/* File Toolbar Header */}
       <div className="border-b border-border bg-background/80 backdrop-blur-sm px-4 py-3">
         <div className="flex items-center justify-between">

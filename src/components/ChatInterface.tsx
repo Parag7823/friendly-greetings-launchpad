@@ -14,6 +14,7 @@ import { useFileUpload } from '@/hooks/useFileUpload';
 import { getSessionToken } from '@/utils/authHelpers';
 import { useStandardToasts } from '@/hooks/useStandardToasts';
 import { ChatHeader } from './ChatHeader';
+import { ChatTitleBar } from './ChatTitleBar';
 
 interface ChatInterfaceProps {
   currentView?: string;
@@ -46,6 +47,8 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate, isEmbedded, ch
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
   const [pastedImages, setPastedImages] = useState<File[]>([]);
   const [isThinking, setIsThinking] = useState(false);
+  const [currentChatTitle, setCurrentChatTitle] = useState('New Chat');
+  const [showChatHistory, setShowChatHistory] = useState(false);
 
   // IMPROVEMENT: Cleanup Object URLs to prevent memory leaks
   useEffect(() => {
@@ -444,6 +447,9 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate, isEmbedded, ch
                 detail: eventDetail
               }));
 
+              // Update local state
+              setCurrentChatTitle(generatedTitle);
+
               // Dispatch title update event to TabbedFilePreview
               window.dispatchEvent(new CustomEvent('chat-title-updated', {
                 detail: { title: generatedTitle }
@@ -725,6 +731,13 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate, isEmbedded, ch
       default:
         return (
           <div className="h-full flex flex-col finley-dynamic-bg">
+            {/* Chat Title Bar */}
+            <ChatTitleBar
+              title={currentChatTitle}
+              onHistoryClick={() => setShowChatHistory(true)}
+              isLoading={false}
+            />
+
             {/* Chat Messages Area */}
             <div className="flex-1 overflow-y-auto p-4 pt-2">
               {messages.length === 0 ? (
