@@ -58,6 +58,19 @@ export const TabbedFilePreview = ({
 
   const activeFile = openFiles.find(f => f.id === activeFileId);
 
+  // Listen for chat title updates from ChatInterface
+  useEffect(() => {
+    const handleChatTitleUpdate = (event: CustomEvent) => {
+      const { title } = event.detail;
+      if (title) {
+        setChatTitle(title);
+      }
+    };
+
+    window.addEventListener('chat-title-updated', handleChatTitleUpdate as EventListener);
+    return () => window.removeEventListener('chat-title-updated', handleChatTitleUpdate as EventListener);
+  }, []);
+
   // FIX #14: Cleanup file content cache when file is closed to prevent memory leaks
   useEffect(() => {
     return () => {
@@ -216,6 +229,13 @@ export const TabbedFilePreview = ({
   if (openFiles.length === 0) {
     return (
       <div className="h-full flex flex-col finley-dynamic-bg">
+        {/* Chat Title Bar - Always show */}
+        <ChatTitleBar
+          title={chatTitle}
+          onHistoryClick={() => setShowChatHistory(true)}
+          isLoading={false}
+        />
+
         {/* Empty State Toolbar */}
         <div className="border-b border-border bg-background/80 backdrop-blur-sm px-4 py-3">
           <div className="flex items-center justify-between">
@@ -242,6 +262,18 @@ export const TabbedFilePreview = ({
             </div>
           </div>
         </div>
+
+        {/* Chat History Modal */}
+        <ChatHistoryModal
+          isOpen={showChatHistory}
+          onClose={() => setShowChatHistory(false)}
+          onSelectChat={(chatId, title) => {
+            setChatTitle(title);
+            window.dispatchEvent(new CustomEvent('chat-selected', {
+              detail: { chatId }
+            }));
+          }}
+        />
       </div>
     );
   }

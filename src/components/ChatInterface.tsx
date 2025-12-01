@@ -84,6 +84,38 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate, isEmbedded, ch
     }
   }, [user?.id, searchParams]);
 
+  // Generate chat title on first message
+  const generateChatTitle = useCallback(async (firstMessage: string) => {
+    if (!user?.id || !currentChatId) return;
+    
+    try {
+      const sessionToken = await getSessionToken();
+      const response = await fetch(`${config.apiUrl}/generate-chat-title`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(sessionToken && { 'Authorization': `Bearer ${sessionToken}` })
+        },
+        body: JSON.stringify({
+          message: firstMessage,
+          user_id: user.id
+        })
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        if (data.title) {
+          // Dispatch title update event to TabbedFilePreview
+          window.dispatchEvent(new CustomEvent('chat-title-updated', {
+            detail: { title: data.title }
+          }));
+        }
+      }
+    } catch (error) {
+      console.error('Failed to generate chat title:', error);
+    }
+  }, [user?.id, currentChatId]);
+
   // CRITICAL FIX: Load chat history on mount or when chat_id changes
   useEffect(() => {
     const loadChatHistory = async () => {
@@ -360,78 +392,111 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate, isEmbedded, ch
 
       const userMessage = {
         id: `msg-${Date.now()}`,
-        text: message,
         isUser: true,
         timestamp: new Date()
       };
+      setMessages(prev => [...prev, attachmentMessage]);
 
-      setMessages(prev => [...prev, userMessage]);
-      const currentMessage = message;
-      setMessage(''); // Clear input immediately
-      setIsThinking(true);
+      // Upload pasted images immediately
+      await processFiles(pastedImages);
+      setPastedImages([]); // Clear pasted images after processing
 
-      try {
-        let chatId = currentChatId;
+      toast({
+        title: 'Files Attached',
+        description: `${pastedImages.length} file(s) ready to send`
+      });
+    }
 
-        // If this is a new chat, generate a title and create chat entry
-        if (isNewChat) {
-          try {
-            const sessionToken = await getSessionToken();
+    // Only send text message if there's text content
+    if (!message.trim()) {
+      return; // Images are already being processed, no need to send empty message
+    }
 
-            const titleResponse = await fetch(`${config.apiUrl}/generate-chat-title`, {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                ...(sessionToken && { 'Authorization': `Bearer ${sessionToken}` })
-              },
-              body: JSON.stringify({
-                message: currentMessage,
-                user_id: user?.id || 'anonymous',
-                session_token: sessionToken
-              })
-            });
+    const userMessage = {
+      id: `msg-${Date.now()}`,
+      text: message,
+      isUser: true,
+      timestamp: new Date()
+    };
 
-            if (titleResponse.ok) {
-              const titleData = await titleResponse.json();
-              chatId = titleData.chat_id;
-              const generatedTitle = titleData.title || 'New Chat';
-              
-              setCurrentChatId(chatId);
-              setIsNewChat(false);
+    setMessages(prev => [...prev, userMessage]);
+    const currentMessage = message;
+    setMessage(''); // Clear input immediately
+    setIsThinking(true);
 
-              // Update URL with the chat ID from backend
-              setSearchParams({ chat_id: chatId }, { replace: true });
+    try {
+      let chatId = currentChatId;
 
-              const eventDetail = {
-                chatId: chatId,
-                title: generatedTitle,
-                timestamp: new Date()
-              };
-              console.log('📤 Dispatching new-chat-created event:', eventDetail);
-              window.dispatchEvent(new CustomEvent('new-chat-created', {
-                detail: eventDetail
-              }));
+      // If this is a new chat, generate a title and create chat entry
+      if (isNewChat) {
+        try {
+          const sessionToken = await getSessionToken();
 
-              console.log('✅ Chat title generated:', generatedTitle);
-            } else {
-              console.warn('Title generation response not ok:', titleResponse.status);
-              // Continue with chat even if title generation fails
-              chatId = `chat_${Date.now()}`;
-              setCurrentChatId(chatId);
-              setIsNewChat(false);
-            }
-          } catch (titleError) {
-            console.error('Title generation error:', titleError);
+          const titleResponse = await fetch(`${config.apiUrl}/generate-chat-title`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              ...(sessionToken && { 'Authorization': `Bearer ${sessionToken}` })
+            },
+            body: JSON.stringify({
+              message: currentMessage,
+              user_id: user?.id || 'anonymous',
+              session_token: sessionToken
+            })
+          });
+
+          if (titleResponse.ok) {
+            const titleData = await titleResponse.json();
+            chatId = titleData.chat_id;
+            const generatedTitle = titleData.title || 'New Chat';
+            
+            setCurrentChatId(chatId);
+            setIsNewChat(false);
+
+            // Update URL with the chat ID from backend
+            setSearchParams({ chat_id: chatId }, { replace: true });
+
+            const eventDetail = {
+              chatId: chatId,
+              title: generatedTitle,
+              timestamp: new Date()
+            };
+            console.log('📤 Dispatching new-chat-created event:', eventDetail);
+            window.dispatchEvent(new CustomEvent('new-chat-created', {
+              detail: eventDetail
+            }));
+
+            // Dispatch title update event to TabbedFilePreview
+            window.dispatchEvent(new CustomEvent('chat-title-updated', {
+              detail: { title: generatedTitle }
+            }));
+
+            console.log('✅ Chat title generated:', generatedTitle);
+          } else {
+            console.warn('Title generation response not ok:', titleResponse.status);
             // Continue with chat even if title generation fails
             chatId = `chat_${Date.now()}`;
             setCurrentChatId(chatId);
             setIsNewChat(false);
           }
+        } catch (titleError) {
+          console.error('Title generation error:', titleError);
+          // Continue with chat even if title generation fails
+          chatId = `chat_${Date.now()}`;
+          setCurrentChatId(chatId);
+          setIsNewChat(false);
         }
+      }
 
-        // Create placeholder AI message for streaming
-        const aiMessageId = `msg-${Date.now()}-ai`;
-        const aiMessage = {
+      // Create placeholder AI message for streaming
+      const aiMessageId = `msg-${Date.now()}-ai`;
+      const aiMessage = {
+        id: aiMessageId,
+        text: '',
+        isUser: false,
+        timestamp: new Date()
+      };
+      setMessages(prev => [...prev, aiMessage]);
           id: aiMessageId,
           text: '',
           isUser: false,
