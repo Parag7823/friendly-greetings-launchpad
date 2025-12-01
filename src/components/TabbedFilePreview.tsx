@@ -211,14 +211,31 @@ export const TabbedFilePreview = ({
 
   if (openFiles.length === 0) {
     return (
-      <div className="h-full flex items-center justify-center finley-dynamic-bg">
-        <div className="text-center space-y-3 p-8">
-          <FileSpreadsheet className="w-16 h-16 mx-auto text-muted-foreground/30" />
-          <div>
-            <h3 className="text-lg font-semibold text-foreground">No files open</h3>
-            <p className="text-sm text-muted-foreground mt-1">
-              Click a file in Data Sources to view it here
-            </p>
+      <div className="h-full flex flex-col finley-dynamic-bg rounded-lg overflow-hidden">
+        {/* Empty State Toolbar */}
+        <div className="border-b border-border bg-background/80 backdrop-blur-sm px-4 py-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <FileSpreadsheet className="w-4 h-4 text-muted-foreground" />
+              <span className="text-sm font-medium text-muted-foreground">File Preview</span>
+            </div>
+            {/* Action buttons placeholder */}
+            <div className="flex items-center gap-2">
+              {/* Buttons will be added here */}
+            </div>
+          </div>
+        </div>
+        
+        {/* Empty State Content */}
+        <div className="flex-1 flex items-center justify-center">
+          <div className="text-center space-y-3 p-8">
+            <FileSpreadsheet className="w-16 h-16 mx-auto text-muted-foreground/30" />
+            <div>
+              <h3 className="text-lg font-semibold text-foreground">No files open</h3>
+              <p className="text-sm text-muted-foreground mt-1">
+                Click a file in Data Sources to view it here
+              </p>
+            </div>
           </div>
         </div>
       </div>
@@ -226,7 +243,32 @@ export const TabbedFilePreview = ({
   }
 
   return (
-    <div className="h-full flex flex-col finley-dynamic-bg">
+    <div className="h-full flex flex-col finley-dynamic-bg rounded-lg overflow-hidden">
+      {/* Toolbar Header - NEW */}
+      <div className="border-b border-border bg-background/80 backdrop-blur-sm px-4 py-3">
+        <div className="flex items-center justify-between">
+          {/* File Name Display */}
+          <div className="flex items-center gap-3 min-w-0">
+            <FileSpreadsheet className="w-4 h-4 text-primary flex-shrink-0" />
+            <div className="min-w-0">
+              <h2 className="text-sm font-semibold text-foreground truncate">
+                {activeFile?.filename || 'File Preview'}
+              </h2>
+              {activeFile && (
+                <p className="text-xs text-muted-foreground">
+                  {activeFile.events_count ? `${activeFile.events_count} events` : 'Loading...'}
+                </p>
+              )}
+            </div>
+          </div>
+          
+          {/* Action Buttons Placeholder - Will be populated later */}
+          <div className="flex items-center gap-2 flex-shrink-0">
+            {/* Download, Share, Refresh buttons will go here */}
+          </div>
+        </div>
+      </div>
+
       {/* Tabs Header */}
       <div className="border-b border-border bg-background/50 backdrop-blur-sm">
         <div className="flex items-center overflow-x-auto scrollbar-thin scrollbar-thumb-border scrollbar-track-transparent">
