@@ -9,6 +9,8 @@ import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from './AuthProvider';
 import { cn } from '@/lib/utils';
 import { getFileIcon } from '@/utils/fileHelpers';
+import { ChatTitleBar } from './ChatTitleBar';
+import { ChatHistoryModal } from './ChatHistoryModal';
 
 // Ag-Grid Imports
 import { AgGridReact } from 'ag-grid-react';
@@ -51,6 +53,8 @@ export const TabbedFilePreview = ({
   const [fileContent, setFileContent] = useState<Record<string, any[]>>({});
   const [loadingContent, setLoadingContent] = useState<Record<string, boolean>>({});
   const [showMetadata, setShowMetadata] = useState<Record<string, boolean>>({});
+  const [showChatHistory, setShowChatHistory] = useState(false);
+  const [chatTitle, setChatTitle] = useState('New Chat');
 
   const activeFile = openFiles.find(f => f.id === activeFileId);
 
@@ -244,7 +248,14 @@ export const TabbedFilePreview = ({
 
   return (
     <div className="h-full flex flex-col finley-dynamic-bg">
-      {/* Toolbar Header - NEW */}
+      {/* Chat Title Bar - NEW */}
+      <ChatTitleBar
+        title={chatTitle}
+        onHistoryClick={() => setShowChatHistory(true)}
+        isLoading={false}
+      />
+
+      {/* File Toolbar Header */}
       <div className="border-b border-border bg-background/80 backdrop-blur-sm px-4 py-3">
         <div className="flex items-center justify-between">
           {/* File Name Display */}
@@ -414,6 +425,19 @@ export const TabbedFilePreview = ({
           )}
         </AnimatePresence>
       </div>
+
+      {/* Chat History Modal */}
+      <ChatHistoryModal
+        isOpen={showChatHistory}
+        onClose={() => setShowChatHistory(false)}
+        onSelectChat={(chatId, title) => {
+          setChatTitle(title);
+          // Dispatch event to switch chat in ChatInterface
+          window.dispatchEvent(new CustomEvent('chat-selected', {
+            detail: { chatId }
+          }));
+        }}
+      />
     </div>
   );
 };

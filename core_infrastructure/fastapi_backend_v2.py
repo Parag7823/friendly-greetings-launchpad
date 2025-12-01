@@ -8632,24 +8632,47 @@ async def get_chat_history(user_id: str):
             "status": "success"
         }
     except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"❌ Unexpected error in get_chat_history: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
 
 @app.put("/chat/rename")
 async def rename_chat(request: dict):
-    """Rename chat"""
+    """Rename chat - DEPRECATED, use PUT /chat/{chat_id}/title instead"""
     try:
         chat_id = request.get('chat_id')
         new_title = request.get('title')
+        user_id = request.get('user_id')
         
         if not chat_id or not new_title:
             raise HTTPException(status_code=400, detail="Missing chat_id or title")
         
-        # For now, just return success since we're grouping by date
-        # In a full implementation, you'd update a chat_sessions table
-        structured_logger.info("Chat rename requested", chat_id=chat_id, new_title=new_title)
+        # Update chat_sessions table with new title
+        supabase_client = await _ensure_supabase_loaded()
+        if not supabase_client:
+            raise HTTPException(status_code=503, detail="Database service temporarily unavailable")
+        
+        try:
+            supabase_client.table('chat_sessions').update({
+                'title': new_title,
+                'updated_at': pendulum.now().to_iso8601_string()
+            }).eq('chat_id', chat_id).execute()
+            
+            structured_logger.info("Chat renamed", chat_id=chat_id, new_title=new_title)
+        except Exception as db_err:
+            # If chat_sessions table doesn't exist, create entry
+            if 'relation "public.chat_sessions" does not exist' in str(db_err):
+                structured_logger.warning(f"chat_sessions table not found, creating entry: {db_err}")
+                try:
+                    supabase_client.table('chat_sessions').insert({
+                        'chat_id': chat_id,
+                        'user_id': user_id,
+                        'title': new_title,
+                        'created_at': pendulum.now().to_iso8601_string(),
+                        'updated_at': pendulum.now().to_iso8601_string()
+                    }).execute()
+                except Exception as insert_err:
+                    structured_logger.error(f"Failed to create chat_sessions entry: {insert_err}")
+                    raise HTTPException(status_code=500, detail="Failed to save chat title")
+            else:
+                raise
         
         return {
             "status": "success",
@@ -8657,6 +8680,8 @@ async def rename_chat(request: dict):
             "chat_id": chat_id,
             "title": new_title
         }
+    except HTTPException:
+        raise
     except Exception as e:
         structured_logger.error("Chat rename error", error=e)
         raise HTTPException(status_code=500, detail=str(e))
@@ -8675,6 +8700,12 @@ async def delete_chat(request: dict):
             # Delete chat messages for this chat
             # FIX: Use eq() instead of like() to match exact chat_id instead of timestamp pattern
             supabase.table('chat_messages').delete().eq('user_id', user_id).eq('chat_id', chat_id).execute()
+            
+            # Also delete from chat_sessions if it exists
+            try:
+                supabase.table('chat_sessions').delete().eq('chat_id', chat_id).execute()
+            except Exception as e:
+                structured_logger.debug(f"Failed to delete from chat_sessions (may not exist): {e}")
         
         structured_logger.info("Chat deleted", chat_id=chat_id, user_id=user_id)
         
@@ -8683,6 +8714,92 @@ async def delete_chat(request: dict):
             "message": "Chat deleted successfully",
             "chat_id": chat_id
         }
+    except Exception as e:
+        structured_logger.error("Chat delete error", error=e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.put("/chat/{chat_id}/title")
+async def update_chat_title(chat_id: str, request: dict):
+    """Update chat title - NEW ENDPOINT for ChatHistoryModal"""
+    try:
+        new_title = request.get('title')
+        user_id = request.get('user_id')
+        
+        if not new_title:
+            raise HTTPException(status_code=400, detail="Missing title")
+        
+        supabase_client = await _ensure_supabase_loaded()
+        if not supabase_client:
+            raise HTTPException(status_code=503, detail="Database service temporarily unavailable")
+        
+        try:
+            # Try to update existing chat_sessions entry
+            supabase_client.table('chat_sessions').update({
+                'title': new_title,
+                'updated_at': pendulum.now().to_iso8601_string()
+            }).eq('chat_id', chat_id).execute()
+            
+            structured_logger.info("Chat title updated", chat_id=chat_id, new_title=new_title)
+        except Exception as db_err:
+            # If chat_sessions table doesn't exist, create entry
+            if 'relation "public.chat_sessions" does not exist' in str(db_err):
+                structured_logger.warning(f"chat_sessions table not found, creating entry: {db_err}")
+                try:
+                    supabase_client.table('chat_sessions').insert({
+                        'chat_id': chat_id,
+                        'user_id': user_id,
+                        'title': new_title,
+                        'created_at': pendulum.now().to_iso8601_string(),
+                        'updated_at': pendulum.now().to_iso8601_string()
+                    }).execute()
+                except Exception as insert_err:
+                    structured_logger.error(f"Failed to create chat_sessions entry: {insert_err}")
+                    raise HTTPException(status_code=500, detail="Failed to save chat title")
+            else:
+                raise
+        
+        return {
+            "status": "success",
+            "message": "Chat title updated successfully",
+            "chat_id": chat_id,
+            "title": new_title
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        structured_logger.error("Chat title update error", error=e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/chat/{chat_id}")
+async def delete_chat_by_id(chat_id: str, user_id: str):
+    """Delete chat by ID - NEW ENDPOINT for ChatHistoryModal"""
+    try:
+        if not chat_id:
+            raise HTTPException(status_code=400, detail="Missing chat_id")
+        
+        supabase_client = await _ensure_supabase_loaded()
+        if not supabase_client:
+            raise HTTPException(status_code=503, detail="Database service temporarily unavailable")
+        
+        if user_id:
+            # Delete chat messages for this chat
+            supabase_client.table('chat_messages').delete().eq('user_id', user_id).eq('chat_id', chat_id).execute()
+            
+            # Also delete from chat_sessions if it exists
+            try:
+                supabase_client.table('chat_sessions').delete().eq('chat_id', chat_id).execute()
+            except Exception as e:
+                structured_logger.debug(f"Failed to delete from chat_sessions (may not exist): {e}")
+        
+        structured_logger.info("Chat deleted", chat_id=chat_id, user_id=user_id)
+        
+        return {
+            "status": "success",
+            "message": "Chat deleted successfully",
+            "chat_id": chat_id
+        }
+    except HTTPException:
+        raise
     except Exception as e:
         structured_logger.error("Chat delete error", error=e)
         raise HTTPException(status_code=500, detail=str(e))

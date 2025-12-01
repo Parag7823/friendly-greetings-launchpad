@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Menu, Loader2 } from 'lucide-react';
-import { FinleySidebar } from './FinleySidebar';
+import { Loader2 } from 'lucide-react';
 import { ThreePanelLayout } from './ThreePanelLayout';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from './AuthProvider';
@@ -13,8 +12,6 @@ import { WebSocketProvider } from '@/contexts/WebSocketContext';
 
 export const FinleyLayout = () => {
   const { user, loading, signInAnonymously } = useAuth();
-  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(true);
   const [currentView, setCurrentView] = useState('chat');
   const [currentChatId, setCurrentChatId] = useState<string | null>(null);
   const [sessionToken, setSessionToken] = useState<string | null>(null);
@@ -100,69 +97,6 @@ export const FinleyLayout = () => {
 
   return (
     <div className="h-screen w-full bg-background flex overflow-hidden relative">
-      {/* Sidebar Toggle Button */}
-      <Button
-        variant="ghost"
-        size="icon"
-        className="fixed top-3 left-3 z-50"
-        onClick={() => {
-          if (window.innerWidth < 1024) {
-            setIsSidebarOpen(!isSidebarOpen);
-          } else {
-            setIsSidebarCollapsed(!isSidebarCollapsed);
-          }
-        }}
-      >
-        <Menu className="h-4 w-4" />
-      </Button>
-
-      {/* Mobile Overlay */}
-      <AnimatePresence>
-        {isSidebarOpen && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-[#1a1a1a]/50 z-40 lg:hidden"
-            onClick={() => setIsSidebarOpen(false)}
-          />
-        )}
-      </AnimatePresence>
-
-      {/* Mobile Sidebar */}
-      <AnimatePresence>
-        {isSidebarOpen && (
-          <motion.div
-            initial={{ x: -320 }}
-            animate={{ x: 0 }}
-            exit={{ x: -320 }}
-            transition={{ type: "spring", damping: 20, stiffness: 300 }}
-            className="lg:hidden w-80 flex-shrink-0 bg-muted/30 border-r border-border z-50 fixed left-0 top-0 h-full"
-          >
-            <FinleySidebar 
-              onClose={() => setIsSidebarOpen(false)} 
-              onNavigate={handleNavigate}
-              currentView={currentView}
-              currentChatId={currentChatId}
-            />
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* Desktop Sidebar - Collapsible on large screens */}
-      <motion.div
-        className="hidden lg:block bg-muted/30 border-r border-border flex-shrink-0"
-        animate={{ width: isSidebarCollapsed ? "72px" : "280px" }}
-        transition={{ type: "spring", damping: 20, stiffness: 300 }}
-      >
-        <FinleySidebar 
-          onNavigate={handleNavigate}
-          currentView={currentView}
-          isCollapsed={isSidebarCollapsed}
-          currentChatId={currentChatId}
-        />
-      </motion.div>
-      
       {/* Main Content */}
       <div className="flex-1 flex flex-col min-h-0">
         {/* ERROR #5 FIX: Wrap with WebSocketProvider for global access */}

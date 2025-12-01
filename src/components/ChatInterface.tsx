@@ -13,13 +13,17 @@ import { ChatInputMicroInteractions } from './ChatInputMicroInteractions';
 import { useFileUpload } from '@/hooks/useFileUpload';
 import { getSessionToken } from '@/utils/authHelpers';
 import { useStandardToasts } from '@/hooks/useStandardToasts';
+import { ChatHeader } from './ChatHeader';
 
 interface ChatInterfaceProps {
   currentView?: string;
   onNavigate?: (view: string) => void;
+  isEmbedded?: boolean;
+  chatTitle?: string;
+  onHistoryClick?: () => void;
 }
 
-export const ChatInterface = ({ currentView = 'chat', onNavigate }: ChatInterfaceProps) => {
+export const ChatInterface = ({ currentView = 'chat', onNavigate, isEmbedded, chatTitle, onHistoryClick }: ChatInterfaceProps) => {
   const { user } = useAuth();
   const { toast } = useToast();
   const { processFileWithFastAPI } = useFastAPIProcessor();
