@@ -292,9 +292,6 @@ class FieldDetectionRequest(BaseModel):
 
 class PlatformDetectionRequest(BaseModel):
     payload: Optional[Dict[str, Any]] = None  # Structured data (columns, sample_data)
-    filename: Optional[str] = None
-    user_id: Optional[str] = None
-
 class DocumentClassificationRequest(BaseModel):
     payload: Optional[Dict[str, Any]] = None
     filename: Optional[str] = None
@@ -302,13 +299,29 @@ class DocumentClassificationRequest(BaseModel):
     user_id: Optional[str] = None
     platform: Optional[str] = None
     document_type: Optional[str] = None  # New field added
+    document_subtype: Optional[str] = None  # New field added
 
-# ============================================================================
-# INLINED SUPABASE CLIENT (removed external supabase_client.py dependency)
-# ============================================================================
-# This code was previously in core_infrastructure/supabase_client.py
-# Inlined here to eliminate import path issues and circular dependencies
-# Functionality preserved: lazy loading, connection pooling, thread-safe singleton
+# LIBRARY FIX: Pydantic models for metadata validation (replaces scattered JSON parsing)
+class UserConnectionMetadata(BaseModel):
+    """Validated metadata for user_connections.metadata field"""
+    last_history_id: Optional[str] = None  # Gmail incremental sync cursor
+    last_synced_at: Optional[str] = None
+    sync_errors: Optional[List[str]] = None
+    error_count: int = 0
+    
+    class Config:
+        extra = "allow"  # Allow additional fields for extensibility
+
+class SyncRunStats(BaseModel):
+    """Validated stats for sync_runs.stats field"""
+    records_fetched: int = 0
+    actions_used: int = 0
+    attachments_saved: int = 0
+    queued_jobs: int = 0
+    skipped: int = 0
+    
+    class Config:
+        extra = "allow"
 
 from supabase import create_client, Client
 import socket
@@ -10159,23 +10172,24 @@ async def _gmail_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> Dict
                 if uc_row.data:
                     if glom:
                         uc_data = uc_row.data[0]
-                        uc_metadata = glom(uc_data, Coalesce('metadata', default={}))
-                        if isinstance(uc_metadata, str):
-                            try:
-                                uc_metadata = orjson.loads(uc_metadata)
-                            except Exception:
-                                uc_metadata = {}
-                        last_history_id = uc_metadata.get('last_history_id')
+                        uc_metadata_raw = glom(uc_data, Coalesce('metadata', default={}))
                         last_ts = glom(uc_data, Coalesce('last_synced_at', default=None))
                     else:
-                        uc_metadata = uc_row.data[0].get('metadata') or {}
-                        if isinstance(uc_metadata, str):
-                            try:
-                                uc_metadata = orjson.loads(uc_metadata)
-                            except Exception:
-                                uc_metadata = {}
-                        last_history_id = uc_metadata.get('last_history_id')
+                        uc_metadata_raw = uc_row.data[0].get('metadata') or {}
                         last_ts = uc_row.data[0].get('last_synced_at')
+                    
+                    # LIBRARY FIX: Use Pydantic validation instead of manual JSON parsing
+                    try:
+                        if isinstance(uc_metadata_raw, str):
+                            uc_metadata_raw = orjson.loads(uc_metadata_raw)
+                        uc_metadata = UserConnectionMetadata.model_validate(uc_metadata_raw)
+                        last_history_id = uc_metadata.last_history_id
+                    except ValidationError as ve:
+                        logger.warning(f"Failed to validate user connection metadata: {ve}")
+                        last_history_id = None
+                    except Exception as e:
+                        logger.warning(f"Failed to parse user connection metadata: {e}")
+                        last_history_id = None
                     
                     if last_ts and last_history_id:
                         last_sync_time = pendulum.parse(last_ts).naive()
@@ -10283,7 +10297,6 @@ async def _gmail_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> Dict
         # FIX #4: Batch Gmail message fetching (performance optimization)
         # Instead of 1 API call per message, batch fetch messages concurrently
         # This reduces 10,000 sequential calls to ~100 batched calls (100x speedup)
-        from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
         @retry(
             stop=stop_after_attempt(5),
             wait=wait_exponential(multiplier=0.1, min=0.1, max=1),
@@ -10442,13 +10455,19 @@ async def _gmail_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> Dict
                 uc_current = supabase.table('user_connections').select('metadata').eq('nango_connection_id', connection_id).limit(1).execute()
                 current_meta = {}
                 if uc_current.data:
-                    uc_metadata = uc_current.data[0].get('metadata') or {}
-                    if isinstance(uc_metadata, str):
-                        try:
-                            uc_metadata = orjson.loads(uc_metadata)
-                        except Exception:
-                            uc_metadata = {}
-                    current_meta = uc_metadata
+                    uc_metadata_raw = uc_current.data[0].get('metadata') or {}
+                    # LIBRARY FIX: Use Pydantic validation instead of manual JSON parsing
+                    try:
+                        if isinstance(uc_metadata_raw, str):
+                            uc_metadata_raw = orjson.loads(uc_metadata_raw)
+                        uc_metadata = UserConnectionMetadata.model_validate(uc_metadata_raw)
+                        current_meta = uc_metadata.model_dump()
+                    except ValidationError as ve:
+                        logger.warning(f"Failed to validate current user connection metadata: {ve}")
+                        current_meta = {}
+                    except Exception as e:
+                        logger.warning(f"Failed to parse current user connection metadata: {e}")
+                        current_meta = {}
                 
                 # Update with new historyId
                 updated_meta = {**current_meta}

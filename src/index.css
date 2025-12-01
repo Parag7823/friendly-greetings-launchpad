@@ -330,9 +330,9 @@
 
   /* Combined dynamic black for easy use */
   .finley-dynamic-bg {
-    @apply bg-gradient-to-b from-background via-background to-muted/50 border-border/60;
-    @apply dark:from-zinc-900 dark:via-zinc-900 dark:to-zinc-800 dark:border-zinc-700;
-    @apply transition-all duration-200;
+    background-color: hsl(var(--background));
+    /* Pure #020617 Void Navy - consistent across entire app */
+    transition: all 200ms;
   }
 
   /* Typography Utilities */
