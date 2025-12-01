@@ -750,6 +750,7 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate, isEmbedded, ch
             <ChatTitleBar
               title={currentChatTitle}
               onHistoryClick={() => setShowChatHistory(true)}
+              onNewChat={resetChat}
               isLoading={false}
             />
 
@@ -818,7 +819,7 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate, isEmbedded, ch
 
             {/* Chat Input Area with Micro-Interactions */}
             <div className="border-t border-border/50 p-4 finley-dynamic-bg">
-              <div className="max-w-4xl mx-auto">
+              <div className="max-w-2xl mx-auto">
                 {/* Attached Files Preview - Above input */}
                 {pastedImages.length > 0 && (
                   <div className="mb-3 flex flex-wrap gap-2 p-2 glass-card rounded-lg">

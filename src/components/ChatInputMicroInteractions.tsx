@@ -43,29 +43,13 @@ export const ChatInputMicroInteractions: React.FC<ChatInputMicroInteractionsProp
 
   return (
     <div className="w-full">
-      {/* Chat Input Container with Glassmorphism */}
+      {/* Chat Input Container - Simplified */}
       <div
         className={`
-          relative rounded-lg border transition-all duration-300
-          ${isFocused || isTyping
-            ? 'border-primary/60 shadow-lg shadow-primary/20'
-            : 'border-slate-700/50 shadow-md shadow-primary/10'
-          }
+          relative border-t border-border transition-all duration-300
           ${isLoading ? 'opacity-60 pointer-events-none' : ''}
-          glass-card
         `}
       >
-        {/* Animated Glow Background */}
-        <div
-          className={`
-            absolute inset-0 rounded-lg pointer-events-none
-            ${isFocused || isTyping
-              ? 'animate-pulse bg-primary/5'
-              : 'bg-primary/0'
-            }
-          `}
-        />
-
         {/* Input Area */}
         <div className="relative flex items-end gap-4 p-4">
           {/* File Upload Button */}
@@ -112,13 +96,6 @@ export const ChatInputMicroInteractions: React.FC<ChatInputMicroInteractionsProp
             <Send className="w-4 h-4" />
           </button>
         </div>
-
-        {/* Character Count (Optional) */}
-        {value.length > 0 && (
-          <div className="px-4 pb-3 text-xs text-slate-500 font-medium">
-            {value.length} characters
-          </div>
-        )}
       </div>
     </div>
   );

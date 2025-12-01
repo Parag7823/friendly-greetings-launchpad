@@ -21,7 +21,7 @@ export const ChatTitleBar = ({
         {/* Title Section */}
         <div className="flex-1 min-w-0">
           <h2 className={cn(
-            "text-sm font-semibold text-foreground truncate transition-opacity",
+            "text-xs font-medium text-foreground truncate transition-opacity",
             isLoading && "opacity-60"
           )}>
             {title || "New Chat"}
@@ -37,21 +37,21 @@ export const ChatTitleBar = ({
             <Button
               size="sm"
               variant="ghost"
-              className="h-8 w-8 p-0"
+              className="h-8 w-8 p-0 hover:bg-slate-700/50"
               onClick={onNewChat}
               title="New Chat"
             >
-              <Plus className="w-4 h-4" />
+              <Plus className="w-4 h-4 text-foreground" />
             </Button>
           )}
           <Button
             size="sm"
             variant="ghost"
-            className="h-8 w-8 p-0"
+            className="h-8 w-8 p-0 hover:bg-slate-700/50"
             onClick={onHistoryClick}
             title="Chat History"
           >
-            <History className="w-4 h-4" />
+            <History className="w-4 h-4 text-foreground" />
           </Button>
         </div>
       </div>
