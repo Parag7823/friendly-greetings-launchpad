@@ -392,111 +392,83 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate, isEmbedded, ch
 
       const userMessage = {
         id: `msg-${Date.now()}`,
+        text: message,
         isUser: true,
         timestamp: new Date()
       };
-      setMessages(prev => [...prev, attachmentMessage]);
 
-      // Upload pasted images immediately
-      await processFiles(pastedImages);
-      setPastedImages([]); // Clear pasted images after processing
+      setMessages(prev => [...prev, userMessage]);
+      const currentMessage = message;
+      setMessage(''); // Clear input immediately
+      setIsThinking(true);
 
-      toast({
-        title: 'Files Attached',
-        description: `${pastedImages.length} file(s) ready to send`
-      });
-    }
+      try {
+        let chatId = currentChatId;
 
-    // Only send text message if there's text content
-    if (!message.trim()) {
-      return; // Images are already being processed, no need to send empty message
-    }
+        // If this is a new chat, generate a title and create chat entry
+        if (isNewChat) {
+          try {
+            const sessionToken = await getSessionToken();
 
-    const userMessage = {
-      id: `msg-${Date.now()}`,
-      text: message,
-      isUser: true,
-      timestamp: new Date()
-    };
+            const titleResponse = await fetch(`${config.apiUrl}/generate-chat-title`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                ...(sessionToken && { 'Authorization': `Bearer ${sessionToken}` })
+              },
+              body: JSON.stringify({
+                message: currentMessage,
+                user_id: user?.id || 'anonymous',
+                session_token: sessionToken
+              })
+            });
 
-    setMessages(prev => [...prev, userMessage]);
-    const currentMessage = message;
-    setMessage(''); // Clear input immediately
-    setIsThinking(true);
+            if (titleResponse.ok) {
+              const titleData = await titleResponse.json();
+              chatId = titleData.chat_id;
+              const generatedTitle = titleData.title || 'New Chat';
+              
+              setCurrentChatId(chatId);
+              setIsNewChat(false);
 
-    try {
-      let chatId = currentChatId;
+              // Update URL with the chat ID from backend
+              setSearchParams({ chat_id: chatId }, { replace: true });
 
-      // If this is a new chat, generate a title and create chat entry
-      if (isNewChat) {
-        try {
-          const sessionToken = await getSessionToken();
+              const eventDetail = {
+                chatId: chatId,
+                title: generatedTitle,
+                timestamp: new Date()
+              };
+              console.log('📤 Dispatching new-chat-created event:', eventDetail);
+              window.dispatchEvent(new CustomEvent('new-chat-created', {
+                detail: eventDetail
+              }));
 
-          const titleResponse = await fetch(`${config.apiUrl}/generate-chat-title`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              ...(sessionToken && { 'Authorization': `Bearer ${sessionToken}` })
-            },
-            body: JSON.stringify({
-              message: currentMessage,
-              user_id: user?.id || 'anonymous',
-              session_token: sessionToken
-            })
-          });
+              // Dispatch title update event to TabbedFilePreview
+              window.dispatchEvent(new CustomEvent('chat-title-updated', {
+                detail: { title: generatedTitle }
+              }));
 
-          if (titleResponse.ok) {
-            const titleData = await titleResponse.json();
-            chatId = titleData.chat_id;
-            const generatedTitle = titleData.title || 'New Chat';
-            
-            setCurrentChatId(chatId);
-            setIsNewChat(false);
-
-            // Update URL with the chat ID from backend
-            setSearchParams({ chat_id: chatId }, { replace: true });
-
-            const eventDetail = {
-              chatId: chatId,
-              title: generatedTitle,
-              timestamp: new Date()
-            };
-            console.log('📤 Dispatching new-chat-created event:', eventDetail);
-            window.dispatchEvent(new CustomEvent('new-chat-created', {
-              detail: eventDetail
-            }));
-
-            // Dispatch title update event to TabbedFilePreview
-            window.dispatchEvent(new CustomEvent('chat-title-updated', {
-              detail: { title: generatedTitle }
-            }));
-
-            console.log('✅ Chat title generated:', generatedTitle);
-          } else {
-            console.warn('Title generation response not ok:', titleResponse.status);
+              console.log('✅ Chat title generated:', generatedTitle);
+            } else {
+              console.warn('Title generation response not ok:', titleResponse.status);
+              // Continue with chat even if title generation fails
+              chatId = `chat_${Date.now()}`;
+              setCurrentChatId(chatId);
+              setIsNewChat(false);
+            }
+          } catch (titleError) {
+            console.error('Title generation error:', titleError);
             // Continue with chat even if title generation fails
             chatId = `chat_${Date.now()}`;
             setCurrentChatId(chatId);
             setIsNewChat(false);
           }
-        } catch (titleError) {
-          console.error('Title generation error:', titleError);
-          // Continue with chat even if title generation fails
-          chatId = `chat_${Date.now()}`;
-          setCurrentChatId(chatId);
-          setIsNewChat(false);
         }
-      }
 
-      // Create placeholder AI message for streaming
-      const aiMessageId = `msg-${Date.now()}-ai`;
-      const aiMessage = {
-        id: aiMessageId,
-        text: '',
-        isUser: false,
-        timestamp: new Date()
-      };
-      setMessages(prev => [...prev, aiMessage]);
+        // Create placeholder AI message for streaming
+        const aiMessageId = `msg-${Date.now()}-ai`;
+        const aiMessage = {
           id: aiMessageId,
           text: '',
           isUser: false,
