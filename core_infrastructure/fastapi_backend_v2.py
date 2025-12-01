@@ -91,6 +91,9 @@ from dataclasses import dataclass
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 
+# LIBRARY FIX: Import tenacity for consistent retry logic (replaces manual loops)
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+
 # CRITICAL FIX: Import xxhash for fast hashing (used in dedupe detection)
 try:
     import xxhash
@@ -10280,19 +10283,18 @@ async def _gmail_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> Dict
         # FIX #4: Batch Gmail message fetching (performance optimization)
         # Instead of 1 API call per message, batch fetch messages concurrently
         # This reduces 10,000 sequential calls to ~100 batched calls (100x speedup)
-        async def fetch_message_with_retry(mid, max_retries=2):
-            """Fetch single message with exponential backoff retry"""
-            for attempt in range(max_retries):
-                try:
-                    msg = await nango.get_gmail_message(provider_key, connection_id, mid)
-                    stats['actions_used'] += 1
-                    return msg
-                except Exception as e:
-                    if attempt < max_retries - 1:
-                        await asyncio.sleep(0.1 * (2 ** attempt))  # Exponential backoff
-                        continue
-                    logger.warning(f"Failed to fetch message {mid} after {max_retries} retries: {e}")
-                    return None
+        from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+        @retry(
+            stop=stop_after_attempt(5),
+            wait=wait_exponential(multiplier=0.1, min=0.1, max=1),
+            retry=retry_if_exception_type(Exception),
+            reraise=False
+        )
+        async def fetch_message_with_retry(mid):
+            """Fetch single message with exponential backoff retry using tenacity"""
+            msg = await nango.get_gmail_message(provider_key, connection_id, mid)
+            stats['actions_used'] += 1
+            return msg
         
         # Batch fetch messages concurrently (max 10 concurrent to avoid rate limits)
         batch_size = 10

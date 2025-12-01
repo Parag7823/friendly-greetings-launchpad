@@ -320,6 +320,21 @@ export const FinleySidebar = ({ onClose, onNavigate, currentView = 'chat', isCol
             {isCollapsed && <TooltipContent side="right"><p>New Chat</p></TooltipContent>}
           </Tooltip>
 
+          {/* Integrations Button - Brand Aligned */}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                className={`w-full h-9 rounded-lg border border-primary/30 hover:border-primary/50 hover:bg-primary/5 transition-all duration-200 ${isCollapsed ? 'justify-center px-0' : 'justify-start px-2'}`}
+                onClick={() => onNavigate?.('integrations')}
+              >
+                <Plug className="w-4 h-4 text-primary" />
+                {!isCollapsed && <span className="font-medium text-sm ml-2">Integrations</span>}
+              </Button>
+            </TooltipTrigger>
+            {isCollapsed && <TooltipContent side="right"><p>Integrations</p></TooltipContent>}
+          </Tooltip>
+
           {/* Chat History Section */}
           {chatHistory.length > 0 && (
             <div className="mt-4">
