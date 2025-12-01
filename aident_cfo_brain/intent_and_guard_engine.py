@@ -318,7 +318,7 @@ class OutputGuard:
             # Response is repetitive - generate variation
             logger.warning(
                 "Repetitive response detected",
-                similarity=similarity_score,
+                similarity_score=similarity_score,
                 frustration_level=frustration_level
             )
             

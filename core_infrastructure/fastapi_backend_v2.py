@@ -1252,6 +1252,43 @@ async def app_lifespan(app: FastAPI):
             logger.warning(f"⚠️ Failed to initialize global thread pool: {thread_err}")
             _thread_pool = None
         
+        # PERMANENT FIX: Pre-load heavy ML models at startup (not during first chat request)
+        # This prevents 1-2 minute delays on first message
+        logger.info("🔄 Pre-loading ML models for chat orchestrator...")
+        try:
+            # Import and initialize intent classifier + output guard (loads spacy + sentence-transformers)
+            from aident_cfo_brain.intent_and_guard_engine import (
+                get_intent_classifier,
+                get_output_guard
+            )
+            
+            # Pre-load spacy + sentence-transformers models in background thread
+            # This prevents blocking the startup event
+            def _preload_models():
+                try:
+                    logger.info("   Loading intent classifier (spacy + sentence-transformers)...")
+                    intent_classifier = get_intent_classifier()
+                    logger.info("   ✅ Intent classifier loaded")
+                    
+                    logger.info("   Loading output guard (sentence-transformers)...")
+                    output_guard = get_output_guard()
+                    logger.info("   ✅ Output guard loaded")
+                    
+                    logger.info("✅ All ML models pre-loaded successfully - chat will be instant!")
+                except Exception as model_err:
+                    logger.warning(f"⚠️ Failed to pre-load ML models: {model_err} - will load on first chat (may be slow)")
+            
+            # Run model loading in thread pool to avoid blocking startup
+            if _thread_pool:
+                _thread_pool.submit(_preload_models)
+                logger.info("   Model pre-loading started in background...")
+            else:
+                # Fallback: load synchronously if thread pool not available
+                _preload_models()
+        
+        except Exception as model_import_err:
+            logger.warning(f"⚠️ Failed to import intent classifier: {model_import_err}")
+        
         logger.info("✅ All critical systems and optimizations initialized successfully")
         
     except Exception as e:
