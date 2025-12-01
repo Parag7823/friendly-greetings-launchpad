@@ -8632,6 +8632,16 @@ async def get_chat_history(user_id: str):
             "status": "success"
         }
     except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get chat history for user {user_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve chat history")
+
+@app.put("/chat/rename")
+async def rename_chat(request: dict):
+    """Rename chat - DEPRECATED, use PUT /chat/{chat_id}/title instead"""
+    try:
+        chat_id = request.get('chat_id')
         new_title = request.get('title')
         user_id = request.get('user_id')
         
