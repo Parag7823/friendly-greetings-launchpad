@@ -15,6 +15,7 @@ import { getSessionToken } from '@/utils/authHelpers';
 import { useStandardToasts } from '@/hooks/useStandardToasts';
 import { ChatHeader } from './ChatHeader';
 import { ChatTitleBar } from './ChatTitleBar';
+import { ChatHistoryModal } from './ChatHistoryModal';
 
 interface ChatInterfaceProps {
   currentView?: string;
@@ -352,6 +353,20 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate, isEmbedded, ch
 
     window.addEventListener('new-chat-requested', handleNewChat);
     return () => window.removeEventListener('new-chat-requested', handleNewChat);
+  }, []);
+
+  // Listen for chat title updates from other sources
+  useEffect(() => {
+    const handleChatTitleUpdate = (event: CustomEvent) => {
+      const { title } = event.detail;
+      if (title) {
+        setCurrentChatTitle(title);
+        console.log('✅ Chat title updated from event:', title);
+      }
+    };
+
+    window.addEventListener('chat-title-updated', handleChatTitleUpdate as EventListener);
+    return () => window.removeEventListener('chat-title-updated', handleChatTitleUpdate as EventListener);
   }, []);
 
   // Rotate sample questions
@@ -875,5 +890,22 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate, isEmbedded, ch
     }
   };
 
-  return renderCurrentView();
+  return (
+    <>
+      {renderCurrentView()}
+      <ChatHistoryModal
+        isOpen={showChatHistory}
+        onClose={() => setShowChatHistory(false)}
+        onSelectChat={(chatId, title) => {
+          setCurrentChatId(chatId);
+          setCurrentChatTitle(title);
+          setMessages([]);
+          setIsNewChat(false);
+          setSearchParams({ chat_id: chatId }, { replace: true });
+          setShowChatHistory(false);
+        }}
+        currentChatId={currentChatId}
+      />
+    </>
+  );
 };
