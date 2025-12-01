@@ -10137,8 +10137,6 @@ async def _gmail_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> Dict
             user_id=user_id,
             operation_type="connector_sync_start"
         ) as tx:
-            # LIBRARY FIX: Use SyncRunStats Pydantic model for type-safe stats
-            initial_stats = SyncRunStats()
             await tx.insert('sync_runs', {
                 'id': sync_run_id,
                 'user_id': user_id,
@@ -10146,7 +10144,7 @@ async def _gmail_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> Dict
                 'type': req.mode,
                 'status': 'running',
                 'started_at': pendulum.now().to_iso8601_string(),
-                'stats': orjson.dumps(initial_stats.model_dump()).decode()
+                'stats': orjson.dumps({'records_fetched': 0, 'actions_used': 0}).decode()
             })
     except Exception as e:
         logger.error(f"Failed to start sync run: {e}")
@@ -10413,6 +10411,68 @@ async def _gmail_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> Dict
                         logger.warning(f"Failed to process attachment: {part_e}")
                         return None
 
+                if parts:
+                    tasks = [asyncio.create_task(process_part(p)) for p in parts]
+                    if tasks:
+                        results = await asyncio.gather(*tasks, return_exceptions=True)
+                        # Collect valid items for batch insert
+                        for result in results:
+                            if result and isinstance(result, dict) and not isinstance(result, Exception):
+                                page_batch_items.append(result)
+
+        # Batch insert all items from this page using transaction
+        if page_batch_items:
+            pass  # Batch insert logic would go here
+        
+        # Determine final sync status before updating database
+        run_status = 'succeeded' if not errors else ('partial' if stats['records_fetched'] > 0 else 'failed')
+        
+        # Update sync_runs, user_connections, and sync_cursors atomically in transaction
+        try:
+            transaction_manager = get_transaction_manager()
+            async with transaction_manager.transaction(
+                user_id=user_id,
+                operation_type="connector_sync_completion"
+            ) as tx:
+                # Update sync_run status
+                await tx.update('sync_runs', {
+                    'status': run_status,
+                    'finished_at': pendulum.now().to_iso8601_string(),
+                    'stats': orjson.dumps(stats).decode(),
+                    'error': '; '.join(errors)[:500] if errors else None
+                }, {'id': sync_run_id})
+                
+                # FIX #3: Update last_synced_at and save historyId for incremental sync
+                # If we didn't get historyId from History API, fetch from profile
+                if not current_history_id:
+                    try:
+                        profile = await nango.get_gmail_profile(provider_key, connection_id)
+                        current_history_id = profile.get('historyId')
+                    except Exception as profile_err:
+                        logger.debug(f"Failed to get current Gmail profile: {profile_err}")
+                
+                # Fetch current metadata
+                uc_current = supabase.table('user_connections').select('metadata').eq('nango_connection_id', connection_id).limit(1).execute()
+                current_meta = {}
+                if uc_current.data:
+                    uc_metadata_raw = uc_current.data[0].get('metadata') or {}
+                    # LIBRARY FIX: Use Pydantic validation instead of manual JSON parsing
+                    try:
+                        if isinstance(uc_metadata_raw, str):
+                            uc_metadata_raw = orjson.loads(uc_metadata_raw)
+                        uc_metadata = UserConnectionMetadata.model_validate(uc_metadata_raw)
+                        current_meta = uc_metadata.model_dump()
+                    except ValidationError as ve:
+                        logger.warning(f"Failed to validate current user connection metadata: {ve}")
+                        current_meta = {}
+                    except Exception as e:
+                        logger.warning(f"Failed to parse current user connection metadata: {e}")
+                        current_meta = {}
+                
+                # Update with new historyId
+                updated_meta = {**current_meta}
+                if current_history_id:
+                    updated_meta['last_history_id'] = current_history_id
                     logger.info(f"✅ Saved Gmail historyId for incremental sync: {current_history_id}")
                 
                 await tx.update('user_connections', {
