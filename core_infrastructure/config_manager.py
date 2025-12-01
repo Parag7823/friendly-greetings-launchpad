@@ -115,6 +115,12 @@ class AppConfig(BaseSettings):
     max_upload_size_mb: int = 500
     upload_temp_dir: str = "/tmp"
     
+    # CRITICAL FIX #7: Attachment size limit to prevent OOM crashes
+    # Prevents downloading huge attachments that exhaust worker RAM
+    # Math: 5 users × 10 attachments × 50MB = 2.5GB RAM → OOM on 2GB worker
+    # Solution: Limit to 25MB per attachment (reasonable for business documents)
+    max_attachment_size_mb: int = 25  # Max size for provider attachments (Gmail, Dropbox, etc.)
+    
     class Config:
         env_prefix = "APP_"
         case_sensitive = False

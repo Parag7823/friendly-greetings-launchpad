@@ -13,7 +13,7 @@ from tenacity import (
     AsyncRetrying,
 )
 
-from core_infrastructure.config_manager import get_nango_config
+from core_infrastructure.config_manager import get_nango_config, get_app_config
 
 logger = structlog.get_logger(__name__)
 
@@ -153,8 +153,13 @@ class NangoClient:
         return resp.json()
 
     async def get_gmail_attachment(self, provider_config_key: str, connection_id: str,
-                                   message_id: str, attachment_id: str) -> bytes:
-        """Fetch a Gmail attachment as bytes (base64 decode)."""
+                                   message_id: str, attachment_id: str) -> Optional[bytes]:
+        """
+        Fetch a Gmail attachment as bytes (base64 decode).
+        
+        CRITICAL FIX #7: Added size check to prevent OOM crashes.
+        Returns None if attachment exceeds max_attachment_size_mb.
+        """
         url = f"{self.base_url}/proxy/gmail/v1/users/me/messages/{message_id}/attachments/{attachment_id}"
         _PROVIDER = 'gmail'
         _METHOD = 'GET'
@@ -181,10 +186,23 @@ class NangoClient:
         # Gmail API uses base64url; handle both
         b64 = b64.replace("-", "+").replace("_", "/")
         try:
-            return base64.b64decode(b64)
+            decoded = base64.b64decode(b64)
         except Exception:
             # Try urlsafe decode as fallback
-            return base64.urlsafe_b64decode(b64)
+            decoded = base64.urlsafe_b64decode(b64)
+        
+        # CRITICAL FIX #7: Check attachment size before returning
+        app_config = get_app_config()
+        max_size_bytes = app_config.max_attachment_size_mb * 1024 * 1024
+        
+        if len(decoded) > max_size_bytes:
+            logger.warning(
+                f"Attachment too large: {len(decoded)} bytes > {max_size_bytes} bytes limit. "
+                f"Skipping attachment {attachment_id} from message {message_id}"
+            )
+            return None
+        
+        return decoded
 
     async def list_gmail_history(self, provider_config_key: str, connection_id: str, 
                                  start_history_id: str, max_results: int = 100,

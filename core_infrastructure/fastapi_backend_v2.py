@@ -323,6 +323,74 @@ class SyncRunStats(BaseModel):
     class Config:
         extra = "allow"
 
+# LIBRARY FIX: Connector-specific metadata and stats models for type-safe validation
+class ZohoMailMetadata(BaseModel):
+    """Validated metadata for Zoho Mail user_connections.metadata field"""
+    last_sync_token: Optional[str] = None  # Zoho incremental sync token
+    last_synced_at: Optional[str] = None
+    sync_errors: Optional[List[str]] = None
+    error_count: int = 0
+    
+    class Config:
+        extra = "allow"
+
+class XeroMetadata(BaseModel):
+    """Validated metadata for Xero user_connections.metadata field"""
+    last_sync_token: Optional[str] = None  # Xero incremental sync token
+    last_synced_at: Optional[str] = None
+    sync_errors: Optional[List[str]] = None
+    error_count: int = 0
+    tenant_id: Optional[str] = None  # Xero tenant ID for multi-tenant support
+    
+    class Config:
+        extra = "allow"
+
+class StripeMetadata(BaseModel):
+    """Validated metadata for Stripe user_connections.metadata field"""
+    last_sync_token: Optional[str] = None  # Stripe pagination token
+    last_synced_at: Optional[str] = None
+    sync_errors: Optional[List[str]] = None
+    error_count: int = 0
+    account_id: Optional[str] = None  # Stripe account ID
+    
+    class Config:
+        extra = "allow"
+
+class PayPalMetadata(BaseModel):
+    """Validated metadata for PayPal user_connections.metadata field"""
+    last_sync_token: Optional[str] = None  # PayPal pagination token
+    last_synced_at: Optional[str] = None
+    sync_errors: Optional[List[str]] = None
+    error_count: int = 0
+    merchant_id: Optional[str] = None  # PayPal merchant ID
+    
+    class Config:
+        extra = "allow"
+
+class RazorpayMetadata(BaseModel):
+    """Validated metadata for Razorpay user_connections.metadata field"""
+    last_sync_token: Optional[str] = None  # Razorpay pagination token
+    last_synced_at: Optional[str] = None
+    sync_errors: Optional[List[str]] = None
+    error_count: int = 0
+    account_id: Optional[str] = None  # Razorpay account ID
+    
+    class Config:
+        extra = "allow"
+
+class ConnectorSyncStats(BaseModel):
+    """Extended stats for all connector syncs (Xero, Stripe, PayPal, Razorpay, etc.)"""
+    records_fetched: int = 0
+    actions_used: int = 0
+    attachments_saved: int = 0
+    queued_jobs: int = 0
+    skipped: int = 0
+    errors_encountered: int = 0
+    processing_time_ms: Optional[int] = None
+    
+    class Config:
+        extra = "allow"
+
 from supabase import create_client, Client
 import socket
 from urllib.parse import urlparse
@@ -5488,20 +5556,27 @@ async def _fast_classify_row_cached(self, row, platform_info: dict, column_names
             
         except Exception as e:
             # Handle error with recovery system
-            error_recovery = get_error_recovery_system()
-            error_context = ErrorContext(
-                error_id=str(uuid.uuid4()),
-                user_id=user_id,
-                job_id=job_id,
-                transaction_id=transaction_id,  # CRITICAL FIX: Use transaction_id instead of None
-                operation_type="streaming_init",
-                error_message=str(e),
-                error_details={"filename": streamed_file.filename, "file_size": streamed_file_size or streamed_file.size},
-                severity=ErrorSeverity.HIGH,
-                occurred_at=datetime.utcnow()
-            )
-            
-            await error_recovery.handle_processing_error(error_context)
+            # CRITICAL FIX #6: Add null check to prevent cascading failures
+            try:
+                error_recovery = get_error_recovery_system()
+                if error_recovery:
+                    error_context = ErrorContext(
+                        error_id=str(uuid.uuid4()),
+                        user_id=user_id,
+                        job_id=job_id,
+                        transaction_id=transaction_id,  # CRITICAL FIX: Use transaction_id instead of None
+                        operation_type="streaming_init",
+                        error_message=str(e),
+                        error_details={"filename": streamed_file.filename, "file_size": streamed_file_size or streamed_file.size},
+                        severity=ErrorSeverity.HIGH,
+                        occurred_at=datetime.utcnow()
+                    )
+                    
+                    await error_recovery.handle_processing_error(error_context)
+                else:
+                    logger.warning("Error recovery system not available, continuing without recovery")
+            except Exception as recovery_err:
+                logger.warning(f"Error recovery failed: {recovery_err}, continuing without recovery")
             
             await manager.send_update(job_id, {
                 "step": "error",
