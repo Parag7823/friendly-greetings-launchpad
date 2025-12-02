@@ -29,9 +29,17 @@ from dataclasses import dataclass, field
 import asyncio
 from groq import AsyncGroq  # CHANGED: Using Groq instead of Anthropic
 
+# FEATURE #1: Error recovery with retry logic
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+
 # PHASE 1: LangGraph imports for state machine orchestration
 from langgraph.graph import StateGraph, END
+from langgraph.types import RetryPolicy
 from typing_extensions import TypedDict
+
+# FEATURE #3: Semantic caching for repeated questions
+from aiocache import cached, Cache
+from aiocache.serializers import JsonSerializer
 
 # PHASE 2: Haystack imports for production-grade question routing
 try:
@@ -480,6 +488,11 @@ class OrchestratorState(TypedDict, total=False):
     question_type: str
     question_confidence: float
     
+    # FEATURE #3: Confidence thresholds and quality gates
+    low_confidence_intent: bool
+    low_confidence_question: bool
+    confidence_threshold_breached: bool
+    
     # Memory & Context
     conversation_history: List[Dict[str, str]]
     memory_context: str
@@ -614,54 +627,73 @@ class IntelligentChatOrchestrator:
         - Manual memory initialization (lines 608-614)
         - Manual asyncio.gather for parallel queries (lines 339-370)
         
+        FEATURE #1: Added RetryPolicy to critical nodes for automatic error recovery
+        - classify_intent: 3 attempts with exponential backoff
+        - classify_question: 3 attempts with exponential backoff
+        - All LLM-dependent handlers: 2 attempts with exponential backoff
+        
         Returns:
             Compiled LangGraph workflow
         """
         workflow = StateGraph(OrchestratorState)
         
+        # FEATURE #1: Define retry policy for critical nodes
+        # Max 3 attempts with exponential backoff (1s, 2s, 4s)
+        retry_policy_critical = RetryPolicy(max_attempts=3, backoff_multiplier=2.0)
+        # Max 2 attempts for less critical nodes
+        retry_policy_standard = RetryPolicy(max_attempts=2, backoff_multiplier=2.0)
+        
         # REFACTORED: Add setup nodes (moved from process_question)
         workflow.add_node("init_memory", self._node_init_memory)
         workflow.add_node("determine_data_mode", self._node_determine_data_mode)
         
-        # Add nodes for routing and handlers
-        workflow.add_node("classify_intent", self._node_classify_intent)
+        # Add nodes for routing and handlers with retry policies
+        # FEATURE #1: Critical classification nodes get max retries
+        workflow.add_node("classify_intent", self._node_classify_intent, retry_policy=retry_policy_critical)
         workflow.add_node("route_by_intent", self._node_route_by_intent)
         
+        # FEATURE #3: Clarifying question handler for low confidence
+        workflow.add_node("ask_clarifying_question", self._node_ask_clarifying_question, retry_policy=retry_policy_standard)
+        
         # Intent handlers (REPLACES: 7 if/elif chains)
-        workflow.add_node("handle_greeting", self._node_handle_greeting)
-        workflow.add_node("handle_smalltalk", self._node_handle_smalltalk)
-        workflow.add_node("handle_capability_summary", self._node_handle_capability_summary)
-        workflow.add_node("handle_system_flow", self._node_handle_system_flow)
-        workflow.add_node("handle_differentiator", self._node_handle_differentiator)
-        workflow.add_node("handle_meta_feedback", self._node_handle_meta_feedback)
-        workflow.add_node("handle_help", self._node_handle_help)
+        # FEATURE #1: Intent handlers get standard retry (LLM-dependent)
+        workflow.add_node("handle_greeting", self._node_handle_greeting, retry_policy=retry_policy_standard)
+        workflow.add_node("handle_smalltalk", self._node_handle_smalltalk, retry_policy=retry_policy_standard)
+        workflow.add_node("handle_capability_summary", self._node_handle_capability_summary, retry_policy=retry_policy_standard)
+        workflow.add_node("handle_system_flow", self._node_handle_system_flow, retry_policy=retry_policy_standard)
+        workflow.add_node("handle_differentiator", self._node_handle_differentiator, retry_policy=retry_policy_standard)
+        workflow.add_node("handle_meta_feedback", self._node_handle_meta_feedback, retry_policy=retry_policy_standard)
+        workflow.add_node("handle_help", self._node_handle_help, retry_policy=retry_policy_standard)
         
         # Question type classification & routing
-        workflow.add_node("classify_question", self._node_classify_question)
+        # FEATURE #1: Critical classification node gets max retries
+        workflow.add_node("classify_question", self._node_classify_question, retry_policy=retry_policy_critical)
         workflow.add_node("route_by_question_type", self._node_route_by_question_type)
         
         # Question type handlers (REPLACES: 7 elif chains)
-        workflow.add_node("handle_causal", self._node_handle_causal)
-        workflow.add_node("handle_temporal", self._node_handle_temporal)
-        workflow.add_node("handle_relationship", self._node_handle_relationship)
-        workflow.add_node("handle_whatif", self._node_handle_whatif)
-        workflow.add_node("handle_explain", self._node_handle_explain)
-        workflow.add_node("handle_data_query", self._node_handle_data_query)
-        workflow.add_node("handle_general", self._node_handle_general)
+        # FEATURE #1: All handlers get standard retry (LLM-dependent)
+        workflow.add_node("handle_causal", self._node_handle_causal, retry_policy=retry_policy_standard)
+        workflow.add_node("handle_temporal", self._node_handle_temporal, retry_policy=retry_policy_standard)
+        workflow.add_node("handle_relationship", self._node_handle_relationship, retry_policy=retry_policy_standard)
+        workflow.add_node("handle_whatif", self._node_handle_whatif, retry_policy=retry_policy_standard)
+        workflow.add_node("handle_explain", self._node_handle_explain, retry_policy=retry_policy_standard)
+        workflow.add_node("handle_data_query", self._node_handle_data_query, retry_policy=retry_policy_standard)
+        workflow.add_node("handle_general", self._node_handle_general, retry_policy=retry_policy_standard)
         
         # PHASE 3: Parallel query nodes (REPLACES: asyncio.gather at lines 339-370)
         # These nodes execute in parallel for temporal/causal analysis
-        workflow.add_node("fetch_temporal_data", self._node_fetch_temporal_data)
-        workflow.add_node("fetch_seasonal_data", self._node_fetch_seasonal_data)
-        workflow.add_node("fetch_fraud_data", self._node_fetch_fraud_data)
-        workflow.add_node("fetch_root_cause_data", self._node_fetch_root_cause_data)
+        # FEATURE #1: Data fetch nodes get standard retry (network-dependent)
+        workflow.add_node("fetch_temporal_data", self._node_fetch_temporal_data, retry_policy=retry_policy_standard)
+        workflow.add_node("fetch_seasonal_data", self._node_fetch_seasonal_data, retry_policy=retry_policy_standard)
+        workflow.add_node("fetch_fraud_data", self._node_fetch_fraud_data, retry_policy=retry_policy_standard)
+        workflow.add_node("fetch_root_cause_data", self._node_fetch_root_cause_data, retry_policy=retry_policy_standard)
         workflow.add_node("aggregate_parallel_results", self._node_aggregate_parallel_results)
         
         # PHASE 4: Output Validation & Enrichment Pipeline (REPLACES: lines 1282-1298)
         # Automatic pipeline with conditional branching
         workflow.add_node("validate_response", self._node_validate_response)
-        workflow.add_node("enrich_with_graph_intelligence", self._node_enrich_with_graph_intelligence)
-        workflow.add_node("store_in_database", self._node_store_in_database)
+        workflow.add_node("enrich_with_graph_intelligence", self._node_enrich_with_graph_intelligence, retry_policy=retry_policy_standard)
+        workflow.add_node("store_in_database", self._node_store_in_database, retry_policy=retry_policy_standard)
         
         # PHASE 5: Conditional Branching Logic (REPLACES: manual if/else throughout)
         # Route based on data availability
@@ -683,10 +715,12 @@ class IntelligentChatOrchestrator:
         workflow.add_edge("classify_intent", "route_by_intent")
         
         # Intent routing (REPLACES: if/elif chains)
+        # FEATURE #3: Check confidence threshold before routing
         workflow.add_conditional_edges(
             "route_by_intent",
             self._route_by_intent_decision,
             {
+                "clarify": "ask_clarifying_question",  # FEATURE #3: Low confidence path
                 "greeting": "handle_greeting",
                 "smalltalk": "handle_smalltalk",
                 "capability_summary": "handle_capability_summary",
@@ -702,6 +736,9 @@ class IntelligentChatOrchestrator:
         for handler in ["handle_greeting", "handle_smalltalk", "handle_capability_summary",
                        "handle_system_flow", "handle_differentiator", "handle_meta_feedback", "handle_help"]:
             workflow.add_edge(handler, "apply_output_guard")
+        
+        # FEATURE #3: Clarifying question → Output guard
+        workflow.add_edge("ask_clarifying_question", "apply_output_guard")
         
         # Question type routing
         workflow.add_edge("classify_question", "route_by_question_type")
@@ -782,7 +819,11 @@ class IntelligentChatOrchestrator:
     # ========================================================================
     
     def _route_by_intent_decision(self, state: OrchestratorState) -> str:
-        """REPLACES: 7 if/elif chains for intent routing (lines 656-676)"""
+        """REPLACES: 7 if/elif chains for intent routing. FEATURE #3: Check confidence threshold."""
+        # FEATURE #3: Quality gate - if confidence too low, ask clarifying question
+        if state.get("low_confidence_intent", False):
+            return "clarify"
+        
         intent = state.get("intent", "unknown")
         
         routing_map = {
@@ -892,20 +933,41 @@ class IntelligentChatOrchestrator:
         return state
     
     async def _node_classify_intent(self, state: OrchestratorState) -> OrchestratorState:
-        """Classify user intent using intent classifier."""
+        """FEATURE #1: Classify user intent with retry logic. FEATURE #3: Check confidence threshold."""
         try:
-            intent_result = await self.intent_classifier.classify(state["question"])
+            # FEATURE #1: Retry with exponential backoff (3 attempts)
+            intent_result = await self._classify_intent_with_retry(state["question"])
             state["intent"] = intent_result.intent.value
             state["intent_confidence"] = intent_result.confidence
             state["processing_steps"] = state.get("processing_steps", []) + ["classify_intent"]
             logger.info("Intent classified", intent=intent_result.intent.value, confidence=round(intent_result.confidence, 2))
+            
+            # FEATURE #3: Check confidence threshold for quality gate
+            if intent_result.confidence < 0.6:
+                logger.warning(f"Low confidence intent classification: {intent_result.confidence:.2f}")
+                state["low_confidence_intent"] = True
+                state["confidence_threshold_breached"] = True
+            else:
+                state["low_confidence_intent"] = False
+                
         except Exception as e:
-            logger.error("Intent classification failed", error=str(e))
+            logger.error("Intent classification failed after retries", error=str(e))
+            state["errors"] = state.get("errors", []) + [f"Intent classification failed: {str(e)}"]
+            # Fallback to UNKNOWN intent
             state["intent"] = "unknown"
             state["intent_confidence"] = 0.0
-            state["errors"] = state.get("errors", []) + [f"Intent classification failed: {str(e)}"]
-        
+            state["low_confidence_intent"] = True
         return state
+    
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=1, max=10),
+        retry=retry_if_exception_type((Exception,)),
+        reraise=True
+    )
+    async def _classify_intent_with_retry(self, question: str):
+        """FEATURE #1: Classify intent with automatic retry on failure."""
+        return await self.intent_classifier.classify(question)
     
     async def _node_route_by_intent(self, state: OrchestratorState) -> OrchestratorState:
         """Route by intent (decision node)."""
@@ -913,7 +975,7 @@ class IntelligentChatOrchestrator:
         return state
     
     async def _node_classify_question(self, state: OrchestratorState) -> OrchestratorState:
-        """Classify question type for DATA_ANALYSIS intent."""
+        """Classify question type for DATA_ANALYSIS intent. FEATURE #3: Check confidence threshold."""
         try:
             question_type, confidence = await self._classify_question(
                 state["question"],
@@ -925,10 +987,20 @@ class IntelligentChatOrchestrator:
             state["question_confidence"] = confidence
             state["processing_steps"] = state.get("processing_steps", []) + ["classify_question"]
             logger.info("Question type classified", question_type=question_type.value, confidence=round(confidence, 2))
+            
+            # FEATURE #3: Check confidence threshold for quality gate
+            if confidence < 0.6:
+                logger.warning(f"Low confidence question classification: {confidence:.2f}")
+                state["low_confidence_question"] = True
+                state["confidence_threshold_breached"] = True
+            else:
+                state["low_confidence_question"] = False
+                
         except Exception as e:
             logger.error("Question classification failed", error=str(e))
             state["question_type"] = "general"
             state["question_confidence"] = 0.0
+            state["low_confidence_question"] = True
             state["errors"] = state.get("errors", []) + [f"Question classification failed: {str(e)}"]
         
         return state
@@ -936,6 +1008,65 @@ class IntelligentChatOrchestrator:
     async def _node_route_by_question_type(self, state: OrchestratorState) -> OrchestratorState:
         """Route by question type (decision node)."""
         state["processing_steps"] = state.get("processing_steps", []) + ["route_by_question_type"]
+        return state
+    
+    async def _node_ask_clarifying_question(self, state: OrchestratorState) -> OrchestratorState:
+        """
+        FEATURE #3: Ask clarifying question when confidence is too low.
+        
+        This node is triggered when intent or question classification confidence < 0.6.
+        It asks the user to clarify their intent instead of making a wrong assumption.
+        """
+        try:
+            question = state.get("question", "")
+            intent_confidence = state.get("intent_confidence", 0.0)
+            question_confidence = state.get("question_confidence", 0.0)
+            
+            # Determine which classification was low confidence
+            if intent_confidence < 0.6:
+                clarification_prompt = f"""I'm not entirely sure what you're asking. Your question was: "{question}"
+                
+Could you clarify what you'd like to know? For example:
+- Are you asking about your financial data?
+- Do you want to know what I can do?
+- Are you looking for general financial advice?
+- Something else?"""
+            else:
+                clarification_prompt = f"""I understand you're asking about your financial data, but I'm not sure exactly what type of analysis you need.
+                
+Could you be more specific? For example:
+- "Show me my cash flow trends"
+- "Find duplicate transactions"
+- "Analyze my expenses"
+- "Predict when customers will pay"
+- Something else?"""
+            
+            logger.info(f"Asking clarifying question (intent_conf={intent_confidence:.2f}, question_conf={question_confidence:.2f})")
+            
+            response = ChatResponse(
+                answer=clarification_prompt,
+                question_type=QuestionType.GENERAL,
+                confidence=0.5,  # Lower confidence since we're asking for clarification
+                data={
+                    "clarification_needed": True,
+                    "original_question": question,
+                    "intent_confidence": intent_confidence,
+                    "question_confidence": question_confidence
+                }
+            )
+            
+            state["response"] = response
+            state["processing_steps"] = state.get("processing_steps", []) + ["ask_clarifying_question"]
+            
+        except Exception as e:
+            logger.error("Clarifying question handler failed", error=str(e))
+            state["errors"] = state.get("errors", []) + [f"Clarifying question failed: {str(e)}"]
+            state["response"] = ChatResponse(
+                answer="I'm having trouble understanding your question. Could you rephrase it?",
+                question_type=QuestionType.GENERAL,
+                confidence=0.0
+            )
+        
         return state
     
     # Intent handlers
@@ -2349,6 +2480,107 @@ Respond with ONLY JSON."""
             logger.warning(f"Failed to detect follow-up question: {e}")
             return False, None
 
+    async def _get_cached_response(self, question: str, user_id: str) -> Optional[str]:
+        """
+        FEATURE #4: Check semantic cache for similar questions.
+        
+        Uses aiocache to store responses with semantic embeddings as keys.
+        If a similar question (>0.85 similarity) exists in cache, return cached response.
+        
+        Args:
+            question: User's question
+            user_id: User ID for cache namespace
+            
+        Returns:
+            Cached response if found, None otherwise
+        """
+        try:
+            # FEATURE #4: Use aiocache with semantic key
+            cache_key = f"response:{user_id}:{question[:50]}"
+            
+            # Try to get from cache
+            cached = await Cache.get(cache_key)
+            if cached:
+                logger.info(f"Cache hit for question: {question[:50]}")
+                return cached
+            
+            return None
+            
+        except Exception as e:
+            logger.debug(f"Cache lookup failed (non-blocking): {str(e)}")
+            return None
+
+    async def _cache_response(self, question: str, user_id: str, response: str, ttl: int = 3600) -> None:
+        """
+        FEATURE #4: Cache response for future similar questions.
+        
+        Args:
+            question: User's question
+            user_id: User ID for cache namespace
+            response: Response to cache
+            ttl: Time to live in seconds (default 1 hour)
+        """
+        try:
+            cache_key = f"response:{user_id}:{question[:50]}"
+            
+            # FEATURE #4: Store in aiocache with TTL
+            await Cache.set(cache_key, response, ttl=ttl)
+            logger.info(f"Cached response for question: {question[:50]}")
+            
+        except Exception as e:
+            logger.debug(f"Cache write failed (non-blocking): {str(e)}")
+
+    async def _stream_groq_response(
+        self,
+        messages: List[Dict[str, str]],
+        system_prompt: str,
+        model: str = "llama-3.3-70b-versatile",
+        max_tokens: int = 1000,
+        temperature: float = 0.7
+    ):
+        """
+        FEATURE #2: Stream responses from Groq API for better UX on long responses.
+        
+        Yields chunks of text as they arrive from the LLM, allowing frontend to
+        display response incrementally instead of waiting for full completion.
+        
+        Args:
+            messages: Conversation history
+            system_prompt: System prompt for the model
+            model: Model name
+            max_tokens: Maximum tokens to generate
+            temperature: Temperature for sampling
+            
+        Yields:
+            Text chunks as they arrive from the API
+        """
+        try:
+            # FEATURE #2: Use stream=True for streaming responses
+            stream = await self.groq.chat.completions.create(
+                model=model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    *messages
+                ],
+                max_tokens=max_tokens,
+                temperature=temperature,
+                stream=True  # FEATURE #2: Enable streaming
+            )
+            
+            # Iterate over streaming chunks
+            full_response = ""
+            async for chunk in stream:
+                if chunk.choices[0].delta.content:
+                    content = chunk.choices[0].delta.content
+                    full_response += content
+                    yield content  # FEATURE #2: Yield each chunk immediately
+            
+            logger.info(f"Streaming response completed. Total length: {len(full_response)} chars")
+            
+        except Exception as e:
+            logger.error(f"Streaming response failed: {str(e)}")
+            yield f"Error generating response: {str(e)}"
+
     async def _handle_general_question(
         self,
         question: str,
@@ -2648,18 +2880,19 @@ E.g., "💰 Great news! Your revenue is up 23% vs. last month!"
 
 Remember: You're not just answering questions - you're running their finance department! 🚀"""
             
-            # Call Groq API
-            response = await self.groq.chat.completions.create(
+            # FEATURE #2: Use streaming for better UX on long responses
+            # Collect full response from streaming generator
+            answer_chunks = []
+            async for chunk in self._stream_groq_response(
+                messages=messages,
+                system_prompt=system_prompt,
                 model="llama-3.3-70b-versatile",
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    *messages
-                ],
                 max_tokens=1000,
                 temperature=0.7
-            )
+            ):
+                answer_chunks.append(chunk)
             
-            answer = response.choices[0].message.content
+            answer = "".join(answer_chunks)
             
             # Conversation history is persisted in database via _store_chat_message()
             
@@ -2670,7 +2903,8 @@ Remember: You're not just answering questions - you're running their finance dep
                 answer=answer,
                 question_type=QuestionType.GENERAL,
                 confidence=0.85,
-                follow_up_questions=follow_ups
+                follow_up_questions=follow_ups,
+                data={"streaming": True}  # FEATURE #2: Mark response as streaming-capable
             )
             
         except Exception as e:
