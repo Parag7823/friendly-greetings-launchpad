@@ -49,22 +49,18 @@ try:
     from aident_cfo_brain.intent_and_guard_engine import (
         IntentClassifier,
         OutputGuard,
-        ResponseVariationEngine,
         UserIntent,
         get_intent_classifier,
-        get_output_guard,
-        get_response_variation_engine
+        get_output_guard
     )
 except ImportError:
     # Fallback to relative import
     from .intent_and_guard_engine import (
         IntentClassifier,
         OutputGuard,
-        ResponseVariationEngine,
         UserIntent,
         get_intent_classifier,
-        get_output_guard,
-        get_response_variation_engine
+        get_output_guard
     )
 
 # Initialize logger early for use in import error handlers
@@ -379,10 +375,9 @@ class IntelligentChatOrchestrator:
         # FIX #19: Initialize intent classification and output guard components
         self.intent_classifier = get_intent_classifier()
         self.output_guard = get_output_guard(self.groq)  # PHASE 1: Pass LLM client for LangGraph-based variation
-        self.response_variation_engine = get_response_variation_engine(self.groq)
         
         logger.info("✅ IntelligentChatOrchestrator initialized with all engines including FinleyGraph")
-        logger.info("✅ FIX #19: Intent Classifier, OutputGuard, and ResponseVariation initialized")
+        logger.info("✅ FIX #19: Intent Classifier and OutputGuard initialized (LangGraph-based)")
         
         # PHASE 1: Build LangGraph state machine (replaces manual routing)
         self.graph = self._build_langgraph()
@@ -1149,38 +1144,10 @@ class IntelligentChatOrchestrator:
             state["errors"] = state.get("errors", []) + [f"Result aggregation failed: {str(e)}"]
         return state
     
-    async def _parallel_query(self, queries: List[Tuple[str, callable]]) -> Dict[str, Any]:
-        """
-        PARALLEL PROCESSING: Execute multiple queries simultaneously using asyncio.
-        
-        Example: "Compare Q1 vs Q2" → Query Q1 and Q2 data in parallel
-        
-        Args:
-            queries: List of (query_name, async_function) tuples
-        
-        Returns:
-            Dict mapping query_name to result
-        """
-        try:
-            # Execute all queries in parallel
-            tasks = [func() for name, func in queries]
-            results = await asyncio.gather(*tasks, return_exceptions=True)
-            
-            # Map results back to query names
-            result_dict = {}
-            for (name, _), result in zip(queries, results):
-                if isinstance(result, Exception):
-                    logger.error("Parallel query failed", query_name=name, error=str(result))
-                    result_dict[name] = None
-                else:
-                    result_dict[name] = result
-            
-            logger.info("Parallel processing completed", query_count=len(queries))
-            return result_dict
-            
-        except Exception as e:
-            logger.error("Parallel processing failed", error=str(e))
-            return {}
+    # REMOVED: _parallel_query() method
+    # REASON: Dead code - replaced by LangGraph parallel nodes (fetch_temporal_data, fetch_seasonal_data, etc.)
+    # LangGraph automatically handles parallel execution via conditional edges (lines 506-513)
+    # This method was never called anywhere in the codebase
     
     async def _determine_data_mode(self, user_id: str) -> DataMode:
         """

@@ -563,160 +563,15 @@ Generate the varied response now:"""
             return proposed_response  # Fallback to original
 
 
-# LangGraph State Definition for Response Variation
-class ResponseVariationState(TypedDict):
-    """State for response variation graph"""
-    original_response: str
-    question: str
-    variation_type: str
-    variation_prompt: str
-    alternative_response: str
-
-
-class ResponseVariationEngine:
-    """
-    LangGraph-based response variation engine.
-    
-    PHASE 1 IMPLEMENTATION:
-    - Replaces manual variation type selection with LangGraph state routing
-    - Replaces manual prompt engineering with LangGraph state nodes
-    - Replaces manual LLM calls with LangGraph declarative nodes
-    - 100% library-based (zero custom logic)
-    
-    Used by:
-    1. OutputGuard (when repetition detected)
-    2. Frustration escalation (when user frustrated)
-    3. Response diversity (for better UX)
-    """
-    
-    def __init__(self, llm_client: AsyncGroq):
-        """Initialize with LangGraph state machine"""
-        self.llm = llm_client
-        
-        # Variation type mappings
-        self.variation_prompts = {
-            "general": "Generate a completely different response with different structure and examples.",
-            "concise": "Generate a much more concise response (50-100 words max) that's direct and actionable.",
-            "detailed": "Generate a more detailed response with step-by-step breakdown and examples.",
-            "strategic": "Generate a response that focuses on strategic implications and business impact.",
-            "simplified": "Generate a simplified response using plain language, no jargon."
-        }
-        
-        # Build LangGraph state machine
-        self.graph = self._build_graph()
-        logger.info("✅ ResponseVariationEngine initialized with LangGraph state machine")
-    
-    def _build_graph(self) -> StateGraph:
-        """Build LangGraph state machine for response variation"""
-        graph = StateGraph(ResponseVariationState)
-        
-        # Add nodes for variation pipeline
-        graph.add_node("select_prompt", self._node_select_prompt)
-        graph.add_node("generate_variation", self._node_generate_variation)
-        graph.add_node("finalize", self._node_finalize)
-        
-        # Add edges
-        graph.set_entry_point("select_prompt")
-        graph.add_edge("select_prompt", "generate_variation")
-        graph.add_edge("generate_variation", "finalize")
-        graph.add_edge("finalize", END)
-        
-        return graph.compile(checkpointer=MemorySaver())
-    
-    def _node_select_prompt(self, state: ResponseVariationState) -> ResponseVariationState:
-        """LangGraph node: Select variation prompt based on type"""
-        variation_instruction = self.variation_prompts.get(
-            state["variation_type"],
-            self.variation_prompts["general"]
-        )
-        
-        return {
-            **state,
-            "variation_prompt": variation_instruction
-        }
-    
-    async def _node_generate_variation(self, state: ResponseVariationState) -> ResponseVariationState:
-        """LangGraph node: Generate alternative response using LLM"""
-        try:
-            prompt = f"""You are Finley, an AI finance assistant.
-
-USER'S QUESTION: {state["question"]}
-
-ORIGINAL RESPONSE (do NOT repeat this):
-{state["original_response"]}
-
-TASK: {state["variation_prompt"]}
-
-Generate the alternative response now:"""
-            
-            response = await self.llm.chat.completions.create(
-                model="llama-3.3-70b-versatile",
-                messages=[{"role": "user", "content": prompt}],
-                max_tokens=500,
-                temperature=0.8
-            )
-            
-            alternative_response = response.choices[0].message.content.strip()
-            
-            return {
-                **state,
-                "alternative_response": alternative_response
-            }
-        
-        except Exception as e:
-            logger.error(f"Failed to generate variation: {e}")
-            return {
-                **state,
-                "alternative_response": state["original_response"]
-            }
-    
-    def _node_finalize(self, state: ResponseVariationState) -> ResponseVariationState:
-        """LangGraph node: Finalize variation"""
-        return state
-    
-    async def generate_alternative(
-        self,
-        original_response: str,
-        question: str,
-        variation_type: str = "general"
-    ) -> str:
-        """
-        Generate an alternative response using LangGraph.
-        
-        Args:
-            original_response: Original response
-            question: User's question
-            variation_type: Type of variation ("general", "concise", "detailed", "strategic", "simplified")
-        
-        Returns:
-            Alternative response
-        """
-        try:
-            # Initialize state
-            initial_state = {
-                "original_response": original_response,
-                "question": question,
-                "variation_type": variation_type,
-                "variation_prompt": "",
-                "alternative_response": original_response
-            }
-            
-            # Run graph
-            final_state = await asyncio.to_thread(
-                lambda: self.graph.invoke(initial_state)
-            )
-            
-            return final_state["alternative_response"]
-        
-        except Exception as e:
-            logger.error(f"Failed to generate alternative: {e}")
-            return original_response
+# REMOVED: ResponseVariationEngine class and ResponseVariationState
+# REASON: Dead code - OutputGuard handles response variation internally via _node_generate_variation()
+# The OutputGuard class (lines 332-563) already implements variation generation with LangGraph
+# This was never called anywhere in the codebase
 
 
 # Singleton instances
 _intent_classifier: Optional[IntentClassifier] = None
 _output_guard: Optional[OutputGuard] = None
-_response_variation_engine: Optional[ResponseVariationEngine] = None
 
 
 def get_intent_classifier() -> IntentClassifier:
@@ -735,9 +590,5 @@ def get_output_guard(llm_client: AsyncGroq) -> OutputGuard:
     return _output_guard
 
 
-def get_response_variation_engine(llm_client: AsyncGroq) -> ResponseVariationEngine:
-    """Get or create response variation engine singleton (LangGraph-based)"""
-    global _response_variation_engine
-    if _response_variation_engine is None:
-        _response_variation_engine = ResponseVariationEngine(llm_client)
-    return _response_variation_engine
+# REMOVED: get_response_variation_engine() function
+# REASON: ResponseVariationEngine is dead code - OutputGuard handles variation internally
