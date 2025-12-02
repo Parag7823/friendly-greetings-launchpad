@@ -145,8 +145,8 @@ langchain==0.2.16
 langchain-openai==0.1.21
 langchain-groq==0.1.5
 
-# LangGraph: State Machine Orchestrator (PHASE 4 - CORE ORCHESTRATION)
-langgraph==0.2.52  # Replaces 1,190 lines of manual routing, memory, and state management
+# LangGraph - State Machine Orchestration (PHASE 1: Routing & Memory Management)
+langgraph==0.0.64  # State machine for declarative routing, parallel execution, automatic state persistence
 
 # BDD Testing Framework
 behave>=1.2.0

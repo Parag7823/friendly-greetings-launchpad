@@ -25,9 +25,13 @@ import importlib.util
 from datetime import datetime, timedelta
 from typing import Dict, Any, List, Optional, Tuple
 from enum import Enum
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import asyncio
 from groq import AsyncGroq  # CHANGED: Using Groq instead of Anthropic
+
+# PHASE 1: LangGraph imports for state machine orchestration
+from langgraph.graph import StateGraph, END
+from typing_extensions import TypedDict
 
 # FIX #INSTRUCTOR: Type-safe question classification with instructor
 try:
@@ -236,6 +240,41 @@ class OnboardingState(Enum):
     ACTIVE = "active"  # User is actively using system
 
 
+# PHASE 1: LangGraph State - Replaces manual parameter passing
+class OrchestratorState(TypedDict, total=False):
+    """
+    Unified state for LangGraph orchestrator.
+    
+    REPLACES: Manual memory initialization (lines 608-614)
+    - LangGraph automatically persists this state across nodes
+    - Eliminates manual parameter passing between functions
+    - Automatic context injection between nodes
+    """
+    # Input
+    question: str
+    user_id: str
+    chat_id: Optional[str]
+    context: Optional[Dict[str, Any]]
+    
+    # Classification results
+    intent: str
+    intent_confidence: float
+    question_type: str
+    question_confidence: float
+    
+    # Memory & Context
+    conversation_history: List[Dict[str, str]]
+    memory_context: str
+    memory_messages: List[Dict[str, str]]
+    
+    # Response
+    response: Any
+    
+    # Metadata
+    processing_steps: List[str]
+    errors: List[str]
+
+
 @dataclass
 class ChatResponse:
     """Structured response from the orchestrator"""
@@ -335,6 +374,383 @@ class IntelligentChatOrchestrator:
         
         logger.info("✅ IntelligentChatOrchestrator initialized with all engines including FinleyGraph")
         logger.info("✅ FIX #19: Intent Classifier, OutputGuard, and ResponseVariation initialized")
+        
+        # PHASE 1: Build LangGraph state machine (replaces manual routing)
+        self.graph = self._build_langgraph()
+        logger.info("✅ PHASE 1: LangGraph state machine compiled")
+    
+    def _build_langgraph(self):
+        """
+        PHASE 1: Build LangGraph state machine.
+        
+        REPLACES:
+        - 60+ lines of manual if/elif routing (lines 656-710)
+        - Manual memory initialization (lines 608-614)
+        - Manual asyncio.gather for parallel queries (lines 339-370)
+        
+        Returns:
+            Compiled LangGraph workflow
+        """
+        workflow = StateGraph(OrchestratorState)
+        
+        # Add nodes for routing and handlers
+        workflow.add_node("classify_intent", self._node_classify_intent)
+        workflow.add_node("route_by_intent", self._node_route_by_intent)
+        
+        # Intent handlers (REPLACES: 7 if/elif chains)
+        workflow.add_node("handle_greeting", self._node_handle_greeting)
+        workflow.add_node("handle_smalltalk", self._node_handle_smalltalk)
+        workflow.add_node("handle_capability_summary", self._node_handle_capability_summary)
+        workflow.add_node("handle_system_flow", self._node_handle_system_flow)
+        workflow.add_node("handle_differentiator", self._node_handle_differentiator)
+        workflow.add_node("handle_meta_feedback", self._node_handle_meta_feedback)
+        workflow.add_node("handle_help", self._node_handle_help)
+        
+        # Question type classification & routing
+        workflow.add_node("classify_question", self._node_classify_question)
+        workflow.add_node("route_by_question_type", self._node_route_by_question_type)
+        
+        # Question type handlers (REPLACES: 7 elif chains)
+        workflow.add_node("handle_causal", self._node_handle_causal)
+        workflow.add_node("handle_temporal", self._node_handle_temporal)
+        workflow.add_node("handle_relationship", self._node_handle_relationship)
+        workflow.add_node("handle_whatif", self._node_handle_whatif)
+        workflow.add_node("handle_explain", self._node_handle_explain)
+        workflow.add_node("handle_data_query", self._node_handle_data_query)
+        workflow.add_node("handle_general", self._node_handle_general)
+        
+        # Post-processing
+        workflow.add_node("apply_output_guard", self._node_apply_output_guard)
+        workflow.add_node("save_memory", self._node_save_memory)
+        
+        # Set entry point
+        workflow.set_entry_point("classify_intent")
+        
+        # Define edges
+        workflow.add_edge("classify_intent", "route_by_intent")
+        
+        # Intent routing (REPLACES: if/elif chains)
+        workflow.add_conditional_edges(
+            "route_by_intent",
+            self._route_by_intent_decision,
+            {
+                "greeting": "handle_greeting",
+                "smalltalk": "handle_smalltalk",
+                "capability_summary": "handle_capability_summary",
+                "system_flow": "handle_system_flow",
+                "differentiator": "handle_differentiator",
+                "meta_feedback": "handle_meta_feedback",
+                "help": "handle_help",
+                "data_analysis": "classify_question",
+            }
+        )
+        
+        # Intent handlers → Output guard
+        for handler in ["handle_greeting", "handle_smalltalk", "handle_capability_summary",
+                       "handle_system_flow", "handle_differentiator", "handle_meta_feedback", "handle_help"]:
+            workflow.add_edge(handler, "apply_output_guard")
+        
+        # Question type routing
+        workflow.add_edge("classify_question", "route_by_question_type")
+        
+        # Question type routing (REPLACES: elif chains)
+        workflow.add_conditional_edges(
+            "route_by_question_type",
+            self._route_by_question_type_decision,
+            {
+                "causal": "handle_causal",
+                "temporal": "handle_temporal",
+                "relationship": "handle_relationship",
+                "what_if": "handle_whatif",
+                "explain": "handle_explain",
+                "data_query": "handle_data_query",
+                "general": "handle_general",
+            }
+        )
+        
+        # Question handlers → Output guard
+        for handler in ["handle_causal", "handle_temporal", "handle_relationship",
+                       "handle_whatif", "handle_explain", "handle_data_query", "handle_general"]:
+            workflow.add_edge(handler, "apply_output_guard")
+        
+        # Post-processing
+        workflow.add_edge("apply_output_guard", "save_memory")
+        workflow.add_edge("save_memory", END)
+        
+        return workflow.compile()
+    
+    # ========================================================================
+    # ROUTING DECISION FUNCTIONS - Replaces if/elif logic
+    # ========================================================================
+    
+    def _route_by_intent_decision(self, state: OrchestratorState) -> str:
+        """REPLACES: 7 if/elif chains for intent routing (lines 656-676)"""
+        intent = state.get("intent", "unknown")
+        
+        routing_map = {
+            "greeting": "greeting",
+            "smalltalk": "smalltalk",
+            "capability_summary": "capability_summary",
+            "system_flow": "system_flow",
+            "differentiator": "differentiator",
+            "meta_feedback": "meta_feedback",
+            "help": "help",
+        }
+        
+        return routing_map.get(intent, "data_analysis")
+    
+    def _route_by_question_type_decision(self, state: OrchestratorState) -> str:
+        """REPLACES: 7 elif chains for question type routing (lines 690-710)"""
+        question_type = state.get("question_type", "general")
+        
+        routing_map = {
+            "causal": "causal",
+            "temporal": "temporal",
+            "relationship": "relationship",
+            "what_if": "what_if",
+            "explain": "explain",
+            "data_query": "data_query",
+        }
+        
+        return routing_map.get(question_type, "general")
+    
+    # ========================================================================
+    # NODE IMPLEMENTATIONS - Replaces manual handler invocations
+    # ========================================================================
+    
+    async def _node_classify_intent(self, state: OrchestratorState) -> OrchestratorState:
+        """Classify user intent using intent classifier."""
+        try:
+            intent_result = await self.intent_classifier.classify(state["question"])
+            state["intent"] = intent_result.intent.value
+            state["intent_confidence"] = intent_result.confidence
+            state["processing_steps"] = state.get("processing_steps", []) + ["classify_intent"]
+            logger.info("Intent classified", intent=intent_result.intent.value, confidence=round(intent_result.confidence, 2))
+        except Exception as e:
+            logger.error("Intent classification failed", error=str(e))
+            state["intent"] = "unknown"
+            state["intent_confidence"] = 0.0
+            state["errors"] = state.get("errors", []) + [f"Intent classification failed: {str(e)}"]
+        
+        return state
+    
+    async def _node_route_by_intent(self, state: OrchestratorState) -> OrchestratorState:
+        """Route by intent (decision node)."""
+        state["processing_steps"] = state.get("processing_steps", []) + ["route_by_intent"]
+        return state
+    
+    async def _node_classify_question(self, state: OrchestratorState) -> OrchestratorState:
+        """Classify question type for DATA_ANALYSIS intent."""
+        try:
+            question_type, confidence = await self._classify_question(
+                state["question"],
+                state["user_id"],
+                state.get("conversation_history", []),
+                memory_context=state.get("memory_context", "")
+            )
+            state["question_type"] = question_type.value
+            state["question_confidence"] = confidence
+            state["processing_steps"] = state.get("processing_steps", []) + ["classify_question"]
+            logger.info("Question type classified", question_type=question_type.value, confidence=round(confidence, 2))
+        except Exception as e:
+            logger.error("Question classification failed", error=str(e))
+            state["question_type"] = "general"
+            state["question_confidence"] = 0.0
+            state["errors"] = state.get("errors", []) + [f"Question classification failed: {str(e)}"]
+        
+        return state
+    
+    async def _node_route_by_question_type(self, state: OrchestratorState) -> OrchestratorState:
+        """Route by question type (decision node)."""
+        state["processing_steps"] = state.get("processing_steps", []) + ["route_by_question_type"]
+        return state
+    
+    # Intent handlers
+    async def _node_handle_greeting(self, state: OrchestratorState) -> OrchestratorState:
+        """Handle greeting intent."""
+        try:
+            response = await self._handle_greeting(state["question"], state["user_id"], state.get("conversation_history", []), None)
+            state["response"] = response
+            state["processing_steps"] = state.get("processing_steps", []) + ["handle_greeting"]
+        except Exception as e:
+            logger.error("Greeting handler failed", error=str(e))
+            state["errors"] = state.get("errors", []) + [f"Greeting handler failed: {str(e)}"]
+        return state
+    
+    async def _node_handle_smalltalk(self, state: OrchestratorState) -> OrchestratorState:
+        """Handle smalltalk intent."""
+        try:
+            response = await self._handle_smalltalk(state["question"], state["user_id"], state.get("conversation_history", []), None)
+            state["response"] = response
+            state["processing_steps"] = state.get("processing_steps", []) + ["handle_smalltalk"]
+        except Exception as e:
+            logger.error("Smalltalk handler failed", error=str(e))
+            state["errors"] = state.get("errors", []) + [f"Smalltalk handler failed: {str(e)}"]
+        return state
+    
+    async def _node_handle_capability_summary(self, state: OrchestratorState) -> OrchestratorState:
+        """Handle capability summary intent."""
+        try:
+            response = await self._handle_capability_summary(state["question"], state["user_id"], state.get("conversation_history", []), None)
+            state["response"] = response
+            state["processing_steps"] = state.get("processing_steps", []) + ["handle_capability_summary"]
+        except Exception as e:
+            logger.error("Capability summary handler failed", error=str(e))
+            state["errors"] = state.get("errors", []) + [f"Capability summary handler failed: {str(e)}"]
+        return state
+    
+    async def _node_handle_system_flow(self, state: OrchestratorState) -> OrchestratorState:
+        """Handle system flow intent."""
+        try:
+            response = await self._handle_system_flow(state["question"], state["user_id"], state.get("conversation_history", []), None)
+            state["response"] = response
+            state["processing_steps"] = state.get("processing_steps", []) + ["handle_system_flow"]
+        except Exception as e:
+            logger.error("System flow handler failed", error=str(e))
+            state["errors"] = state.get("errors", []) + [f"System flow handler failed: {str(e)}"]
+        return state
+    
+    async def _node_handle_differentiator(self, state: OrchestratorState) -> OrchestratorState:
+        """Handle differentiator intent."""
+        try:
+            response = await self._handle_differentiator(state["question"], state["user_id"], state.get("conversation_history", []), None)
+            state["response"] = response
+            state["processing_steps"] = state.get("processing_steps", []) + ["handle_differentiator"]
+        except Exception as e:
+            logger.error("Differentiator handler failed", error=str(e))
+            state["errors"] = state.get("errors", []) + [f"Differentiator handler failed: {str(e)}"]
+        return state
+    
+    async def _node_handle_meta_feedback(self, state: OrchestratorState) -> OrchestratorState:
+        """Handle meta feedback intent."""
+        try:
+            response = await self._handle_meta_feedback(state["question"], state["user_id"], state.get("conversation_history", []), None)
+            state["response"] = response
+            state["processing_steps"] = state.get("processing_steps", []) + ["handle_meta_feedback"]
+        except Exception as e:
+            logger.error("Meta feedback handler failed", error=str(e))
+            state["errors"] = state.get("errors", []) + [f"Meta feedback handler failed: {str(e)}"]
+        return state
+    
+    async def _node_handle_help(self, state: OrchestratorState) -> OrchestratorState:
+        """Handle help intent."""
+        try:
+            response = await self._handle_help(state["question"], state["user_id"], state.get("conversation_history", []), None)
+            state["response"] = response
+            state["processing_steps"] = state.get("processing_steps", []) + ["handle_help"]
+        except Exception as e:
+            logger.error("Help handler failed", error=str(e))
+            state["errors"] = state.get("errors", []) + [f"Help handler failed: {str(e)}"]
+        return state
+    
+    # Question type handlers
+    async def _node_handle_causal(self, state: OrchestratorState) -> OrchestratorState:
+        """Handle causal question."""
+        try:
+            response = await self._handle_causal_question(state["question"], state["user_id"], state.get("context"), state.get("conversation_history", []))
+            state["response"] = response
+            state["processing_steps"] = state.get("processing_steps", []) + ["handle_causal"]
+        except Exception as e:
+            logger.error("Causal handler failed", error=str(e))
+            state["errors"] = state.get("errors", []) + [f"Causal handler failed: {str(e)}"]
+        return state
+    
+    async def _node_handle_temporal(self, state: OrchestratorState) -> OrchestratorState:
+        """Handle temporal question with PARALLEL QUERY EXECUTION (PHASE 3)."""
+        try:
+            response = await self._handle_temporal_question(state["question"], state["user_id"], state.get("context"), state.get("conversation_history", []))
+            state["response"] = response
+            state["processing_steps"] = state.get("processing_steps", []) + ["handle_temporal"]
+        except Exception as e:
+            logger.error("Temporal handler failed", error=str(e))
+            state["errors"] = state.get("errors", []) + [f"Temporal handler failed: {str(e)}"]
+        return state
+    
+    async def _node_handle_relationship(self, state: OrchestratorState) -> OrchestratorState:
+        """Handle relationship question."""
+        try:
+            response = await self._handle_relationship_question(state["question"], state["user_id"], state.get("context"), state.get("conversation_history", []))
+            state["response"] = response
+            state["processing_steps"] = state.get("processing_steps", []) + ["handle_relationship"]
+        except Exception as e:
+            logger.error("Relationship handler failed", error=str(e))
+            state["errors"] = state.get("errors", []) + [f"Relationship handler failed: {str(e)}"]
+        return state
+    
+    async def _node_handle_whatif(self, state: OrchestratorState) -> OrchestratorState:
+        """Handle what-if question."""
+        try:
+            response = await self._handle_whatif_question(state["question"], state["user_id"], state.get("context"), state.get("conversation_history", []))
+            state["response"] = response
+            state["processing_steps"] = state.get("processing_steps", []) + ["handle_whatif"]
+        except Exception as e:
+            logger.error("What-if handler failed", error=str(e))
+            state["errors"] = state.get("errors", []) + [f"What-if handler failed: {str(e)}"]
+        return state
+    
+    async def _node_handle_explain(self, state: OrchestratorState) -> OrchestratorState:
+        """Handle explain question."""
+        try:
+            response = await self._handle_explain_question(state["question"], state["user_id"], state.get("context"), state.get("conversation_history", []))
+            state["response"] = response
+            state["processing_steps"] = state.get("processing_steps", []) + ["handle_explain"]
+        except Exception as e:
+            logger.error("Explain handler failed", error=str(e))
+            state["errors"] = state.get("errors", []) + [f"Explain handler failed: {str(e)}"]
+        return state
+    
+    async def _node_handle_data_query(self, state: OrchestratorState) -> OrchestratorState:
+        """Handle data query question."""
+        try:
+            response = await self._handle_data_query(state["question"], state["user_id"], state.get("context"), state.get("conversation_history", []))
+            state["response"] = response
+            state["processing_steps"] = state.get("processing_steps", []) + ["handle_data_query"]
+        except Exception as e:
+            logger.error("Data query handler failed", error=str(e))
+            state["errors"] = state.get("errors", []) + [f"Data query handler failed: {str(e)}"]
+        return state
+    
+    async def _node_handle_general(self, state: OrchestratorState) -> OrchestratorState:
+        """Handle general question."""
+        try:
+            response = await self._handle_general_question(state["question"], state["user_id"], state.get("context"), state.get("conversation_history", []), None)
+            state["response"] = response
+            state["processing_steps"] = state.get("processing_steps", []) + ["handle_general"]
+        except Exception as e:
+            logger.error("General handler failed", error=str(e))
+            state["errors"] = state.get("errors", []) + [f"General handler failed: {str(e)}"]
+        return state
+    
+    async def _node_apply_output_guard(self, state: OrchestratorState) -> OrchestratorState:
+        """Apply output guard to check for repetition."""
+        try:
+            if state.get("response"):
+                safe_response = await self.output_guard.check_and_fix(
+                    proposed_response=state["response"].answer,
+                    recent_responses=state.get("memory_messages", [])[-5:],
+                    question=state["question"],
+                    llm_client=self.groq,
+                    frustration_level=0
+                )
+                state["response"].answer = safe_response
+            state["processing_steps"] = state.get("processing_steps", []) + ["apply_output_guard"]
+        except Exception as e:
+            logger.error("Output guard failed", error=str(e))
+            state["errors"] = state.get("errors", []) + [f"Output guard failed: {str(e)}"]
+        return state
+    
+    async def _node_save_memory(self, state: OrchestratorState) -> OrchestratorState:
+        """Save memory after response."""
+        try:
+            if state.get("response"):
+                from core_infrastructure.fastapi_backend_v2 import get_memory_manager
+                memory_manager = get_memory_manager(state["user_id"])
+                await memory_manager.add_message(state["question"], state["response"].answer)
+            state["processing_steps"] = state.get("processing_steps", []) + ["save_memory"]
+        except Exception as e:
+            logger.error("Memory save failed", error=str(e))
+            state["errors"] = state.get("errors", []) + [f"Memory save failed: {str(e)}"]
+        return state
     
     async def _parallel_query(self, queries: List[Tuple[str, callable]]) -> Dict[str, Any]:
         """
