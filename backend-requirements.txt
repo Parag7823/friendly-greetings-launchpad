@@ -148,9 +148,9 @@ langchain-groq==0.1.5
 # LangGraph - State Machine Orchestration (PHASE 1: Routing & Memory Management)
 langgraph==0.0.64  # State machine for declarative routing, parallel execution, automatic state persistence
 
-# Haystack - Production-Grade Question Routing (PHASE 2: Replace custom classification)
-haystack==1.1.0  # LLM-based routing with built-in conversation history support
-haystack-experimental==0.3.0  # Memory components (InMemoryChatMessageStore, ChatMessageRetriever)
+# REMOVED: Haystack (version 1.1.0 doesn't exist - max available is 0.42)
+# Replaced by: LangGraph (line 149) + LangChain (lines 144-146) for routing and memory
+# These provide better integration with Groq/LLM and are already in use
 
 # GLiNER - Zero-Shot Entity Recognition (PHASE 4: Hybrid entity extraction)
 gliner==0.1.12  # Fast, offline entity extraction for known financial entities
