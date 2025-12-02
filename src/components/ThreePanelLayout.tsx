@@ -54,7 +54,7 @@ export const ThreePanelLayout = ({ currentView = 'chat', onNavigate }: ThreePane
     <div className="h-full w-full finley-dynamic-bg flex flex-col">
       {/* AUDIT FIX #5: Removed wasteful 48px header bar - Database button moved to TabbedFilePreview */}
       <PanelGroup direction="horizontal" className="h-full flex-1">
-        {/* Chat Panel - 50% default (wider now) */}
+        {/* Chat Panel - 50% default */}
         <Panel defaultSize={50} minSize={30} maxSize={70} className="relative">
           <ChatInterface currentView={currentView} onNavigate={onNavigate} />
         </Panel>
@@ -62,8 +62,8 @@ export const ThreePanelLayout = ({ currentView = 'chat', onNavigate }: ThreePane
         {/* Resize Handle - Single copper line */}
         <PanelResizeHandle className="w-0.5 bg-primary/60 hover:bg-primary transition-colors" />
 
-        {/* File Preview Panel - 50% default (wider now) */}
-        <Panel defaultSize={50} minSize={30} className="relative p-4">
+        {/* File Preview Panel - 50% default (matching chat panel) */}
+        <Panel defaultSize={50} minSize={30} maxSize={70} className="relative p-4">
           <div className="h-full w-full rounded-xl overflow-hidden bg-background shadow-lg">
             <TabbedFilePreview
               openFiles={openFiles}

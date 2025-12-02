@@ -151,7 +151,7 @@
 
   /* Custom scrollbar for dark theme */
   ::-webkit-scrollbar {
-    width: 6px;
+    width: 2px;
   }
 
   ::-webkit-scrollbar-track {
