@@ -148,9 +148,9 @@ langchain-groq==0.1.5
 # LangGraph - State Machine Orchestration (PHASE 1: Routing & Memory Management)
 langgraph==0.0.64  # State machine for declarative routing, parallel execution, automatic state persistence
 
-# Haystack - Production-Grade Question Routing (PHASE 2: Replace custom classification)
-farm-haystack==1.26.4  # LLM-based routing with built-in conversation history support (FIXED: was haystack==1.1.0)
-# Note: Package name is farm-haystack (not haystack), latest version is 1.26.4
+# REMOVED: farm-haystack==1.26.4 (incompatible with pydantic 2.7.0 - requires pydantic<2)
+# Replaced by: LangGraph (line 149) + LangChain (lines 144-146) for routing and memory
+# LangGraph provides better state management and is compatible with pydantic 2.7.0
 
 # GLiNER - Zero-Shot Entity Recognition (PHASE 4: Hybrid entity extraction)
 gliner==0.2.24  # Fast, offline entity extraction for known financial entities (FIXED: was 0.1.12)
