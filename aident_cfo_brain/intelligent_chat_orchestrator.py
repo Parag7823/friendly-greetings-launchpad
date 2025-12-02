@@ -313,6 +313,82 @@ if INSTRUCTOR_AVAILABLE:
             le=1.0,
             description="Confidence score for entity identification"
         )
+    
+    # Intent handler response models
+    class GreetingResponse(BaseModel):
+        """Type-safe greeting response"""
+        greeting_message: str = Field(
+            ...,
+            description="Warm greeting message for the user"
+        )
+        follow_up: str = Field(
+            ...,
+            description="Follow-up question or suggestion (e.g., 'How can I help you today?')"
+        )
+        tone: str = Field(
+            default="friendly",
+            description="Tone of response (friendly, professional, warm)"
+        )
+    
+    class CapabilitySummaryResponse(BaseModel):
+        """Type-safe capability summary response"""
+        capabilities: List[str] = Field(
+            ...,
+            description="List of main capabilities (e.g., 'Causal analysis', 'Temporal patterns', 'What-if scenarios')"
+        )
+        key_features: List[str] = Field(
+            ...,
+            description="Key features that differentiate the platform"
+        )
+        next_step: str = Field(
+            ...,
+            description="Suggested next action for user"
+        )
+    
+    class SystemFlowResponse(BaseModel):
+        """Type-safe system flow explanation"""
+        flow_steps: List[str] = Field(
+            ...,
+            description="Steps in the system flow (e.g., 'Connect data', 'Ask questions', 'Get insights')"
+        )
+        current_step: str = Field(
+            default="",
+            description="Where user is in the flow"
+        )
+        next_step: str = Field(
+            ...,
+            description="What to do next"
+        )
+    
+    class DifferentiatorResponse(BaseModel):
+        """Type-safe differentiator explanation"""
+        differentiators: List[str] = Field(
+            ...,
+            description="Key differentiators from competitors"
+        )
+        unique_value: str = Field(
+            ...,
+            description="Unique value proposition"
+        )
+        proof_point: str = Field(
+            ...,
+            description="Evidence or proof of differentiation"
+        )
+    
+    class HelpResponse(BaseModel):
+        """Type-safe help response"""
+        help_topics: List[str] = Field(
+            ...,
+            description="Available help topics"
+        )
+        suggested_topic: str = Field(
+            ...,
+            description="Suggested help topic based on context"
+        )
+        contact_info: str = Field(
+            default="",
+            description="Contact information if needed"
+        )
 
 
 class DataMode(Enum):
@@ -1524,64 +1600,53 @@ With your financial data, I can:
                 reasoning=intent_result.reasoning
             )
             
-            # CRITICAL FIX: Route by INTENT FIRST (before question_type)
-            # This ensures greetings, smalltalk, and meta questions are handled appropriately
-            print(f"[ORCHESTRATOR] Routing by user intent...", flush=True)
-            if intent_result.intent == UserIntent.GREETING:
-                response = await self._handle_greeting(question, user_id, conversation_history, memory_manager)
+            # PHASE 2: REPLACE MANUAL ROUTING WITH LANGGRAPH
+            # This replaces 58 lines of if/elif chains with automatic orchestration
+            print(f"[ORCHESTRATOR] Executing LangGraph state machine...", flush=True)
             
-            elif intent_result.intent == UserIntent.SMALLTALK:
-                response = await self._handle_smalltalk(question, user_id, conversation_history, memory_manager)
+            # Initialize LangGraph state with all required context
+            initial_state = {
+                "question": question,
+                "user_id": user_id,
+                "conversation_history": conversation_history,
+                "memory_context": memory_context,
+                "data_mode": data_mode,
+                "intent": intent_result.intent,
+                "intent_confidence": intent_result.confidence,
+                "context": context or {},
+                "response": None,
+                "processing_steps": ["initialize_state"],
+                "errors": []
+            }
             
-            elif intent_result.intent == UserIntent.CAPABILITY_SUMMARY:
-                response = await self._handle_capability_summary(question, user_id, conversation_history, memory_manager)
-            
-            elif intent_result.intent == UserIntent.SYSTEM_FLOW:
-                response = await self._handle_system_flow(question, user_id, conversation_history, memory_manager)
-            
-            elif intent_result.intent == UserIntent.DIFFERENTIATOR:
-                response = await self._handle_differentiator(question, user_id, conversation_history, memory_manager)
-            
-            elif intent_result.intent == UserIntent.META_FEEDBACK:
-                response = await self._handle_meta_feedback(question, user_id, conversation_history, memory_manager)
-            
-            elif intent_result.intent == UserIntent.HELP:
-                response = await self._handle_help(question, user_id, conversation_history, memory_manager)
-            
-            else:
-                # Intent is DATA_ANALYSIS or CONNECT_SOURCE or UNKNOWN - classify by question type
-                print(f"[ORCHESTRATOR] Classifying question type (intent-based routing didn't match)...", flush=True)
-                question_type, confidence = await self._classify_question(
-                    question, 
-                    user_id, 
-                    conversation_history,
-                    memory_context=memory_context
+            # Execute LangGraph state machine (automatic routing, parallelization, state management)
+            try:
+                final_state = await asyncio.to_thread(
+                    lambda: self.graph.invoke(initial_state)
                 )
+                response = final_state.get("response")
                 
-                logger.info("Question classified", question_type=question_type.value, confidence=round(confidence, 2))
+                if not response:
+                    logger.error("LangGraph returned no response")
+                    response = ChatResponse(
+                        answer="I encountered an error processing your question. Please try again.",
+                        question_type=QuestionType.UNKNOWN,
+                        confidence=0.0,
+                        data={}
+                    )
                 
-                # Step 2: Route to appropriate handler (pass conversation history + memory context)
-                if question_type == QuestionType.CAUSAL:
-                    response = await self._handle_causal_question(question, user_id, context, conversation_history)
+                logger.info("LangGraph execution completed", 
+                           processing_steps=final_state.get("processing_steps", []),
+                           errors=final_state.get("errors", []))
                 
-                elif question_type == QuestionType.TEMPORAL:
-                    response = await self._handle_temporal_question(question, user_id, context, conversation_history)
-                
-                elif question_type == QuestionType.RELATIONSHIP:
-                    response = await self._handle_relationship_question(question, user_id, context, conversation_history)
-                
-                elif question_type == QuestionType.WHAT_IF:
-                    response = await self._handle_whatif_question(question, user_id, context, conversation_history)
-                
-                elif question_type == QuestionType.EXPLAIN:
-                    response = await self._handle_explain_question(question, user_id, context, conversation_history)
-                
-                elif question_type == QuestionType.DATA_QUERY:
-                    response = await self._handle_data_query(question, user_id, context, conversation_history)
-                
-                else:
-                    # FIX #1: Pass memory_manager to general handler for repetition detection
-                    response = await self._handle_general_question(question, user_id, context, conversation_history, memory_manager)
+            except Exception as e:
+                logger.error("LangGraph execution failed", error=str(e), exc_info=True)
+                response = ChatResponse(
+                    answer="I encountered an error processing your question. Please try rephrasing it or contact support if the issue persists.",
+                    question_type=QuestionType.UNKNOWN,
+                    confidence=0.0,
+                    data={'error': str(e)}
+                )
             
             # Step 3: FIX #19 - OUTPUT GUARD (Check for repetition and fix if needed)
             print(f"[ORCHESTRATOR] Running output guard...", flush=True)
@@ -2504,6 +2569,452 @@ Remember: You're not just answering questions - you're running their finance dep
                 "Find cost-saving opportunities",
                 "Compare this month vs. last month"
             ]
+    
+    # ========================================================================
+    # INTENT HANDLERS (7 missing implementations)
+    # ========================================================================
+    
+    async def _handle_greeting(
+        self,
+        question: str,
+        user_id: str,
+        conversation_history: list[Dict[str, str]] = None,
+        memory_manager: Optional[Any] = None
+    ) -> ChatResponse:
+        """Handle greeting intent with warm, personalized response using instructor."""
+        try:
+            if not INSTRUCTOR_AVAILABLE:
+                return ChatResponse(
+                    answer="Hello! I'm Finley, your AI finance assistant. How can I help you today?",
+                    question_type=QuestionType.GENERAL,
+                    confidence=1.0,
+                    data={}
+                )
+            
+            # Build context about user
+            user_context = ""
+            if memory_manager:
+                stats = await memory_manager.get_memory_stats()
+                user_context = f"User has {stats.get('message_count', 0)} previous messages in conversation."
+            
+            prompt = f"""Generate a warm, personalized greeting response for a user.
+
+USER QUESTION: {question}
+{user_context}
+
+Generate a greeting that:
+1. Is warm and welcoming
+2. Acknowledges their question
+3. Offers to help with their financial needs
+4. Is concise (1-2 sentences max)"""
+            
+            client = instructor.patch(self.groq)
+            response = await asyncio.wait_for(
+                client.chat.completions.create(
+                    model="llama-3.3-70b-versatile",
+                    response_model=GreetingResponse,
+                    messages=[
+                        {"role": "system", "content": "You are Finley, a warm and helpful AI finance assistant."},
+                        {"role": "user", "content": prompt}
+                    ],
+                    max_tokens=200,
+                    temperature=0.7
+                ),
+                timeout=10.0
+            )
+            
+            answer = f"{response.greeting_message} {response.follow_up}"
+            logger.info("Greeting handled with instructor", tone=response.tone)
+            
+            return ChatResponse(
+                answer=answer,
+                question_type=QuestionType.GENERAL,
+                confidence=1.0,
+                data={"intent": "greeting", "tone": response.tone}
+            )
+        
+        except Exception as e:
+            logger.error("Greeting handler failed", error=str(e))
+            return ChatResponse(
+                answer="Hello! I'm Finley, your AI finance assistant. How can I help you today?",
+                question_type=QuestionType.GENERAL,
+                confidence=0.8,
+                data={}
+            )
+    
+    async def _handle_smalltalk(
+        self,
+        question: str,
+        user_id: str,
+        conversation_history: list[Dict[str, str]] = None,
+        memory_manager: Optional[Any] = None
+    ) -> ChatResponse:
+        """Handle smalltalk with friendly, brief response."""
+        try:
+            # For smalltalk, use simple LLM response without instructor overhead
+            messages = [
+                {"role": "system", "content": "You are Finley, a friendly AI finance assistant. Keep responses brief and warm (1-2 sentences)."},
+                {"role": "user", "content": question}
+            ]
+            
+            response = await asyncio.wait_for(
+                self.groq.chat.completions.create(
+                    model="llama-3.3-70b-versatile",
+                    messages=messages,
+                    max_tokens=150,
+                    temperature=0.8
+                ),
+                timeout=10.0
+            )
+            
+            answer = response.choices[0].message.content.strip()
+            logger.info("Smalltalk handled")
+            
+            return ChatResponse(
+                answer=answer,
+                question_type=QuestionType.GENERAL,
+                confidence=0.9,
+                data={"intent": "smalltalk"}
+            )
+        
+        except Exception as e:
+            logger.error("Smalltalk handler failed", error=str(e))
+            return ChatResponse(
+                answer="I appreciate the chat! How can I help with your finances today?",
+                question_type=QuestionType.GENERAL,
+                confidence=0.7,
+                data={}
+            )
+    
+    async def _handle_capability_summary(
+        self,
+        question: str,
+        user_id: str,
+        conversation_history: list[Dict[str, str]] = None,
+        memory_manager: Optional[Any] = None
+    ) -> ChatResponse:
+        """Handle capability summary request with structured response using instructor."""
+        try:
+            if not INSTRUCTOR_AVAILABLE:
+                capabilities = [
+                    "Causal analysis - Understand WHY financial events happen",
+                    "Temporal patterns - Detect seasonal and cyclical trends",
+                    "Relationship mapping - Understand vendor and customer connections",
+                    "What-if scenarios - Model financial outcomes",
+                    "Anomaly detection - Flag unusual transactions",
+                    "Predictive forecasting - Predict cash flow and trends"
+                ]
+                answer = "I can help you with:\n" + "\n".join(f"• {cap}" for cap in capabilities)
+                return ChatResponse(
+                    answer=answer,
+                    question_type=QuestionType.GENERAL,
+                    confidence=0.9,
+                    data={}
+                )
+            
+            prompt = """Generate a summary of Finley's capabilities as an AI finance assistant.
+
+Include:
+1. Main capabilities (causal analysis, temporal patterns, relationships, what-if, anomalies, forecasting)
+2. Key features that make it unique
+3. Suggested next step for the user"""
+            
+            client = instructor.patch(self.groq)
+            response = await asyncio.wait_for(
+                client.chat.completions.create(
+                    model="llama-3.3-70b-versatile",
+                    response_model=CapabilitySummaryResponse,
+                    messages=[
+                        {"role": "system", "content": "You are Finley, an AI finance assistant. Describe your capabilities clearly and concisely."},
+                        {"role": "user", "content": prompt}
+                    ],
+                    max_tokens=300,
+                    temperature=0.5
+                ),
+                timeout=10.0
+            )
+            
+            capabilities_text = "\n".join(f"• {cap}" for cap in response.capabilities)
+            features_text = "\n".join(f"• {feat}" for feat in response.key_features)
+            
+            answer = f"""I can help you with:
+
+{capabilities_text}
+
+Key features:
+{features_text}
+
+{response.next_step}"""
+            
+            logger.info("Capability summary handled with instructor")
+            
+            return ChatResponse(
+                answer=answer,
+                question_type=QuestionType.GENERAL,
+                confidence=1.0,
+                data={"intent": "capability_summary"}
+            )
+        
+        except Exception as e:
+            logger.error("Capability summary handler failed", error=str(e))
+            return ChatResponse(
+                answer="I can help with causal analysis, temporal patterns, relationship mapping, what-if scenarios, anomaly detection, and predictive forecasting. What would you like to explore?",
+                question_type=QuestionType.GENERAL,
+                confidence=0.8,
+                data={}
+            )
+    
+    async def _handle_system_flow(
+        self,
+        question: str,
+        user_id: str,
+        conversation_history: list[Dict[str, str]] = None,
+        memory_manager: Optional[Any] = None
+    ) -> ChatResponse:
+        """Handle system flow explanation with structured response using instructor."""
+        try:
+            if not INSTRUCTOR_AVAILABLE:
+                flow = "1. Connect your financial data → 2. Ask questions → 3. Get AI-powered insights → 4. Make better decisions"
+                return ChatResponse(
+                    answer=f"Here's how it works:\n{flow}",
+                    question_type=QuestionType.GENERAL,
+                    confidence=0.8,
+                    data={}
+                )
+            
+            prompt = """Explain the system flow for using Finley AI finance assistant.
+
+Include:
+1. Main steps in the flow (connect data, ask questions, get insights, decide)
+2. Where the user currently is (if possible from context)
+3. What they should do next"""
+            
+            client = instructor.patch(self.groq)
+            response = await asyncio.wait_for(
+                client.chat.completions.create(
+                    model="llama-3.3-70b-versatile",
+                    response_model=SystemFlowResponse,
+                    messages=[
+                        {"role": "system", "content": "You are Finley. Explain the system flow clearly."},
+                        {"role": "user", "content": prompt}
+                    ],
+                    max_tokens=250,
+                    temperature=0.5
+                ),
+                timeout=10.0
+            )
+            
+            steps_text = "\n".join(f"{i+1}. {step}" for i, step in enumerate(response.flow_steps))
+            
+            answer = f"""Here's how the system works:
+
+{steps_text}
+
+{response.next_step}"""
+            
+            logger.info("System flow handled with instructor")
+            
+            return ChatResponse(
+                answer=answer,
+                question_type=QuestionType.GENERAL,
+                confidence=1.0,
+                data={"intent": "system_flow"}
+            )
+        
+        except Exception as e:
+            logger.error("System flow handler failed", error=str(e))
+            return ChatResponse(
+                answer="The system works like this: 1) Connect your financial data 2) Ask me questions 3) Get AI-powered insights 4) Make better decisions. What would you like to know?",
+                question_type=QuestionType.GENERAL,
+                confidence=0.7,
+                data={}
+            )
+    
+    async def _handle_differentiator(
+        self,
+        question: str,
+        user_id: str,
+        conversation_history: list[Dict[str, str]] = None,
+        memory_manager: Optional[Any] = None
+    ) -> ChatResponse:
+        """Handle differentiator explanation with structured response using instructor."""
+        try:
+            if not INSTRUCTOR_AVAILABLE:
+                return ChatResponse(
+                    answer="I use advanced AI with causal inference, temporal pattern learning, and semantic relationship extraction to provide insights that generic finance tools can't.",
+                    question_type=QuestionType.GENERAL,
+                    confidence=0.7,
+                    data={}
+                )
+            
+            prompt = """Explain what makes Finley different from other finance tools.
+
+Include:
+1. Key differentiators (AI-powered, causal inference, pattern detection, etc.)
+2. Unique value proposition
+3. Proof or evidence of differentiation"""
+            
+            client = instructor.patch(self.groq)
+            response = await asyncio.wait_for(
+                client.chat.completions.create(
+                    model="llama-3.3-70b-versatile",
+                    response_model=DifferentiatorResponse,
+                    messages=[
+                        {"role": "system", "content": "You are Finley. Explain your unique value clearly and confidently."},
+                        {"role": "user", "content": prompt}
+                    ],
+                    max_tokens=300,
+                    temperature=0.6
+                ),
+                timeout=10.0
+            )
+            
+            differentiators_text = "\n".join(f"• {diff}" for diff in response.differentiators)
+            
+            answer = f"""Here's what makes me different:
+
+{differentiators_text}
+
+Unique value: {response.unique_value}
+
+Proof: {response.proof_point}"""
+            
+            logger.info("Differentiator handled with instructor")
+            
+            return ChatResponse(
+                answer=answer,
+                question_type=QuestionType.GENERAL,
+                confidence=1.0,
+                data={"intent": "differentiator"}
+            )
+        
+        except Exception as e:
+            logger.error("Differentiator handler failed", error=str(e))
+            return ChatResponse(
+                answer="I use advanced AI with causal inference, temporal pattern learning, and semantic relationship extraction to provide insights that generic finance tools can't.",
+                question_type=QuestionType.GENERAL,
+                confidence=0.7,
+                data={}
+            )
+    
+    async def _handle_meta_feedback(
+        self,
+        question: str,
+        user_id: str,
+        conversation_history: list[Dict[str, str]] = None,
+        memory_manager: Optional[Any] = None
+    ) -> ChatResponse:
+        """Handle meta feedback and suggestions."""
+        try:
+            # For meta feedback, use simple LLM response
+            messages = [
+                {"role": "system", "content": "You are Finley. Acknowledge feedback warmly and thank the user for their input."},
+                {"role": "user", "content": question}
+            ]
+            
+            response = await asyncio.wait_for(
+                self.groq.chat.completions.create(
+                    model="llama-3.3-70b-versatile",
+                    messages=messages,
+                    max_tokens=150,
+                    temperature=0.7
+                ),
+                timeout=10.0
+            )
+            
+            answer = response.choices[0].message.content.strip()
+            logger.info("Meta feedback handled")
+            
+            return ChatResponse(
+                answer=answer,
+                question_type=QuestionType.GENERAL,
+                confidence=0.9,
+                data={"intent": "meta_feedback"}
+            )
+        
+        except Exception as e:
+            logger.error("Meta feedback handler failed", error=str(e))
+            return ChatResponse(
+                answer="Thank you for your feedback! I appreciate it and will continue to improve.",
+                question_type=QuestionType.GENERAL,
+                confidence=0.7,
+                data={}
+            )
+    
+    async def _handle_help(
+        self,
+        question: str,
+        user_id: str,
+        conversation_history: list[Dict[str, str]] = None,
+        memory_manager: Optional[Any] = None
+    ) -> ChatResponse:
+        """Handle help requests with structured response using instructor."""
+        try:
+            if not INSTRUCTOR_AVAILABLE:
+                help_topics = [
+                    "Getting started - How to connect your data",
+                    "Question types - What kinds of questions I can answer",
+                    "Data sources - What financial platforms I support",
+                    "Troubleshooting - Common issues and solutions"
+                ]
+                answer = "I can help with:\n" + "\n".join(f"• {topic}" for topic in help_topics)
+                return ChatResponse(
+                    answer=answer,
+                    question_type=QuestionType.GENERAL,
+                    confidence=0.8,
+                    data={}
+                )
+            
+            prompt = f"""Generate help information for a user asking: "{question}"
+
+Include:
+1. Available help topics
+2. Suggested topic based on their question
+3. Contact info if they need more help"""
+            
+            client = instructor.patch(self.groq)
+            response = await asyncio.wait_for(
+                client.chat.completions.create(
+                    model="llama-3.3-70b-versatile",
+                    response_model=HelpResponse,
+                    messages=[
+                        {"role": "system", "content": "You are Finley's help system. Provide helpful information."},
+                        {"role": "user", "content": prompt}
+                    ],
+                    max_tokens=250,
+                    temperature=0.5
+                ),
+                timeout=10.0
+            )
+            
+            topics_text = "\n".join(f"• {topic}" for topic in response.help_topics)
+            
+            answer = f"""I can help with:
+
+{topics_text}
+
+Based on your question, I suggest: {response.suggested_topic}"""
+            
+            if response.contact_info:
+                answer += f"\n\nFor more help: {response.contact_info}"
+            
+            logger.info("Help handled with instructor")
+            
+            return ChatResponse(
+                answer=answer,
+                question_type=QuestionType.GENERAL,
+                confidence=1.0,
+                data={"intent": "help"}
+            )
+        
+        except Exception as e:
+            logger.error("Help handler failed", error=str(e))
+            return ChatResponse(
+                answer="I can help with getting started, question types, data sources, and troubleshooting. What do you need help with?",
+                question_type=QuestionType.GENERAL,
+                confidence=0.7,
+                data={}
+            )
     
     # ========================================================================
     # HELPER METHODS
