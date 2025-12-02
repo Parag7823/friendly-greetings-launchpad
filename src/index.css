@@ -5,47 +5,47 @@
 
 @layer base {
   :root {
-    /* The Executive Theme - Midnight Navy & Copper */
+    /* The Executive Theme - Dark Grey & Copper */
     
     /* Primary Backgrounds */
-    --background: 217 33% 2%;
-    /* #020617 - Void Navy (deepest blue, dark grey) */
+    --background: 0 0% 13.3%;
+    /* #222222 - Dark Grey (primary background) */
     --foreground: 220 13% 91%;
     /* #e2e8f0 - Platinum (high contrast, softer than white) */
 
-    --card: 217 33% 9%;
-    /* #0f172a - Deep River (slightly lighter navy for cards) */
+    --card: 0 0% 16.5%;
+    /* #2a2a2a - Slightly lighter dark grey for cards */
     --card-foreground: 220 13% 91%;
     /* #e2e8f0 - Platinum text on cards */
 
-    --popover: 217 33% 9%;
-    /* #0f172a - Deep River for popovers */
+    --popover: 0 0% 16.5%;
+    /* #2a2a2a - Dark grey for popovers */
     --popover-foreground: 220 13% 91%;
     /* #e2e8f0 - Platinum text */
 
     /* Primary Accent - Electric Copper */
     --primary: 38 92% 50%;
     /* #f59e0b - Electric Copper for primary buttons and active states */
-    --primary-foreground: 217 33% 2%;
-    /* #020617 - Void Navy text on copper buttons */
+    --primary-foreground: 0 0% 13.3%;
+    /* #222222 - Dark grey text on copper buttons */
 
     /* Secondary - Platinum */
     --secondary: 220 13% 91%;
     /* #e2e8f0 - Platinum for secondary elements */
-    --secondary-foreground: 217 33% 2%;
-    /* #020617 - Void Navy text on platinum */
+    --secondary-foreground: 0 0% 13.3%;
+    /* #222222 - Dark grey text on platinum */
 
-    /* Muted - Subtle navy tones */
-    --muted: 217 33% 15%;
-    /* Muted navy background */
+    /* Muted - Subtle grey tones */
+    --muted: 0 0% 20%;
+    /* Muted grey background */
     --muted-foreground: 220 13% 60%;
     /* Muted text */
 
     /* Accent - Electric Copper */
     --accent: 38 92% 50%;
     /* #f59e0b - Electric Copper for accents */
-    --accent-foreground: 217 33% 2%;
-    /* #020617 - Void Navy text on copper accents */
+    --accent-foreground: 0 0% 13.3%;
+    /* #222222 - Dark grey text on copper accents */
 
     /* Status Colors */
     --destructive: 356 100% 71%;
@@ -54,10 +54,10 @@
     /* Platinum text on destructive */
 
     /* Borders and Inputs */
-    --border: 217 33% 15%;
-    /* Subtle navy borders */
-    --input: 217 33% 9%;
-    /* #0f172a - Deep River for input backgrounds */
+    --border: 0 0% 20%;
+    /* Subtle grey borders */
+    --input: 0 0% 16.5%;
+    /* #2a2a2a - Dark grey for input backgrounds */
     --ring: 38 92% 50%;
     /* #f59e0b - Electric Copper for focus rings */
 
@@ -69,8 +69,8 @@
     /* #f59e0b - Electric Copper brand accent */
     --finley-light-accent: 38 92% 60%;
     /* Lighter copper for hover states */
-    --finley-shadow: 217 33% 2%;
-    /* Void Navy for shadows */
+    --finley-shadow: 0 0% 13.3%;
+    /* Dark grey for shadows */
     
     /* Status Colors */
     --success: 16 100% 66%;
@@ -79,14 +79,14 @@
     /* #f43f5e - Rose for negative trends */
 
     /* Neutral/Muted Tones for UI Hierarchy */
-    --slate-800: 217 33% 15%;
-    /* #1e293b - Hover states on cards, secondary backgrounds */
-    --slate-700: 217 33% 20%;
-    /* #334155 - Borders and dividers */
-    --slate-500: 217 33% 40%;
-    /* #64748b - Secondary text (labels, timestamps, disabled states) */
-    --slate-400: 217 33% 55%;
-    /* #94a3b8 - Tertiary text, muted foreground */
+    --slate-800: 0 0% 20%;
+    /* #333333 - Hover states on cards, secondary backgrounds */
+    --slate-700: 0 0% 25%;
+    /* #404040 - Borders and dividers */
+    --slate-500: 0 0% 40%;
+    /* #666666 - Secondary text (labels, timestamps, disabled states) */
+    --slate-400: 0 0% 55%;
+    /* #8c8c8c - Tertiary text, muted foreground */
 
     /* Secondary Accent - Steel Blue (for secondary actions) */
     --secondary-accent: 217 91% 60%;
@@ -131,7 +131,7 @@
     font-family: 'Inter', system-ui, -apple-system, sans-serif;
     font-feature-settings: "cv11", "ss01";
     font-variation-settings: "opsz" 32;
-    background: linear-gradient(135deg, #020617 0%, #0a1628 100%);
+    background: linear-gradient(135deg, #222222 0%, #2a2a2a 100%);
     /* FIX #3: Add comfortable line-height for readability (1.6x instead of browser default 1.2-1.3) */
     line-height: 1.6;
     /* FIX #3: Add letter-spacing for breathing room between characters */
