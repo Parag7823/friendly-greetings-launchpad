@@ -229,7 +229,7 @@ export const TabbedFilePreview = ({
     return (
       <div className="h-full flex flex-col finley-dynamic-bg">
         {/* Empty State Toolbar */}
-        <div className="border-b border-border bg-background/80 backdrop-blur-sm px-4 py-3">
+        <div className="border-b border-border bg-background/80 backdrop-blur-sm px-4 py-2">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <FileSpreadsheet className="w-4 h-4 text-muted-foreground" />
@@ -273,7 +273,7 @@ export const TabbedFilePreview = ({
   return (
     <div className="h-full flex flex-col finley-dynamic-bg">
       {/* File Toolbar Header */}
-      <div className="border-b border-border bg-background/80 backdrop-blur-sm px-4 py-3">
+      <div className="border-b border-border bg-background/80 backdrop-blur-sm px-4 py-2">
         <div className="flex items-center justify-between">
           {/* File Name Display */}
           <div className="flex items-center gap-3 min-w-0">
