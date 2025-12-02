@@ -50,7 +50,7 @@ pendulum==3.0.0  # Better date parsing (handles 100+ formats)
 sentence-transformers==2.2.2
 torch==2.1.0
 transformers<5.0.0,>=4.57.3  # Pin to version compatible with gliner 0.2.24 and sentence-transformers 2.2.2
-huggingface-hub<0.20.0  # Pin to version compatible with sentence-transformers 2.2.2 (cached_download API)
+huggingface-hub>=0.21.4  # Pin to version compatible with gliner 0.2.24 and sentence-transformers 2.2.2
 
 # Monitoring and Metrics
 prometheus-client==0.19.0
