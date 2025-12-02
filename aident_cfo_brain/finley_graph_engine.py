@@ -1045,6 +1045,117 @@ class FinleyGraphEngine:
         
         return {'nodes_added': nodes_added, 'edges_added': edges_added}
     
+    async def enrich_response(
+        self,
+        question: str,
+        response_answer: str,
+        user_id: str,
+        question_type: str
+    ) -> Optional[Dict[str, Any]]:
+        """
+        ISSUE #1 FIX: Enrich response with graph intelligence insights.
+        
+        Extracts relevant graph insights (temporal patterns, causal relationships,
+        predictions, fraud warnings) and formats them for inclusion in response.
+        
+        Args:
+            question: User's original question
+            response_answer: Generated response text
+            user_id: User ID for graph context
+            question_type: Type of question (causal, temporal, etc.)
+        
+        Returns:
+            Dict with enrichment data or None if no enrichment available
+        """
+        try:
+            # Build graph if not already built
+            if not self.graph:
+                await self.build_graph(user_id)
+            
+            if not self.graph or self.graph.vcount() == 0:
+                logger.debug("Graph empty, no enrichment available")
+                return None
+            
+            enrichment = {}
+            
+            # Extract graph-based insights based on question type
+            if question_type == "temporal":
+                # Add temporal patterns from graph edges
+                temporal_insights = []
+                for edge in self.graph.es:
+                    if edge['recurrence_frequency'] and edge['recurrence_frequency'] != 'none':
+                        temporal_insights.append({
+                            'frequency': edge['recurrence_frequency'],
+                            'confidence': edge['recurrence_score'] or 0.0,
+                            'next_occurrence': edge['next_predicted_occurrence']
+                        })
+                
+                if temporal_insights:
+                    enrichment['temporal_patterns'] = temporal_insights[:3]  # Top 3
+            
+            elif question_type == "causal":
+                # Add causal relationships from graph
+                causal_insights = []
+                for edge in self.graph.es:
+                    if edge['causal_strength'] and edge['causal_strength'] > 0.5:
+                        source_name = self.index_to_node_id.get(edge.source, "unknown")
+                        target_name = self.index_to_node_id.get(edge.target, "unknown")
+                        causal_insights.append({
+                            'source': source_name,
+                            'target': target_name,
+                            'strength': edge['causal_strength'],
+                            'direction': edge['causal_direction'],
+                            'reasoning': edge['reasoning']
+                        })
+                
+                if causal_insights:
+                    enrichment['causal_relationships'] = causal_insights[:3]
+            
+            elif question_type in ["what_if", "explain"]:
+                # Add predictions from graph
+                predictions = []
+                for edge in self.graph.es:
+                    if edge['prediction_confidence'] and edge['prediction_confidence'] > 0.6:
+                        predictions.append({
+                            'confidence': edge['prediction_confidence'],
+                            'reason': edge['prediction_reason'],
+                            'expected_date': edge['next_predicted_occurrence']
+                        })
+                
+                if predictions:
+                    enrichment['predictions'] = predictions[:3]
+            
+            # Add fraud/duplicate warnings if detected
+            fraud_warnings = []
+            for edge in self.graph.es:
+                if edge['is_duplicate'] and edge['duplicate_confidence'] and edge['duplicate_confidence'] > 0.7:
+                    fraud_warnings.append({
+                        'type': 'duplicate',
+                        'confidence': edge['duplicate_confidence']
+                    })
+            
+            if fraud_warnings:
+                enrichment['fraud_warnings'] = fraud_warnings[:2]
+            
+            # Add graph statistics
+            enrichment['graph_stats'] = {
+                'node_count': self.graph.vcount(),
+                'edge_count': self.graph.ecount(),
+                'density': self.graph.density()
+            }
+            
+            if enrichment:
+                logger.info("Response enriched with graph intelligence",
+                           question_type=question_type,
+                           enrichment_keys=list(enrichment.keys()))
+                return enrichment
+            
+            return None
+        
+        except Exception as e:
+            logger.warning("Graph enrichment failed (non-blocking)", error=str(e))
+            return None
+    
     async def _clear_redis_cache(self, user_id: str):
         """
         Clear cached graph from Redis for user.

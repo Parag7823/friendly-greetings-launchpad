@@ -770,15 +770,32 @@ class IntelligentChatOrchestrator:
         )
         
         # PHASE 3: Temporal handler → Parallel queries (REPLACES: asyncio.gather)
-        # When handling temporal questions, fetch data in parallel
-        workflow.add_edge("handle_temporal", "fetch_temporal_data")
+        # ISSUE #3 FIX: Use Send() API for true parallel execution (not sequential edges)
+        # When handling temporal questions, fetch all data in parallel
+        from langgraph.types import Send
         
-        # Parallel execution: All fetch nodes run simultaneously
-        workflow.add_edge("fetch_temporal_data", "fetch_seasonal_data")
-        workflow.add_edge("fetch_temporal_data", "fetch_fraud_data")
-        workflow.add_edge("fetch_temporal_data", "fetch_root_cause_data")
+        def _route_temporal_parallel(state: OrchestratorState):
+            """Route to all fetch nodes in parallel using Send() API"""
+            return [
+                Send("fetch_temporal_data", state),
+                Send("fetch_seasonal_data", state),
+                Send("fetch_fraud_data", state),
+                Send("fetch_root_cause_data", state),
+            ]
         
-        # Aggregate parallel results
+        workflow.add_conditional_edges(
+            "handle_temporal",
+            _route_temporal_parallel,
+            {
+                "fetch_temporal_data": "fetch_temporal_data",
+                "fetch_seasonal_data": "fetch_seasonal_data",
+                "fetch_fraud_data": "fetch_fraud_data",
+                "fetch_root_cause_data": "fetch_root_cause_data",
+            }
+        )
+        
+        # Aggregate parallel results (all fetch nodes converge here)
+        workflow.add_edge("fetch_temporal_data", "aggregate_parallel_results")
         workflow.add_edge("fetch_seasonal_data", "aggregate_parallel_results")
         workflow.add_edge("fetch_fraud_data", "aggregate_parallel_results")
         workflow.add_edge("fetch_root_cause_data", "aggregate_parallel_results")

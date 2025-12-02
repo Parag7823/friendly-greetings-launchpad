@@ -122,16 +122,31 @@ class IntentClassifier:
     
     def __init__(self):
         """Initialize classifier with LangChain MultiPromptChain"""
-        # Create LangChain ChatGroq for intent routing
-        self.llm = ChatGroq(
+        # BUG #7 FIX: Use AsyncGroq directly for instructor patching
+        # instructor.patch() does NOT support LangChain ChatGroq wrapper
+        # Must use raw AsyncGroq client for instructor compatibility
+        import instructor
+        
+        groq_api_key = os.getenv("GROQ_API_KEY")
+        if not groq_api_key:
+            raise ValueError("GROQ_API_KEY environment variable is required")
+        
+        # Create raw AsyncGroq client for instructor patching
+        base_groq = AsyncGroq(api_key=groq_api_key)
+        
+        # Patch with instructor for structured output
+        self.groq_client = instructor.patch(base_groq)
+        
+        # Also create LangChain ChatGroq for MultiPromptChain (if needed for other operations)
+        self.langchain_llm = ChatGroq(
             model="llama-3.3-70b-versatile",
             temperature=0.1,  # Low temperature for consistent classification
-            api_key=os.getenv("GROQ_API_KEY")
+            api_key=groq_api_key
         )
         
         # Build MultiPromptChain for intent routing
         self.chain = self._build_multiprompt_chain()
-        logger.info("✅ IntentClassifier initialized with LangChain MultiPromptChain (PHASE 2)")
+        logger.info("✅ IntentClassifier initialized with AsyncGroq+instructor (PHASE 2 FIX)")
     
     def _build_multiprompt_chain(self) -> MultiPromptChain:
         """
