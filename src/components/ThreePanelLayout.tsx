@@ -59,8 +59,8 @@ export const ThreePanelLayout = ({ currentView = 'chat', onNavigate }: ThreePane
           <ChatInterface currentView={currentView} onNavigate={onNavigate} />
         </Panel>
 
-        {/* Resize Handle - Single copper line */}
-        <PanelResizeHandle className="w-0.5 bg-primary/60 hover:bg-primary transition-colors" />
+        {/* Resize Handle - Thicker and shorter */}
+        <PanelResizeHandle className="w-1 bg-primary/60 hover:bg-primary transition-colors flex items-center justify-center h-[30%]" />
 
         {/* File Preview Panel - 50% default (matching chat panel) */}
         <Panel defaultSize={50} minSize={30} maxSize={70} className="relative p-4">

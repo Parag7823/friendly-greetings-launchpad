@@ -228,19 +228,7 @@ export const TabbedFilePreview = ({
   if (openFiles.length === 0) {
     return (
       <div className="h-full flex flex-col finley-dynamic-bg">
-        {/* Empty State Toolbar */}
-        <div className="border-b border-border bg-background/80 backdrop-blur-sm px-4 py-2">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <FileSpreadsheet className="w-4 h-4 text-muted-foreground" />
-              <span className="text-sm font-medium text-muted-foreground">File Preview</span>
-            </div>
-            {/* Action buttons placeholder */}
-            <div className="flex items-center gap-2">
-              {/* Buttons will be added here */}
-            </div>
-          </div>
-        </div>
+        {/* Empty State Toolbar - Removed File Preview label */}
         
         {/* Empty State Content */}
         <div className="flex-1 flex items-center justify-center">
@@ -273,7 +261,7 @@ export const TabbedFilePreview = ({
   return (
     <div className="h-full flex flex-col finley-dynamic-bg">
       {/* File Toolbar Header */}
-      <div className="border-b border-border bg-background/80 backdrop-blur-sm px-4 py-2">
+      <div className="border-b border-border bg-background/80 backdrop-blur-sm px-4 py-2 rounded-tl-xl">
         <div className="flex items-center justify-between">
           {/* File Name Display */}
           <div className="flex items-center gap-3 min-w-0">

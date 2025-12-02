@@ -1,27 +1,20 @@
 """
-Intelligent Chat Orchestrator - The Brain of Finley AI (LangGraph-Powered)
-===========================================================================
+Intelligent Chat Orchestrator - The Brain of Finley AI
+======================================================
 
-CONSOLIDATED MODULE: Combines intelligent_chat_orchestrator.py + intent_and_guard_engine.py + aident_memory_manager.py
-
-This module provides:
-1. LangGraph-based state machine orchestration (replaces 1,190 lines of custom code)
-2. Built-in intent classification (spaCy + sentence-transformers)
-3. Automatic output guard & response variation
-4. Redis-backed conversation memory with auto-summarization
-5. Intelligent routing to all intelligence engines
+This module connects the chat interface to all intelligence engines,
+providing natural language understanding and intelligent routing.
 
 Features:
-- 94% code reduction via LangGraph
-- Automatic state persistence & checkpointing
-- Parallel intelligence execution
-- Built-in error recovery & retry logic
-- Zero manual memory management
-- 100% library potential utilization
+- Natural language question classification
+- Intelligent routing to appropriate engines
+- Human-readable response formatting
+- Context-aware conversation management
+- Proactive insights and suggestions
 
 Author: Finley AI Team
-Version: 2.0.0 (LangGraph Refactor)
-Date: 2025-01-28
+Version: 1.0.0
+Date: 2025-01-22
 """
 
 import structlog
@@ -29,58 +22,161 @@ import json
 import os
 import sys
 import importlib.util
-import asyncio
-import pickle
-import threading
 from datetime import datetime, timedelta
-from typing import Dict, Any, List, Optional, Tuple, TypedDict
+from typing import Dict, Any, List, Optional, Tuple
 from enum import Enum
 from dataclasses import dataclass
-from groq import AsyncGroq
+import asyncio
+from groq import AsyncGroq  # CHANGED: Using Groq instead of Anthropic
 
-# LangGraph: State machine orchestration (REPLACES ALL MANUAL ROUTING)
-from langgraph.graph import StateGraph, START, END
-from langgraph.checkpoint.memory import MemorySaver
+# FIX #INSTRUCTOR: Type-safe question classification with instructor
+try:
+    import instructor
+    from pydantic import BaseModel, Field
+    INSTRUCTOR_AVAILABLE = True
+except ImportError:
+    INSTRUCTOR_AVAILABLE = False
+    logger_temp = structlog.get_logger(__name__)
+    logger_temp.warning("instructor not available - falling back to manual JSON parsing")
 
-# LangChain: Memory management (REPLACES AidentMemoryManager)
-from langchain.memory import ConversationSummaryBufferMemory
-from langchain_groq import ChatGroq
+# FIX #19: Import intent classification and output guard components
+try:
+    # Try package layout first
+    from aident_cfo_brain.intent_and_guard_engine import (
+        IntentClassifier,
+        OutputGuard,
+        ResponseVariationEngine,
+        UserIntent,
+        get_intent_classifier,
+        get_output_guard,
+        get_response_variation_engine
+    )
+except ImportError:
+    # Fallback to relative import
+    from .intent_and_guard_engine import (
+        IntentClassifier,
+        OutputGuard,
+        ResponseVariationEngine,
+        UserIntent,
+        get_intent_classifier,
+        get_output_guard,
+        get_response_variation_engine
+    )
 
-# Intent classification: spaCy + sentence-transformers (REPLACES IntentClassifier)
-import spacy
-from sentence_transformers import SentenceTransformer
-from sklearn.metrics.pairwise import cosine_similarity
-
-# Redis: Persistence (REPLACES manual Redis operations)
-import redis.asyncio as redis
-
-# Initialize logger
+# Initialize logger early for use in import error handlers
 logger = structlog.get_logger(__name__)
 
-# Setup sys.path for imports
+# FIX #16: Add parent directory to sys.path for imports to work in all deployment layouts
+# This ensures modules in aident_cfo_brain/ can be imported regardless of how the module is loaded
 _current_dir = os.path.dirname(os.path.abspath(__file__))
 _parent_dir = os.path.dirname(_current_dir)
 _root_dir = os.path.dirname(_parent_dir)
 
+# Add all potential paths to sys.path (in order of priority)
+# Priority: current dir (aident_cfo_brain) > parent (project root) > root (/) > app root (/app)
 for _path in [_current_dir, _parent_dir, _root_dir, '/app']:
     if _path and _path not in sys.path:
         sys.path.insert(0, _path)
 
-# Global model cache (REPLACES intent_and_guard_engine.py model caching)
-_model_cache = {}
-_model_lock = threading.Lock()
+# Helper function to load modules from specific file paths
+def _load_module_from_path(module_name: str, file_path: str):
+    """Load a module from a specific file path using importlib"""
+    if not os.path.exists(file_path):
+        raise ImportError(f"Module file not found: {file_path}")
+    spec = importlib.util.spec_from_file_location(module_name, file_path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"Cannot load spec for {module_name} from {file_path}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    return module
 
-# Import intelligence engines
+# Nuclear option: Dynamic file search - finds modules anywhere on the system
+def _find_module_file(module_name: str, search_roots: list = None) -> str:
+    """
+    Recursively search for a module file starting from multiple root directories.
+    This is the nuclear option - guaranteed to find the file if it exists anywhere.
+    """
+    if search_roots is None:
+        search_roots = ['/app', '/app/src', '/app/aident_cfo_brain', '/', os.getcwd()]
+    
+    target_file = f"{module_name}.py"
+    
+    for root in search_roots:
+        if not root or not os.path.isdir(root):
+            continue
+        
+        try:
+            # Search up to 5 levels deep to avoid infinite recursion
+            for level in range(5):
+                for dirpath, dirnames, filenames in os.walk(root):
+                    # Skip deep recursion
+                    if dirpath.count(os.sep) - root.count(os.sep) > level:
+                        continue
+                    
+                    if target_file in filenames:
+                        full_path = os.path.join(dirpath, target_file)
+                        logger.debug(f"✓ Found {module_name} at: {full_path}")
+                        return full_path
+        except (OSError, PermissionError):
+            continue
+    
+    # Not found anywhere
+    raise ImportError(f"Could not find {module_name}.py anywhere in {search_roots}")
+
+# FIX #16: Use absolute imports with try/except fallbacks for different deployment layouts
+# Supports both: package layout (aident_cfo_brain.module) and flat layout (module)
+
 try:
+    # Try package layout first (standard Python package)
     from aident_cfo_brain.finley_graph_engine import FinleyGraphEngine
+    from aident_cfo_brain.aident_memory_manager import AidentMemoryManager
     from aident_cfo_brain.causal_inference_engine import CausalInferenceEngine
     from aident_cfo_brain.temporal_pattern_learner import TemporalPatternLearner
     from aident_cfo_brain.enhanced_relationship_detector import EnhancedRelationshipDetector
-except ImportError:
-    from finley_graph_engine import FinleyGraphEngine
-    from causal_inference_engine import CausalInferenceEngine
-    from temporal_pattern_learner import TemporalPatternLearner
-    from enhanced_relationship_detector import EnhancedRelationshipDetector
+    logger.debug("✓ Tier 1: Package layout imports successful (aident_cfo_brain.module)")
+except ImportError as e1:
+    logger.debug(f"✗ Tier 1 failed: {e1}. Trying Tier 2 (flat layout)...")
+    try:
+        # Fallback to flat layout (Railway deployment or direct module import)
+        # sys.path now includes current directory and root, so these should work
+        from finley_graph_engine import FinleyGraphEngine
+        from aident_memory_manager import AidentMemoryManager
+        from causal_inference_engine import CausalInferenceEngine
+        from temporal_pattern_learner import TemporalPatternLearner
+        from enhanced_relationship_detector import EnhancedRelationshipDetector
+        logger.debug("✓ Tier 2: Flat layout imports successful (module)")
+    except ImportError as e2:
+        logger.debug(f"✗ Tier 2 failed: {e2}. Trying Tier 3 (dynamic file search - NUCLEAR OPTION)...")
+        # Final fallback: Dynamic file search - finds modules anywhere on the system
+        # This is guaranteed to work if the files exist anywhere
+        try:
+            _module_names = ['finley_graph_engine', 'aident_memory_manager', 'causal_inference_engine', 
+                            'temporal_pattern_learner', 'enhanced_relationship_detector']
+            _modules = {}
+            
+            for _mod_name in _module_names:
+                try:
+                    # Use dynamic search to find the module file anywhere on the system
+                    _file_path = _find_module_file(_mod_name)
+                    _modules[_mod_name] = _load_module_from_path(_mod_name, _file_path)
+                except ImportError as e:
+                    logger.error(f"Could not find {_mod_name}: {e}")
+                    raise
+            
+            FinleyGraphEngine = _modules['finley_graph_engine'].FinleyGraphEngine
+            AidentMemoryManager = _modules['aident_memory_manager'].AidentMemoryManager
+            CausalInferenceEngine = _modules['causal_inference_engine'].CausalInferenceEngine
+            TemporalPatternLearner = _modules['temporal_pattern_learner'].TemporalPatternLearner
+            EnhancedRelationshipDetector = _modules['enhanced_relationship_detector'].EnhancedRelationshipDetector
+            logger.debug("✓ Tier 3: NUCLEAR OPTION - Dynamic file search successful!")
+        except ImportError as e3:
+            logger.error(f"IMPORT FAILURE - All 3 tiers failed. Fix location: aident_cfo_brain/intelligent_chat_orchestrator.py")
+            logger.error(f"Tier 1 (package layout): {e1}")
+            logger.error(f"Tier 2 (flat layout): {e2}")
+            logger.error(f"Tier 3 (dynamic search): {e3}")
+            logger.error(f"sys.path includes: {sys.path[:3]}")
+            raise
 
 try:
     from data_ingestion_normalization.entity_resolver_optimized import EntityResolverOptimized as EntityResolver
@@ -93,70 +189,63 @@ except ImportError:
     from embedding_service import EmbeddingService
 
 
-# ============================================================================
-# ENUMS & DATA CLASSES
-# ============================================================================
-
-class UserIntent(Enum):
-    """User's actual intent (CONSOLIDATED FROM intent_and_guard_engine.py)"""
-    CAPABILITY_SUMMARY = "capability_summary"
-    SYSTEM_FLOW = "system_flow"
-    DIFFERENTIATOR = "differentiator"
-    META_FEEDBACK = "meta_feedback"
-    SMALLTALK = "smalltalk"
-    GREETING = "greeting"
-    CONNECT_SOURCE = "connect_source"
-    DATA_ANALYSIS = "data_analysis"
-    HELP = "help"
-    UNKNOWN = "unknown"
-
-
 class QuestionType(Enum):
     """Types of questions the system can handle"""
-    CAUSAL = "causal"
-    TEMPORAL = "temporal"
-    RELATIONSHIP = "relationship"
-    WHAT_IF = "what_if"
-    EXPLAIN = "explain"
-    GENERAL = "general"
-    DATA_QUERY = "data_query"
-    UNKNOWN = "unknown"
+    CAUSAL = "causal"  # Why did X happen?
+    TEMPORAL = "temporal"  # When will X happen?
+    RELATIONSHIP = "relationship"  # Show connections
+    WHAT_IF = "what_if"  # What if scenarios
+    EXPLAIN = "explain"  # Explain this number
+    GENERAL = "general"  # General financial questions
+    DATA_QUERY = "data_query"  # Query raw data
+    UNKNOWN = "unknown"  # Couldn't classify
+
+
+# FIX #INSTRUCTOR: Pydantic model for type-safe question classification
+if INSTRUCTOR_AVAILABLE:
+    class QuestionClassification(BaseModel):
+        """Type-safe question classification response from LLM"""
+        type: str = Field(
+            ..., 
+            description="Question type: causal, temporal, relationship, what_if, explain, data_query, general, or unknown"
+        )
+        confidence: float = Field(
+            ..., 
+            ge=0.0, 
+            le=1.0, 
+            description="Confidence score between 0.0 and 1.0"
+        )
+        reasoning: str = Field(
+            ..., 
+            description="Brief explanation of why this classification was chosen"
+        )
 
 
 class DataMode(Enum):
-    """Data availability modes for response differentiation"""
-    NO_DATA = "no_data"
-    LIMITED_DATA = "limited_data"
-    RICH_DATA = "rich_data"
+    """FIX #4: Data availability modes for response differentiation"""
+    NO_DATA = "no_data"  # User has no data connected yet
+    LIMITED_DATA = "limited_data"  # User has <50 transactions
+    RICH_DATA = "rich_data"  # User has >50 transactions
 
 
 class OnboardingState(Enum):
-    """Track onboarding state to prevent repetition"""
-    FIRST_VISIT = "first_visit"
-    ONBOARDED = "onboarded"
-    DATA_CONNECTED = "data_connected"
-    ACTIVE = "active"
-
-
-@dataclass
-class IntentResult:
-    """Result of intent classification (CONSOLIDATED FROM intent_and_guard_engine.py)"""
-    intent: UserIntent
-    confidence: float
-    method: str  # "spacy" or "semantic"
-    reasoning: str
+    """FIX #5: Track onboarding state to prevent repetition"""
+    FIRST_VISIT = "first_visit"  # User's first interaction
+    ONBOARDED = "onboarded"  # User has seen onboarding
+    DATA_CONNECTED = "data_connected"  # User has connected data
+    ACTIVE = "active"  # User is actively using system
 
 
 @dataclass
 class ChatResponse:
     """Structured response from the orchestrator"""
-    answer: str
+    answer: str  # Human-readable answer
     question_type: QuestionType
-    confidence: float
-    data: Optional[Dict[str, Any]] = None
-    actions: Optional[List[Dict[str, Any]]] = None
-    visualizations: Optional[List[Dict[str, Any]]] = None
-    follow_up_questions: Optional[List[str]] = None
+    confidence: float  # 0.0-1.0
+    data: Optional[Dict[str, Any]] = None  # Structured data
+    actions: Optional[List[Dict[str, Any]]] = None  # Suggested actions
+    visualizations: Optional[List[Dict[str, Any]]] = None  # Chart data
+    follow_up_questions: Optional[List[str]] = None  # Suggested questions
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for JSON serialization"""
@@ -170,21 +259,6 @@ class ChatResponse:
             'follow_up_questions': self.follow_up_questions,
             'timestamp': datetime.utcnow().isoformat()
         }
-
-
-class ChatState(TypedDict):
-    """LangGraph state for orchestration (REPLACES manual state passing)"""
-    user_id: str
-    question: str
-    intent: Optional[UserIntent]
-    question_type: Optional[QuestionType]
-    response: Optional[str]
-    memory: Optional[Dict[str, Any]]
-    frustration_level: int
-    data_mode: Optional[DataMode]
-    context: Optional[str]
-    conversation_history: Optional[List[Dict[str, str]]]
-    error: Optional[str]
 
 
 class IntelligentChatOrchestrator:
