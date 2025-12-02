@@ -152,9 +152,9 @@ langgraph==0.0.64  # State machine for declarative routing, parallel execution, 
 # Replaced by: LangGraph (line 149) + LangChain (lines 144-146) for routing and memory
 # LangGraph provides better state management and is compatible with pydantic 2.7.0
 
-# GLiNER - Zero-Shot Entity Recognition (PHASE 4: Hybrid entity extraction)
-gliner==0.2.24  # Fast, offline entity extraction for known financial entities (FIXED: was 0.1.12)
-# Replaces 30% of instructor calls (known entities) with local inference
+# REMOVED: GLiNER (redundant - spaCy provides entity extraction)
+# Replaced by: spaCy (line 115) for NER and entity extraction
+# spaCy's en_core_web_sm model handles all entity recognition needs
 
 # BDD Testing Framework
 behave>=1.2.0

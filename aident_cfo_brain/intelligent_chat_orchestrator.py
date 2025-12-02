@@ -1887,28 +1887,16 @@ With your financial data, I can:
                     data={'error': str(e)}
                 )
             
-            # Step 3: FIX #19 - OUTPUT GUARD (Check for repetition and fix if needed)
-            print(f"[ORCHESTRATOR] Running output guard...", flush=True)
-            safe_response = await self.output_guard.check_and_fix(
-                proposed_response=response.answer,
-                recent_responses=memory_messages[-5:] if memory_messages else [],
-                question=question,
-                frustration_level=memory_manager.get_conversation_state().get('frustration_level', 0)
-            )
-            response.answer = safe_response
-            logger.info("Output guard check completed", repetition_detected=(safe_response != response.answer))
+            # PHASE 5: All post-processing handled by LangGraph workflow
+            # - Output guard applied in _node_apply_output_guard (line 1256)
+            # - Memory saved in _node_save_memory (line 1273)
+            # - Response validated in _node_validate_response (line 1316)
+            # - Database storage in _node_store_in_database
+            # NO external calls needed - trust the graph!
             
-            # Step 4: Save memory after response (for context in next turn)
-            await memory_manager.add_message(question, response.answer)
-            
-            # Step 5: Store in database
-            await self._store_chat_message(user_id, chat_id, question, response)
-            
-            # Step 6: Log memory stats for monitoring
-            memory_stats = await memory_manager.get_memory_stats()
-            # Get question_type from response (LangGraph flow doesn't set it in state)
-            qt = response.question_type if response else QuestionType.UNKNOWN
-            logger.info("Question processed successfully", question_type=qt.value, memory_stats=memory_stats)
+            logger.info("Question processed successfully",
+                       question_type=response.question_type.value if response else "unknown",
+                       confidence=response.confidence if response else 0.0)
             
             return response
             
