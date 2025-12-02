@@ -290,16 +290,32 @@ class AidentMemoryManager:
     
     def get_conversation_state(self) -> Dict[str, Any]:
         """
-        PHASE 3 FIX: Deprecated - conversation state should be tracked by LangGraph.
+        BUG #3 FIX: Track conversation metadata like frustration level.
         
-        This method is kept for backward compatibility but returns empty state.
-        State tracking should be handled by the LangGraph state machine.
+        Returns conversation state with frustration tracking for output guard.
+        This enables proper escalation when user is frustrated.
         
         Returns:
-            Empty state dict
+            Dict with frustration_level and clarification_count
         """
-        logger.debug("get_conversation_state_deprecated", user_id=self.user_id)
-        return {}
+        if not hasattr(self, '_conversation_state'):
+            self._conversation_state = {
+                'frustration_level': 0,
+                'clarification_count': 0,
+                'last_question_type': None
+            }
+        return self._conversation_state
+    
+    def update_frustration_level(self, increment: int = 1) -> None:
+        """
+        BUG #3 FIX: Increment frustration when user asks repeated questions.
+        
+        Args:
+            increment: Amount to increment frustration (default 1)
+        """
+        state = self.get_conversation_state()
+        state['frustration_level'] = min(state['frustration_level'] + increment, 5)
+        logger.debug(f"Frustration level updated to {state['frustration_level']}", user_id=self.user_id)
     
     def update_conversation_state(self, user_message: str, assistant_response: str) -> None:
         """

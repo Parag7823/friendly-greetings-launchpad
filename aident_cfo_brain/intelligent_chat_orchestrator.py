@@ -944,19 +944,6 @@ class IntelligentChatOrchestrator:
         
         return state
     
-    async def _node_determine_data_mode(self, state: OrchestratorState) -> OrchestratorState:
-        """REFACTORED: Determine data mode (moved from process_question)."""
-        try:
-            data_mode = await self._determine_data_mode(state["user_id"])
-            state["data_mode"] = data_mode
-            state["processing_steps"] = state.get("processing_steps", []) + ["determine_data_mode"]
-        except Exception as e:
-            logger.error("Data mode determination failed", error=str(e))
-            state["data_mode"] = DataMode.NO_DATA
-            state["errors"] = state.get("errors", []) + [f"Data mode failed: {str(e)}"]
-        
-        return state
-    
     async def _node_classify_intent(self, state: OrchestratorState) -> OrchestratorState:
         """FEATURE #1: Classify user intent with retry logic. FEATURE #3: Check confidence threshold."""
         try:
@@ -1857,9 +1844,10 @@ With your financial data, I can:
             
             # Execute LangGraph state machine (automatic routing, parallelization, state management)
             try:
-                final_state = await asyncio.to_thread(
-                    lambda: self.graph.invoke(initial_state)
-                )
+                # BUG #1 FIX: Use ainvoke() instead of invoke() wrapped in asyncio.to_thread()
+                # invoke() is synchronous but LangGraph provides ainvoke() for async execution
+                # This eliminates 10-50ms thread pool overhead per request
+                final_state = await self.graph.ainvoke(initial_state)
                 response = final_state.get("response")
                 
                 if not response:
@@ -1932,31 +1920,7 @@ With your financial data, I can:
             Tuple of (QuestionType, confidence_score)
         """
         try:
-            # PHASE 2: Use Haystack Router if available (89% code reduction)
-            if HAYSTACK_AVAILABLE:
-                try:
-                    # Build system prompt with memory context
-                    memory_section = f"\nCONVERSATION MEMORY (auto-summarized):\n{memory_context}\n" if memory_context else ""
-                    
-                    system_prompt = f"""You are Finley's question classifier. Classify user questions to route them to the right analysis engine.
-
-CRITICAL: Consider conversation history AND memory context to understand context. Follow-up questions like "How?" or "Why?" refer to previous context.
-{memory_section}
-QUESTION TYPES:
-- causal: WHY questions (e.g., "Why did revenue drop?", "What caused the spike?")
-- temporal: WHEN questions, patterns over time (e.g., "When will they pay?", "Is this seasonal?")
-- relationship: WHO/connections (e.g., "Show vendor relationships", "Top customers?")
-- what_if: Scenarios, predictions (e.g., "What if I delay payment?", "Impact of hiring?")
-- explain: Data provenance (e.g., "Explain this invoice", "Where's this from?")
-- data_query: Specific data requests (e.g., "Show invoices", "List expenses")
-- general: Platform questions, general advice, how-to
-- unknown: Cannot classify
-
-Respond with ONLY the question type name (e.g., 'causal', 'temporal', etc.)"""
-                    
-                    # Build messages with conversation history (Haystack handles it automatically)
-                    messages = []
-                    
+            # BUG #5 FIX: Removed dead code block referencing HAYSTACK_AVAILABLE (removed in Phase 2)
             # PHASE 2 FIX: Using instructor-only classification (Haystack removed as redundant)
             if INSTRUCTOR_AVAILABLE:
                 logger.info("Using instructor fallback for question classification")
@@ -1994,7 +1958,7 @@ QUESTION TYPES:
 - unknown: Cannot classify
 
 Respond with ONLY JSON."""
-                
+
                 client = instructor.patch(self.groq)
                 response = await asyncio.wait_for(
                     client.chat.completions.create(
