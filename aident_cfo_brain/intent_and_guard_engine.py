@@ -268,9 +268,9 @@ Based on the question, which intent is the user expressing? Return ONLY the inte
             template=router_template
         )
         
-        # Create router chain
+        # Create router chain (use LangChain LLM for MultiPromptChain)
         router_chain = LLMRouterChain.from_llm_and_prompts(
-            llm=self.llm,
+            llm=self.langchain_llm,
             prompt=router_prompt,
             destination_prompts=intent_prompts,
             default_destination="unknown"
@@ -281,7 +281,7 @@ Based on the question, which intent is the user expressing? Return ONLY the inte
             router=router_chain,
             destination_chains=intent_chains,
             default_chain=LLMChain(
-                llm=self.llm,
+                llm=self.langchain_llm,
                 prompt=PromptTemplate(
                     input_variables=["input"],
                     template="Question: {input}\n\nI don't understand this question. Can you rephrase it?"
@@ -306,7 +306,6 @@ Based on the question, which intent is the user expressing? Return ONLY the inte
             IntentResult with intent, confidence, method, and reasoning
         """
         try:
-            import instructor
             from pydantic import BaseModel, Field
             
             # Define structured output model for intent classification
@@ -331,10 +330,10 @@ Classify the user's question into one of these intents:
 
 Return the intent name, confidence (0.0-1.0), and reasoning."""
             
-            # Use instructor for structured output
-            client = instructor.patch(self.llm)
+            # BUG #7 FIX: Use pre-patched groq_client (instructor already applied in __init__)
+            # Do NOT patch again - self.groq_client is already instructor-patched
             response = await asyncio.to_thread(
-                lambda: client.chat.completions.create(
+                lambda: self.groq_client.chat.completions.create(
                     model="llama-3.3-70b-versatile",
                     response_model=IntentClassificationResponse,
                     messages=[

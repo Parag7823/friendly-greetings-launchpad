@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
-import { X, FileSpreadsheet, Info, Loader2, CheckCircle2, AlertCircle } from 'lucide-react';
+import { X, FileSpreadsheet, Info, Loader2, CheckCircle2, AlertCircle, Database } from 'lucide-react';
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
 import { Card } from './ui/card';
@@ -40,13 +40,17 @@ interface TabbedFilePreviewProps {
   activeFileId: string | null;
   onFileSelect: (fileId: string) => void;
   onFileClose: (fileId: string) => void;
+  onToggleDataSources?: () => void;
+  isDataSourcesCollapsed?: boolean;
 }
 
 export const TabbedFilePreview = ({
   openFiles,
   activeFileId,
   onFileSelect,
-  onFileClose
+  onFileClose,
+  onToggleDataSources,
+  isDataSourcesCollapsed = true
 }: TabbedFilePreviewProps) => {
   const { user } = useAuth();
   const [fileContent, setFileContent] = useState<Record<string, any[]>>({});
@@ -234,9 +238,16 @@ export const TabbedFilePreview = ({
           <div className="flex items-center gap-2">
             {/* Feature icons will be added here */}
           </div>
-          {/* Right side - Reserved for future actions */}
+          {/* Right side - Data Sources Button */}
           <div className="flex items-center gap-2">
-            {/* Action buttons will be added here */}
+            <Button
+              onClick={onToggleDataSources}
+              className="h-8 px-3 rounded-md bg-primary/10 hover:bg-primary/20 text-primary border border-primary/30 text-xs font-medium transition-colors"
+              title={isDataSourcesCollapsed ? "Open Data Sources" : "Close Data Sources"}
+            >
+              <Database className="w-3.5 h-3.5 mr-1.5" />
+              Data Sources
+            </Button>
           </div>
         </div>
         
@@ -279,9 +290,16 @@ export const TabbedFilePreview = ({
         <div className="flex items-center gap-2">
           {/* Feature icons will be added here */}
         </div>
-        {/* Right side - Reserved for future actions */}
+        {/* Right side - Data Sources Button */}
         <div className="flex items-center gap-2">
-          {/* Action buttons will be added here */}
+          <Button
+            onClick={onToggleDataSources}
+            className="h-8 px-3 rounded-md bg-primary/10 hover:bg-primary/20 text-primary border border-primary/30 text-xs font-medium transition-colors"
+            title={isDataSourcesCollapsed ? "Open Data Sources" : "Close Data Sources"}
+          >
+            <Database className="w-3.5 h-3.5 mr-1.5" />
+            Data Sources
+          </Button>
         </div>
       </div>
       
