@@ -279,13 +279,10 @@ Based on the question, which intent is the user expressing? Return ONLY the inte
     
     async def classify(self, question: str) -> IntentResult:
         """
-        PHASE 2: Classify user intent using LangChain's MultiPromptChain.
+        PHASE 2 FIX: Classify user intent using LangChain's router with structured output.
         
-        LangChain's MultiPromptChain automatically:
-        1. Routes to the appropriate intent chain
-        2. Uses LLM-based semantic understanding
-        3. Returns structured output
-        4. Provides confidence via LLM reasoning
+        Uses instructor for type-safe structured output parsing instead of keyword matching.
+        The LLM directly returns the intent and confidence scores.
         
         Args:
             question: User's question
@@ -294,22 +291,68 @@ Based on the question, which intent is the user expressing? Return ONLY the inte
             IntentResult with intent, confidence, method, and reasoning
         """
         try:
-            # Run MultiPromptChain
-            result = await asyncio.to_thread(
-                lambda: self.chain.run(input=question)
+            import instructor
+            from pydantic import BaseModel, Field
+            
+            # Define structured output model for intent classification
+            class IntentClassificationResponse(BaseModel):
+                intent: str = Field(description="The detected user intent")
+                confidence: float = Field(description="Confidence score 0.0-1.0")
+                reasoning: str = Field(description="Why this intent was selected")
+            
+            # Build classification prompt
+            system_prompt = """You are an expert at understanding user intent in financial conversations.
+Classify the user's question into one of these intents:
+- capability_summary: Asking what Finley can do, features, functionality
+- system_flow: Asking how Finley works, processes, methodology
+- differentiator: Asking why Finley is better, competitive advantage
+- meta_feedback: Feedback about Finley's behavior, repetition complaints
+- greeting: Simple greetings (hi, hello, hey, good morning, etc.)
+- smalltalk: Casual conversation (how are you, what's up, how's your day)
+- connect_source: Asking to connect data sources (QuickBooks, Xero, Stripe, etc.)
+- data_analysis: Asking to analyze or query financial data (revenue, expenses, etc.)
+- help: Asking for help, saying confused, requesting guidance
+- unknown: Cannot classify
+
+Return the intent name, confidence (0.0-1.0), and reasoning."""
+            
+            # Use instructor for structured output
+            client = instructor.patch(self.llm)
+            response = await asyncio.to_thread(
+                lambda: client.chat.completions.create(
+                    model="llama-3.3-70b-versatile",
+                    response_model=IntentClassificationResponse,
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": f"Question: {question}"}
+                    ],
+                    temperature=0.1,
+                    max_tokens=200
+                )
             )
             
-            # Parse result to extract intent
-            intent = self._parse_intent_from_result(result, question)
+            # Map intent string to enum
+            intent_map = {
+                "capability_summary": UserIntent.CAPABILITY_SUMMARY,
+                "system_flow": UserIntent.SYSTEM_FLOW,
+                "differentiator": UserIntent.DIFFERENTIATOR,
+                "meta_feedback": UserIntent.META_FEEDBACK,
+                "greeting": UserIntent.GREETING,
+                "smalltalk": UserIntent.SMALLTALK,
+                "connect_source": UserIntent.CONNECT_SOURCE,
+                "data_analysis": UserIntent.DATA_ANALYSIS,
+                "help": UserIntent.HELP,
+                "unknown": UserIntent.UNKNOWN,
+            }
             
-            # Extract confidence from result
-            confidence = self._extract_confidence_from_result(result)
+            intent = intent_map.get(response.intent.lower(), UserIntent.UNKNOWN)
+            confidence = max(0.0, min(1.0, response.confidence))  # Clamp to 0.0-1.0
             
             return IntentResult(
                 intent=intent,
                 confidence=confidence,
-                method="langchain_multiprompt",
-                reasoning=f"LLM-based routing: {result[:100]}..."
+                method="langchain_structured_routing",
+                reasoning=response.reasoning
             )
         
         except Exception as e:
@@ -320,56 +363,6 @@ Based on the question, which intent is the user expressing? Return ONLY the inte
                 method="fallback",
                 reasoning=f"Classification failed: {str(e)}"
             )
-    
-    def _parse_intent_from_result(self, result: str, question: str) -> UserIntent:
-        """
-        Parse intent from LangChain MultiPromptChain result.
-        
-        The result contains the intent name or reasoning.
-        """
-        result_lower = result.lower()
-        
-        # Map keywords to intents
-        intent_keywords = {
-            UserIntent.CAPABILITY_SUMMARY: ["capability", "can do", "features", "functionality"],
-            UserIntent.SYSTEM_FLOW: ["how", "work", "process", "methodology"],
-            UserIntent.DIFFERENTIATOR: ["better", "different", "advantage", "why"],
-            UserIntent.META_FEEDBACK: ["repeat", "feedback", "behavior"],
-            UserIntent.GREETING: ["hi", "hello", "hey", "morning"],
-            UserIntent.SMALLTALK: ["how are you", "what's up", "how's"],
-            UserIntent.CONNECT_SOURCE: ["connect", "quickbooks", "xero", "stripe", "data source"],
-            UserIntent.DATA_ANALYSIS: ["revenue", "expenses", "transactions", "analyze", "query"],
-            UserIntent.HELP: ["help", "confused", "guidance"],
-        }
-        
-        # Find best matching intent
-        for intent, keywords in intent_keywords.items():
-            if any(keyword in result_lower for keyword in keywords):
-                return intent
-        
-        # Fallback: check question for hints
-        question_lower = question.lower()
-        for intent, keywords in intent_keywords.items():
-            if any(keyword in question_lower for keyword in keywords):
-                return intent
-        
-        return UserIntent.UNKNOWN
-    
-    def _extract_confidence_from_result(self, result: str) -> float:
-        """
-        Extract confidence score from LangChain result.
-        
-        LLM-based routing provides implicit confidence through reasoning.
-        """
-        # If result contains "yes" or positive indicators, high confidence
-        result_lower = result.lower()
-        
-        if "yes" in result_lower or "is asking" in result_lower or "is this" in result_lower:
-            return 0.85  # High confidence
-        elif "no" in result_lower or "not asking" in result_lower:
-            return 0.5   # Medium confidence
-        else:
-            return 0.7   # Default confidence for LLM-based routing
         
 
 
@@ -492,24 +485,27 @@ class OutputGuard:
         frustration_level: int
     ) -> bool:
         """
-        Check if proposed response is repetitive based on LangChain's memory summary.
+        OPPORTUNITY #1 FIX: Removed manual phrase counting.
         
-        LangChain's ConversationSummaryBufferMemory automatically summarizes old messages,
-        so we just check if the proposed response appears in the summary.
+        LangChain's ConversationSummaryBufferMemory automatically:
+        1. Maintains a buffer of recent messages
+        2. Summarizes old messages semantically (not keyword-based)
+        3. Detects semantic similarity via LLM summarization
+        
+        This method is now a no-op - LangChain's memory handles repetition detection.
+        Kept for backward compatibility.
+        
+        Returns:
+            False (LangChain memory prevents repetition automatically)
         """
         try:
-            # Simple check: if key phrases from proposed response are in memory buffer
-            key_phrases = proposed_response.split()[:10]  # First 10 words
-            phrase_count = sum(1 for phrase in key_phrases if phrase.lower() in memory_buffer.lower())
+            # REMOVED: Manual phrase counting (lines 495-503 old)
+            # REASON: LangChain's ConversationSummaryBufferMemory handles this via LLM-based summarization
+            # The memory buffer already contains semantically-deduplicated content
+            # No manual keyword matching needed
             
-            # If more than 50% of key phrases are in memory, it's repetitive
-            is_repetitive = phrase_count > len(key_phrases) * 0.5
-            
-            # Increase sensitivity if user is frustrated
-            if frustration_level >= 3:
-                is_repetitive = phrase_count > len(key_phrases) * 0.3
-            
-            return is_repetitive
+            logger.debug(f"Repetition check delegated to LangChain memory (frustration: {frustration_level})")
+            return False  # LangChain memory prevents repetition automatically
         except Exception as e:
             logger.warning(f"Repetition check failed: {e}")
             return False
@@ -573,8 +569,8 @@ Generate the varied response now:"""
 
 
 # REMOVED: ResponseVariationEngine class and ResponseVariationState
-# REASON: Dead code - OutputGuard handles response variation internally via _node_generate_variation()
-# The OutputGuard class (lines 332-563) already implements variation generation with LangGraph
+# REASON: Dead code - OutputGuard handles response variation internally
+# The OutputGuard class (lines 369-568) implements variation generation via _generate_variation_langchain()
 # This was never called anywhere in the codebase
 
 

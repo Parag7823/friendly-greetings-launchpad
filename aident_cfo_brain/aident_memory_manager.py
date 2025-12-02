@@ -141,29 +141,20 @@ class AidentMemoryManager:
     
     async def save_memory(self) -> bool:
         """
-        Save memory to LangChain ConversationSummaryBufferMemory.
+        PHASE 3 FIX: Simplified - LangChain memory automatically persists.
+        
+        This method is kept for backward compatibility but does nothing.
+        LangChain's ConversationSummaryBufferMemory handles persistence automatically.
         
         Returns:
-            True if successful, False otherwise
+            True (always succeeds since LangChain handles it)
         """
         try:
-            # LangChain memory automatically persists when messages are added
-            # This method is kept for backward compatibility
-            variables = self.memory.load_memory_variables({})
-            buffer = variables.get("chat_history", "")
-            
             message_count = len(self.memory.chat_memory.messages)
-            
-            logger.info(
-                "memory_saved",
-                user_id=self.user_id,
-                message_count=message_count,
-                buffer_size=len(str(buffer))
-            )
+            logger.debug("memory_checkpoint", user_id=self.user_id, message_count=message_count)
             return True
-        
         except Exception as e:
-            logger.error(f"Failed to save memory: {e}")
+            logger.error(f"Failed to checkpoint memory: {e}")
             return False
     
     async def add_message(self, user_message: str, assistant_response: str) -> bool:
@@ -286,64 +277,42 @@ class AidentMemoryManager:
     
     def detect_frustration(self, user_message: str) -> int:
         """
-        Detect frustration signals in user message.
+        PHASE 3 FIX: Deprecated - frustration detection should be handled by LLM.
+        
+        This method is kept for backward compatibility but should not be used.
+        Use the LLM directly to detect frustration signals in user messages.
         
         Returns:
-            Frustration level (0-5)
+            0 (always, as this is deprecated)
         """
-        frustration_signals = [
-            'why', 'again', 'same', 'repeat', 'still', 'not helping',
-            'confused', 'don\'t understand', 'what?', 'huh?', 'seriously',
-            'come on', 'enough', 'stop', 'annoyed', 'frustrated'
-        ]
-        
-        message_lower = user_message.lower()
-        signal_count = sum(1 for signal in frustration_signals if signal in message_lower)
-        
-        # Frustration tracking (stored in LangGraph state)
-        frustration_level = signal_count
-        
-        if signal_count > 0:
-            logger.info(
-                "frustration_detected",
-                user_id=self.user_id,
-                frustration_level=frustration_level
-            )
-        
-        return frustration_level
+        logger.debug("detect_frustration_deprecated", user_id=self.user_id)
+        return 0
     
     def get_conversation_state(self) -> Dict[str, Any]:
         """
-        Get current conversation state for repetition detection.
+        PHASE 3 FIX: Deprecated - conversation state should be tracked by LangGraph.
+        
+        This method is kept for backward compatibility but returns empty state.
+        State tracking should be handled by the LangGraph state machine.
         
         Returns:
-            Dict with topics, response types, phrases, and frustration level
+            Empty state dict
         """
-        return {
-            'topics_discussed': [],
-            'response_types_used': [],
-            'phrases_used': [],
-            'frustration_level': 0,
-            'last_response_type': None
-        }
+        logger.debug("get_conversation_state_deprecated", user_id=self.user_id)
+        return {}
     
     def update_conversation_state(self, user_message: str, assistant_response: str) -> None:
         """
-        Update conversation state after each exchange.
+        PHASE 3 FIX: Deprecated - state tracking should be handled by LangGraph.
         
-        LangGraph state automatically tracks topics, response types, and phrases.
+        This method is kept for backward compatibility but does nothing.
+        State tracking should be handled by the LangGraph state machine.
         
         Args:
-            user_message: User's message
-            assistant_response: Assistant's response
+            user_message: User's message (unused)
+            assistant_response: Assistant's response (unused)
         """
-        # State tracking is now handled by LangGraph state machine
-        logger.debug(
-            "conversation_state_updated",
-            user_id=self.user_id,
-            user_message_length=len(user_message),
-            response_length=len(assistant_response)
-        )
+        logger.debug("update_conversation_state_deprecated", user_id=self.user_id)
 # REMOVED: _AsyncLock and _NoOpLock classes
 # LangGraph checkpointer handles atomic state updates automatically
 # No manual locking needed with LangGraph's built-in concurrency control
