@@ -1,5 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Send, Paperclip } from 'lucide-react';
+import TextareaAutosize from 'react-textarea-autosize';
+import debounce from 'lodash.debounce';
 
 interface ChatInputMicroInteractionsProps {
   value: string;
@@ -28,16 +30,27 @@ export const ChatInputMicroInteractions: React.FC<ChatInputMicroInteractionsProp
   const [isFocused, setIsFocused] = useState(false);
   const [isTyping, setIsTyping] = useState(false);
 
+  // Debounce typing state to prevent excessive re-renders (300ms delay)
+  const debouncedSetTyping = useMemo(
+    () => debounce((val: boolean) => setIsTyping(val), 300),
+    []
+  );
+
   useEffect(() => {
-    setIsTyping(value.length > 0);
-  }, [value]);
+    debouncedSetTyping(value.length > 0);
+    
+    // Cleanup debounced function on unmount
+    return () => {
+      debouncedSetTyping.cancel();
+    };
+  }, [value, debouncedSetTyping]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
+    // Only prevent default if there's content AND user pressed Enter without Shift
+    // This allows natural newline behavior when input is empty
+    if (e.key === 'Enter' && !e.shiftKey && value.trim() && !isLoading) {
       e.preventDefault();
-      if (value.trim() && !isLoading) {
-        onSend();
-      }
+      onSend();
     }
   };
 
@@ -63,8 +76,8 @@ export const ChatInputMicroInteractions: React.FC<ChatInputMicroInteractionsProp
             <Paperclip className="w-4 h-4 text-muted-foreground hover:text-primary transition-colors" />
           </button>
 
-          {/* Textarea */}
-          <textarea
+          {/* Textarea with Auto-Resize */}
+          <TextareaAutosize
             value={value}
             onChange={(e) => onChange(e.target.value)}
             onFocus={() => setIsFocused(true)}
@@ -72,14 +85,22 @@ export const ChatInputMicroInteractions: React.FC<ChatInputMicroInteractionsProp
             onKeyDown={handleKeyDown}
             placeholder={placeholder}
             disabled={isLoading}
-            rows={1}
+            minRows={1}
+            maxRows={6}
+            aria-label="Chat message input"
+            aria-describedby="input-help"
+            aria-busy={isLoading}
             className={`
               flex-1 bg-transparent text-foreground placeholder:text-slate-600 placeholder:font-normal
-              outline-none resize-none max-h-32
+              outline-none resize-none
               disabled:opacity-50 disabled:cursor-not-allowed
               text-sm font-normal
             `}
           />
+          {/* Hidden help text for screen readers */}
+          <span id="input-help" className="sr-only">
+            Press Enter to send message, Shift+Enter for new line
+          </span>
 
           {/* Send Button */}
           <button
