@@ -23,11 +23,11 @@
     --popover-foreground: 220 13% 91%;
     /* #e2e8f0 - Platinum text */
 
-    /* Primary Accent - Electric Copper */
-    --primary: 38 92% 50%;
-    /* #f59e0b - Electric Copper for primary buttons and active states */
-    --primary-foreground: 0 0% 13.3%;
-    /* #222222 - Dark grey text on copper buttons */
+    /* Primary Accent - Vibrant Blue */
+    --primary: 217 100% 45%;
+    /* #2563eb - Vibrant Blue for primary buttons and active states */
+    --primary-foreground: 220 13% 91%;
+    /* #e2e8f0 - Platinum text on blue buttons */
 
     /* Secondary - Platinum */
     --secondary: 220 13% 91%;

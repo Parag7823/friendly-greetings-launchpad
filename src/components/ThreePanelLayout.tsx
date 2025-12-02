@@ -84,8 +84,8 @@ export const ThreePanelLayout = ({ currentView = 'chat', onNavigate }: ThreePane
           ref={rightPanelRef}
           defaultSize={0}         // AUDIT FIX #2: Start collapsed (hidden)
           collapsedSize={0}       // AUDIT FIX #2: Fully hidden when collapsed
-          minSize={15}
-          maxSize={40}
+          minSize={25}            // Minimum 25% when expanded
+          maxSize={50}            // Maximum 50% of screen
           collapsible
           className="relative"
           onCollapse={() => {
