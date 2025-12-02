@@ -650,38 +650,64 @@ With your financial data, I can:
                 reasoning=intent_result.reasoning
             )
             
-            # Step 1: Classify the question type (with memory context + conversation history)
-            question_type, confidence = await self._classify_question(
-                question, 
-                user_id, 
-                conversation_history,
-                memory_context=memory_context
-            )
+            # CRITICAL FIX: Route by INTENT FIRST (before question_type)
+            # This ensures greetings, smalltalk, and meta questions are handled appropriately
+            print(f"[ORCHESTRATOR] Routing by user intent...", flush=True)
+            if intent_result.intent == UserIntent.GREETING:
+                response = await self._handle_greeting(question, user_id, conversation_history, memory_manager)
             
-            logger.info("Question classified", question_type=question_type.value, confidence=round(confidence, 2))
+            elif intent_result.intent == UserIntent.SMALLTALK:
+                response = await self._handle_smalltalk(question, user_id, conversation_history, memory_manager)
             
-            # Step 2: Route to appropriate handler (pass conversation history + memory context)
-            if question_type == QuestionType.CAUSAL:
-                response = await self._handle_causal_question(question, user_id, context, conversation_history)
+            elif intent_result.intent == UserIntent.CAPABILITY_SUMMARY:
+                response = await self._handle_capability_summary(question, user_id, conversation_history, memory_manager)
             
-            elif question_type == QuestionType.TEMPORAL:
-                response = await self._handle_temporal_question(question, user_id, context, conversation_history)
+            elif intent_result.intent == UserIntent.SYSTEM_FLOW:
+                response = await self._handle_system_flow(question, user_id, conversation_history, memory_manager)
             
-            elif question_type == QuestionType.RELATIONSHIP:
-                response = await self._handle_relationship_question(question, user_id, context, conversation_history)
+            elif intent_result.intent == UserIntent.DIFFERENTIATOR:
+                response = await self._handle_differentiator(question, user_id, conversation_history, memory_manager)
             
-            elif question_type == QuestionType.WHAT_IF:
-                response = await self._handle_whatif_question(question, user_id, context, conversation_history)
+            elif intent_result.intent == UserIntent.META_FEEDBACK:
+                response = await self._handle_meta_feedback(question, user_id, conversation_history, memory_manager)
             
-            elif question_type == QuestionType.EXPLAIN:
-                response = await self._handle_explain_question(question, user_id, context, conversation_history)
-            
-            elif question_type == QuestionType.DATA_QUERY:
-                response = await self._handle_data_query(question, user_id, context, conversation_history)
+            elif intent_result.intent == UserIntent.HELP:
+                response = await self._handle_help(question, user_id, conversation_history, memory_manager)
             
             else:
-                # FIX #1: Pass memory_manager to general handler for repetition detection
-                response = await self._handle_general_question(question, user_id, context, conversation_history, memory_manager)
+                # Intent is DATA_ANALYSIS or CONNECT_SOURCE or UNKNOWN - classify by question type
+                print(f"[ORCHESTRATOR] Classifying question type (intent-based routing didn't match)...", flush=True)
+                question_type, confidence = await self._classify_question(
+                    question, 
+                    user_id, 
+                    conversation_history,
+                    memory_context=memory_context
+                )
+                
+                logger.info("Question classified", question_type=question_type.value, confidence=round(confidence, 2))
+                
+                # Step 2: Route to appropriate handler (pass conversation history + memory context)
+                if question_type == QuestionType.CAUSAL:
+                    response = await self._handle_causal_question(question, user_id, context, conversation_history)
+                
+                elif question_type == QuestionType.TEMPORAL:
+                    response = await self._handle_temporal_question(question, user_id, context, conversation_history)
+                
+                elif question_type == QuestionType.RELATIONSHIP:
+                    response = await self._handle_relationship_question(question, user_id, context, conversation_history)
+                
+                elif question_type == QuestionType.WHAT_IF:
+                    response = await self._handle_whatif_question(question, user_id, context, conversation_history)
+                
+                elif question_type == QuestionType.EXPLAIN:
+                    response = await self._handle_explain_question(question, user_id, context, conversation_history)
+                
+                elif question_type == QuestionType.DATA_QUERY:
+                    response = await self._handle_data_query(question, user_id, context, conversation_history)
+                
+                else:
+                    # FIX #1: Pass memory_manager to general handler for repetition detection
+                    response = await self._handle_general_question(question, user_id, context, conversation_history, memory_manager)
             
             # Step 3: FIX #19 - OUTPUT GUARD (Check for repetition and fix if needed)
             print(f"[ORCHESTRATOR] Running output guard...", flush=True)

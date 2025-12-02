@@ -63,7 +63,7 @@ export const ThreePanelLayout = ({ currentView = 'chat', onNavigate }: ThreePane
         <PanelResizeHandle className="w-0.5 bg-primary/60 hover:bg-primary transition-colors" />
 
         {/* File Preview Panel - 50% default (wider now) */}
-        <Panel defaultSize={50} minSize={30} className="relative p-2">
+        <Panel defaultSize={50} minSize={30} className="relative p-4">
           <div className="h-full w-full rounded-xl overflow-hidden bg-background shadow-lg">
             <TabbedFilePreview
               openFiles={openFiles}
