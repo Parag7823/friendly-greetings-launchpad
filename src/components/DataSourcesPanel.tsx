@@ -592,9 +592,9 @@ export const DataSourcesPanel = ({ isOpen, onClose, onFilePreview }: DataSources
   }, {} as Record<string, Integration[]>);
 
   return (
-    <div className="h-full w-full finley-dynamic-bg flex flex-col">
+    <div className="h-full w-full bg-background flex flex-col">
       {/* Header - NO X button */}
-      <div className="flex items-center gap-2 px-4 py-3 border-b border-border">
+      <div className="flex items-center gap-2 px-4 py-3 border-b border-border bg-card">
         <Plug className="w-4 h-4 text-primary" />
         <h2 className="text-sm font-semibold">Data Sources</h2>
       </div>

@@ -72,6 +72,7 @@ class AidentMemoryManager:
         """
         self.user_id = user_id
         self.max_token_limit = max_token_limit
+        self.checkpoint_dir = None  # PHASE 6: Not used, but kept for backward compatibility
         
         # Initialize LLM for summary generation
         import os

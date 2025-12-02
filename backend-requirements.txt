@@ -47,10 +47,10 @@ pendulum==3.0.0  # Better date parsing (handles 100+ formats)
 
 # Semantic Embeddings (BGE - Free, Open-Source)
 # FIX #17: For semantic relationship embeddings and similarity search
-sentence-transformers==2.2.2
+sentence-transformers==2.7.0  # Compatible with huggingface-hub>=0.21.4 (removed cached_download in newer versions)
 torch==2.1.0
-transformers==4.39.3  # Compatible with torch 2.1.0 and sentence-transformers 2.2.2
-huggingface-hub>=0.21.4  # Pin to version compatible with gliner 0.2.24 and sentence-transformers 2.2.2
+transformers==4.39.3  # Compatible with torch 2.1.0
+huggingface-hub>=0.21.4  # sentence-transformers 2.7.0 supports this version
 
 # Monitoring and Metrics
 prometheus-client==0.19.0

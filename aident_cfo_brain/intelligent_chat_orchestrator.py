@@ -29,13 +29,13 @@ from dataclasses import dataclass, field
 import asyncio
 from groq import AsyncGroq  # CHANGED: Using Groq instead of Anthropic
 
-# FEATURE #1: Error recovery with retry logic
-from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
-
 # PHASE 1: LangGraph imports for state machine orchestration
 from langgraph.graph import StateGraph, END
 from langgraph.types import RetryPolicy
 from typing_extensions import TypedDict
+
+# PHASE 3: spaCy for production-grade entity extraction
+import spacy
 
 # FEATURE #3: Semantic caching for repeated questions
 from aiocache import cached, Cache
@@ -786,28 +786,14 @@ class IntelligentChatOrchestrator:
             workflow.add_edge(handler, "apply_output_guard")
         
         # PHASE 4: Output Validation & Enrichment Pipeline (REPLACES: lines 1282-1298)
-        # Sequential pipeline: validate → enrich → store
+        # Sequential pipeline: validate → enrich → store → save memory
         workflow.add_edge("apply_output_guard", "validate_response")
         workflow.add_edge("validate_response", "enrich_with_graph_intelligence")
         workflow.add_edge("enrich_with_graph_intelligence", "store_in_database")
         
-        # PHASE 5: Conditional Branching after storage (REPLACES: manual if/else)
-        # Route to appropriate handler based on data availability
-        workflow.add_edge("store_in_database", "determine_data_mode")
-        
-        workflow.add_conditional_edges(
-            "determine_data_mode",
-            self._route_by_data_availability,
-            {
-                "no_data": "onboarding_handler",
-                "limited_data": "exploration_handler",
-                "rich_data": "advanced_handler",
-            }
-        )
-        
-        # All data mode handlers → Save memory → End
-        for handler in ["onboarding_handler", "exploration_handler", "advanced_handler"]:
-            workflow.add_edge(handler, "save_memory")
+        # PHASE 5: After storage, save memory and end
+        # (Data mode determination already happened at the start of the workflow)
+        workflow.add_edge("store_in_database", "save_memory")
         
         # Post-processing
         workflow.add_edge("save_memory", END)
