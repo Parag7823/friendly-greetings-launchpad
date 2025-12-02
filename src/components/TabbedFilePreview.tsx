@@ -400,7 +400,7 @@ export const TabbedFilePreview = ({
       </div>
 
       {/* File Content */}
-      <div className="flex-1 overflow-hidden bg-black/20">
+      <div className="flex-1 overflow-hidden bg-slate-800/20">
         <AnimatePresence mode="wait">
           {activeFile && (
             <motion.div
