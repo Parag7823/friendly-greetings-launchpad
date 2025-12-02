@@ -273,6 +273,9 @@ class OrchestratorState(TypedDict, total=False):
     fraud_data: Optional[Dict[str, Any]]
     root_cause_data: Optional[Dict[str, Any]]
     
+    # PHASE 5: Data mode for conditional branching
+    data_mode: str
+    
     # Response
     response: Any
     
@@ -841,6 +844,192 @@ class IntelligentChatOrchestrator:
         except Exception as e:
             logger.error("Memory save failed", error=str(e))
             state["errors"] = state.get("errors", []) + [f"Memory save failed: {str(e)}"]
+        return state
+    
+    # ========================================================================
+    # PHASE 4: OUTPUT VALIDATION & ENRICHMENT PIPELINE (REPLACES: lines 1282-1298)
+    # ========================================================================
+    
+    async def _node_validate_response(self, state: OrchestratorState) -> OrchestratorState:
+        """
+        PHASE 4: Validate response quality and safety.
+        
+        REPLACES: Manual check_and_fix at lines 1284-1291
+        """
+        try:
+            if state.get("response"):
+                # Validate response has required fields
+                response = state["response"]
+                if not response.answer:
+                    state["errors"] = state.get("errors", []) + ["Response has empty answer"]
+                    logger.warning("Response validation failed: empty answer")
+                
+                # Validate confidence score
+                if not (0.0 <= response.confidence <= 1.0):
+                    response.confidence = max(0.0, min(1.0, response.confidence))
+                    logger.warning("Response confidence normalized", confidence=response.confidence)
+                
+                # Check for safety issues
+                if len(response.answer) > 10000:
+                    logger.warning("Response too long", length=len(response.answer))
+                    response.answer = response.answer[:10000] + "..."
+            
+            state["processing_steps"] = state.get("processing_steps", []) + ["validate_response"]
+            logger.info("Response validation completed")
+        except Exception as e:
+            logger.error("Response validation failed", error=str(e))
+            state["errors"] = state.get("errors", []) + [f"Response validation failed: {str(e)}"]
+        return state
+    
+    async def _node_enrich_with_graph_intelligence(self, state: OrchestratorState) -> OrchestratorState:
+        """
+        PHASE 4: Enrich response with graph intelligence.
+        
+        Automatically adds insights from FinleyGraph engine.
+        """
+        try:
+            if state.get("response") and state.get("question"):
+                response = state["response"]
+                
+                # Query graph engine for enrichment
+                try:
+                    enrichment = await self.graph_engine.enrich_response(
+                        question=state["question"],
+                        response_answer=response.answer,
+                        user_id=state["user_id"],
+                        question_type=response.question_type.value
+                    )
+                    
+                    if enrichment:
+                        # Add graph insights to response data
+                        if response.data is None:
+                            response.data = {}
+                        response.data["graph_insights"] = enrichment
+                        logger.info("Response enriched with graph intelligence")
+                except Exception as e:
+                    logger.warning("Graph enrichment failed (non-blocking)", error=str(e))
+            
+            state["processing_steps"] = state.get("processing_steps", []) + ["enrich_with_graph_intelligence"]
+        except Exception as e:
+            logger.error("Enrichment pipeline failed", error=str(e))
+            state["errors"] = state.get("errors", []) + [f"Enrichment failed: {str(e)}"]
+        return state
+    
+    async def _node_store_in_database(self, state: OrchestratorState) -> OrchestratorState:
+        """
+        PHASE 4: Store response in database.
+        
+        REPLACES: Manual _store_chat_message at line 1298
+        """
+        try:
+            if state.get("response"):
+                await self._store_chat_message(
+                    user_id=state["user_id"],
+                    chat_id=state.get("chat_id"),
+                    question=state["question"],
+                    response=state["response"]
+                )
+            state["processing_steps"] = state.get("processing_steps", []) + ["store_in_database"]
+            logger.info("Response stored in database")
+        except Exception as e:
+            logger.error("Database storage failed", error=str(e))
+            state["errors"] = state.get("errors", []) + [f"Storage failed: {str(e)}"]
+        return state
+    
+    # ========================================================================
+    # PHASE 5: CONDITIONAL BRANCHING HANDLERS (REPLACES: manual if/else)
+    # ========================================================================
+    
+    async def _node_determine_data_mode(self, state: OrchestratorState) -> OrchestratorState:
+        """
+        PHASE 5: Determine user's data availability mode.
+        
+        REPLACES: Manual if/else logic at lines 1606-1633
+        """
+        try:
+            data_mode = await self._determine_data_mode(state["user_id"])
+            state["data_mode"] = data_mode.value
+            state["processing_steps"] = state.get("processing_steps", []) + ["determine_data_mode"]
+            logger.info("Data mode determined", mode=data_mode.value)
+        except Exception as e:
+            logger.error("Data mode determination failed", error=str(e))
+            state["data_mode"] = "no_data"
+            state["errors"] = state.get("errors", []) + [f"Data mode determination failed: {str(e)}"]
+        return state
+    
+    async def _node_onboarding_handler(self, state: OrchestratorState) -> OrchestratorState:
+        """
+        PHASE 5: Handle NO_DATA mode - User has no data connected yet.
+        
+        REPLACES: Manual if not has_data logic
+        """
+        try:
+            # Generate onboarding questions and guidance
+            onboarding_response = await self._generate_no_data_intelligence(state["user_id"])
+            
+            if state.get("response"):
+                state["response"].answer = onboarding_response
+                state["response"].confidence = 0.9
+            
+            state["processing_steps"] = state.get("processing_steps", []) + ["onboarding_handler"]
+            logger.info("Onboarding guidance provided")
+        except Exception as e:
+            logger.error("Onboarding handler failed", error=str(e))
+            state["errors"] = state.get("errors", []) + [f"Onboarding handler failed: {str(e)}"]
+        return state
+    
+    async def _node_exploration_handler(self, state: OrchestratorState) -> OrchestratorState:
+        """
+        PHASE 5: Handle LIMITED_DATA mode - User has <50 transactions.
+        
+        REPLACES: Manual elif has_connections and not has_files logic
+        """
+        try:
+            # Provide exploration questions to help user understand platform
+            exploration_questions = [
+                "What are my top expense categories?",
+                "Show me my cash flow trends",
+                "Which vendors do I pay most often?",
+                "What's my average transaction size?",
+                "Are there any unusual transactions?"
+            ]
+            
+            if state.get("response"):
+                state["response"].follow_up_questions = exploration_questions
+                state["response"].confidence = 0.85
+            
+            state["processing_steps"] = state.get("processing_steps", []) + ["exploration_handler"]
+            logger.info("Exploration guidance provided")
+        except Exception as e:
+            logger.error("Exploration handler failed", error=str(e))
+            state["errors"] = state.get("errors", []) + [f"Exploration handler failed: {str(e)}"]
+        return state
+    
+    async def _node_advanced_handler(self, state: OrchestratorState) -> OrchestratorState:
+        """
+        PHASE 5: Handle RICH_DATA mode - User has >50 transactions.
+        
+        REPLACES: Manual else logic for advanced analysis
+        """
+        try:
+            # Provide advanced analysis questions
+            advanced_questions = [
+                "What's driving my profitability changes?",
+                "Predict my cash flow for next quarter",
+                "Which relationships are most valuable?",
+                "Detect anomalies in my transactions",
+                "Compare my metrics to industry benchmarks"
+            ]
+            
+            if state.get("response"):
+                state["response"].follow_up_questions = advanced_questions
+                state["response"].confidence = 0.95
+            
+            state["processing_steps"] = state.get("processing_steps", []) + ["advanced_handler"]
+            logger.info("Advanced analysis guidance provided")
+        except Exception as e:
+            logger.error("Advanced handler failed", error=str(e))
+            state["errors"] = state.get("errors", []) + [f"Advanced handler failed: {str(e)}"]
         return state
     
     # ========================================================================
