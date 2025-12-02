@@ -201,7 +201,7 @@ class QuestionType(Enum):
     UNKNOWN = "unknown"  # Couldn't classify
 
 
-# FIX #INSTRUCTOR: Pydantic model for type-safe question classification
+# FIX #INSTRUCTOR: Pydantic models for type-safe extraction with instructor
 if INSTRUCTOR_AVAILABLE:
     class QuestionClassification(BaseModel):
         """Type-safe question classification response from LLM"""
@@ -218,6 +218,100 @@ if INSTRUCTOR_AVAILABLE:
         reasoning: str = Field(
             ..., 
             description="Brief explanation of why this classification was chosen"
+        )
+    
+    class EntityExtraction(BaseModel):
+        """Type-safe entity extraction from questions"""
+        entities: List[str] = Field(
+            ...,
+            description="List of financial entities/metrics mentioned (e.g., 'revenue', 'expenses', 'cash flow')"
+        )
+        metrics: List[str] = Field(
+            ...,
+            description="Specific metrics to analyze (e.g., 'Q1 revenue', 'monthly expenses')"
+        )
+        time_periods: List[str] = Field(
+            default_factory=list,
+            description="Time periods mentioned (e.g., 'last quarter', 'this year', 'Q1 2024')"
+        )
+        confidence: float = Field(
+            ...,
+            ge=0.0,
+            le=1.0,
+            description="Confidence score for extraction"
+        )
+    
+    class ScenarioExtraction(BaseModel):
+        """Type-safe scenario extraction from what-if questions"""
+        scenario_type: str = Field(
+            ...,
+            description="Type of scenario: sensitivity_analysis, forecast, comparison, or impact_analysis"
+        )
+        base_metric: str = Field(
+            ...,
+            description="The main metric being analyzed (e.g., 'cash flow', 'revenue')"
+        )
+        variables: List[str] = Field(
+            ...,
+            description="Variables being changed in the scenario (e.g., 'payment delay', 'hiring cost')"
+        )
+        changes: List[str] = Field(
+            ...,
+            description="Specific changes to apply (e.g., 'delay by 30 days', 'increase by 20%')"
+        )
+        confidence: float = Field(
+            ...,
+            ge=0.0,
+            le=1.0,
+            description="Confidence score for scenario extraction"
+        )
+    
+    class QueryParameterExtraction(BaseModel):
+        """Type-safe query parameter extraction from data queries"""
+        filters: List[str] = Field(
+            default_factory=list,
+            description="Filter conditions (e.g., 'amount > 1000', 'date in Q1')"
+        )
+        sort_by: str = Field(
+            default="date",
+            description="Field to sort by (e.g., 'amount', 'date', 'vendor')"
+        )
+        limit: int = Field(
+            default=100,
+            ge=1,
+            le=10000,
+            description="Maximum number of results to return"
+        )
+        group_by: List[str] = Field(
+            default_factory=list,
+            description="Fields to group by (e.g., 'vendor', 'category')"
+        )
+        confidence: float = Field(
+            ...,
+            ge=0.0,
+            le=1.0,
+            description="Confidence score for parameter extraction"
+        )
+    
+    class EntityIDExtraction(BaseModel):
+        """Type-safe entity ID extraction from questions"""
+        entity_type: str = Field(
+            ...,
+            description="Type of entity (e.g., 'invoice', 'transaction', 'vendor', 'customer')"
+        )
+        entity_identifier: str = Field(
+            ...,
+            description="The specific identifier or value (e.g., 'INV-12345', 'Acme Corp', 'TXN-789')"
+        )
+        search_field: str = Field(
+            default="id",
+            description="Field to search in (e.g., 'id', 'name', 'reference_number')"
+        )
+        confidence: float = Field(
+            ...,
+            ge=0.0,
+            le=1.0,
+            description="Confidence score for entity identification"
         )
 
 
@@ -2420,18 +2514,138 @@ Remember: You're not just answering questions - you're running their finance dep
         question: str,
         user_id: str
     ) -> Dict[str, Any]:
-        """Extract entities/metrics mentioned in the question"""
-        # Placeholder - use GPT-4 to extract entities
-        return {}
+        """
+        Extract entities/metrics mentioned in the question using instructor.
+        
+        FIX #INSTRUCTOR: Uses instructor for type-safe entity extraction.
+        Falls back to empty dict if instructor unavailable.
+        
+        Returns:
+            Dict with entities, metrics, time_periods, and confidence
+        """
+        try:
+            if not INSTRUCTOR_AVAILABLE:
+                logger.warning("instructor not available - entity extraction returning empty dict")
+                return {}
+            
+            # Build prompt for entity extraction
+            prompt = f"""Analyze this financial question and extract all mentioned entities and metrics.
+
+QUESTION: {question}
+
+Extract:
+1. Financial entities (e.g., revenue, expenses, cash flow, inventory, receivables)
+2. Specific metrics (e.g., "Q1 revenue", "monthly expenses", "YTD profit")
+3. Time periods mentioned (e.g., "last quarter", "this year", "2024")
+
+Be specific and extract actual values mentioned in the question."""
+            
+            # Use instructor for type-safe extraction
+            client = instructor.patch(self.groq)
+            
+            response = await asyncio.wait_for(
+                client.chat.completions.create(
+                    model="llama-3.3-70b-versatile",
+                    response_model=EntityExtraction,
+                    messages=[
+                        {"role": "system", "content": "You are a financial data extraction expert. Extract entities and metrics from questions."},
+                        {"role": "user", "content": prompt}
+                    ],
+                    max_tokens=300,
+                    temperature=0.1
+                ),
+                timeout=30.0
+            )
+            
+            logger.info("Entities extracted with instructor", 
+                       entity_count=len(response.entities),
+                       metric_count=len(response.metrics),
+                       confidence=response.confidence)
+            
+            return {
+                "entities": response.entities,
+                "metrics": response.metrics,
+                "time_periods": response.time_periods,
+                "confidence": response.confidence
+            }
+        
+        except asyncio.TimeoutError:
+            logger.error("Entity extraction timeout")
+            return {}
+        except Exception as e:
+            logger.error("Entity extraction failed", error=str(e))
+            return {}
     
     async def _extract_scenario_from_question(
         self,
         question: str,
         user_id: str
     ) -> Dict[str, Any]:
-        """Extract scenario parameters from what-if question"""
-        # Placeholder - use GPT-4 to extract scenario
-        return {'question': question}
+        """
+        Extract scenario parameters from what-if question using instructor.
+        
+        FIX #INSTRUCTOR: Uses instructor for type-safe scenario extraction.
+        Falls back to basic dict if instructor unavailable.
+        
+        Returns:
+            Dict with scenario_type, base_metric, variables, changes, and confidence
+        """
+        try:
+            if not INSTRUCTOR_AVAILABLE:
+                logger.warning("instructor not available - scenario extraction returning basic dict")
+                return {'question': question}
+            
+            # Build prompt for scenario extraction
+            prompt = f"""Analyze this what-if question and extract scenario parameters.
+
+QUESTION: {question}
+
+Extract:
+1. Scenario type: sensitivity_analysis (what if X changes?), forecast (predict future), comparison (compare scenarios), or impact_analysis (impact of change)
+2. Base metric: The main metric being analyzed (e.g., cash flow, revenue, profit)
+3. Variables: What variables are being changed (e.g., payment delay, hiring cost, price increase)
+4. Changes: Specific changes to apply (e.g., "delay by 30 days", "increase by 20%", "reduce to $50k")
+
+Be precise about the changes mentioned."""
+            
+            # Use instructor for type-safe extraction
+            client = instructor.patch(self.groq)
+            
+            response = await asyncio.wait_for(
+                client.chat.completions.create(
+                    model="llama-3.3-70b-versatile",
+                    response_model=ScenarioExtraction,
+                    messages=[
+                        {"role": "system", "content": "You are a financial scenario analysis expert. Extract scenario parameters from what-if questions."},
+                        {"role": "user", "content": prompt}
+                    ],
+                    max_tokens=300,
+                    temperature=0.1
+                ),
+                timeout=30.0
+            )
+            
+            logger.info("Scenario extracted with instructor",
+                       scenario_type=response.scenario_type,
+                       base_metric=response.base_metric,
+                       variable_count=len(response.variables),
+                       confidence=response.confidence)
+            
+            return {
+                "scenario_type": response.scenario_type,
+                "base_metric": response.base_metric,
+                "variables": response.variables,
+                "changes": response.changes,
+                "confidence": response.confidence,
+                "question": question
+            }
+        
+        except asyncio.TimeoutError:
+            logger.error("Scenario extraction timeout")
+            return {'question': question}
+        except Exception as e:
+            logger.error("Scenario extraction failed", error=str(e))
+            return {'question': question}
     
     async def _extract_entity_id_from_question(
         self,
@@ -2439,18 +2653,143 @@ Remember: You're not just answering questions - you're running their finance dep
         user_id: str,
         context: Optional[Dict[str, Any]]
     ) -> Optional[str]:
-        """Extract entity ID from question"""
-        # Placeholder - use GPT-4 + context to find entity
-        return None
+        """
+        Extract entity ID from question using instructor.
+        
+        FIX #INSTRUCTOR: Uses instructor for type-safe entity ID extraction.
+        Falls back to None if instructor unavailable or entity not found.
+        
+        Returns:
+            Entity identifier string (e.g., 'INV-12345') or None if not found
+        """
+        try:
+            if not INSTRUCTOR_AVAILABLE:
+                logger.warning("instructor not available - entity ID extraction returning None")
+                return None
+            
+            # Build context information if available
+            context_info = ""
+            if context:
+                context_info = f"\nCONTEXT: {str(context)[:500]}"
+            
+            # Build prompt for entity ID extraction
+            prompt = f"""Analyze this question and extract the specific entity being referenced.
+
+QUESTION: {question}{context_info}
+
+Extract:
+1. Entity type: What kind of entity (invoice, transaction, vendor, customer, etc.)
+2. Entity identifier: The specific ID or name (e.g., 'INV-12345', 'Acme Corp', 'TXN-789')
+3. Search field: Which field to search in (id, name, reference_number, etc.)
+
+If no specific entity is mentioned, return empty string for entity_identifier."""
+            
+            # Use instructor for type-safe extraction
+            client = instructor.patch(self.groq)
+            
+            response = await asyncio.wait_for(
+                client.chat.completions.create(
+                    model="llama-3.3-70b-versatile",
+                    response_model=EntityIDExtraction,
+                    messages=[
+                        {"role": "system", "content": "You are a financial data extraction expert. Extract specific entity IDs from questions."},
+                        {"role": "user", "content": prompt}
+                    ],
+                    max_tokens=200,
+                    temperature=0.1
+                ),
+                timeout=30.0
+            )
+            
+            # Return entity identifier if found and confidence is high
+            if response.entity_identifier and response.confidence > 0.5:
+                logger.info("Entity ID extracted with instructor",
+                           entity_type=response.entity_type,
+                           entity_identifier=response.entity_identifier,
+                           confidence=response.confidence)
+                return response.entity_identifier
+            else:
+                logger.debug("Entity ID extraction low confidence or empty", 
+                            confidence=response.confidence)
+                return None
+        
+        except asyncio.TimeoutError:
+            logger.error("Entity ID extraction timeout")
+            return None
+        except Exception as e:
+            logger.error("Entity ID extraction failed", error=str(e))
+            return None
     
     async def _extract_query_params_from_question(
         self,
         question: str,
         user_id: str
     ) -> Dict[str, Any]:
-        """Extract query parameters from data query question"""
-        # Placeholder - use GPT-4 to extract filters
-        return {}
+        """
+        Extract query parameters from data query question using instructor.
+        
+        FIX #INSTRUCTOR: Uses instructor for type-safe query parameter extraction.
+        Falls back to empty dict if instructor unavailable.
+        
+        Returns:
+            Dict with filters, sort_by, limit, group_by, and confidence
+        """
+        try:
+            if not INSTRUCTOR_AVAILABLE:
+                logger.warning("instructor not available - query parameter extraction returning empty dict")
+                return {}
+            
+            # Build prompt for query parameter extraction
+            prompt = f"""Analyze this data query question and extract query parameters.
+
+QUESTION: {question}
+
+Extract:
+1. Filters: Conditions to filter data (e.g., "amount > 1000", "date in Q1", "vendor = Acme")
+2. Sort by: Field to sort results (default: date)
+3. Limit: Maximum number of results (default: 100, max: 10000)
+4. Group by: Fields to group results (e.g., "vendor", "category", "month")
+
+Be specific about filter conditions and sorting preferences."""
+            
+            # Use instructor for type-safe extraction
+            client = instructor.patch(self.groq)
+            
+            response = await asyncio.wait_for(
+                client.chat.completions.create(
+                    model="llama-3.3-70b-versatile",
+                    response_model=QueryParameterExtraction,
+                    messages=[
+                        {"role": "system", "content": "You are a database query expert. Extract query parameters from natural language questions."},
+                        {"role": "user", "content": prompt}
+                    ],
+                    max_tokens=300,
+                    temperature=0.1
+                ),
+                timeout=30.0
+            )
+            
+            logger.info("Query parameters extracted with instructor",
+                       filter_count=len(response.filters),
+                       sort_by=response.sort_by,
+                       limit=response.limit,
+                       group_by_count=len(response.group_by),
+                       confidence=response.confidence)
+            
+            return {
+                "filters": response.filters,
+                "sort_by": response.sort_by,
+                "limit": response.limit,
+                "group_by": response.group_by,
+                "confidence": response.confidence
+            }
+        
+        except asyncio.TimeoutError:
+            logger.error("Query parameter extraction timeout")
+            return {}
+        except Exception as e:
+            logger.error("Query parameter extraction failed", error=str(e))
+            return {}
     
     async def _format_causal_response(
         self,

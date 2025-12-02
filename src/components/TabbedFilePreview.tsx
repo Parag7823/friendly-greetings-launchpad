@@ -229,7 +229,7 @@ export const TabbedFilePreview = ({
     return (
       <div className="h-full flex flex-col">
         {/* Header Bar - Aligned with Chat "New Chat" bar */}
-        <div className="h-12 flex items-center justify-between px-4 py-2 border-b border-border/30 bg-background/40">
+        <div className="h-12 flex items-center justify-between px-4 py-2 border-b border-border bg-background">
           {/* Left side - Reserved for future features/routing */}
           <div className="flex items-center gap-2">
             {/* Feature icons will be added here */}
@@ -241,7 +241,7 @@ export const TabbedFilePreview = ({
         </div>
         
         {/* File Preview Container */}
-        <div className="flex-1 flex flex-col finley-dynamic-bg rounded-lg border border-border shadow-lg overflow-hidden m-4">
+        <div className="flex-1 flex flex-col finley-dynamic-bg rounded-lg border border-border shadow-lg overflow-hidden">
           {/* Empty State Content */}
         <div className="flex-1 flex items-center justify-center">
           <div className="text-center space-y-3 p-8">
@@ -274,7 +274,7 @@ export const TabbedFilePreview = ({
   return (
     <div className="h-full flex flex-col">
       {/* Header Bar - Aligned with Chat "New Chat" bar */}
-      <div className="h-12 flex items-center justify-between px-4 py-2 border-b border-border/30 bg-background/40">
+      <div className="h-12 flex items-center justify-between px-4 py-2 border-b border-border bg-background">
         {/* Left side - Reserved for future features/routing */}
         <div className="flex items-center gap-2">
           {/* Feature icons will be added here */}
@@ -286,7 +286,7 @@ export const TabbedFilePreview = ({
       </div>
       
       {/* File Preview Container */}
-      <div className="flex-1 flex flex-col finley-dynamic-bg rounded-lg border border-border shadow-lg overflow-hidden m-4">
+      <div className="flex-1 flex flex-col finley-dynamic-bg rounded-lg border border-border shadow-lg overflow-hidden">
         {/* File Toolbar Header */}
         <div className="border-b border-border bg-background/80 backdrop-blur-sm px-4 py-2">
         <div className="flex items-center justify-between">
