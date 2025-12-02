@@ -267,6 +267,12 @@ class OrchestratorState(TypedDict, total=False):
     memory_context: str
     memory_messages: List[Dict[str, str]]
     
+    # PHASE 3: Parallel query results
+    temporal_data: Optional[Dict[str, Any]]
+    seasonal_data: Optional[Dict[str, Any]]
+    fraud_data: Optional[Dict[str, Any]]
+    root_cause_data: Optional[Dict[str, Any]]
+    
     # Response
     response: Any
     
@@ -419,6 +425,27 @@ class IntelligentChatOrchestrator:
         workflow.add_node("handle_data_query", self._node_handle_data_query)
         workflow.add_node("handle_general", self._node_handle_general)
         
+        # PHASE 3: Parallel query nodes (REPLACES: asyncio.gather at lines 339-370)
+        # These nodes execute in parallel for temporal/causal analysis
+        workflow.add_node("fetch_temporal_data", self._node_fetch_temporal_data)
+        workflow.add_node("fetch_seasonal_data", self._node_fetch_seasonal_data)
+        workflow.add_node("fetch_fraud_data", self._node_fetch_fraud_data)
+        workflow.add_node("fetch_root_cause_data", self._node_fetch_root_cause_data)
+        workflow.add_node("aggregate_parallel_results", self._node_aggregate_parallel_results)
+        
+        # PHASE 4: Output Validation & Enrichment Pipeline (REPLACES: lines 1282-1298)
+        # Automatic pipeline with conditional branching
+        workflow.add_node("validate_response", self._node_validate_response)
+        workflow.add_node("enrich_with_graph_intelligence", self._node_enrich_with_graph_intelligence)
+        workflow.add_node("store_in_database", self._node_store_in_database)
+        
+        # PHASE 5: Conditional Branching Logic (REPLACES: manual if/else throughout)
+        # Route based on data availability
+        workflow.add_node("determine_data_mode", self._node_determine_data_mode)
+        workflow.add_node("onboarding_handler", self._node_onboarding_handler)
+        workflow.add_node("exploration_handler", self._node_exploration_handler)
+        workflow.add_node("advanced_handler", self._node_advanced_handler)
+        
         # Post-processing
         workflow.add_node("apply_output_guard", self._node_apply_output_guard)
         workflow.add_node("save_memory", self._node_save_memory)
@@ -468,13 +495,58 @@ class IntelligentChatOrchestrator:
             }
         )
         
-        # Question handlers → Output guard
-        for handler in ["handle_causal", "handle_temporal", "handle_relationship",
+        # PHASE 3: Temporal handler → Parallel queries (REPLACES: asyncio.gather)
+        # When handling temporal questions, fetch data in parallel
+        workflow.add_edge("handle_temporal", "fetch_temporal_data")
+        
+        # Parallel execution: All fetch nodes run simultaneously
+        workflow.add_edge("fetch_temporal_data", "fetch_seasonal_data")
+        workflow.add_edge("fetch_temporal_data", "fetch_fraud_data")
+        workflow.add_edge("fetch_temporal_data", "fetch_root_cause_data")
+        
+        # Aggregate parallel results
+        workflow.add_edge("fetch_seasonal_data", "aggregate_parallel_results")
+        workflow.add_edge("fetch_fraud_data", "aggregate_parallel_results")
+        workflow.add_edge("fetch_root_cause_data", "aggregate_parallel_results")
+        
+        # Continue to output guard
+        workflow.add_edge("aggregate_parallel_results", "apply_output_guard")
+        
+        # Question type handlers → Output guard (non-temporal)
+        for handler in ["handle_causal", "handle_relationship",
                        "handle_whatif", "handle_explain", "handle_data_query", "handle_general"]:
             workflow.add_edge(handler, "apply_output_guard")
         
+        # Intent handlers → Output guard
+        for handler in ["handle_greeting", "handle_smalltalk", "handle_capability_summary",
+                       "handle_system_flow", "handle_differentiator", "handle_meta_feedback", "handle_help"]:
+            workflow.add_edge(handler, "apply_output_guard")
+        
+        # PHASE 4: Output Validation & Enrichment Pipeline (REPLACES: lines 1282-1298)
+        # Sequential pipeline: validate → enrich → store
+        workflow.add_edge("apply_output_guard", "validate_response")
+        workflow.add_edge("validate_response", "enrich_with_graph_intelligence")
+        workflow.add_edge("enrich_with_graph_intelligence", "store_in_database")
+        
+        # PHASE 5: Conditional Branching after storage (REPLACES: manual if/else)
+        # Route to appropriate handler based on data availability
+        workflow.add_edge("store_in_database", "determine_data_mode")
+        
+        workflow.add_conditional_edges(
+            "determine_data_mode",
+            self._route_by_data_availability,
+            {
+                "no_data": "onboarding_handler",
+                "limited_data": "exploration_handler",
+                "rich_data": "advanced_handler",
+            }
+        )
+        
+        # All data mode handlers → Save memory → End
+        for handler in ["onboarding_handler", "exploration_handler", "advanced_handler"]:
+            workflow.add_edge(handler, "save_memory")
+        
         # Post-processing
-        workflow.add_edge("apply_output_guard", "save_memory")
         workflow.add_edge("save_memory", END)
         
         return workflow.compile()
@@ -513,6 +585,25 @@ class IntelligentChatOrchestrator:
         }
         
         return routing_map.get(question_type, "general")
+    
+    def _route_by_data_availability(self, state: OrchestratorState) -> str:
+        """
+        PHASE 5: Route by data availability (REPLACES: manual if/else at lines 1606-1633, 1948-1978)
+        
+        Declarative conditional routing based on data mode:
+        - no_data → onboarding_handler
+        - limited_data → exploration_handler
+        - rich_data → advanced_handler
+        """
+        data_mode = state.get("data_mode", "no_data")
+        
+        routing_map = {
+            "no_data": "no_data",
+            "limited_data": "limited_data",
+            "rich_data": "rich_data",
+        }
+        
+        return routing_map.get(data_mode, "no_data")
     
     # ========================================================================
     # NODE IMPLEMENTATIONS - Replaces manual handler invocations
@@ -750,6 +841,124 @@ class IntelligentChatOrchestrator:
         except Exception as e:
             logger.error("Memory save failed", error=str(e))
             state["errors"] = state.get("errors", []) + [f"Memory save failed: {str(e)}"]
+        return state
+    
+    # ========================================================================
+    # PHASE 3: PARALLEL QUERY NODES - Replaces asyncio.gather (lines 785-816)
+    # ========================================================================
+    
+    async def _node_fetch_temporal_data(self, state: OrchestratorState) -> OrchestratorState:
+        """
+        PHASE 3: Fetch temporal data in parallel.
+        
+        REPLACES: asyncio.gather() for parallel query execution
+        LangGraph automatically executes this node in parallel with other fetch nodes.
+        """
+        try:
+            temporal_data = await self.temporal_learner.learn_all_patterns(state["user_id"])
+            state["temporal_data"] = temporal_data
+            state["processing_steps"] = state.get("processing_steps", []) + ["fetch_temporal_data"]
+            logger.info("Temporal data fetched", patterns_count=len(temporal_data.get('patterns', [])))
+        except Exception as e:
+            logger.error("Temporal data fetch failed", error=str(e))
+            state["temporal_data"] = {}
+            state["errors"] = state.get("errors", []) + [f"Temporal data fetch failed: {str(e)}"]
+        return state
+    
+    async def _node_fetch_seasonal_data(self, state: OrchestratorState) -> OrchestratorState:
+        """
+        PHASE 3: Fetch seasonal data in parallel.
+        
+        Runs simultaneously with fetch_temporal_data and fetch_fraud_data.
+        """
+        try:
+            # Extract seasonal patterns from temporal data if available
+            temporal_data = state.get("temporal_data", {})
+            seasonal_data = {
+                "seasonal_patterns": temporal_data.get("seasonal_patterns", []),
+                "seasonality_strength": temporal_data.get("seasonality_strength", 0.0),
+                "seasonal_forecast": temporal_data.get("seasonal_forecast", {})
+            }
+            state["seasonal_data"] = seasonal_data
+            state["processing_steps"] = state.get("processing_steps", []) + ["fetch_seasonal_data"]
+            logger.info("Seasonal data fetched", seasonality_strength=seasonal_data.get("seasonality_strength"))
+        except Exception as e:
+            logger.error("Seasonal data fetch failed", error=str(e))
+            state["seasonal_data"] = {}
+            state["errors"] = state.get("errors", []) + [f"Seasonal data fetch failed: {str(e)}"]
+        return state
+    
+    async def _node_fetch_fraud_data(self, state: OrchestratorState) -> OrchestratorState:
+        """
+        PHASE 3: Fetch fraud/anomaly data in parallel.
+        
+        Runs simultaneously with fetch_temporal_data and fetch_seasonal_data.
+        """
+        try:
+            # Query anomaly detection results
+            fraud_result = self.supabase.rpc(
+                'detect_anomalies',
+                {'p_user_id': state["user_id"]}
+            ).execute()
+            
+            fraud_data = {
+                "anomalies": fraud_result.data if fraud_result.data else [],
+                "anomaly_count": len(fraud_result.data) if fraud_result.data else 0
+            }
+            state["fraud_data"] = fraud_data
+            state["processing_steps"] = state.get("processing_steps", []) + ["fetch_fraud_data"]
+            logger.info("Fraud data fetched", anomaly_count=fraud_data.get("anomaly_count"))
+        except Exception as e:
+            logger.error("Fraud data fetch failed", error=str(e))
+            state["fraud_data"] = {}
+            state["errors"] = state.get("errors", []) + [f"Fraud data fetch failed: {str(e)}"]
+        return state
+    
+    async def _node_fetch_root_cause_data(self, state: OrchestratorState) -> OrchestratorState:
+        """
+        PHASE 3: Fetch root cause analysis data in parallel.
+        
+        Runs simultaneously with fetch_temporal_data and fetch_seasonal_data.
+        """
+        try:
+            # Run causal analysis for root cause detection
+            root_cause_data = await self.causal_engine.analyze_causal_relationships(
+                user_id=state["user_id"]
+            )
+            state["root_cause_data"] = root_cause_data
+            state["processing_steps"] = state.get("processing_steps", []) + ["fetch_root_cause_data"]
+            logger.info("Root cause data fetched", relationships_count=len(root_cause_data.get('causal_relationships', [])))
+        except Exception as e:
+            logger.error("Root cause data fetch failed", error=str(e))
+            state["root_cause_data"] = {}
+            state["errors"] = state.get("errors", []) + [f"Root cause data fetch failed: {str(e)}"]
+        return state
+    
+    async def _node_aggregate_parallel_results(self, state: OrchestratorState) -> OrchestratorState:
+        """
+        PHASE 3: Aggregate results from parallel fetch nodes.
+        
+        REPLACES: Manual result aggregation in asyncio.gather (lines 802-809)
+        LangGraph automatically waits for all parallel nodes to complete before this node runs.
+        """
+        try:
+            # Aggregate all parallel results
+            aggregated_data = {
+                "temporal": state.get("temporal_data", {}),
+                "seasonal": state.get("seasonal_data", {}),
+                "fraud": state.get("fraud_data", {}),
+                "root_cause": state.get("root_cause_data", {})
+            }
+            
+            # Store aggregated results in response
+            if state.get("response"):
+                state["response"].data = aggregated_data
+            
+            state["processing_steps"] = state.get("processing_steps", []) + ["aggregate_parallel_results"]
+            logger.info("Parallel results aggregated", data_sources=list(aggregated_data.keys()))
+        except Exception as e:
+            logger.error("Result aggregation failed", error=str(e))
+            state["errors"] = state.get("errors", []) + [f"Result aggregation failed: {str(e)}"]
         return state
     
     async def _parallel_query(self, queries: List[Tuple[str, callable]]) -> Dict[str, Any]:
