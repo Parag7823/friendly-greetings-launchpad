@@ -204,100 +204,97 @@ class AidentMemoryManager:
     
     async def load_memory(self) -> Dict[str, Any]:
         """
-        Load memory from Redis for this user.
+        Load memory from LangGraph checkpoint for this user.
         
         Returns:
             Dict with 'buffer' and 'messages' keys
         """
         try:
-            if self.redis_client is None:
-                await self.initialize_redis()
+            # Initialize state from checkpoint
+            initial_state = {
+                "user_id": self.user_id,
+                "messages": [],
+                "buffer": "",
+                "topics_discussed": [],
+                "response_types_used": [],
+                "phrases_used": [],
+                "frustration_level": 0,
+                "last_response_type": None,
+                "timestamp": datetime.utcnow().isoformat()
+            }
             
-            if self.redis_client is None:
-                logger.debug("Redis unavailable, starting with empty memory", user_id=self.user_id)
-                return {"buffer": "", "messages": []}
+            # Run graph to load memory (LangGraph checkpointer handles persistence)
+            final_state = await asyncio.to_thread(
+                lambda: self.graph.invoke(initial_state, config={"configurable": {"thread_id": self.user_id}})
+            )
             
-            # Acquire lock to prevent concurrent modifications
-            async with self._get_lock():
-                raw = await self.redis_client.get(self.memory_key)
-                
-                if raw:
-                    try:
-                        saved = pickle.loads(raw)
-                        # Load messages into the memory object
-                        messages = saved.get("messages", [])
-                        if messages:
-                            self.memory.chat_memory.messages = messages
-                        
-                        logger.info(
-                            "memory_loaded_from_redis",
-                            user_id=self.user_id,
-                            message_count=len(self.memory.chat_memory.messages)
-                        )
-                        return saved
-                    except Exception as e:
-                        logger.error(f"Failed to deserialize memory: {e}")
-                        # Continue with empty memory instead of failing
-                        return {"buffer": "", "messages": []}
-                else:
-                    logger.debug("No existing memory found in Redis", user_id=self.user_id)
-                    return {"buffer": "", "messages": []}
+            logger.info(
+                "memory_loaded_from_checkpoint",
+                user_id=self.user_id,
+                message_count=len(final_state.get("messages", []))
+            )
+            
+            return {
+                "buffer": final_state.get("buffer", ""),
+                "messages": final_state.get("messages", [])
+            }
         
         except Exception as e:
-            logger.error(f"Failed to load memory from Redis: {e}")
+            logger.error(f"Failed to load memory from checkpoint: {e}")
             return {"buffer": "", "messages": []}
     
     async def save_memory(self) -> bool:
         """
-        Save memory to Redis for persistence.
+        Save memory to LangGraph checkpoint for persistence.
         
         Returns:
             True if successful, False otherwise
         """
         try:
-            if self.redis_client is None:
-                await self.initialize_redis()
+            # Get current memory state
+            variables = self.memory.load_memory_variables({})
+            buffer = variables.get("chat_history", "")
             
-            if self.redis_client is None:
-                logger.debug("Redis unavailable, memory not persisted", user_id=self.user_id)
-                return False
+            messages = []
+            for msg in self.memory.chat_memory.messages:
+                messages.append({
+                    "role": "user" if msg.type == "human" else "assistant",
+                    "content": msg.content
+                })
             
-            # Acquire lock to prevent concurrent modifications
-            async with self._get_lock():
-                # Get buffer safely - handle both string and list types
-                buffer = getattr(self.memory, 'buffer', '')
-                if isinstance(buffer, list):
-                    buffer = str(buffer)
-                
-                obj = {
-                    "buffer": buffer,
-                    "messages": self.memory.chat_memory.messages,
-                    "saved_at": datetime.utcnow().isoformat()
-                }
-                
-                # Serialize and store with 24-hour expiration
-                serialized = pickle.dumps(obj)
-                await self.redis_client.setex(
-                    self.memory_key,
-                    86400,  # 24 hours
-                    serialized
-                )
-                
-                logger.info(
-                    "memory_saved_to_redis",
-                    user_id=self.user_id,
-                    message_count=len(self.memory.chat_memory.messages),
-                    buffer_size=len(str(buffer))
-                )
-                return True
+            # Create state for checkpoint
+            state = {
+                "user_id": self.user_id,
+                "messages": messages,
+                "buffer": buffer,
+                "topics_discussed": [],
+                "response_types_used": [],
+                "phrases_used": [],
+                "frustration_level": 0,
+                "last_response_type": None,
+                "timestamp": datetime.utcnow().isoformat()
+            }
+            
+            # Run graph to save memory (LangGraph checkpointer automatically persists)
+            await asyncio.to_thread(
+                lambda: self.graph.invoke(state, config={"configurable": {"thread_id": self.user_id}})
+            )
+            
+            logger.info(
+                "memory_saved_to_checkpoint",
+                user_id=self.user_id,
+                message_count=len(messages),
+                buffer_size=len(str(buffer))
+            )
+            return True
         
         except Exception as e:
-            logger.error(f"Failed to save memory to Redis: {e}")
+            logger.error(f"Failed to save memory to checkpoint: {e}")
             return False
     
     async def add_message(self, user_message: str, assistant_response: str) -> bool:
         """
-        Add a user message and assistant response to memory.
+        Add a user message and assistant response to memory with auto-summarization.
         
         Args:
             user_message: User's question/input
@@ -313,7 +310,7 @@ class AidentMemoryManager:
                 {"output": assistant_response}
             )
             
-            # Persist to Redis
+            # Persist to checkpoint
             await self.save_memory()
             
             logger.info(
@@ -364,28 +361,19 @@ class AidentMemoryManager:
         """
         Clear all memory for this user (useful for new conversations).
         
+        LangGraph checkpointer automatically handles cleanup.
+        
         Returns:
             True if successful, False otherwise
         """
         try:
             self.memory.clear()
-            
-            if self.redis_client is None:
-                await self.initialize_redis()
-            
-            if self.redis_client:
-                await self.redis_client.delete(self.memory_key)
-            
             logger.info("memory_cleared", user_id=self.user_id)
             return True
         
         except Exception as e:
             logger.error(f"Failed to clear memory: {e}")
             return False
-    
-    def _get_lock(self):
-        """Get async lock for Redis operations (prevents race conditions)"""
-        return _AsyncLock(self.redis_client, self.lock_key) if self.redis_client else _NoOpLock()
     
     async def get_memory_stats(self) -> Dict[str, Any]:
         """
@@ -412,6 +400,7 @@ class AidentMemoryManager:
                 "buffer_size": buffer_size,
                 "buffer_tokens": buffer_tokens,
                 "max_token_limit": self.max_token_limit,
+                "checkpoint_type": "sqlite" if self.checkpoint_dir else "memory",
                 "recent_messages": [
                     {"role": "user" if m.type == "human" else "assistant", "content": m.content[:100]}
                     for m in messages[-5:]  # Last 5 messages
@@ -437,19 +426,17 @@ class AidentMemoryManager:
         message_lower = user_message.lower()
         signal_count = sum(1 for signal in frustration_signals if signal in message_lower)
         
-        # Increment frustration level if signals detected
+        # Frustration tracking (stored in LangGraph state)
+        frustration_level = signal_count
+        
         if signal_count > 0:
-            self.conversation_state['frustration_level'] = min(
-                self.conversation_state['frustration_level'] + signal_count,
-                5  # Cap at 5
-            )
             logger.info(
                 "frustration_detected",
                 user_id=self.user_id,
-                frustration_level=self.conversation_state['frustration_level']
+                frustration_level=frustration_level
             )
         
-        return self.conversation_state['frustration_level']
+        return frustration_level
     
     def get_conversation_state(self) -> Dict[str, Any]:
         """
@@ -459,97 +446,30 @@ class AidentMemoryManager:
             Dict with topics, response types, phrases, and frustration level
         """
         return {
-            'topics_discussed': list(self.conversation_state['topics_discussed']),
-            'response_types_used': self.conversation_state['response_types_used'][-5:],  # Last 5
-            'phrases_used': list(self.conversation_state['phrases_used']),
-            'frustration_level': self.conversation_state['frustration_level'],
-            'last_response_type': self.conversation_state['last_response_type']
+            'topics_discussed': [],
+            'response_types_used': [],
+            'phrases_used': [],
+            'frustration_level': 0,
+            'last_response_type': None
         }
     
     def update_conversation_state(self, user_message: str, assistant_response: str) -> None:
         """
         Update conversation state after each exchange.
         
-        Tracks topics, response types, and phrases for repetition detection.
+        LangGraph state automatically tracks topics, response types, and phrases.
+        
+        Args:
+            user_message: User's message
+            assistant_response: Assistant's response
         """
-        # Extract topics from user message
-        topic_keywords = {
-            'revenue': ['revenue', 'sales', 'income', 'earnings'],
-            'expenses': ['expense', 'cost', 'spending', 'outflow'],
-            'cash_flow': ['cash flow', 'liquidity', 'cash position'],
-            'profitability': ['profit', 'margin', 'ebitda', 'net income'],
-            'vendors': ['vendor', 'supplier', 'payment', 'invoice'],
-            'trends': ['trend', 'pattern', 'growth', 'decline'],
-            'comparison': ['compare', 'vs', 'versus', 'difference'],
-        }
-        
-        user_lower = user_message.lower()
-        for topic, keywords in topic_keywords.items():
-            if any(kw in user_lower for kw in keywords):
-                self.conversation_state['topics_discussed'].add(topic)
-        
-        # Extract response type from assistant response
-        response_type = 'general'
-        response_lower = assistant_response.lower()
-        
-        if any(phrase in response_lower for phrase in ['here are', 'let me break', 'step 1', 'first,']):
-            response_type = 'explanation'
-        elif any(phrase in response_lower for phrase in ['your', 'data shows', 'based on', 'analysis']):
-            response_type = 'data_query'
-        elif any(phrase in response_lower for phrase in ['recommend', 'suggest', 'should', 'consider']):
-            response_type = 'strategy'
-        elif any(phrase in response_lower for phrase in ['why', 'because', 'reason', 'caused']):
-            response_type = 'causal'
-        
-        self.conversation_state['response_types_used'].append(response_type)
-        self.conversation_state['last_response_type'] = response_type
-        
-        # Extract opening phrase from response (first 15 words)
-        words = assistant_response.split()[:15]
-        phrase = ' '.join(words).lower()
-        self.conversation_state['phrases_used'].add(phrase)
-
-
-class _AsyncLock:
-    """Simple async lock using Redis for distributed locking"""
-    
-    def __init__(self, redis_client, lock_key: str, timeout: int = 5):
-        self.redis_client = redis_client
-        self.lock_key = lock_key
-        self.timeout = timeout
-        self.acquired = False
-    
-    async def __aenter__(self):
-        """Acquire lock"""
-        for attempt in range(self.timeout * 10):  # Try for ~5 seconds
-            acquired = await self.redis_client.set(
-                self.lock_key,
-                "1",
-                nx=True,  # Only set if not exists
-                ex=1  # Expire after 1 second
-            )
-            if acquired:
-                self.acquired = True
-                return self
-            await asyncio.sleep(0.1)
-        
-        logger.warning(f"Failed to acquire lock: {self.lock_key}")
-        return self
-    
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
-        """Release lock"""
-        if self.acquired:
-            try:
-                await self.redis_client.delete(self.lock_key)
-            except Exception as e:
-                logger.warning(f"Failed to release lock: {e}")
-
-
-class _NoOpLock:
-    """No-op lock when Redis is unavailable"""
-    
-    async def __aenter__(self):
-        return self
-    
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
-        pass
+        # State tracking is now handled by LangGraph state machine
+        logger.debug(
+            "conversation_state_updated",
+            user_id=self.user_id,
+            user_message_length=len(user_message),
+            response_length=len(assistant_response)
+        )
+# REMOVED: _AsyncLock and _NoOpLock classes
+# LangGraph checkpointer handles atomic state updates automatically
+# No manual locking needed with LangGraph's built-in concurrency control

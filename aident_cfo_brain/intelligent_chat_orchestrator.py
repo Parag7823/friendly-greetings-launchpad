@@ -378,7 +378,7 @@ class IntelligentChatOrchestrator:
         
         # FIX #19: Initialize intent classification and output guard components
         self.intent_classifier = get_intent_classifier()
-        self.output_guard = get_output_guard()
+        self.output_guard = get_output_guard(self.groq)  # PHASE 1: Pass LLM client for LangGraph-based variation
         self.response_variation_engine = get_response_variation_engine(self.groq)
         
         logger.info("✅ IntelligentChatOrchestrator initialized with all engines including FinleyGraph")
@@ -823,7 +823,6 @@ class IntelligentChatOrchestrator:
                     proposed_response=state["response"].answer,
                     recent_responses=state.get("memory_messages", [])[-5:],
                     question=state["question"],
-                    llm_client=self.groq,
                     frustration_level=0
                 )
                 state["response"].answer = safe_response
@@ -1529,7 +1528,6 @@ With your financial data, I can:
                 proposed_response=response.answer,
                 recent_responses=memory_messages[-5:] if memory_messages else [],
                 question=question,
-                llm_client=self.groq,
                 frustration_level=memory_manager.conversation_state.get('frustration_level', 0)
             )
             response.answer = safe_response
