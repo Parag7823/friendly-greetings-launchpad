@@ -1170,7 +1170,7 @@ async def app_lifespan(app: FastAPI):
         # CRITICAL FIX: Defer Supabase client initialization to first use
         # Don't block startup on database connection - it will be initialized on first API request
         # This prevents startup timeouts and allows graceful degradation if DB is temporarily unavailable
-        supabase = None
+        supabase = get_supabase_client()
         logger.info("✅ Supabase client will be lazy-loaded on first use (non-blocking startup)")
         
         # Initialize critical systems (only if Supabase is available)
@@ -10620,6 +10620,7 @@ async def _gmail_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> Dict
                         item = {
                             'user_id': user_id,
                             'user_connection_id': user_connection_id,
+                            'sync_run_id': sync_run_id,
                             'provider_id': provider_attachment_id,
                             'kind': 'email',
                             'source_ts': source_ts or pendulum.now().to_iso8601_string(),
@@ -10819,11 +10820,15 @@ async def _zoho_mail_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> 
         except Exception:
             pass  # Connector may already exist
 
+        # Fetch connector UUID (FIX: use UUID, not provider_key TEXT)
+        conn_row = supabase.table('connectors').select('id').eq('provider', provider_key).limit(1).execute()
+        connector_id = conn_row.data[0]['id'] if conn_row.data else None
+
         # Upsert user_connection record
         try:
             supabase.table('user_connections').insert({
                 'user_id': user_id,
-                'connector_id': provider_key,
+                'connector_id': connector_id,
                 'nango_connection_id': connection_id,
                 'status': 'active',
                 'sync_mode': 'pull'
@@ -11421,6 +11426,7 @@ async def _gdrive_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> Dic
                     item = {
                         'user_id': user_id,
                         'user_connection_id': user_connection_id,
+                        'sync_run_id': sync_run_id,
                         'provider_id': fid,
                         'kind': 'file',
                         'source_ts': f.get('modifiedTime') or pendulum.now().to_iso8601_string(),
@@ -11887,6 +11893,90 @@ async def connectors_sync(req: ConnectorSyncRequest):
         logger.error(f"Connectors sync failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+
+# ============================================================================
+# TASK #1: ADD SYNC STATUS POLLING ENDPOINT
+# ============================================================================
+@app.get("/api/connectors/sync/{sync_run_id}/status")
+async def get_sync_status(sync_run_id: str, user_id: str, session_token: Optional[str] = None):
+    """
+    Get current status of a sync run.
+    
+    Returns:
+    {
+        "status": "queued|running|succeeded|failed|partial|cancelled",
+        "stats": {"records_fetched": 100, "actions_used": 50, ...},
+        "errors": ["error1", "error2"],
+        "started_at": "2025-01-01T00:00:00Z",
+        "finished_at": "2025-01-01T00:05:00Z",
+        "duration_seconds": 300
+    }
+    """
+    await _validate_security('connectors-sync-status', user_id, session_token)
+    
+    try:
+        # Query sync_run by ID
+        result = supabase.table('sync_runs').select(
+            'id, user_id, status, stats, error, started_at, finished_at'
+        ).eq('id', sync_run_id).limit(1).execute()
+        
+        if not result.data:
+            raise HTTPException(status_code=404, detail=f"Sync run {sync_run_id} not found")
+        
+        sync_run = result.data[0]
+        
+        # Verify ownership
+        if sync_run['user_id'] != user_id:
+            raise HTTPException(status_code=403, detail="Unauthorized")
+        
+        # Parse stats
+        stats = sync_run.get('stats') or {}
+        if isinstance(stats, str):
+            try:
+                stats = orjson.loads(stats)
+            except Exception:
+                stats = {}
+        
+        # Calculate duration
+        started_at = sync_run.get('started_at')
+        finished_at = sync_run.get('finished_at')
+        duration_seconds = None
+        
+        if started_at and finished_at:
+            try:
+                start = pendulum.parse(started_at)
+                finish = pendulum.parse(finished_at)
+                duration_seconds = int((finish - start).total_seconds())
+            except Exception:
+                pass
+        
+        # Build response
+        response = {
+            'status': sync_run.get('status', 'unknown'),
+            'stats': stats,
+            'errors': [sync_run['error']] if sync_run.get('error') else [],
+            'started_at': started_at,
+            'finished_at': finished_at,
+            'duration_seconds': duration_seconds
+        }
+        
+        # Log access
+        logger.info(
+            "sync_status_retrieved",
+            sync_run_id=sync_run_id,
+            user_id=user_id,
+            status=sync_run.get('status')
+        )
+        
+        return response
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get sync status: {e}", sync_run_id=sync_run_id)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 class ConnectorMetadataUpdate(BaseModel):
     user_id: str
     connection_id: str
@@ -12097,6 +12187,7 @@ async def _process_webhook_delta_items(user_id: str, user_connection_id: str, pr
                 ext_item = {
                     'user_id': user_id,
                     'user_connection_id': user_connection_id,
+                    'sync_run_id': correlation_id,
                     'provider_id': str(item_id),
                     'kind': 'txn',
                     'source_ts': item.get('date') or item.get('updated_at') or pendulum.now().to_iso8601_string(),
@@ -12224,7 +12315,8 @@ async def nango_webhook(request: Request):
                 'signature_valid': bool(signature_valid),
                 'status': 'queued',
                 'error': None,
-                'event_id': event_id
+                'event_id': event_id,
+                'created_at': pendulum.now().to_iso8601_string()
             }).execute()
         except Exception as e:
             # Conflict on unique(event_id) is fine; treat as already processed
