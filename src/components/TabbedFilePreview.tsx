@@ -242,7 +242,7 @@ export const TabbedFilePreview = ({
           <div className="flex items-center gap-2">
             <Button
               onClick={onToggleDataSources}
-              className="h-8 px-3 rounded-md bg-primary/10 hover:bg-primary/20 text-primary border border-primary/30 text-xs font-medium transition-colors"
+              className="h-8 px-3 rounded-md bg-primary/10 hover:bg-primary/20 text-white border border-primary/30 text-xs font-medium transition-colors"
               title={isDataSourcesCollapsed ? "Open Data Sources" : "Close Data Sources"}
             >
               <Database className="w-3.5 h-3.5 mr-1.5" />
@@ -252,17 +252,11 @@ export const TabbedFilePreview = ({
         </div>
         
         {/* File Preview Container */}
-        <div className="flex-1 flex flex-col finley-dynamic-bg rounded-lg border border-border shadow-lg overflow-hidden">
+        <div className="flex-1 flex flex-col bg-background overflow-hidden">
           {/* Empty State Content */}
         <div className="flex-1 flex items-center justify-center">
           <div className="text-center space-y-3 p-8">
-            <FileSpreadsheet className="w-16 h-16 mx-auto text-muted-foreground/30" />
-            <div>
-              <h3 className="text-lg font-semibold text-foreground">No files open</h3>
-              <p className="text-sm text-muted-foreground mt-1">
-                Click a file in Data Sources to view it here
-              </p>
-            </div>
+            <h3 className="text-2xl font-semibold text-foreground">Finance Workspace</h3>
           </div>
         </div>
         </div>
@@ -304,7 +298,7 @@ export const TabbedFilePreview = ({
       </div>
       
       {/* File Preview Container */}
-      <div className="flex-1 flex flex-col finley-dynamic-bg rounded-lg border border-border shadow-lg overflow-hidden">
+      <div className="flex-1 flex flex-col bg-background overflow-hidden">
         {/* File Toolbar Header */}
         <div className="bg-background/80 backdrop-blur-sm px-4 py-2">
         <div className="flex items-center justify-between">

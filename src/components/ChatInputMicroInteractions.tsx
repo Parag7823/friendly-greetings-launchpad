@@ -55,68 +55,71 @@ export const ChatInputMicroInteractions: React.FC<ChatInputMicroInteractionsProp
   };
 
   return (
-    <div
-      className={`
-        w-full relative flex items-end gap-3 p-3 border border-border rounded-lg
-        bg-transparent transition-all duration-300
-        ${isFocused || isTyping
-          ? 'border-slate-600/80'
-          : 'border-slate-700/50'
-        }
-        ${isLoading ? 'opacity-60 pointer-events-none' : ''}
-      `}
-    >
-          {/* File Upload Button */}
-          <button
-            onClick={onFileClick}
-            disabled={isLoading}
-            className="flex-shrink-0 p-2 hover:bg-slate-700/50 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            title="Attach file"
-          >
-            <Paperclip className="w-4 h-4 text-muted-foreground hover:text-primary transition-colors" />
-          </button>
+    <div className="w-full flex items-end gap-3">
+      {/* Input Box Component - Separate container */}
+      <div
+        className={`
+          flex-1 relative flex items-center gap-2 p-3 border border-border rounded-lg
+          bg-transparent transition-all duration-300
+          ${isFocused || isTyping
+            ? 'border-slate-600/80'
+            : 'border-slate-700/50'
+          }
+          ${isLoading ? 'opacity-60 pointer-events-none' : ''}
+        `}
+      >
+        {/* File Upload Button */}
+        <button
+          onClick={onFileClick}
+          disabled={isLoading}
+          className="flex-shrink-0 p-2 hover:bg-slate-700/50 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          title="Attach file"
+        >
+          <Paperclip className="w-4 h-4 text-muted-foreground hover:text-primary transition-colors" />
+        </button>
 
-          {/* Textarea with Auto-Resize */}
-          <TextareaAutosize
-            value={value}
-            onChange={(e) => onChange(e.target.value)}
-            onFocus={() => setIsFocused(true)}
-            onBlur={() => setIsFocused(false)}
-            onKeyDown={handleKeyDown}
-            placeholder={placeholder}
-            disabled={isLoading}
-            minRows={1}
-            maxRows={6}
-            aria-label="Chat message input"
-            aria-describedby="input-help"
-            aria-busy={isLoading}
-            className={`
-              flex-1 bg-transparent text-foreground placeholder:text-slate-600 placeholder:font-normal
-              outline-none resize-none
-              disabled:opacity-50 disabled:cursor-not-allowed
-              text-sm font-normal
-            `}
-          />
-          {/* Hidden help text for screen readers */}
-          <span id="input-help" className="sr-only">
-            Press Enter to send message, Shift+Enter for new line
-          </span>
+        {/* Textarea with Auto-Resize - Centered */}
+        <TextareaAutosize
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          onFocus={() => setIsFocused(true)}
+          onBlur={() => setIsFocused(false)}
+          onKeyDown={handleKeyDown}
+          placeholder={placeholder}
+          disabled={isLoading}
+          minRows={1}
+          maxRows={6}
+          aria-label="Chat message input"
+          aria-describedby="input-help"
+          aria-busy={isLoading}
+          className={`
+            flex-1 bg-transparent text-foreground placeholder:text-slate-600 placeholder:font-normal
+            outline-none resize-none text-center
+            disabled:opacity-50 disabled:cursor-not-allowed
+            text-sm font-normal
+          `}
+        />
+        {/* Hidden help text for screen readers */}
+        <span id="input-help" className="sr-only">
+          Press Enter to send message, Shift+Enter for new line
+        </span>
+      </div>
 
-          {/* Send Button */}
-          <button
-            onClick={onSend}
-            disabled={!value.trim() || isLoading}
-            className={`
-              flex-shrink-0 p-2 rounded-lg transition-all duration-200
-              ${value.trim() && !isLoading
-                ? 'bg-primary hover:bg-copper-dark text-primary-foreground shadow-lg shadow-primary/30 hover:shadow-primary/50'
-                : 'bg-slate-700/50 text-muted-foreground cursor-not-allowed opacity-50'
-              }
-            `}
-            title="Send message (Shift+Enter for new line)"
-          >
-            <Send className="w-4 h-4" />
-          </button>
+      {/* Send Button Component - Separate container */}
+      <button
+        onClick={onSend}
+        disabled={!value.trim() || isLoading}
+        className={`
+          flex-shrink-0 p-3 rounded-lg transition-all duration-200
+          ${value.trim() && !isLoading
+            ? 'bg-primary hover:bg-primary/90 text-primary-foreground shadow-lg shadow-primary/30 hover:shadow-primary/50'
+            : 'bg-slate-700/50 text-muted-foreground cursor-not-allowed opacity-50'
+          }
+        `}
+        title="Send message (Shift+Enter for new line)"
+      >
+        <Send className="w-4 h-4" />
+      </button>
     </div>
   );
 };
