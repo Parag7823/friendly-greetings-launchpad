@@ -256,7 +256,7 @@ export const DataSourcesPanel = ({ isOpen, onClose, onFilePreview }: DataSources
         setVerifying(provider);
 
         // FIX: Add 60-second timeout to clear "Connecting..." state if verification never completes
-        setTimeout(() => {
+        const timeoutId = setTimeout(() => {
           setVerifying((current) => {
             if (current === provider) {
               toast({
@@ -264,11 +264,15 @@ export const DataSourcesPanel = ({ isOpen, onClose, onFilePreview }: DataSources
                 description: 'Please try connecting again or check if the popup was blocked.',
                 variant: 'destructive'
               });
+              setConnecting(null); // Also clear connecting state
               return null;
             }
             return current;
           });
         }, 60000); // 60 seconds
+        
+        // Store timeout ID for cleanup if needed
+        (window as any)._connectionTimeoutId = timeoutId;
       } else {
         throw new Error('No connection URL received from server');
       }
@@ -593,11 +597,6 @@ export const DataSourcesPanel = ({ isOpen, onClose, onFilePreview }: DataSources
 
   return (
     <div className="h-full w-full bg-background flex flex-col">
-      {/* Header - NO X button */}
-      <div className="flex items-center gap-2 px-4 py-3 border-b border-border bg-card">
-        <Plug className="w-4 h-4 text-primary" />
-        <h2 className="text-sm font-semibold">Data Sources</h2>
-      </div>
 
       <div className="flex-1 overflow-y-auto">
         <div className="p-4 space-y-8">

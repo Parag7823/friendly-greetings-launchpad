@@ -87,7 +87,7 @@ export const ThreePanelLayout = ({ currentView = 'chat', onNavigate }: ThreePane
           minSize={25}            // Minimum 25% when expanded
           maxSize={50}            // Maximum 50% of screen
           collapsible
-          className="relative"
+          className="relative transition-all duration-300"
           onCollapse={() => {
             setIsPanelCollapsed(true);
             localStorage.setItem('rightPanelExpanded', 'false');
