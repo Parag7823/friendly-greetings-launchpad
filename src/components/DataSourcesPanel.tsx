@@ -755,23 +755,21 @@ export const DataSourcesPanel = ({ isOpen, onClose, onFilePreview }: DataSources
                                     {integration.icon}
                                   </div>
                                   <div className="flex-1 min-w-0 overflow-hidden">
-                                    <div className="flex flex-col gap-1 min-w-0 flex-1">
-                                      <div className="flex items-center gap-2 min-w-0">
-                                        <p className="text-[10px] font-medium">{integration.name}</p>
-                                        {connected && (
-                                          <Badge
-                                            variant="default"
-                                            className="text-[8px] bg-gradient-to-r from-emerald-500 to-green-600 text-white border-0 shadow-sm flex-shrink-0"
-                                          >
-                                            <CheckCircle2 className="w-3 h-3 mr-1" />
-                                            Connected
-                                          </Badge>
-                                        )}
-                                      </div>
-                                      <p className="text-xs text-muted-foreground line-clamp-2">
-                                        {integration.description}
-                                      </p>
+                                    <div className="flex items-center gap-2 min-w-0">
+                                      <p className="text-[10px] font-medium whitespace-nowrap">{integration.name}</p>
+                                      {connected && (
+                                        <Badge
+                                          variant="default"
+                                          className="text-[8px] bg-gradient-to-r from-emerald-500 to-green-600 text-white border-0 shadow-sm"
+                                        >
+                                          <CheckCircle2 className="w-3 h-3 mr-1" />
+                                          Connected
+                                        </Badge>
+                                      )}
                                     </div>
+                                    <p className="text-xs text-muted-foreground truncate">
+                                      {integration.description}
+                                    </p>
                                     {connected && connection.last_synced_at && (
                                       <p className="text-[10px] text-muted-foreground mt-1">
                                         Last synced: {new Date(connection.last_synced_at).toLocaleString()}
