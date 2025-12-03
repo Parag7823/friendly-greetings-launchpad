@@ -233,16 +233,16 @@ export const TabbedFilePreview = ({
     return (
       <div className="h-full flex flex-col">
         {/* Header Bar - Aligned with Chat "New Chat" bar */}
-        <div className="flex items-center justify-between px-4 py-3 bg-background">
+        <div className="flex items-start justify-between px-4 py-2 bg-background">
           {/* Left side - Reserved for future features/routing */}
           <div className="flex items-center gap-2">
             {/* Feature icons will be added here */}
           </div>
           {/* Right side - Data Sources Button */}
-          <div className="flex items-center gap-2">
+          <div className="flex items-start gap-2">
             <Button
               onClick={onToggleDataSources}
-              className="h-8 px-3 rounded-md bg-primary/10 hover:bg-primary/20 text-white border border-primary/30 text-xs font-medium transition-colors"
+              className="h-7 px-3 rounded-md bg-primary/10 hover:bg-primary/20 text-white border border-primary/30 text-xs font-medium transition-colors"
               title={isDataSourcesCollapsed ? "Open Data Sources" : "Close Data Sources"}
             >
               <Database className="w-3.5 h-3.5 mr-1.5" />
@@ -279,16 +279,16 @@ export const TabbedFilePreview = ({
   return (
     <div className="h-full flex flex-col">
       {/* Header Bar - Aligned with Chat "New Chat" bar */}
-      <div className="flex items-center justify-between px-4 py-3 bg-background">
+      <div className="flex items-start justify-between px-4 py-2 bg-background">
         {/* Left side - Reserved for future features/routing */}
         <div className="flex items-center gap-2">
           {/* Feature icons will be added here */}
         </div>
         {/* Right side - Data Sources Button */}
-        <div className="flex items-center gap-2">
+        <div className="flex items-start gap-2">
           <Button
             onClick={onToggleDataSources}
-            className="h-8 px-3 rounded-md bg-primary/10 hover:bg-primary/20 text-white border border-primary/30 text-xs font-medium transition-colors"
+            className="h-7 px-3 rounded-md bg-primary/10 hover:bg-primary/20 text-white border border-primary/30 text-xs font-medium transition-colors"
             title={isDataSourcesCollapsed ? "Open Data Sources" : "Close Data Sources"}
           >
             <Database className="w-3.5 h-3.5 mr-1.5" />
