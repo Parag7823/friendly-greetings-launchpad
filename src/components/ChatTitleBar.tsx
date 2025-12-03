@@ -21,7 +21,7 @@ export const ChatTitleBar = ({
         {/* Title Section */}
         <div className="flex-1 min-w-0">
           <h2 className={cn(
-            "text-[10px] font-medium text-foreground truncate transition-opacity",
+            "text-[11px] font-medium text-foreground truncate transition-opacity",
             isLoading && "opacity-60"
           )}>
             {title || "New Chat"}

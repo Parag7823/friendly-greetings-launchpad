@@ -57,7 +57,7 @@ export const ChatInputMicroInteractions: React.FC<ChatInputMicroInteractionsProp
   return (
     <div
       className={`
-        w-full relative flex flex-col gap-2 p-2 border border-border/40 rounded-lg
+        w-full relative flex flex-col gap-2 p-3 border border-border/40 rounded-lg
         bg-transparent transition-all duration-300
         ${isFocused || isTyping
           ? 'border-slate-600/60'
