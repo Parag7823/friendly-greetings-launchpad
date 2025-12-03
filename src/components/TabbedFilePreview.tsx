@@ -233,7 +233,7 @@ export const TabbedFilePreview = ({
     return (
       <div className="h-full flex flex-col">
         {/* Header Bar - Aligned with Chat "New Chat" bar */}
-        <div className="flex items-center justify-between px-4 py-1.5 bg-background border-b border-border/28">
+        <div className="flex items-center justify-between px-4 py-1.5 bg-background rounded-lg" style={{border: '1px solid', borderImage: 'linear-gradient(90deg, rgba(37, 99, 235, 0.2), rgba(37, 99, 235, 0.5), rgba(37, 99, 235, 0.2)) 1'}}>
           {/* Left side - Reserved for future features/routing */}
           <div className="flex items-center gap-2">
             {/* Feature icons will be added here */}
@@ -279,7 +279,7 @@ export const TabbedFilePreview = ({
   return (
     <div className="h-full flex flex-col">
       {/* Header Bar - Aligned with Chat "New Chat" bar */}
-      <div className="flex items-center justify-between px-4 py-1.5 bg-background border-b border-border/28">
+      <div className="flex items-center justify-between px-4 py-1.5 bg-background rounded-lg" style={{border: '1px solid', borderImage: 'linear-gradient(90deg, rgba(37, 99, 235, 0.2), rgba(37, 99, 235, 0.5), rgba(37, 99, 235, 0.2)) 1'}}>
         {/* Left side - Reserved for future features/routing */}
         <div className="flex items-center gap-2">
           {/* Feature icons will be added here */}
