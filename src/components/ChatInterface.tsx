@@ -820,7 +820,7 @@ export const ChatInterface = ({ currentView = 'chat', onNavigate, isEmbedded, ch
             </div>
 
             {/* Chat Input Area with Micro-Interactions */}
-            <div className="border-t border-border/30 px-4 py-2 finley-dynamic-bg">
+            <div className="px-4 py-2 finley-dynamic-bg">
               <div className="max-w-2xl mx-auto">
                 {/* Attached Files Preview - Above input */}
                 {pastedImages.length > 0 && (

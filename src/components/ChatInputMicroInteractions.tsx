@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Send, Paperclip } from 'lucide-react';
+import { ArrowUp, Paperclip } from 'lucide-react';
 import TextareaAutosize from 'react-textarea-autosize';
 import debounce from 'lodash.debounce';
 
@@ -57,7 +57,7 @@ export const ChatInputMicroInteractions: React.FC<ChatInputMicroInteractionsProp
   return (
     <div
       className={`
-        w-full relative flex flex-col gap-2 p-2 border border-border/40 rounded-md
+        w-full relative flex flex-col gap-2 p-2 border border-border/40 rounded-lg
         bg-transparent transition-all duration-300
         ${isFocused || isTyping
           ? 'border-slate-600/60'
@@ -66,23 +66,6 @@ export const ChatInputMicroInteractions: React.FC<ChatInputMicroInteractionsProp
         ${isLoading ? 'opacity-60 pointer-events-none' : ''}
       `}
     >
-      {/* Top Row - Send Button on Right */}
-      <div className="flex items-center justify-end">
-        <button
-          onClick={onSend}
-          disabled={!value.trim() || isLoading}
-          className={`
-            flex-shrink-0 p-1.5 rounded transition-all duration-200
-            ${value.trim() && !isLoading
-              ? 'bg-primary hover:bg-primary/90 text-primary-foreground shadow-lg shadow-primary/30 hover:shadow-primary/50'
-              : 'bg-transparent text-muted-foreground cursor-not-allowed opacity-30'
-            }
-          `}
-          title="Send message (Enter to send)"
-        >
-          <Send className="w-4 h-4" />
-        </button>
-      </div>
 
       {/* Input Row */}
       <div className="flex items-end gap-2">
@@ -121,6 +104,22 @@ export const ChatInputMicroInteractions: React.FC<ChatInputMicroInteractionsProp
         <span id="input-help" className="sr-only">
           Press Enter to send message, Shift+Enter for new line
         </span>
+
+        {/* Send Button - Aligned with input */}
+        <button
+          onClick={onSend}
+          disabled={!value.trim() || isLoading}
+          className={`
+            flex-shrink-0 p-1.5 rounded transition-all duration-200
+            ${value.trim() && !isLoading
+              ? 'bg-primary hover:bg-primary/90 text-primary-foreground'
+              : 'bg-transparent text-muted-foreground cursor-not-allowed opacity-30'
+            }
+          `}
+          title="Send message (Enter to send)"
+        >
+          <ArrowUp className="w-4 h-4" />
+        </button>
       </div>
     </div>
   );
