@@ -300,17 +300,17 @@ export const TabbedFilePreview = ({
       {/* File Preview Container */}
       <div className="flex-1 flex flex-col bg-background overflow-hidden">
         {/* File Toolbar Header */}
-        <div className="bg-background/80 backdrop-blur-sm px-4 py-2">
+        <div className="bg-background/80 backdrop-blur-sm px-4 py-3">
         <div className="flex items-center justify-between">
           {/* File Name Display */}
           <div className="flex items-center gap-3 min-w-0">
             <FileSpreadsheet className="w-4 h-4 text-primary flex-shrink-0" />
             <div className="min-w-0">
-              <h2 className="text-sm font-semibold text-foreground truncate">
+              <h2 className="text-[10px] font-medium text-foreground truncate">
                 {activeFile?.filename || 'File Preview'}
               </h2>
               {activeFile && (
-                <p className="text-xs text-muted-foreground">
+                <p className="text-[9px] text-muted-foreground">
                   {activeFile.events_count ? `${activeFile.events_count} events` : 'Loading...'}
                 </p>
               )}
