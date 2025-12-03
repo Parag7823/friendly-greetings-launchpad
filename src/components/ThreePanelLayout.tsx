@@ -63,7 +63,7 @@ export const ThreePanelLayout = ({ currentView = 'chat', onNavigate }: ThreePane
         <PanelResizeHandle className="w-0.5 bg-primary/60 hover:bg-primary transition-colors" />
 
         {/* File Preview Panel - 70% default (resizable 50-85%) */}
-        <Panel defaultSize={70} minSize={50} maxSize={85} className="relative p-4">
+        <Panel defaultSize={70} minSize={50} maxSize={85} className="relative p-4 overflow-hidden">
           <div className="h-full w-full rounded-xl overflow-hidden bg-background shadow-lg">
             <TabbedFilePreview
               openFiles={openFiles}
@@ -84,10 +84,10 @@ export const ThreePanelLayout = ({ currentView = 'chat', onNavigate }: ThreePane
           ref={rightPanelRef}
           defaultSize={0}         // AUDIT FIX #2: Start collapsed (hidden)
           collapsedSize={0}       // AUDIT FIX #2: Fully hidden when collapsed
-          minSize={25}            // Minimum 25% when expanded
-          maxSize={50}            // Maximum 50% of screen
+          minSize={20}            // Minimum 20% when expanded (reduced from 25%)
+          maxSize={45}            // Maximum 45% of screen (reduced from 50%)
           collapsible
-          className="relative transition-all duration-300"
+          className="relative transition-all duration-300 overflow-hidden"
           onCollapse={() => {
             setIsPanelCollapsed(true);
             localStorage.setItem('rightPanelExpanded', 'false');
