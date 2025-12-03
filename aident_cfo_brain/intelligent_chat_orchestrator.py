@@ -34,6 +34,9 @@ from langgraph.graph import StateGraph, END
 from langgraph.types import RetryPolicy
 from typing_extensions import TypedDict
 
+# ISSUE #2 FIX: Add missing tenacity imports for retry decorator
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+
 # PHASE 3: spaCy for production-grade entity extraction
 import spacy
 
@@ -1292,17 +1295,32 @@ Could you be more specific? For example:
         - Integrated into orchestrator workflow
         """
         try:
-            if state.get("response") and state.get("memory_manager"):
-                memory_manager = state["memory_manager"]
+            if state.get("response"):
+                memory_manager = state.get("memory_manager")
+                
+                # ISSUE #3 FIX: If memory_manager not initialized, create fallback
+                if not memory_manager:
+                    logger.warning("Memory manager not initialized, creating fallback instance")
+                    try:
+                        memory_manager = AidentMemoryManager(
+                            user_id=state["user_id"],
+                            redis_url=os.getenv('ARQ_REDIS_URL') or os.getenv('REDIS_URL')
+                        )
+                    except Exception as e:
+                        logger.error("Failed to create fallback memory manager", error=str(e))
+                        memory_manager = None
                 
                 # Add message to memory (triggers auto-summarization if needed)
-                await memory_manager.add_message(state["question"], state["response"].answer)
-                
-                # LangGraph checkpointer automatically persists state
-                logger.info("Memory saved to LangGraph checkpoint",
-                           user_id=state["user_id"],
-                           question_length=len(state["question"]),
-                           response_length=len(state["response"].answer))
+                if memory_manager:
+                    await memory_manager.add_message(state["question"], state["response"].answer)
+                    
+                    # LangGraph checkpointer automatically persists state
+                    logger.info("Memory saved to LangGraph checkpoint",
+                               user_id=state["user_id"],
+                               question_length=len(state["question"]),
+                               response_length=len(state["response"].answer))
+                else:
+                    logger.warning("Memory save skipped: memory manager unavailable")
             
             state["processing_steps"] = state.get("processing_steps", []) + ["save_memory"]
         except Exception as e:

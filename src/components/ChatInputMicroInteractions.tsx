@@ -57,66 +57,71 @@ export const ChatInputMicroInteractions: React.FC<ChatInputMicroInteractionsProp
   return (
     <div
       className={`
-        w-full relative flex items-end gap-3 p-3 border border-border rounded-lg
+        w-full relative flex flex-col gap-2 p-2 border border-border/40 rounded-md
         bg-transparent transition-all duration-300
         ${isFocused || isTyping
-          ? 'border-slate-600/80'
-          : 'border-slate-700/50'
+          ? 'border-slate-600/60'
+          : 'border-slate-700/30'
         }
         ${isLoading ? 'opacity-60 pointer-events-none' : ''}
       `}
     >
-          {/* File Upload Button */}
-          <button
-            onClick={onFileClick}
-            disabled={isLoading}
-            className="flex-shrink-0 p-2 hover:bg-slate-700/50 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            title="Attach file"
-          >
-            <Paperclip className="w-4 h-4 text-muted-foreground hover:text-primary transition-colors" />
-          </button>
+      {/* Top Row - Send Button on Right */}
+      <div className="flex items-center justify-end">
+        <button
+          onClick={onSend}
+          disabled={!value.trim() || isLoading}
+          className={`
+            flex-shrink-0 p-1.5 rounded transition-all duration-200
+            ${value.trim() && !isLoading
+              ? 'bg-primary hover:bg-primary/90 text-primary-foreground shadow-lg shadow-primary/30 hover:shadow-primary/50'
+              : 'bg-transparent text-muted-foreground cursor-not-allowed opacity-30'
+            }
+          `}
+          title="Send message (Enter to send)"
+        >
+          <Send className="w-4 h-4" />
+        </button>
+      </div>
 
-          {/* Textarea with Auto-Resize */}
-          <TextareaAutosize
-            value={value}
-            onChange={(e) => onChange(e.target.value)}
-            onFocus={() => setIsFocused(true)}
-            onBlur={() => setIsFocused(false)}
-            onKeyDown={handleKeyDown}
-            placeholder={placeholder}
-            disabled={isLoading}
-            minRows={1}
-            maxRows={6}
-            aria-label="Chat message input"
-            aria-describedby="input-help"
-            aria-busy={isLoading}
-            className={`
-              flex-1 bg-transparent text-foreground placeholder:text-slate-600 placeholder:font-normal
-              outline-none resize-none
-              disabled:opacity-50 disabled:cursor-not-allowed
-              text-sm font-normal
-            `}
-          />
-          {/* Hidden help text for screen readers */}
-          <span id="input-help" className="sr-only">
-            Press Enter to send message, Shift+Enter for new line
-          </span>
+      {/* Input Row */}
+      <div className="flex items-end gap-2">
+        {/* File Upload Button */}
+        <button
+          onClick={onFileClick}
+          disabled={isLoading}
+          className="flex-shrink-0 p-1.5 hover:bg-slate-700/50 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          title="Attach file"
+        >
+          <Paperclip className="w-4 h-4 text-muted-foreground hover:text-primary transition-colors" />
+        </button>
 
-          {/* Send Button */}
-          <button
-            onClick={onSend}
-            disabled={!value.trim() || isLoading}
-            className={`
-              flex-shrink-0 p-2 rounded-lg transition-all duration-200
-              ${value.trim() && !isLoading
-                ? 'bg-primary hover:bg-copper-dark text-primary-foreground shadow-lg shadow-primary/30 hover:shadow-primary/50'
-                : 'bg-slate-700/50 text-muted-foreground cursor-not-allowed opacity-50'
-              }
-            `}
-            title="Send message (Shift+Enter for new line)"
-          >
-            <Send className="w-4 h-4" />
-          </button>
+        {/* Textarea with Auto-Resize */}
+        <TextareaAutosize
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          onFocus={() => setIsFocused(true)}
+          onBlur={() => setIsFocused(false)}
+          onKeyDown={handleKeyDown}
+          placeholder={placeholder}
+          disabled={isLoading}
+          minRows={1}
+          maxRows={4}
+          aria-label="Chat message input"
+          aria-describedby="input-help"
+          aria-busy={isLoading}
+          className={`
+            flex-1 bg-transparent text-foreground placeholder:text-slate-600 placeholder:font-normal
+            outline-none resize-none
+            disabled:opacity-50 disabled:cursor-not-allowed
+            text-sm font-normal
+          `}
+        />
+        {/* Hidden help text for screen readers */}
+        <span id="input-help" className="sr-only">
+          Press Enter to send message, Shift+Enter for new line
+        </span>
+      </div>
     </div>
   );
 };
