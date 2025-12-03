@@ -60,7 +60,7 @@ export const ThreePanelLayout = ({ currentView = 'chat', onNavigate }: ThreePane
         </Panel>
 
         {/* Resize Handle - Gradient from file preview header */}
-        <div className="w-0.5 hover:w-1 transition-all cursor-col-resize" style={{backgroundImage: 'linear-gradient(to bottom, transparent 0%, rgba(37, 99, 235, 0.3) 20%, rgba(37, 99, 235, 1) 50%, rgba(37, 99, 235, 0.3) 80%, transparent 100%)'}} />
+        <PanelResizeHandle className="w-0.5 hover:w-1 transition-all" style={{backgroundImage: 'linear-gradient(to bottom, transparent 0%, rgba(37, 99, 235, 0.3) 20%, rgba(37, 99, 235, 1) 50%, rgba(37, 99, 235, 0.3) 80%, transparent 100%)'}} />
 
         {/* File Preview Panel - 70% default (resizable 50-85%) */}
         <Panel defaultSize={70} minSize={50} maxSize={85} className="relative p-4 overflow-hidden">
@@ -77,7 +77,7 @@ export const ThreePanelLayout = ({ currentView = 'chat', onNavigate }: ThreePane
         </Panel>
 
         {/* Resize Handle - Gradient from file preview header */}
-        <div className="w-0.5 hover:w-1 transition-all cursor-col-resize" style={{backgroundImage: 'linear-gradient(to bottom, transparent 0%, rgba(37, 99, 235, 0.3) 20%, rgba(37, 99, 235, 1) 50%, rgba(37, 99, 235, 0.3) 80%, transparent 100%)'}} />
+        <PanelResizeHandle className="w-0.5 hover:w-1 transition-all" style={{backgroundImage: 'linear-gradient(to bottom, transparent 0%, rgba(37, 99, 235, 0.3) 20%, rgba(37, 99, 235, 1) 50%, rgba(37, 99, 235, 0.3) 80%, transparent 100%)'}} />
 
         {/* Data Sources Panel - Hidden by default, collapsible (AUDIT FIX #2) */}
         <Panel
