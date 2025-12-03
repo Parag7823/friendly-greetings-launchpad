@@ -751,12 +751,12 @@ export const DataSourcesPanel = ({ isOpen, onClose, onFilePreview }: DataSources
                                   }`}
                               >
                                 <div className="flex items-center gap-3 flex-1 min-w-0">
-                                  <div className="text-muted-foreground">
+                                  <div className="text-muted-foreground flex-shrink-0">
                                     {integration.icon}
                                   </div>
-                                  <div className="flex-1 min-w-0">
-                                    <div className="flex items-center gap-2">
-                                      <p className="text-[10px] font-medium">{integration.name}</p>
+                                  <div className="flex-1 min-w-0 overflow-hidden">
+                                    <div className="flex items-center gap-2 min-w-0">
+                                      <p className="text-[10px] font-medium whitespace-nowrap">{integration.name}</p>
                                       {connected && (
                                         <Badge
                                           variant="default"
