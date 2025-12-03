@@ -167,7 +167,7 @@ export const DataSourcesPanel = ({ isOpen, onClose, onFilePreview }: DataSources
   const [connecting, setConnecting] = useState<string | null>(null);
   const [verifying, setVerifying] = useState<string | null>(null); // Track which provider is being verified
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(
-    new Set(['accounting', 'data-sources', 'payment'])
+    new Set([])
   );
 
   const handlePlusClick = () => {
@@ -723,7 +723,7 @@ export const DataSourcesPanel = ({ isOpen, onClose, onFilePreview }: DataSources
                         className="w-full flex items-center justify-between px-4 py-3 bg-muted/30 hover:bg-muted/50 transition-colors"
                       >
                         <div className="flex items-center gap-2">
-                          <span className="text-sm font-medium">{categoryInfo.name}</span>
+                          <span className="text-[13px] font-medium">{categoryInfo.name}</span>
                           <Badge variant="outline" className="text-[8px]">
                             {integrations.length}
                           </Badge>
