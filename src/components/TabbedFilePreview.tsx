@@ -233,7 +233,7 @@ export const TabbedFilePreview = ({
     return (
       <div className="h-full flex flex-col">
         {/* Header Bar - Aligned with Chat "New Chat" bar */}
-        <div className="flex items-start justify-between px-4 py-1.5 bg-background border-b border-border/20">
+        <div className="flex items-start justify-between px-4 py-1 bg-background border-b border-border/20">
           {/* Left side - Reserved for future features/routing */}
           <div className="flex items-center gap-2">
             {/* Feature icons will be added here */}
@@ -242,7 +242,7 @@ export const TabbedFilePreview = ({
           <div className="flex items-start gap-2">
             <Button
               onClick={onToggleDataSources}
-              className="h-7 px-3 rounded-md bg-primary/10 hover:bg-primary/20 text-white border border-primary/30 text-xs font-medium transition-colors"
+              className="h-6 px-3 rounded-md bg-primary/10 hover:bg-primary/20 text-white border border-primary/30 text-xs font-medium transition-colors"
               title={isDataSourcesCollapsed ? "Open Data Sources" : "Close Data Sources"}
             >
               <Database className="w-3.5 h-3.5 mr-1.5" />
@@ -279,7 +279,7 @@ export const TabbedFilePreview = ({
   return (
     <div className="h-full flex flex-col">
       {/* Header Bar - Aligned with Chat "New Chat" bar */}
-      <div className="flex items-start justify-between px-4 py-1.5 bg-background border-b border-border/20">
+      <div className="flex items-start justify-between px-4 py-1 bg-background border-b border-border/20">
         {/* Left side - Reserved for future features/routing */}
         <div className="flex items-center gap-2">
           {/* Feature icons will be added here */}
@@ -288,7 +288,7 @@ export const TabbedFilePreview = ({
         <div className="flex items-start gap-2">
           <Button
             onClick={onToggleDataSources}
-            className="h-7 px-3 rounded-md bg-primary/10 hover:bg-primary/20 text-white border border-primary/30 text-xs font-medium transition-colors"
+            className="h-6 px-3 rounded-md bg-primary/10 hover:bg-primary/20 text-white border border-primary/30 text-xs font-medium transition-colors"
             title={isDataSourcesCollapsed ? "Open Data Sources" : "Close Data Sources"}
           >
             <Database className="w-3.5 h-3.5 mr-1.5" />
