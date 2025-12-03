@@ -16,7 +16,7 @@ export const ChatTitleBar = ({
   isLoading = false,
 }: ChatTitleBarProps) => {
   return (
-    <div className="border-b border-border bg-background/80 backdrop-blur-sm px-4 py-3">
+    <div className="bg-background/80 backdrop-blur-sm px-4 py-3">
       <div className="flex items-center justify-between">
         {/* Title Section */}
         <div className="flex-1 min-w-0">

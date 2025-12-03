@@ -294,7 +294,7 @@ export const TabbedFilePreview = ({
         <div className="flex items-center gap-2">
           <Button
             onClick={onToggleDataSources}
-            className="h-8 px-3 rounded-md bg-primary/10 hover:bg-primary/20 text-primary border border-primary/30 text-xs font-medium transition-colors"
+            className="h-8 px-3 rounded-md bg-primary/10 hover:bg-primary/20 text-white border border-primary/30 text-xs font-medium transition-colors"
             title={isDataSourcesCollapsed ? "Open Data Sources" : "Close Data Sources"}
           >
             <Database className="w-3.5 h-3.5 mr-1.5" />
@@ -306,7 +306,7 @@ export const TabbedFilePreview = ({
       {/* File Preview Container */}
       <div className="flex-1 flex flex-col finley-dynamic-bg rounded-lg border border-border shadow-lg overflow-hidden">
         {/* File Toolbar Header */}
-        <div className="border-b border-border bg-background/80 backdrop-blur-sm px-4 py-2">
+        <div className="bg-background/80 backdrop-blur-sm px-4 py-2">
         <div className="flex items-center justify-between">
           {/* File Name Display */}
           <div className="flex items-center gap-3 min-w-0">
@@ -331,7 +331,7 @@ export const TabbedFilePreview = ({
       </div>
 
       {/* Tabs Header */}
-      <div className="border-b border-border bg-background/50 backdrop-blur-sm">
+      <div className="bg-background/50 backdrop-blur-sm">
         <div className="flex items-center overflow-x-auto scrollbar-thin scrollbar-thumb-border scrollbar-track-transparent">
           {openFiles.map((file) => {
             const Icon = getFileIcon(file.filename);

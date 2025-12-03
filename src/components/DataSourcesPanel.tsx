@@ -605,7 +605,6 @@ export const DataSourcesPanel = ({ isOpen, onClose, onFilePreview }: DataSources
           <div>
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center gap-2">
-                <FileSpreadsheet className="w-4 h-4 text-muted-foreground" />
                 <h2 className="section-header">Financial Documents</h2>
                 {uploadedFiles.length > 0 && (
                   <Badge variant="secondary" className="text-[9px]">
@@ -704,7 +703,6 @@ export const DataSourcesPanel = ({ isOpen, onClose, onFilePreview }: DataSources
           {/* Integrations Section */}
           <div>
             <div className="flex items-center gap-2 mb-4">
-              <Plug className="w-4 h-4 text-muted-foreground" />
               <h3 className="section-header">Integrations</h3>
             </div>
 
@@ -726,7 +724,6 @@ export const DataSourcesPanel = ({ isOpen, onClose, onFilePreview }: DataSources
                         className="w-full flex items-center justify-between px-4 py-3 bg-muted/30 hover:bg-muted/50 transition-colors"
                       >
                         <div className="flex items-center gap-2">
-                          {categoryInfo.icon}
                           <span className="text-sm font-medium">{categoryInfo.name}</span>
                           <Badge variant="outline" className="text-[8px]">
                             {integrations.length}
