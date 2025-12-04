@@ -243,7 +243,8 @@ export const DataSourcesPanel = ({ isOpen, onClose, onFilePreview }: DataSources
       }
 
       const data = await response.json();
-      const connectUrl = data?.connect_session?.connect_url || data?.connect_session?.url;
+      // Handle both Airbyte (oauth_url) and legacy Nango (connect_session.connect_url) response formats
+      const connectUrl = data?.oauth_url || data?.connect_session?.connect_url || data?.connect_session?.url;
 
       if (connectUrl) {
         window.open(connectUrl, '_blank', 'width=600,height=800');

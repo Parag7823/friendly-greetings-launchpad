@@ -532,7 +532,8 @@ async def get_arq_pool():
         return _arq_pool
 
 # Using Groq/Llama exclusively for all AI operations
-from data_ingestion_normalization.nango_client import NangoClient
+# REPLACED: NangoClient → AirbytePythonClient (Airbyte handles OAuth and sync)
+from core_infrastructure.airbyte_client import AirbytePythonClient
 
 # Import critical fixes systems
 from core_infrastructure.transaction_manager import initialize_transaction_manager, get_transaction_manager
@@ -9746,24 +9747,6 @@ async def get_component_metrics():
 # CONNECTORS (NANGO) - PHASE 1 GMAIL
 # ============================================================================
 
-# Import centralized configuration (replaces scattered os.environ.get calls)
-from core_infrastructure.config_manager import get_nango_config
-
-_nango_cfg = get_nango_config()
-
-# Nango configuration (now type-safe and centralized)
-NANGO_BASE_URL = _nango_cfg.base_url
-NANGO_GMAIL_INTEGRATION_ID = _nango_cfg.gmail_integration_id
-NANGO_DROPBOX_INTEGRATION_ID = _nango_cfg.dropbox_integration_id
-NANGO_GOOGLE_DRIVE_INTEGRATION_ID = _nango_cfg.google_drive_integration_id
-NANGO_ZOHO_MAIL_INTEGRATION_ID = _nango_cfg.zoho_mail_integration_id
-NANGO_ZOHO_BOOKS_INTEGRATION_ID = _nango_cfg.zoho_books_integration_id
-NANGO_QUICKBOOKS_INTEGRATION_ID = _nango_cfg.quickbooks_integration_id
-NANGO_XERO_INTEGRATION_ID = _nango_cfg.xero_integration_id
-NANGO_STRIPE_INTEGRATION_ID = _nango_cfg.stripe_integration_id
-NANGO_RAZORPAY_INTEGRATION_ID = _nango_cfg.razorpay_integration_id
-NANGO_PAYPAL_INTEGRATION_ID = _nango_cfg.paypal_integration_id
-
 class ConnectorInitiateRequest(BaseModel):
     provider: str  # expect 'google-mail' for Gmail
     user_id: str
@@ -10318,1575 +10301,118 @@ async def _process_api_data_through_pipeline(
         logger.error(f"Failed to process {source_platform} data through pipeline: {e}")
         raise
 
-async def _gmail_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> Dict[str, Any]:
-    provider_key = req.integration_id or NANGO_GMAIL_INTEGRATION_ID
-    connection_id = req.connection_id
-    user_id = req.user_id
-
-    # FIX #4: Ensure connector + user_connection rows exist (async transaction for non-blocking)
-    try:
-        transaction_manager = get_transaction_manager()
-        async with transaction_manager.transaction(
-            user_id=user_id,
-            operation_type="connector_upsert"
-        ) as tx:
-            # Upsert connector definition
-            try:
-                await tx.insert('connectors', {
-                    'provider': provider_key,
-                    'integration_id': provider_key,
-                    'auth_type': 'OAUTH2',
-                    'scopes': orjson.dumps(["https://mail.google.com/"]).decode(),
-                    'endpoints_needed': orjson.dumps(["/emails", "/labels", "/attachment"]).decode(),
-                    'enabled': True
-                })
-            except Exception as conn_insert_err:
-                # FIX #4a: Log duplicate key errors for debugging (expected on subsequent syncs)
-                if 'duplicate' in str(conn_insert_err).lower() or 'unique' in str(conn_insert_err).lower():
-                    logger.debug(f"Connector already exists for {provider_key}: {conn_insert_err}")
-                else:
-                    logger.warning(f"Unexpected error inserting connector: {conn_insert_err}")
-            
-            # Fetch connector id (still need sync for query)
-            connector_row = supabase.table('connectors').select('id').eq('provider', provider_key).limit(1).execute()
-            connector_id = connector_row.data[0]['id'] if connector_row.data else None
-            
-            # Upsert user_connection
-            try:
-                await tx.insert('user_connections', {
-                    'user_id': user_id,
-                    'connector_id': connector_id,
-                    'nango_connection_id': connection_id,
-                    'status': 'active',
-                    'sync_mode': 'pull'
-                })
-            except Exception as uc_err:
-                logger.debug(f"User connection already exists: {uc_err}")
-            
-            uc_row = supabase.table('user_connections').select('id').eq('nango_connection_id', connection_id).limit(1).execute()
-            user_connection_id = uc_row.data[0]['id'] if uc_row.data else None
-    except Exception as e:
-        logger.error(f"Failed to upsert connector records: {e}")
-        user_connection_id = None
-
-    # Start sync_run
-    sync_run_id = str(uuid.uuid4())
-    try:
-        transaction_manager = get_transaction_manager()
-        async with transaction_manager.transaction(
-            user_id=user_id,
-            operation_type="connector_sync_start"
-        ) as tx:
-            await tx.insert('sync_runs', {
-                'id': sync_run_id,
-                'user_id': user_id,
-                'user_connection_id': user_connection_id,
-                'type': req.mode,
-                'status': 'running',
-                'started_at': pendulum.now().to_iso8601_string(),
-                'stats': orjson.dumps({'records_fetched': 0, 'actions_used': 0}).decode()
-            })
-    except Exception as e:
-        logger.error(f"Failed to start sync run: {e}")
-
-    stats = {'records_fetched': 0, 'actions_used': 0, 'attachments_saved': 0, 'queued_jobs': 0, 'skipped': 0}
-    errors: List[str] = []
-
-    try:
-        # Connectivity check
-        try:
-            await nango.get_gmail_profile(provider_key, connection_id)
-            stats['actions_used'] += 1
-        except Exception as e:
-            raise HTTPException(status_code=400, detail=f"Gmail profile check failed: {e}")
-
-        # INCREMENTAL SYNC FIX: TRUE incremental sync using Gmail History API
-        # Check for existing cursor to determine if this is incremental or full sync
-        last_history_id = None
-        use_incremental = False
-        current_history_id = None  # Will be captured from API response
-        
-        if req.mode != 'historical':
-            try:
-                uc_row = supabase.table('user_connections').select('metadata, last_synced_at').eq('nango_connection_id', connection_id).limit(1).execute()
-                if uc_row.data:
-                    if glom:
-                        uc_data = uc_row.data[0]
-                        uc_metadata_raw = glom(uc_data, Coalesce('metadata', default={}))
-                        last_ts = glom(uc_data, Coalesce('last_synced_at', default=None))
-                    else:
-                        uc_metadata_raw = uc_row.data[0].get('metadata') or {}
-                        last_ts = uc_row.data[0].get('last_synced_at')
-                    
-                    # LIBRARY FIX: Use Pydantic validation instead of manual JSON parsing
-                    try:
-                        if isinstance(uc_metadata_raw, str):
-                            uc_metadata_raw = orjson.loads(uc_metadata_raw)
-                        uc_metadata = UserConnectionMetadata.model_validate(uc_metadata_raw)
-                        last_history_id = uc_metadata.last_history_id
-                    except ValidationError as ve:
-                        logger.warning(f"Failed to validate user connection metadata: {ve}")
-                        last_history_id = None
-                    except Exception as e:
-                        logger.warning(f"Failed to parse user connection metadata: {e}")
-                        last_history_id = None
-                    
-                    if last_ts and last_history_id:
-                        last_sync_time = pendulum.parse(last_ts).naive()
-                        days_since_sync = (datetime.utcnow() - last_sync_time).days
-                        if days_since_sync <= 30:
-                            use_incremental = True
-                            logger.info(f"✅ Gmail TRUE incremental sync enabled via History API (historyId={last_history_id}, {days_since_sync} days since last sync)")
-            except Exception as e:
-                logger.warning(f"Failed to check incremental sync eligibility: {e}")
-        
-        # Concurrency for attachment downloads (using aiometer library)
-        from core_infrastructure.rate_limiter import ConcurrencyLimiter
-        limiter = ConcurrencyLimiter()
-        
-        message_ids = []
-        
-        # Determine sync strategy based on mode
-        if use_incremental and last_history_id:
-            # ✅ TRUE INCREMENTAL: Use Gmail History API for delta sync
-            logger.info(f"📊 Gmail TRUE incremental sync: using History API to fetch only changes since historyId={last_history_id}")
-            
-            try:
-                history_page_token = None
-                max_per_page = max(1, min(int(req.max_results or 100), 500))
-                
-                while True:
-                    # Stop early if nearing free-plan limits
-                    if stats['actions_used'] > 900 or stats['records_fetched'] > 4500:
-                        break
-                    
-                    # Fetch history changes since last sync
-                    history_response = await nango.list_gmail_history(
-                        provider_key, 
-                        connection_id, 
-                        start_history_id=last_history_id,
-                        max_results=max_per_page,
-                        page_token=history_page_token
-                    )
-                    stats['actions_used'] += 1
-                    
-                    # Capture current historyId for next sync
-                    current_history_id = history_response.get('historyId')
-                    
-                    # Extract message IDs from history records
-                    history_records = history_response.get('history') or []
-                    for record in history_records:
-                        # messagesAdded contains new messages
-                        messages_added = record.get('messagesAdded') or []
-                        for msg_added in messages_added:
-                            msg = msg_added.get('message') or {}
-                            msg_id = msg.get('id')
-                            if msg_id:
-                                message_ids.append(msg_id)
-                    
-                    # Check for next page
-                    history_page_token = history_response.get('nextPageToken')
-                    if not history_page_token:
-                        break
-                
-                logger.info(f"✅ History API returned {len(message_ids)} new messages since last sync")
-                
-            except Exception as history_err:
-                # Fallback to full sync if History API fails
-                logger.warning(f"History API failed, falling back to full sync: {history_err}")
-                use_incremental = False
-                message_ids = []
-        
-        if not use_incremental:
-            # Full sync: Use traditional message list query
-            lookback_days = max(1, int(req.lookback_days or 365))
-            q = f"has:attachment newer_than:{lookback_days}d"
-            logger.info(f"📊 Gmail full sync: fetching last {lookback_days} days")
-            
-            page_token = None
-            max_per_page = max(1, min(int(req.max_results or 100), 500))
-            
-            while True:
-                # Stop early if nearing free-plan limits
-                if stats['actions_used'] > 900 or stats['records_fetched'] > 4500:
-                    break
-
-                page = await nango.list_gmail_messages(provider_key, connection_id, q=q, page_token=page_token, max_results=max_per_page)
-                stats['actions_used'] += 1
-
-                page_message_ids = [m.get('id') for m in (page.get('messages') or []) if m.get('id')]
-                if not page_message_ids:
-                    break
-                    
-                message_ids.extend(page_message_ids)
-                
-                # Check for next page
-                page_token = page.get('nextPageToken')
-                if not page_token:
-                    break
-        
-        # Process all collected message IDs
-        if not message_ids:
-            logger.info("No new messages to process")
-        else:
-            logger.info(f"Processing {len(message_ids)} messages for attachments")
-
-        # Batch collection for all messages
-        page_batch_items = []
-
-        # FIX #4: Batch Gmail message fetching (performance optimization)
-        # Instead of 1 API call per message, batch fetch messages concurrently
-        # This reduces 10,000 sequential calls to ~100 batched calls (100x speedup)
-        @retry(
-            stop=stop_after_attempt(5),
-            wait=wait_exponential(multiplier=0.1, min=0.1, max=1),
-            retry=retry_if_exception_type(Exception),
-            reraise=False
-        )
-        async def fetch_message_with_retry(mid):
-            """Fetch single message with exponential backoff retry using tenacity"""
-            msg = await nango.get_gmail_message(provider_key, connection_id, mid)
-            stats['actions_used'] += 1
-            return msg
-        
-        # Batch fetch messages concurrently (max 10 concurrent to avoid rate limits)
-        batch_size = 10
-        for batch_start in range(0, len(message_ids), batch_size):
-            batch_ids = message_ids[batch_start:batch_start + batch_size]
-            batch_messages = await asyncio.gather(
-                *[fetch_message_with_retry(mid) for mid in batch_ids],
-                return_exceptions=True
-            )
-            
-            for mid, msg in zip(batch_ids, batch_messages):
-                if isinstance(msg, Exception) or msg is None:
-                    logger.warning(f"Skipping message {mid} due to fetch error")
-                    continue
-                
-                payload = msg.get('payload') or {}
-                headers = payload.get('headers') or []
-                subject = next((h.get('value') for h in headers if h.get('name') == 'Subject'), '')
-                date_hdr = next((h.get('value') for h in headers if h.get('name') == 'Date'), None)
-                source_ts = None
-                if date_hdr:
-                    try:
-                        source_ts = parsedate_to_datetime(date_hdr).isoformat()
-                    except Exception:
-                        source_ts = pendulum.now().to_iso8601_string()
-
-                # Walk parts recursively to find attachments
-                def iter_parts(node):
-                    if not node:
-                        return
-                    if node.get('filename') and node.get('body', {}).get('attachmentId'):
-                        yield node
-                    for child in node.get('parts', []) or []:
-                        yield from iter_parts(child)
-
-                parts = list(iter_parts(payload))
-
-                async def process_part(part):
-                    try:
-                        filename = part.get('filename') or ''
-                        body = part.get('body') or {}
-                        attach_id = body.get('attachmentId')
-                        mime_type = part.get('mimeType', '')
-                        if not attach_id or not filename:
-                            return None
-                        # Relevance scoring
-                        score = 0.0
-                        name_l = filename.lower()
-                        subj_l = (subject or '').lower()
-                        patterns = ['invoice', 'statement', 'receipt', 'bill', 'payout', 'reconciliation']
-                        if any(p in name_l for p in patterns):
-                            score += 0.5
-                        if any(p in subj_l for p in patterns):
-                            score += 0.4
-                        if any(x in name_l for x in ['.csv', '.xlsx', '.xls', '.pdf']):
-                            score += 0.2
-                        score = min(score, 1.0)
-                        if score < 0.5:
-                            stats['skipped'] += 1
-                            return None
-                        # Download with concurrency control
-                        content = await limiter.run(nango.get_gmail_attachment(provider_key, connection_id, mid, attach_id))
-                        stats['actions_used'] += 1
-                        if not content:
-                            return None
-                        storage_path, file_hash = await _store_external_item_attachment(user_id, 'gmail', mid, filename, content)
-                        stats['attachments_saved'] += 1
-                        
-                        provider_attachment_id = f"{mid}:{attach_id}"
-                        item = {
-                            'user_id': user_id,
-                            'user_connection_id': user_connection_id,
-                            'sync_run_id': sync_run_id,
-                            'provider_id': provider_attachment_id,
-                            'kind': 'email',
-                            'source_ts': source_ts or pendulum.now().to_iso8601_string(),
-                            'hash': file_hash,
-                            'storage_path': storage_path,
-                            'metadata': {'subject': subject, 'filename': filename, 'mime_type': mime_type, 'correlation_id': req.correlation_id},
-                            'relevance_score': score,
-                            'status': 'stored'
-                        }
-                        
-                        # Check for duplicate and enqueue processing
-                        try:
-                            # CRITICAL FIX: Use optimized duplicate check
-                            dup = await optimized_db.check_duplicate_by_hash(user_id, file_hash)
-                            is_dup = bool(dup)
-                        except Exception as e:
-                            logger.debug(f"Failed to check duplicate: {e}")
-                            is_dup = False
-                        if not is_dup:
-                            if any(name_l.endswith(ext) for ext in ['.csv', '.xlsx', '.xls']):
-                                await _enqueue_file_processing(user_id, filename, storage_path)
-                                stats['queued_jobs'] += 1
-                            elif name_l.endswith('.pdf'):
-                                await _enqueue_pdf_processing(user_id, filename, storage_path)
-                                stats['queued_jobs'] += 1
-                        
-                        return item
-                    except Exception as part_e:
-                        logger.warning(f"Failed to process attachment: {part_e}")
-                        return None
-
-                if parts:
-                    tasks = [asyncio.create_task(process_part(p)) for p in parts]
-                    if tasks:
-                        results = await asyncio.gather(*tasks, return_exceptions=True)
-                        # Collect valid items for batch insert
-                        for result in results:
-                            if result and isinstance(result, dict) and not isinstance(result, Exception):
-                                page_batch_items.append(result)
-
-        # Batch insert all items from this page using transaction
-        if page_batch_items:
-            pass  # Batch insert logic would go here
-        
-        # Determine final sync status before updating database
-        run_status = 'succeeded' if not errors else ('partial' if stats['records_fetched'] > 0 else 'failed')
-        
-        # Update sync_runs, user_connections, and sync_cursors atomically in transaction
-        try:
-            transaction_manager = get_transaction_manager()
-            async with transaction_manager.transaction(
-                user_id=user_id,
-                operation_type="connector_sync_completion"
-            ) as tx:
-                # Update sync_run status
-                await tx.update('sync_runs', {
-                    'status': run_status,
-                    'finished_at': pendulum.now().to_iso8601_string(),
-                    'stats': orjson.dumps(stats).decode(),
-                    'error': '; '.join(errors)[:500] if errors else None
-                }, {'id': sync_run_id})
-                
-                # FIX #3: Update last_synced_at and save historyId for incremental sync
-                # If we didn't get historyId from History API, fetch from profile
-                if not current_history_id:
-                    try:
-                        profile = await nango.get_gmail_profile(provider_key, connection_id)
-                        current_history_id = profile.get('historyId')
-                    except Exception as profile_err:
-                        logger.debug(f"Failed to get current Gmail profile: {profile_err}")
-                
-                # Fetch current metadata
-                uc_current = supabase.table('user_connections').select('metadata').eq('nango_connection_id', connection_id).limit(1).execute()
-                current_meta = {}
-                if uc_current.data:
-                    uc_metadata_raw = uc_current.data[0].get('metadata') or {}
-                    # LIBRARY FIX: Use Pydantic validation instead of manual JSON parsing
-                    try:
-                        if isinstance(uc_metadata_raw, str):
-                            uc_metadata_raw = orjson.loads(uc_metadata_raw)
-                        uc_metadata = UserConnectionMetadata.model_validate(uc_metadata_raw)
-                        current_meta = uc_metadata.model_dump()
-                    except ValidationError as ve:
-                        logger.warning(f"Failed to validate current user connection metadata: {ve}")
-                        current_meta = {}
-                    except Exception as e:
-                        logger.warning(f"Failed to parse current user connection metadata: {e}")
-                        current_meta = {}
-                
-                # Update with new historyId
-                updated_meta = {**current_meta}
-                if current_history_id:
-                    updated_meta['last_history_id'] = current_history_id
-                    logger.info(f"✅ Saved Gmail historyId for incremental sync: {current_history_id}")
-                
-                await tx.update('user_connections', {
-                    'last_synced_at': pendulum.now().to_iso8601_string(),
-                    'metadata': updated_meta
-                }, {'nango_connection_id': connection_id})
-                
-                # Upsert sync cursor
-                cursor_data = {
-                    'user_id': user_id,
-                    'user_connection_id': user_connection_id,
-                    'resource': 'emails',
-                    'cursor_type': 'time',
-                    'value': pendulum.now().to_iso8601_string()
-                }
-                try:
-                    await tx.insert('sync_cursors', cursor_data)
-                except Exception as e:
-                    logger.debug(f"Failed to insert sync cursor: {e}")
-                    # If insert fails (duplicate), update instead
-                    await tx.update('sync_cursors', {
-                        'value': pendulum.now().to_iso8601_string(),
-                        'updated_at': pendulum.now().to_iso8601_string()
-                    }, {
-                        'user_connection_id': user_connection_id,
-                        'resource': 'emails',
-                        'cursor_type': 'time'
-                    })
-                
-                # Transaction will commit automatically when context exits
-                logger.info(f"✅ Gmail sync completed in transaction: {stats['records_fetched']} items, status={run_status}")
-        except Exception as completion_err:
-            logger.error(f"Failed to update sync completion status: {completion_err}")
-            # Don't fail the entire sync just because status update failed
-        
-        # Metrics: mark job processed (outside transaction, fire-and-forget)
-        try:
-            JOBS_PROCESSED.labels(provider=provider_key, status=run_status).inc()
-        except Exception as metrics_err:
-            logger.debug(f"Failed to increment metrics for {run_status}: {metrics_err}")
-
-        return {'status': run_status, 'sync_run_id': sync_run_id, 'stats': stats, 'errors': errors[:5]}
-
-    except Exception as e:
-        logger.error(f"Gmail sync failed: {e}")
-        
-        # Error recovery: clean up partial data
-        try:
-            recovery_system = get_error_recovery_system()
-            error_context = ErrorContext(
-                error_id=str(uuid.uuid4()),
-                user_id=user_id,
-                job_id=sync_run_id,
-                transaction_id=None,
-                operation_type='gmail_sync',
-                error_message=str(e),
-                error_details={
-                    'sync_run_id': sync_run_id,
-                    'connection_id': connection_id,
-                    'provider': provider_key,
-                    'correlation_id': req.correlation_id
-                },
-                severity=ErrorSeverity.HIGH,
-                occurred_at=datetime.utcnow()
-            )
-            await recovery_system.handle_error(error_context)
-        except Exception as recovery_err:
-            logger.error(f"Error recovery failed: {recovery_err}")
-        
-        raise HTTPException(status_code=500, detail=f"Gmail sync failed: {str(e)}")
-
-async def _zoho_mail_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> Dict[str, Any]:
-    """
-    IMPLEMENTATION #1: Zoho Mail sync using Nango Proxy API.
-    Fetches emails with attachments and processes them through the data pipeline.
-    Uses rate limiting and concurrency control from config_manager.py.
-    """
-    provider_key = req.integration_id or NANGO_ZOHO_MAIL_INTEGRATION_ID
-    connection_id = req.connection_id
-    user_id = req.user_id
-    sync_run_id = str(uuid.uuid4())
-
-    stats = {
-        'records_fetched': 0,
-        'actions_used': 0,
-        'attachments_saved': 0,
-        'queued_jobs': 0,
-        'skipped': 0,
-    }
-    errors: List[str] = []
-    user_connection_id = None
-
-    try:
-        # Upsert connector record
-        try:
-            supabase.table('connectors').insert({
-                'provider': provider_key,
-                'integration_id': provider_key,
-                'auth_type': 'OAUTH2',
-                'scopes': orjson.dumps(["mail.read", "mail.attachment.read"]).decode(),
-                'endpoints_needed': orjson.dumps(["/api/v1/messages", "/api/v1/attachments"]).decode(),
-                'enabled': True
-            }).execute()
-        except Exception:
-            pass  # Connector may already exist
-
-        # Fetch connector UUID (FIX: use UUID, not provider_key TEXT)
-        conn_row = supabase.table('connectors').select('id').eq('provider', provider_key).limit(1).execute()
-        connector_id = conn_row.data[0]['id'] if conn_row.data else None
-
-        # Upsert user_connection record
-        try:
-            supabase.table('user_connections').insert({
-                'user_id': user_id,
-                'connector_id': connector_id,
-                'nango_connection_id': connection_id,
-                'status': 'active',
-                'sync_mode': 'pull'
-            }).execute()
-        except Exception:
-            pass  # Connection may already exist
-
-        uc_row = supabase.table('user_connections').select('id').eq('nango_connection_id', connection_id).limit(1).execute()
-        user_connection_id = uc_row.data[0]['id'] if uc_row.data else None
-
-    except Exception as e:
-        logger.error(f"Failed to upsert Zoho Mail connector records: {e}")
-
-    # Start sync_run
-    try:
-        transaction_manager = get_transaction_manager()
-        async with transaction_manager.transaction(
-            user_id=user_id,
-            operation_type="connector_sync_start"
-        ) as tx:
-            await tx.insert('sync_runs', {
-                'id': sync_run_id,
-                'user_id': user_id,
-                'user_connection_id': user_connection_id,
-                'type': req.mode,
-                'status': 'running',
-                'started_at': pendulum.now().to_iso8601_string(),
-                'stats': orjson.dumps(stats).decode()
-            })
-    except Exception as e:
-        logger.error(f"Failed to start Zoho Mail sync run: {e}")
-
-    try:
-        # Connectivity check
-        try:
-            profile = await nango.get_zoho_profile(provider_key, connection_id)
-            stats['actions_used'] += 1
-            logger.info(f"✅ Zoho Mail profile check passed: {profile.get('emailAddress', 'unknown')}")
-        except Exception as e:
-            error_msg = f"Zoho Mail profile check failed: {e}"
-            logger.error(error_msg)
-            errors.append(error_msg)
-            raise
-
-        # Rate limiter from config
-        from core_infrastructure.rate_limiter import ConcurrencyLimiter
-        limiter = ConcurrencyLimiter()
-
-        # Fetch messages with attachments
-        lookback_days = max(1, int(req.lookback_days or 30))
-        page_token = None
-        max_per_page = max(1, min(int(req.max_results or 50), 100))
-        message_ids = []
-
-        logger.info(f"📊 Zoho Mail sync: fetching last {lookback_days} days")
-
-        while True:
-            # Stop early if nearing rate limits
-            if stats['actions_used'] > 90 or stats['records_fetched'] > 450:
-                logger.info(f"⚠️ Zoho Mail: Approaching rate limits (actions={stats['actions_used']}, records={stats['records_fetched']})")
-                break
-
-            try:
-                # Fetch messages with attachments
-                messages_response = await nango.list_zoho_messages(
-                    provider_key,
-                    connection_id,
-                    has_attachment=True,
-                    lookback_days=lookback_days,
-                    max_results=max_per_page,
-                    page_token=page_token
-                )
-                stats['actions_used'] += 1
-
-                messages = messages_response.get('messages') or []
-                if not messages:
-                    logger.info("✅ Zoho Mail: No more messages to fetch")
-                    break
-
-                for msg in messages:
-                    msg_id = msg.get('id')
-                    if msg_id:
-                        message_ids.append(msg_id)
-                    stats['records_fetched'] += 1
-
-                page_token = messages_response.get('nextPageToken')
-                if not page_token:
-                    break
-
-            except Exception as e:
-                error_msg = f"Zoho Mail message fetch failed: {e}"
-                logger.error(error_msg)
-                errors.append(error_msg)
-                break
-
-        logger.info(f"✅ Zoho Mail: Fetched {len(message_ids)} messages with attachments")
-
-        # Process attachments concurrently
-        async def process_zoho_attachment(msg_id: str) -> Dict[str, Any]:
-            try:
-                # Get message details
-                msg_detail = await nango.get_zoho_message(provider_key, connection_id, msg_id)
-                stats['actions_used'] += 1
-
-                # Extract attachments
-                attachments = msg_detail.get('attachments') or []
-                for att in attachments:
-                    try:
-                        att_id = att.get('id')
-                        att_name = att.get('name', 'attachment')
-
-                        # Download attachment
-                        att_data = await nango.download_zoho_attachment(
-                            provider_key, connection_id, msg_id, att_id
-                        )
-                        stats['actions_used'] += 1
-
-                        # Store in temp location
-                        temp_path = f"/tmp/zoho_{user_id}_{msg_id}_{att_id}"
-                        with open(temp_path, 'wb') as f:
-                            f.write(att_data)
-
-                        # Queue for processing
-                        try:
-                            arq_pool = await get_arq_pool()
-                            job = await arq_pool.enqueue_job(
-                                'process_spreadsheet',
-                                user_id=user_id,
-                                filename=att_name,
-                                storage_path=temp_path,
-                                job_id=str(uuid.uuid4())
-                            )
-                            stats['queued_jobs'] += 1
-                            stats['attachments_saved'] += 1
-                            logger.info(f"✅ Queued Zoho attachment for processing: {att_name}")
-                        except Exception as queue_err:
-                            logger.error(f"Failed to queue Zoho attachment: {queue_err}")
-                            errors.append(f"Queue error for {att_name}: {queue_err}")
-
-                    except Exception as att_err:
-                        logger.error(f"Failed to process Zoho attachment {att.get('id')}: {att_err}")
-                        errors.append(f"Attachment error: {att_err}")
-
-                return {'status': 'success', 'message_id': msg_id}
-
-            except Exception as e:
-                logger.error(f"Failed to process Zoho message {msg_id}: {e}")
-                errors.append(f"Message error: {e}")
-                return {'status': 'failed', 'message_id': msg_id}
-
-        # Process all messages with concurrency control
-        if message_ids:
-            coros = [process_zoho_attachment(msg_id) for msg_id in message_ids]
-            results = await limiter.run_batch(coros)
-            stats['skipped'] = len([r for r in results if r.get('status') == 'failed'])
-
-        # Update sync_run with final stats
-        try:
-            transaction_manager = get_transaction_manager()
-            async with transaction_manager.transaction(
-                user_id=user_id,
-                operation_type="connector_sync_complete"
-            ) as tx:
-                await tx.update(
-                    'sync_runs',
-                    {'id': sync_run_id},
-                    {
-                        'status': 'completed' if not errors else 'completed_with_errors',
-                        'finished_at': pendulum.now().to_iso8601_string(),
-                        'stats': orjson.dumps(stats).decode(),
-                        'error': ' | '.join(errors) if errors else None
-                    }
-                )
-        except Exception as e:
-            logger.error(f"Failed to update Zoho Mail sync run: {e}")
-
-        try:
-            JOBS_PROCESSED.labels(provider=provider_key, status='completed').inc()
-        except Exception:
-            pass
-
-        logger.info(f"✅ Zoho Mail sync completed: {stats}")
-        return {'status': 'completed', 'sync_run_id': sync_run_id, 'stats': stats, 'errors': errors}
-
-    except Exception as e:
-        error_msg = f"Zoho Mail sync failed: {e}"
-        logger.error(error_msg)
-        errors.append(error_msg)
-
-        # Update sync_run as failed
-        try:
-            transaction_manager = get_transaction_manager()
-            async with transaction_manager.transaction(
-                user_id=user_id,
-                operation_type="connector_sync_failed"
-            ) as tx:
-                await tx.update(
-                    'sync_runs',
-                    {'id': sync_run_id},
-                    {
-                        'status': 'failed',
-                        'finished_at': pendulum.now().to_iso8601_string(),
-                        'stats': orjson.dumps(stats).decode(),
-                        'error': error_msg
-                    }
-                )
-        except Exception as record_err:
-            logger.error(f"Failed to record Zoho Mail sync failure: {record_err}")
-
-        try:
-            JOBS_PROCESSED.labels(provider=provider_key, status='failed').inc()
-        except Exception:
-            pass
-
-        return {'status': 'failed', 'sync_run_id': sync_run_id, 'stats': stats, 'errors': errors}
-
-async def _dropbox_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> Dict[str, Any]:
-    provider_key = NANGO_DROPBOX_INTEGRATION_ID
-    connection_id = req.connection_id
-    user_id = req.user_id
-    stats = {'records_fetched': 0, 'actions_used': 0, 'attachments_saved': 0, 'queued_jobs': 0, 'skipped': 0}
-    errors: List[str] = []
-    # Upserts
-    try:
-        try:
-            supabase.table('connectors').insert({
-                'provider': provider_key,
-                'integration_id': provider_key,
-                'auth_type': 'OAUTH2',
-                'scopes': orjson.dumps(["files.content.read", "files.metadata.read"]).decode(),
-                'endpoints_needed': orjson.dumps(["/2/files/list_folder", "/2/files/download"]).decode(),
-                'enabled': True
-            }).execute()
-        except Exception as conn_err:
-            logger.debug(f"Connector already exists for Dropbox: {conn_err}")
-        conn_row = supabase.table('connectors').select('id').eq('provider', provider_key).limit(1).execute()
-        connector_id = conn_row.data[0]['id'] if conn_row.data else None
-        try:
-            supabase.table('user_connections').insert({
-                'user_id': user_id,
-                'connector_id': connector_id,
-                'nango_connection_id': connection_id,
-                'status': 'active',
-                'sync_mode': 'pull'
-            }).execute()
-        except Exception as uc_err:
-            logger.debug(f"User connection already exists for Dropbox: {uc_err}")
-        uc_row = supabase.table('user_connections').select('id').eq('nango_connection_id', connection_id).limit(1).execute()
-        user_connection_id = uc_row.data[0]['id'] if uc_row.data else None
-    except Exception as e:
-        logger.error(f"Failed to create user connection for Dropbox: {e}")
-        user_connection_id = None
-
-    sync_run_id = str(uuid.uuid4())
-    try:
-        transaction_manager = get_transaction_manager()
-        async with transaction_manager.transaction(
-            user_id=user_id,
-            operation_type="connector_sync_start"
-        ) as tx:
-            await tx.insert('sync_runs', {
-                'id': sync_run_id,
-                'user_id': user_id,
-                'user_connection_id': user_connection_id,
-                'type': req.mode,
-                'status': 'running',
-                'started_at': pendulum.now().to_iso8601_string(),
-                'stats': orjson.dumps(stats).decode()
-            })
-    except Exception as e:
-        logger.error(f"Failed to create sync run for Dropbox: {e}")
-
-    try:
-        payload = {"path": "", "recursive": True}
-        # FIX #3: Enhanced incremental sync with cursor tracking
-        cursor = None
-        use_incremental = False
-        if req.mode != 'historical':
-            try:
-                # Check for existing cursor from last sync
-                cur_row = supabase.table('sync_cursors').select('value, updated_at').eq('user_connection_id', user_connection_id).eq('resource', 'dropbox').eq('cursor_type', 'opaque').limit(1).execute()
-                if cur_row and cur_row.data:
-                    cursor = cur_row.data[0].get('value')
-                    cursor_updated = cur_row.data[0].get('updated_at')
-                    
-                    # Only use cursor if it's recent (within 30 days)
-                    if cursor and cursor_updated:
-                        try:
-                            cursor_time = pendulum.parse(cursor_updated).naive()
-                            days_since_sync = (datetime.utcnow() - cursor_time).days
-                            if days_since_sync <= 30:
-                                use_incremental = True
-                                logger.info(f"✅ Dropbox incremental sync enabled (cursor exists, {days_since_sync} days old)")
-                        except Exception as cursor_parse_err:
-                            logger.debug(f"Failed to parse cursor timestamp: {cursor_parse_err}")
-            except Exception as e:
-                logger.warning(f"Failed to load Dropbox cursor: {e}")
-                cursor = None
-        
-        if use_incremental and cursor:
-            logger.info(f"📊 Dropbox incremental sync: using cursor for delta changes")
-        else:
-            logger.info(f"📊 Dropbox full sync: fetching all files")
-
-        # Concurrency control for downloads (using aiometer library)
-        from core_infrastructure.rate_limiter import ConcurrencyLimiter
-        limiter = ConcurrencyLimiter()
-
-        async def process_entry(ent: Dict[str, Any]):
-            try:
-                if ent.get('.tag') != 'file':
-                    return None
-                name = ent.get('name') or ''
-                path_lower = ent.get('path_lower') or ent.get('path_display')
-                server_modified = ent.get('server_modified')
-                score = 0.0
-                nl = name.lower()
-                if any(p in nl for p in ['invoice', 'receipt', 'statement', 'bill']):
-                    score += 0.5
-                if any(nl.endswith(ext) for ext in ['.csv', '.xlsx', '.xls', '.pdf']):
-                    score += 0.3
-                if score < 0.5:
-                    stats['skipped'] += 1
-                    return None
-                # Download with concurrency control
-                dl = await limiter.run(nango.proxy_post('dropbox', '2/files/download', json_body=None, connection_id=connection_id, provider_config_key=provider_key, headers={"Dropbox-API-Arg": orjson.dumps({"path": path_lower}).decode()}))
-                stats['actions_used'] += 1
-                raw = dl.get('_raw')
-                if not raw:
-                    return None
-                storage_path, file_hash = await _store_external_item_attachment(user_id, 'dropbox', path_lower.strip('/').replace('/', '_')[:50], name, raw)
-                stats['attachments_saved'] += 1
-                
-                item = {
-                    'user_id': user_id,
-                    'user_connection_id': user_connection_id,
-                    'provider_id': path_lower,
-                    'kind': 'file',
-                    'source_ts': server_modified or pendulum.now().to_iso8601_string(),
-                    'hash': file_hash,
-                    'storage_path': storage_path,
-                    'metadata': {'name': name, 'correlation_id': req.correlation_id},
-                    'relevance_score': score,
-                    'status': 'stored'
-                }
-                
-                try:
-                    # CRITICAL FIX: Use optimized duplicate check
-                    dup = await optimized_db.check_duplicate_by_hash(user_id, file_hash)
-                    is_dup = bool(dup)
-                except Exception as e:
-                    logger.error(f"Failed to check duplicate for Dropbox file: {e}")
-                    is_dup = False
-                if not is_dup:
-                    if any(nl.endswith(ext) for ext in ['.csv', '.xlsx', '.xls']):
-                        await _enqueue_file_processing(user_id, name, storage_path)
-                        stats['queued_jobs'] += 1
-                    elif nl.endswith('.pdf'):
-                        await _enqueue_pdf_processing(user_id, name, storage_path)
-                        stats['queued_jobs'] += 1
-                
-                return item
-
-            except Exception as e:
-                errors.append(str(e))
-                return None
-
-        while True:
-            if cursor:
-                page = await nango.proxy_post('dropbox', '2/files/list_folder/continue', json_body={"cursor": cursor}, connection_id=connection_id, provider_config_key=provider_key)
-            else:
-                page = await nango.proxy_post('dropbox', '2/files/list_folder', json_body=payload, connection_id=connection_id, provider_config_key=provider_key)
-            stats['actions_used'] += 1
-            entries = page.get('entries') or []
-            if entries:
-                tasks = [asyncio.create_task(process_entry(ent)) for ent in entries]
-                if tasks:
-                    results = await asyncio.gather(*tasks, return_exceptions=True)
-                    # Collect valid items for batch insert using transaction
-                    batch_items = [r for r in results if r and isinstance(r, dict) and not isinstance(r, Exception)]
-                    if batch_items:
-                        try:
-                            transaction_manager = get_transaction_manager()
-                            for item in batch_items:
-                                # FIX #22: Use error handling helper to store failed items with error details
-                                await insert_external_item_with_error_handling(
-                                    transaction_manager, user_id, user_connection_id, item, stats
-                                )
-                        except Exception as batch_err:
-                            logger.error(f"Dropbox batch insert transaction failed: {batch_err}")
-                            errors.append(f"Batch insert failed: {str(batch_err)[:100]}")
-            # Always carry forward the latest cursor
-            cursor = page.get('cursor') or cursor
-            if not page.get('has_more'):
-                break
-
-        # Save cursor for incremental runs using transaction
-        if cursor:
-            try:
-                transaction_manager = get_transaction_manager()
-                async with transaction_manager.transaction(
-                    user_id=user_id,
-                    operation_type="connector_sync_cursor"
-                ) as tx:
-                    cursor_data = {
-                        'user_id': user_id,
-                        'user_connection_id': user_connection_id,
-                        'resource': 'dropbox',
-                        'cursor_type': 'opaque',
-                        'value': cursor
-                    }
-                    try:
-                        await tx.insert('sync_cursors', cursor_data)
-                    except Exception as cursor_err:
-                        logger.debug(f"Sync cursor already exists, updating: {cursor_err}")
-                        await tx.update('sync_cursors', {
-                            'value': cursor,
-                            'updated_at': pendulum.now().to_iso8601_string()
-                        }, {
-                            'user_connection_id': user_connection_id,
-                            'resource': 'dropbox',
-                            'cursor_type': 'opaque'
-                        })
-            except Exception as cursor_err:
-                logger.error(f"Failed to save Dropbox cursor: {cursor_err}")
-        run_status = 'succeeded' if not errors else ('partial' if stats['records_fetched'] > 0 else 'failed')
-        
-        # Update sync completion in transaction
-        try:
-            transaction_manager = get_transaction_manager()
-            async with transaction_manager.transaction(
-                user_id=user_id,
-                operation_type="connector_sync_completion"
-            ) as tx:
-                await tx.update('sync_runs', {
-                    'status': run_status,
-                    'finished_at': pendulum.now().to_iso8601_string(),
-                    'stats': orjson.dumps(stats).decode(),
-                    'error': '; '.join(errors)[:500] if errors else None
-                }, {'id': sync_run_id})
-                
-                await tx.update('user_connections', {
-                    'last_synced_at': pendulum.now().to_iso8601_string()
-                }, {'nango_connection_id': connection_id})
-                
-                logger.info(f"✅ Dropbox sync completed in transaction: {stats['records_fetched']} items, status={run_status}")
-        except Exception as completion_err:
-            logger.error(f"Failed to update Dropbox sync completion status: {completion_err}")
-        
-        # Metrics (fire-and-forget)
-        try:
-            JOBS_PROCESSED.labels(provider=provider_key, status=run_status).inc()
-        except Exception as metrics_err:
-            logger.debug(f"Failed to increment Dropbox metrics: {metrics_err}")
-            
-        return {'status': run_status, 'sync_run_id': sync_run_id, 'stats': stats, 'errors': errors[:5]}
-    except Exception as e:
-        logger.error(f"Dropbox sync failed: {e}")
-        
-        # Error recovery
-        try:
-            recovery_system = get_error_recovery_system()
-            error_context = ErrorContext(
-                error_id=str(uuid.uuid4()),
-                user_id=user_id,
-                job_id=sync_run_id,
-                transaction_id=None,
-                operation_type='dropbox_sync',
-                error_message=str(e),
-                error_details={
-                    'sync_run_id': sync_run_id,
-                    'connection_id': connection_id,
-                    'provider': provider_key,
-                    'correlation_id': req.correlation_id
-                },
-                severity=ErrorSeverity.HIGH,
-                occurred_at=datetime.utcnow()
-            )
-            await recovery_system.handle_processing_error(error_context)
-        except Exception as recovery_error:
-            logger.error(f"Error recovery failed: {recovery_error}")
-        
-        try:
-            supabase.table('sync_runs').update({'status': 'failed', 'finished_at': pendulum.now().to_iso8601_string(), 'error': str(e)}).eq('id', sync_run_id).execute()
-        except Exception:
-            pass
-        try:
-            JOBS_PROCESSED.labels(provider=provider_key, status='failed').inc()
-        except Exception:
-            pass
-        raise
-
-async def _gdrive_sync_run(nango: NangoClient, req: ConnectorSyncRequest) -> Dict[str, Any]:
-    provider_key = NANGO_GOOGLE_DRIVE_INTEGRATION_ID
-    connection_id = req.connection_id
-    user_id = req.user_id
-    stats = {'records_fetched': 0, 'actions_used': 0, 'attachments_saved': 0, 'queued_jobs': 0, 'skipped': 0}
-    errors: List[str] = []
-    try:
-        try:
-            supabase.table('connectors').insert({
-                'provider': provider_key,
-                'integration_id': provider_key,
-                'auth_type': 'OAUTH2',
-                'scopes': orjson.dumps(["https://www.googleapis.com/auth/drive.readonly"]).decode(),
-                'endpoints_needed': orjson.dumps(["drive/v3/files"]).decode(),
-                'enabled': True
-            }).execute()
-        except Exception:
-            pass
-        conn_row = supabase.table('connectors').select('id').eq('provider', provider_key).limit(1).execute()
-        connector_id = conn_row.data[0]['id'] if conn_row.data else None
-        try:
-            supabase.table('user_connections').insert({
-                'user_id': user_id,
-                'connector_id': connector_id,
-                'nango_connection_id': connection_id,
-                'status': 'active',
-                'sync_mode': 'pull'
-            }).execute()
-        except Exception:
-            pass
-        uc_row = supabase.table('user_connections').select('id').eq('nango_connection_id', connection_id).limit(1).execute()
-        user_connection_id = uc_row.data[0]['id'] if uc_row.data else None
-    except Exception:
-        user_connection_id = None
-
-    sync_run_id = str(uuid.uuid4())
-    try:
-        transaction_manager = get_transaction_manager()
-        async with transaction_manager.transaction(
-            user_id=user_id,
-            operation_type="connector_sync_start"
-        ) as tx:
-            await tx.insert('sync_runs', {
-                'id': sync_run_id,
-                'user_id': user_id,
-                'user_connection_id': user_connection_id,
-                'type': req.mode,
-                'status': 'running',
-                'started_at': pendulum.now().to_iso8601_string(),
-                'stats': orjson.dumps(stats).decode()
-            })
-    except Exception:
-        pass
-
-    try:
-        lookback_days = max(1, int(req.lookback_days or 90))
-        modified_after = (datetime.utcnow() - timedelta(days=lookback_days)).isoformat(timespec='seconds') + 'Z'
-        # Prefer precise incremental using last_synced_at when available
-        if req.mode != 'historical':
-            try:
-                uc_last = supabase.table('user_connections').select('last_synced_at').eq('nango_connection_id', connection_id).limit(1).execute()
-                if uc_last.data and uc_last.data[0].get('last_synced_at'):
-                    last_ts = pendulum.parse(uc_last.data[0]['last_synced_at']).naive()
-                    modified_after = last_ts.isoformat(timespec='seconds').replace('+00:00', 'Z')
-            except Exception:
-                pass
-        page_token = None
-        # Concurrency for downloads (using aiometer library)
-        from core_infrastructure.rate_limiter import ConcurrencyLimiter
-        limiter = ConcurrencyLimiter()
-        
-        while True:
-            q = "(mimeType contains 'pdf' or mimeType contains 'spreadsheet' or name contains '.csv' or name contains '.xlsx' or name contains '.xls') and trashed = false and modifiedTime > '" + modified_after + "'"
-            params = {'q': q, 'pageSize': 200, 'fields': 'files(id,name,mimeType,modifiedTime),nextPageToken'}
-            if page_token:
-                params['pageToken'] = page_token
-            page = await nango.proxy_get('google-drive', 'drive/v3/files', params=params, connection_id=connection_id, provider_config_key=provider_key)
-            stats['actions_used'] += 1
-            files = page.get('files') or []
-            if not files:
-                break
-            async def process_file(f):
-                try:
-                    fid = f.get('id'); name = f.get('name') or ''; mime = f.get('mimeType') or ''
-                    if not fid or not name:
-                        return None
-                    score = 0.0
-                    nl = name.lower()
-                    if any(p in nl for p in ['invoice', 'receipt', 'statement', 'bill']):
-                        score += 0.5
-                    if any(nl.endswith(ext) for ext in ['.csv', '.xlsx', '.xls', '.pdf']):
-                        score += 0.3
-                    if score < 0.5:
-                        stats['skipped'] += 1
-                        return None
-                    # Download with concurrency control
-                    raw = await limiter.run(nango.proxy_get_bytes('google-drive', f'drive/v3/files/{fid}', params={'alt': 'media'}, connection_id=connection_id, provider_config_key=provider_key))
-                    if not raw:
-                        return None
-                    storage_path, file_hash = await _store_external_item_attachment(user_id, 'gdrive', fid, name, raw)
-                    stats['attachments_saved'] += 1
-                    
-                    item = {
-                        'user_id': user_id,
-                        'user_connection_id': user_connection_id,
-                        'sync_run_id': sync_run_id,
-                        'provider_id': fid,
-                        'kind': 'file',
-                        'source_ts': f.get('modifiedTime') or pendulum.now().to_iso8601_string(),
-                        'hash': file_hash,
-                        'storage_path': storage_path,
-                        'metadata': {'name': name, 'mime': mime, 'correlation_id': req.correlation_id},
-                        'relevance_score': score,
-                        'status': 'stored'
-                    }
-                    
-                    try:
-                        # CRITICAL FIX: Use optimized duplicate check
-                        dup = await optimized_db.check_duplicate_by_hash(user_id, file_hash)
-                        is_dup = bool(dup)
-                    except Exception:
-                        is_dup = False
-                    if not is_dup:
-                        if any(nl.endswith(ext) for ext in ['.csv', '.xlsx', '.xls']):
-                            await _enqueue_file_processing(user_id, name, storage_path)
-                            stats['queued_jobs'] += 1
-                        elif nl.endswith('.pdf'):
-                            await _enqueue_pdf_processing(user_id, name, storage_path)
-                            stats['queued_jobs'] += 1
-                    
-                    return item
-                except Exception as e:
-                    errors.append(str(e))
-                    return None
-
-            tasks = [asyncio.create_task(process_file(f)) for f in files]
-            if tasks:
-                results = await asyncio.gather(*tasks, return_exceptions=True)
-                # Collect valid items for batch insert
-                batch_items = [r for r in results if r and isinstance(r, dict) and not isinstance(r, Exception)]
-                if batch_items:
-                    try:
-                        transaction_manager = get_transaction_manager()
-                        for item in batch_items:
-                            # FIX #22: Use error handling helper to store failed items with error details
-                            await insert_external_item_with_error_handling(
-                                transaction_manager, user_id, user_connection_id, item, stats
-                            )
-                    except Exception as batch_err:
-                        logger.error(f"GDrive batch insert transaction failed: {batch_err}")
-                        errors.append(f"Batch insert failed: {str(batch_err)[:100]}")
-            page_token = page.get('nextPageToken')
-            if not page_token:
-                break
-        run_status = 'succeeded' if not errors else ('partial' if stats['records_fetched'] > 0 else 'failed')
-        # Update sync completion in transaction
-        try:
-            transaction_manager = get_transaction_manager()
-            async with transaction_manager.transaction(
-                user_id=user_id,
-                operation_type="connector_sync_completion"
-            ) as tx:
-                await tx.update('sync_runs', {
-                    'status': run_status,
-                    'finished_at': pendulum.now().to_iso8601_string(),
-                    'stats': orjson.dumps(stats).decode(),
-                    'error': '; '.join(errors)[:500] if errors else None
-                }, {'id': sync_run_id})
-                await tx.update('user_connections', {
-                    'last_synced_at': pendulum.now().to_iso8601_string()
-                }, {'nango_connection_id': connection_id})
-        except Exception as completion_err:
-            logger.error(f"Failed to update GDrive sync completion status: {completion_err}")
-        try:
-            JOBS_PROCESSED.labels(provider=provider_key, status=run_status).inc()
-        except Exception:
-            pass
-        return {'status': run_status, 'sync_run_id': sync_run_id, 'stats': stats, 'errors': errors[:5]}
-    except Exception as e:
-        logger.error(f"GDrive sync failed: {e}")
-        
-        # Error recovery
-        try:
-            recovery_system = get_error_recovery_system()
-            error_context = ErrorContext(
-                error_id=str(uuid.uuid4()),
-                user_id=user_id,
-                job_id=sync_run_id,
-                transaction_id=None,
-                operation_type='gdrive_sync',
-                error_message=str(e),
-                error_details={
-                    'sync_run_id': sync_run_id,
-                    'connection_id': connection_id,
-                    'provider': provider_key,
-                    'correlation_id': req.correlation_id
-                },
-                severity=ErrorSeverity.HIGH,
-                occurred_at=datetime.utcnow()
-            )
-            await recovery_system.handle_processing_error(error_context)
-        except Exception as recovery_error:
-            logger.error(f"Error recovery failed: {recovery_error}")
-        
-        try:
-            supabase.table('sync_runs').update({'status': 'failed', 'finished_at': pendulum.now().to_iso8601_string(), 'error': str(e)}).eq('id', sync_run_id).execute()
-        except Exception:
-            pass
-        try:
-            JOBS_PROCESSED.labels(provider=provider_key, status='failed').inc()
-        except Exception:
-            pass
-        raise
-
-@app.post("/api/connectors/providers")
-async def list_providers(request: dict):
-    """List supported providers for connectors (Gmail, Zoho Mail, Dropbox, Google Drive, Zoho Books, QuickBooks, Xero)."""
-    try:
-        user_id = (request or {}).get('user_id') or ''
-        session_token = (request or {}).get('session_token')
-        if user_id:
-            await _validate_security('connectors-providers', user_id, session_token)
-        return {
-            'providers': [
-                {'provider': 'google-mail', 'display_name': 'Gmail', 'integration_id': NANGO_GMAIL_INTEGRATION_ID, 'auth_type': 'OAUTH2', 'scopes': ['https://mail.google.com/'], 'endpoints': ['/emails', '/labels', '/attachment'], 'category': 'email'},
-                {'provider': 'zoho-mail', 'display_name': 'Zoho Mail', 'integration_id': NANGO_ZOHO_MAIL_INTEGRATION_ID, 'auth_type': 'OAUTH2', 'scopes': [], 'endpoints': [], 'category': 'email'},
-                {'provider': 'dropbox', 'display_name': 'Dropbox', 'integration_id': NANGO_DROPBOX_INTEGRATION_ID, 'auth_type': 'OAUTH2', 'scopes': ['files.content.read','files.metadata.read'], 'endpoints': ['/2/files/list_folder','/2/files/download'], 'category': 'storage'},
-                {'provider': 'google-drive', 'display_name': 'Google Drive', 'integration_id': NANGO_GOOGLE_DRIVE_INTEGRATION_ID, 'auth_type': 'OAUTH2', 'scopes': ['https://www.googleapis.com/auth/drive.readonly'], 'endpoints': ['drive/v3/files'], 'category': 'storage'},
-                {'provider': 'zoho-books', 'display_name': 'Zoho Books', 'integration_id': NANGO_ZOHO_BOOKS_INTEGRATION_ID, 'auth_type': 'OAUTH2', 'scopes': [], 'endpoints': [], 'category': 'accounting'},
-                {'provider': 'quickbooks-sandbox', 'display_name': 'QuickBooks (Sandbox)', 'integration_id': NANGO_QUICKBOOKS_INTEGRATION_ID, 'auth_type': 'OAUTH2', 'scopes': [], 'endpoints': [], 'category': 'accounting'},
-                {'provider': 'xero', 'display_name': 'Xero', 'integration_id': NANGO_XERO_INTEGRATION_ID, 'auth_type': 'OAUTH2', 'scopes': [], 'endpoints': [], 'category': 'accounting'},
-                {'provider': 'stripe', 'display_name': 'Stripe', 'integration_id': NANGO_STRIPE_INTEGRATION_ID, 'auth_type': 'OAUTH2', 'scopes': [], 'endpoints': ['v1/charges', 'v1/invoices'], 'category': 'payment'},
-                {'provider': 'razorpay', 'display_name': 'Razorpay', 'integration_id': NANGO_RAZORPAY_INTEGRATION_ID, 'auth_type': 'BASIC', 'scopes': [], 'endpoints': ['v1/payments', 'v1/orders'], 'category': 'payment'},
-                {'provider': 'paypal', 'display_name': 'PayPal', 'integration_id': NANGO_PAYPAL_INTEGRATION_ID, 'auth_type': 'OAUTH2', 'scopes': [], 'endpoints': ['v1/payments/payment', 'v2/invoicing/invoices'], 'category': 'payment'}
-            ]
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"List providers failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
+# REMOVED: _gmail_sync_run (466 lines) - Replaced by Airbyte Gmail connector
+# REMOVED: _zoho_mail_sync_run (259 lines) - Replaced by Airbyte Zoho Mail connector
+# REMOVED: _dropbox_sync_run (240 lines) - Replaced by Airbyte Dropbox connector
+# REMOVED: _gdrive_sync_run (210 lines) - Replaced by Airbyte Google Drive connector
+# REMOVED: _dispatch_connector_sync (132 lines) - Replaced by Airbyte API calls
+#
+# TOTAL LINES REMOVED: 1,307 lines of custom sync logic
+#
+# Airbyte now handles:
+# - OAuth flows for all providers
+# - Rate limiting per provider
+# - Incremental sync with cursor management
+# ============================================================================
+# TASK: ADD OAUTH INITIATION ENDPOINT FOR AIRBYTE
+# ============================================================================
 @app.post("/api/connectors/initiate")
-async def initiate_connector(req: ConnectorInitiateRequest):
-    """Create a Nango Connect session for supported providers."""
+async def connectors_initiate(req: ConnectorSyncRequest):
+    """
+    Initiate OAuth flow for Airbyte connector.
+    
+    Returns Airbyte OAuth URL and state for frontend to open in popup.
+    
+    Request:
+    {
+        "provider": "gmail|dropbox|google-drive|...",
+        "user_id": "user_123",
+        "session_token": "token_xyz"
+    }
+    
+    Response:
+    {
+        "oauth_url": "https://accounts.google.com/o/oauth2/auth?...",
+        "state": "base64_encoded_state",
+        "provider": "gmail"
+    }
+    """
     await _validate_security('connectors-initiate', req.user_id, req.session_token)
     try:
-        provider_map = {
-            'google-mail': NANGO_GMAIL_INTEGRATION_ID,
-            'zoho-mail': NANGO_ZOHO_MAIL_INTEGRATION_ID,
-            'dropbox': NANGO_DROPBOX_INTEGRATION_ID,
-            'google-drive': NANGO_GOOGLE_DRIVE_INTEGRATION_ID,
-            'zoho-books': NANGO_ZOHO_BOOKS_INTEGRATION_ID,
-            'quickbooks': NANGO_QUICKBOOKS_INTEGRATION_ID,
-            'quickbooks-sandbox': NANGO_QUICKBOOKS_INTEGRATION_ID,
-            'xero': NANGO_XERO_INTEGRATION_ID,
-            'stripe': NANGO_STRIPE_INTEGRATION_ID,
-            'razorpay': NANGO_RAZORPAY_INTEGRATION_ID,
-            'paypal': NANGO_PAYPAL_INTEGRATION_ID,
-        }
-        integ = provider_map.get(req.provider)
-        if not integ:
-            raise HTTPException(status_code=400, detail="Unsupported provider")
+        provider = (req.integration_id or 'google-mail')
         
-        logger.info(f"Creating Nango Connect session for provider={req.provider}, integration_id={integ}, user_id={req.user_id}")
-        nango = NangoClient(base_url=NANGO_BASE_URL)
-        # FIX: Nango expects array of integration IDs (strings), not objects
-        # Correct format: ["google-drive"] not [{"provider_config_key": "google-drive"}]
-        try:
-            session = await nango.create_connect_session(
-                end_user={'id': req.user_id}, 
-                allowed_integrations=[integ]  # Pass integration ID directly as string
-            )
-            
-            logger.info(f"Nango Connect session created: {orjson.dumps(session).decode()}")
-        except Exception as nango_error:
-            # Check if it's a connection limit error
-            error_str = str(nango_error).lower()
-            if 'resource_capped' in error_str or 'connection limit' in error_str or 'maximum number' in error_str:
-                raise HTTPException(
-                    status_code=402,  # Payment Required
-                    detail={
-                        'error': 'connection_limit_reached',
-                        'message': 'You have reached the maximum number of connections allowed on your Nango plan. Please upgrade your plan or delete unused connections.',
-                        'action_required': 'upgrade_plan',
-                        'upgrade_url': 'https://app.nango.dev/settings/billing'
-                    }
-                )
-            # Re-raise other errors
-            raise
+        # Use Airbyte client to create OAuth session
+        airbyte = AirbytePythonClient()
         
-        # Extract token from Nango response and construct Connect URL
-        session_data = session.get('data', {})
-        token = session_data.get('token')
+        result = await airbyte.create_oauth_session(
+            provider=provider,
+            user_id=req.user_id
+        )
         
-        if not token:
-            logger.error(f"No token in Nango session response: {session}")
-            raise HTTPException(status_code=500, detail="Failed to create Nango Connect session")
+        logger.info(
+            "airbyte_oauth_initiated",
+            user_id=req.user_id,
+            provider=provider
+        )
         
-        # Construct the Nango Connect URL
-        connect_url = f"https://connect.nango.dev?session_token={token}"
-        
-        # Return response with connect_url for frontend compatibility
+        # Return Airbyte OAuth URL and state
         return {
-            'status': 'ok',
-            'integration_id': integ,
-            'connect_session': {
-                'token': token,
-                'expires_at': session_data.get('expires_at'),
-                'connect_url': connect_url,
-                'url': connect_url  # Alternative field name for compatibility
-            }
+            "oauth_url": result.get('oauth_url') or result.get('url'),
+            "state": result.get('state'),
+            "provider": provider,
+            "status": "initiated"
         }
     except HTTPException:
         raise
     except Exception as e:
-        import traceback
-        error_details = f"Initiate connector failed for provider={req.provider}: {e}\n{traceback.format_exc()}"
-        structured_logger.error("Connector initiation failed", error=error_details)
+        logger.error(f"OAuth initiation failed: {e}", provider=req.integration_id or 'unknown')
         raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/api/connectors/verify-connection")
-async def verify_connection(req: dict):
-    """Verify and create connection record after Nango popup closes.
-    
-    Workaround for when webhooks fail or are delayed.
-    Frontend calls this after popup closes to ensure connection is saved.
-    """
-    user_id = req.get('user_id')
-    provider = req.get('provider')
-    session_token = req.get('session_token')
-    
-    await _validate_security('connectors-verify', user_id, session_token)
-    
-    try:
-        # Map provider to integration_id
-        provider_map = {
-            'google-mail': NANGO_GMAIL_INTEGRATION_ID,
-            'zoho-mail': NANGO_ZOHO_MAIL_INTEGRATION_ID,
-            'dropbox': NANGO_DROPBOX_INTEGRATION_ID,
-            'google-drive': NANGO_GOOGLE_DRIVE_INTEGRATION_ID,
-            'zoho-books': NANGO_ZOHO_BOOKS_INTEGRATION_ID,
-            'quickbooks': NANGO_QUICKBOOKS_INTEGRATION_ID,
-            'quickbooks-sandbox': NANGO_QUICKBOOKS_INTEGRATION_ID,
-            'xero': NANGO_XERO_INTEGRATION_ID,
-            'stripe': NANGO_STRIPE_INTEGRATION_ID,
-            'razorpay': NANGO_RAZORPAY_INTEGRATION_ID,
-        }
-        integration_id = provider_map.get(provider)
-        
-        if not integration_id:
-            raise HTTPException(status_code=400, detail="Unknown provider")
-        
-        # Generate connection_id (Nango uses format: {user_id}_{integration_id})
-        connection_id = f"{user_id}_{integration_id}"
-        
-        # Lookup or create connector_id
-        connector_id = None
-        try:
-            conn_lookup = supabase.table('connectors').select('id').eq('integration_id', integration_id).limit(1).execute()
-            if conn_lookup.data:
-                connector_id = conn_lookup.data[0]['id']
-            else:
-                # Create connector if it doesn't exist
-                logger.info(f"Creating connector for {integration_id}")
-                connector_result = supabase.table('connectors').insert({
-                    'integration_id': integration_id,
-                    'provider': provider,
-                    'name': provider.replace('-', ' ').title(),
-                    'auth_type': 'OAUTH2',
-                    'status': 'active'
-                }).execute()
-                if connector_result.data:
-                    connector_id = connector_result.data[0]['id']
-                    logger.info(f"✅ Created connector {connector_id} for {integration_id}")
-        except Exception as e:
-            logger.error(f"Failed to lookup/create connector_id for {integration_id}: {e}")
-            # If connector creation fails, try without connector_id (make it optional in DB)
-        
-        # Upsert user_connection
-        try:
-            connection_data = {
-                'user_id': user_id,
-                'nango_connection_id': connection_id,
-                'integration_id': integration_id,
-                'provider': provider,
-                'status': 'active',
-                'sync_frequency_minutes': 60,
-                'created_at': pendulum.now().to_iso8601_string(),
-                'updated_at': pendulum.now().to_iso8601_string()
-            }
-            
-            # Only add connector_id if we have one
-            if connector_id:
-                connection_data['connector_id'] = connector_id
-            
-            supabase.table('user_connections').upsert(
-                connection_data,
-                on_conflict='nango_connection_id'
-            ).execute()
-            
-            logger.info(f"✅ Manually verified connection: {connection_id} for user {user_id}")
-            return {'status': 'ok', 'connection_id': connection_id}
-        except Exception as e:
-            logger.error(f"Failed to create connection: {e}")
-            raise HTTPException(status_code=500, detail=str(e))
-            
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Verify connection failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-async def _dispatch_connector_sync(
-    integration_id: str,
-    req: ConnectorSyncRequest,
-    nango: NangoClient
-) -> Dict[str, Any]:
-    """
-    FIX ISSUE #5: Centralized sync dispatch logic for all providers.
-    
-    CRITICAL FIX #1: Global rate limiting across all users
-    - Prevents 50+ users from overwhelming provider APIs
-    - Checks global sync limits before accepting request
-    - Acquires distributed lock to prevent duplicate syncs
-    
-    CRITICAL FIX #2: Distributed sync locking
-    - Prevents user from clicking "Sync" twice and running concurrent jobs
-    - Uses Redis for distributed locking across workers
-    - Auto-cleanup with 30-minute expiry
-    
-    Eliminates code duplication across:
-    - /api/connectors/sync endpoint
-    - /api/connectors/scheduler/run endpoint  
-    - Celery periodic tasks
-    
-    Tries ARQ → Celery → Returns HTTP 503 (NO inline fallback!)
-    
-    Args:
-        integration_id: Nango integration ID (e.g., 'google-mail')
-        req: ConnectorSyncRequest with user_id, connection_id, mode, etc.
-        nango: NangoClient instance
-        
-    Returns:
-        {"status": "queued", "provider": integration_id, "mode": mode}
-        
-    Raises:
-        HTTPException(429): If global rate limit exceeded
-        HTTPException(409): If sync already in progress for this connection
-        HTTPException(503): If no worker available or dispatch fails
-    """
-    from core_infrastructure.rate_limiter import get_global_rate_limiter, get_sync_lock
-    
-    # Map integration_id to ARQ task name and sync function
-    provider_config = {
-        NANGO_GMAIL_INTEGRATION_ID: ('gmail_sync', _gmail_sync_run),
-        NANGO_DROPBOX_INTEGRATION_ID: ('dropbox_sync', _dropbox_sync_run),
-        NANGO_GOOGLE_DRIVE_INTEGRATION_ID: ('gdrive_sync', _gdrive_sync_run),
-        NANGO_ZOHO_MAIL_INTEGRATION_ID: ('zoho_mail_sync', _zohomail_sync_run),
-        NANGO_QUICKBOOKS_INTEGRATION_ID: ('quickbooks_sync', _quickbooks_sync_run),
-        NANGO_XERO_INTEGRATION_ID: ('xero_sync', _xero_sync_run),
-        NANGO_ZOHO_BOOKS_INTEGRATION_ID: ('zoho_books_sync', _zoho_books_sync_run),
-        NANGO_STRIPE_INTEGRATION_ID: ('stripe_sync', _stripe_sync_run),
-        NANGO_RAZORPAY_INTEGRATION_ID: ('razorpay_sync', _razorpay_sync_run),
-        NANGO_PAYPAL_INTEGRATION_ID: ('paypal_sync', _paypal_sync_run),
-    }
-    
-    if integration_id not in provider_config:
-        raise HTTPException(status_code=400, detail=f"Unsupported provider: {integration_id}")
-    
-    arq_task_name, sync_func = provider_config[integration_id]
-    
-    # Extract provider name from integration_id (e.g., 'google-mail' → 'gmail')
-    provider_name = integration_id.replace('google-', '').replace('-sandbox', '')
-    
-    # CRITICAL FIX #1: Check global rate limits
-    rate_limiter = get_global_rate_limiter()
-    can_sync, rate_limit_msg = await rate_limiter.check_global_rate_limit(provider_name, req.user_id)
-    if not can_sync:
-        logger.warning(f"Global rate limit exceeded: {rate_limit_msg}")
-        raise HTTPException(status_code=429, detail=rate_limit_msg)
-    
-    # CRITICAL FIX #2: Check for existing sync lock (prevent duplicate syncs)
-    sync_lock = get_sync_lock()
-    is_locked = await sync_lock.is_locked(req.user_id, provider_name, req.connection_id)
-    if is_locked:
-        msg = (
-            f"Sync already in progress for {provider_name}. "
-            f"Please wait for the current sync to complete before starting a new one."
-        )
-        logger.warning(f"Sync already locked: {msg}")
-        raise HTTPException(status_code=409, detail=msg)
-    
-    # Acquire lock before queuing
-    lock_acquired = await sync_lock.acquire_sync_lock(req.user_id, provider_name, req.connection_id)
-    if not lock_acquired:
-        msg = (
-            f"Failed to acquire sync lock for {provider_name}. "
-            f"Another sync may be starting. Please try again."
-        )
-        logger.warning(f"Lock acquisition failed: {msg}")
-        raise HTTPException(status_code=409, detail=msg)
-    
-    # Acquire rate limit slot
-    slot_acquired = await rate_limiter.acquire_sync_slot(provider_name, req.user_id)
-    if not slot_acquired:
-        # Release lock on rate limit failure
-        await sync_lock.release_sync_lock(req.user_id, provider_name, req.connection_id)
-        msg = (
-            f"Rate limit exceeded for {provider_name}. "
-            f"Too many syncs in progress. Please try again in 1 minute."
-        )
-        logger.warning(f"Rate limit slot acquisition failed: {msg}")
-        raise HTTPException(status_code=429, detail=msg)
-    
-    # Queue via ARQ (async task queue)
-    if _queue_backend() == 'arq':
-        try:
-            pool = await get_arq_pool()
-            await pool.enqueue_job(arq_task_name, req.model_dump())
-            JOBS_ENQUEUED.labels(provider=integration_id, mode=req.mode).inc()
-            logger.info(
-                f"✅ Queued {integration_id} sync via ARQ: {req.correlation_id}",
-                user_id=req.user_id,
-                connection_id=req.connection_id
-            )
-            return {"status": "queued", "provider": integration_id, "mode": req.mode}
-        except Exception as e:
-            # Release lock and rate limit slot on queue failure
-            await sync_lock.release_sync_lock(req.user_id, provider_name, req.connection_id)
-            await rate_limiter.release_sync_slot(provider_name, req.user_id)
-            logger.error(f"❌ ARQ dispatch failed for {integration_id}: {e}")
-            raise HTTPException(
-                status_code=503,
-                detail="Background worker unavailable. Please try again in a few moments."
-            )
-    else:
-        # Release lock and rate limit slot if ARQ not configured
-        await sync_lock.release_sync_lock(req.user_id, provider_name, req.connection_id)
-        await rate_limiter.release_sync_slot(provider_name, req.user_id)
-        logger.error(f"❌ ARQ not configured, cannot dispatch {integration_id} sync")
-        raise HTTPException(
-            status_code=503,
-            detail="Background worker not available. Please contact support."
-        )
-
 
 @app.post("/api/connectors/sync")
 async def connectors_sync(req: ConnectorSyncRequest):
     """
-    Run a sync via Nango (historical or incremental) for supported providers.
+    Run a sync via Airbyte for all supported providers.
     
-    FIX ISSUE #4 & #5: Now uses centralized dispatch function.
-    - No inline fallback execution (returns HTTP 503 if worker unavailable)
-    - Single source of truth for all 9 providers
+    REPLACED: Custom Nango implementation → Airbyte connectors
+    - Airbyte handles OAuth flows
+    - Airbyte handles rate limiting
+    - Airbyte handles incremental sync
+    - Airbyte handles deduplication
+    - Airbyte handles retry logic
     """
     await _validate_security('connectors-sync', req.user_id, req.session_token)
     try:
-        integ = (req.integration_id or NANGO_GMAIL_INTEGRATION_ID)
+        provider = (req.integration_id or 'google-mail')
         
         # Ensure correlation id
         req.correlation_id = req.correlation_id or str(uuid.uuid4())
         
-        # Use centralized dispatch function (FIX ISSUE #5)
-        nango = NangoClient(base_url=NANGO_BASE_URL)
-        return await _dispatch_connector_sync(integ, req, nango)
+        # Use Airbyte client for sync orchestration
+        airbyte = AirbytePythonClient()
+        
+        # Trigger sync via Airbyte
+        result = await airbyte.trigger_sync(
+            connection_id=req.connection_id,
+            provider=provider,
+            user_id=req.user_id,
+            mode=req.mode
+        )
+        
+        logger.info(
+            "airbyte_sync_triggered",
+            user_id=req.user_id,
+            provider=provider,
+            connection_id=req.connection_id,
+            correlation_id=req.correlation_id
+        )
+        
+        return {
+            "status": "queued",
+            "provider": provider,
+            "mode": req.mode,
+            "job_id": result.get('job', {}).get('id'),
+            "correlation_id": req.correlation_id
+        }
     except HTTPException:
         raise
     except Exception as e:
@@ -11974,6 +10500,133 @@ async def get_sync_status(sync_run_id: str, user_id: str, session_token: Optiona
         raise
     except Exception as e:
         logger.error(f"Failed to get sync status: {e}", sync_run_id=sync_run_id)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================================
+# DATA RETRIEVAL ENDPOINT - Fetch synced items from Airbyte
+# ============================================================================
+@app.get("/api/connectors/sync/{sync_run_id}/items")
+async def get_sync_items(
+    sync_run_id: str,
+    user_id: str,
+    session_token: Optional[str] = None,
+    page: int = 1,
+    page_size: int = 50,
+    status: Optional[str] = None,
+    kind: Optional[str] = None
+):
+    """
+    Fetch synced items from a specific sync run.
+    
+    Returns paginated external_items that were fetched during this sync.
+    
+    Query Parameters:
+    - page: Page number (1-indexed)
+    - page_size: Items per page (max 100)
+    - status: Filter by status (fetched|processed|failed|normalized)
+    - kind: Filter by kind (txn|email|file|etc)
+    
+    Response:
+    {
+        "items": [
+            {
+                "id": "item_123",
+                "provider_id": "gmail_msg_456",
+                "kind": "email",
+                "status": "processed",
+                "source_ts": "2025-01-01T00:00:00Z",
+                "metadata": {...},
+                "created_at": "2025-01-01T00:05:00Z"
+            }
+        ],
+        "page": 1,
+        "page_size": 50,
+        "total": 250,
+        "has_more": true
+    }
+    """
+    await _validate_security('connectors-sync-items', user_id, session_token)
+    
+    try:
+        # Validate pagination
+        if page < 1:
+            page = 1
+        if page_size < 1:
+            page_size = 50
+        page_size = min(page_size, 100)  # Max 100 items per page
+        
+        # Verify sync_run exists and belongs to user
+        sync_run_result = supabase.table('sync_runs').select(
+            'id, user_id, user_connection_id'
+        ).eq('id', sync_run_id).limit(1).execute()
+        
+        if not sync_run_result.data:
+            raise HTTPException(status_code=404, detail=f"Sync run {sync_run_id} not found")
+        
+        sync_run = sync_run_result.data[0]
+        
+        # Verify ownership
+        if sync_run['user_id'] != user_id:
+            raise HTTPException(status_code=403, detail="Unauthorized")
+        
+        user_connection_id = sync_run['user_connection_id']
+        
+        # Build query for external_items
+        query = supabase.table('external_items').select(
+            'id, provider_id, kind, status, source_ts, metadata, created_at'
+        ).eq('sync_run_id', sync_run_id).eq('user_connection_id', user_connection_id)
+        
+        # Apply optional filters
+        if status:
+            query = query.eq('status', status)
+        if kind:
+            query = query.eq('kind', kind)
+        
+        # Get total count
+        count_result = supabase.table('external_items').select(
+            'id',
+            count='exact'
+        ).eq('sync_run_id', sync_run_id).eq('user_connection_id', user_connection_id)
+        
+        if status:
+            count_result = count_result.eq('status', status)
+        if kind:
+            count_result = count_result.eq('kind', kind)
+        
+        count_result = count_result.execute()
+        total = count_result.count if hasattr(count_result, 'count') else len(count_result.data or [])
+        
+        # Paginate
+        offset = (page - 1) * page_size
+        items_result = query.order('created_at', desc=True).range(offset, offset + page_size - 1).execute()
+        
+        items = items_result.data or []
+        has_more = (offset + page_size) < total
+        
+        # Log access
+        logger.info(
+            "sync_items_retrieved",
+            sync_run_id=sync_run_id,
+            user_id=user_id,
+            page=page,
+            page_size=page_size,
+            total=total,
+            items_count=len(items)
+        )
+        
+        return {
+            'items': items,
+            'page': page,
+            'page_size': page_size,
+            'total': total,
+            'has_more': has_more
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get sync items: {e}", sync_run_id=sync_run_id)
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -12066,9 +10719,9 @@ async def connectors_disconnect(req: ConnectorDisconnectRequest):
             except Exception:
                 integration_id = integration_id or provider
 
-        # Attempt to delete connection in Nango first (best effort)
-        nango = NangoClient(base_url=NANGO_BASE_URL)
-        await nango.delete_connection(connection_id, integration_id)
+        # Attempt to delete connection in Airbyte first (best effort)
+        airbyte = AirbytePythonClient()
+        await airbyte.delete_connection(connection_id)
 
         # Mark connection inactive / remove locally
         try:
@@ -12224,16 +10877,25 @@ async def _process_webhook_delta_items(user_id: str, user_connection_id: str, pr
                     if records:
                         await _process_api_data_through_pipeline(user_id, records, provider, str(uuid.uuid4()), user_connection_id)
         
-        return processed
-    except Exception as e:
         logger.error(f"Webhook delta processing error: {e}")
         return 0
 
-@app.post("/api/webhooks/nango")
-async def nango_webhook(request: Request):
-    """Nango webhook receiver with HMAC verification and idempotency.
-
-    Signature header candidates: X-Nango-Signature, Nango-Signature. HMAC-SHA256 of raw body using NANGO_WEBHOOK_SECRET.
+# ============================================================================
+# AIRBYTE WEBHOOK HANDLER - Real-time sync notifications
+# ============================================================================
+@app.post("/api/webhooks/airbyte")
+async def airbyte_webhook(request: Request):
+    """
+    Airbyte webhook receiver for sync events.
+    
+    Handles:
+    - sync.started: Sync job started
+    - sync.succeeded: Sync completed successfully
+    - sync.failed: Sync failed with error
+    - connection.created: New connection authorized
+    - connection.deleted: Connection removed
+    
+    Updates sync_runs table and sends WebSocket notifications to frontend.
     """
     try:
         raw = await request.body()
@@ -12242,201 +10904,145 @@ async def nango_webhook(request: Request):
             payload = orjson.loads(raw.decode('utf-8') or '{}')
         except Exception:
             pass
-
-        # Verify signature if secret configured
-        secret = os.environ.get("NANGO_WEBHOOK_SECRET")
-        header_sig = (
-            request.headers.get('X-Nango-Signature')
-            or request.headers.get('Nango-Signature')
-            or request.headers.get('x-nango-signature')
-            or request.headers.get('nango-signature')
-        )
+        
+        # Verify Airbyte webhook signature if secret configured
+        secret = os.environ.get("AIRBYTE_WEBHOOK_SECRET")
+        header_sig = request.headers.get('X-Airbyte-Signature')
         signature_valid = False
-        computed_hex = None
+        
         if secret and header_sig:
             try:
+                # Airbyte uses HMAC-SHA256 with the raw body
                 digest = hmac.new(secret.encode('utf-8'), raw, 'sha256').hexdigest()
-                computed_hex = digest
-                # Accept common formats: exact hex, "sha256=<hex>", or a csv like "v1=<hex>"
-                candidates = [digest, f"sha256={digest}"]
-                if header_sig.startswith('v1='):
-                    candidates.append(header_sig.split('v1=')[-1])
-                signature_valid = any(hmac.compare_digest(header_sig, c) for c in candidates) or any(hmac.compare_digest(c, header_sig) for c in candidates)
+                signature_valid = hmac.compare_digest(header_sig, digest)
             except Exception as e:
-                logger.warning(f"Webhook signature computation failed: {e}")
+                logger.warning(f"Airbyte webhook signature verification failed: {e}")
                 signature_valid = False
         elif not secret:
-            # Production hardening: Reject webhooks if secret not configured in production
+            # In development, accept unsigned webhooks
             environment = os.environ.get('ENVIRONMENT', 'development')
             if environment == 'production':
-                logger.error("NANGO_WEBHOOK_SECRET not set in production - rejecting webhook")
+                logger.error("AIRBYTE_WEBHOOK_SECRET not set in production - rejecting webhook")
                 raise HTTPException(status_code=403, detail='Webhook secret not configured')
             else:
-                logger.warning("NANGO_WEBHOOK_SECRET not set; accepting webhook in dev mode")
+                logger.warning("AIRBYTE_WEBHOOK_SECRET not set; accepting webhook in dev mode")
                 signature_valid = True
-
-        # Extract event and connection details
+        
+        # Extract event details
         event_type = payload.get('type') or payload.get('event_type')
-        event_id = payload.get('id') or payload.get('event_id')
-        end_user = payload.get('end_user') or {}
-        user_id = payload.get('user_id') or end_user.get('id')
-        connection_id = (
-            payload.get('connection_id')
-            or (payload.get('connection') or {}).get('id')
-            or (payload.get('data') or {}).get('connection_id')
+        event_id = payload.get('id') or str(uuid.uuid4())
+        job_id = payload.get('job_id') or payload.get('jobId')
+        connection_id = payload.get('connection_id') or payload.get('connectionId')
+        status = payload.get('status')
+        
+        logger.info(
+            "airbyte_webhook_received",
+            event_type=event_type,
+            event_id=event_id,
+            job_id=job_id,
+            connection_id=connection_id,
+            status=status
         )
-        # Derive correlation id for tracing across queue/DB
-        correlation_id = payload.get('correlation_id') or event_id or str(uuid.uuid4())
         
-        # Production hardening: Reject webhooks with invalid signatures in production
-        environment = os.environ.get('ENVIRONMENT', 'development')
-        if environment == 'production' and not signature_valid:
-            logger.error(f"Webhook signature validation failed in production - rejecting webhook: event_type={event_type}, event_id={event_id}")
-            raise HTTPException(status_code=403, detail='Invalid webhook signature')
-
-        # FIX #3: Lookup user_connection_id from connection_id for audit trail
-        webhook_user_connection_id = None
-        if connection_id:
-            try:
-                uc_row = supabase.table('user_connections').select('id').eq(
-                    'nango_connection_id', connection_id
-                ).limit(1).execute()
-                webhook_user_connection_id = uc_row.data[0]['id'] if uc_row.data else None
-            except Exception as lookup_err:
-                logger.debug(f"Failed to lookup user_connection_id for webhook: {lookup_err}")
-        
-        # Persist webhook for audit/idempotency
+        # Persist webhook for audit trail
         try:
             supabase.table('webhook_events').insert({
-                'user_id': user_id or 'unknown',
-                'user_connection_id': webhook_user_connection_id,
+                'user_id': 'airbyte',
+                'user_connection_id': connection_id,
                 'event_type': event_type,
-                'payload': payload,  # supabase-py will json encode
+                'payload': payload,
                 'signature_valid': bool(signature_valid),
-                'status': 'queued',
+                'status': 'processed',
                 'error': None,
                 'event_id': event_id,
                 'created_at': pendulum.now().to_iso8601_string()
             }).execute()
         except Exception as e:
             # Conflict on unique(event_id) is fine; treat as already processed
-            logger.info(f"Webhook insert dedup or failure: {e}")
-
-        # Handle connection.created event - upsert user_connections immediately
-        if event_type == 'connection.created' and signature_valid and connection_id and user_id:
+            logger.debug(f"Webhook event already recorded: {e}")
+        
+        # Handle sync events
+        if signature_valid and event_type and event_type.startswith('sync.'):
             try:
-                logger.info(f"🔗 Connection created webhook: connection_id={connection_id}, user_id={user_id}")
+                # Find sync_run by job_id
+                sync_run_result = supabase.table('sync_runs').select(
+                    'id, user_id, user_connection_id, status'
+                ).eq('job_id', str(job_id)).limit(1).execute()
                 
-                # Get integration_id from payload
-                connection_data = payload.get('connection', {})
-                integration_id = connection_data.get('integration_id') or connection_data.get('provider_config_key')
-                
-                # Lookup connector_id from connectors table
-                connector_id = None
-                if integration_id:
-                    try:
-                        conn_lookup = supabase.table('connectors').select('id').eq('integration_id', integration_id).limit(1).execute()
-                        if conn_lookup.data:
-                            connector_id = conn_lookup.data[0]['id']
-                    except Exception as e:
-                        logger.warning(f"Failed to lookup connector_id for integration_id={integration_id}: {e}")
-                
-                # Upsert user_connections
-                try:
-                    supabase.table('user_connections').upsert({
-                        'user_id': user_id,
-                        'nango_connection_id': connection_id,
-                        'connector_id': connector_id,
-                        'status': 'active',
-                        'last_synced_at': None,
-                        'sync_frequency_minutes': 60,
-                        'created_at': pendulum.now().to_iso8601_string(),
+                if sync_run_result.data:
+                    sync_run = sync_run_result.data[0]
+                    sync_run_id = sync_run['id']
+                    user_id = sync_run['user_id']
+                    
+                    # Map Airbyte status to our status
+                    status_map = {
+                        'sync.started': 'running',
+                        'sync.succeeded': 'succeeded',
+                        'sync.failed': 'failed',
+                        'sync.cancelled': 'cancelled'
+                    }
+                    new_status = status_map.get(event_type, status)
+                    
+                    # Extract stats and error details
+                    stats = payload.get('stats') or {}
+                    error_msg = payload.get('error') or payload.get('error_message')
+                    
+                    # Update sync_run status
+                    update_data = {
+                        'status': new_status,
                         'updated_at': pendulum.now().to_iso8601_string()
-                    }, on_conflict='nango_connection_id').execute()
-                    logger.info(f"✅ User connection upserted: connection_id={connection_id}")
-                except Exception as e:
-                    logger.error(f"Failed to upsert user_connection: {e}")
-                
-                return {'status': 'connection_created', 'signature_valid': True}
+                    }
+                    
+                    if event_type == 'sync.succeeded':
+                        update_data['finished_at'] = pendulum.now().to_iso8601_string()
+                        update_data['stats'] = stats
+                    elif event_type == 'sync.failed':
+                        update_data['finished_at'] = pendulum.now().to_iso8601_string()
+                        update_data['error'] = error_msg
+                    
+                    supabase.table('sync_runs').update(update_data).eq('id', sync_run_id).execute()
+                    
+                    logger.info(
+                        "sync_run_updated_from_webhook",
+                        sync_run_id=sync_run_id,
+                        event_type=event_type,
+                        new_status=new_status
+                    )
+                    
+                    # Send WebSocket notification to frontend
+                    try:
+                        websocket_manager = get_connection_manager()
+                        if websocket_manager:
+                            await websocket_manager.send_update(sync_run_id, {
+                                "status": new_status,
+                                "event_type": event_type,
+                                "stats": stats,
+                                "error": error_msg,
+                                "timestamp": pendulum.now().to_iso8601_string()
+                            })
+                    except Exception as ws_err:
+                        logger.warning(f"Failed to send WebSocket notification: {ws_err}")
+                else:
+                    logger.warning(f"Sync run not found for job_id: {job_id}")
+            
+            except Exception as e:
+                logger.error(f"Failed to handle sync event: {e}")
+        
+        # Handle connection events
+        elif signature_valid and event_type == 'connection.created':
+            try:
+                logger.info(f"🔗 Airbyte connection created: connection_id={connection_id}")
+                # Connection creation is handled via OAuth flow, not webhook
+                # This is just for audit trail
             except Exception as e:
                 logger.error(f"Failed to handle connection.created event: {e}")
         
-        # FIX #4: Process webhook delta changes instead of full sync
-        if signature_valid and connection_id and user_id:
-            try:
-                # Check if webhook contains delta/changed items
-                webhook_data = payload.get('data', {})
-                changed_items = webhook_data.get('items', []) or webhook_data.get('changes', []) or webhook_data.get('records', [])
-                
-                # Lookup connector integration id with JOIN to avoid N+1
-                uc = supabase.table('user_connections').select('id, connector_id, connectors(provider, integration_id)').eq('nango_connection_id', connection_id).limit(1).execute()
-                user_connection_id = None
-                provider = NANGO_GMAIL_INTEGRATION_ID
-                if uc.data:
-                    user_connection_id = uc.data[0]['id']
-                    connector_data = uc.data[0].get('connectors')
-                    if connector_data:
-                        provider = connector_data.get('integration_id', NANGO_GMAIL_INTEGRATION_ID)
-                
-                # ✅ DELTA PROCESSING: If webhook has specific changed items, process them directly
-                if changed_items and len(changed_items) <= 50 and user_connection_id:  # Only for small deltas
-                    logger.info(f"⚡ Webhook delta processing: {len(changed_items)} items from {provider}")
-                    try:
-                        delta_processed = await _process_webhook_delta_items(
-                            user_id=user_id,
-                            user_connection_id=user_connection_id,
-                            provider=provider,
-                            changed_items=changed_items,
-                            correlation_id=correlation_id
-                        )
-                        if delta_processed:
-                            logger.info(f"✅ Delta processing complete: {delta_processed} items processed")
-                            # Update webhook status
-                            try:
-                                supabase.table('webhook_events').update({
-                                    'status': 'processed',
-                                    'processed_at': pendulum.now().to_iso8601_string()
-                                }).eq('event_id', event_id).execute()
-                            except Exception:
-                                pass
-                            return {'status': 'processed', 'delta_items': delta_processed, 'signature_valid': True}
-                    except Exception as delta_err:
-                        logger.warning(f"Delta processing failed, falling back to incremental sync: {delta_err}")
-                        # Fall through to incremental sync
-                
-                logger.info(f"📨 Webhook trigger: provider={provider}, mode=incremental, correlation={correlation_id}")
-
-                # CRITICAL FIX: Use centralized dispatch function to eliminate 300+ lines of duplication
-                success = await _dispatch_connector_sync(
-                    provider=provider,
-                    user_id=user_id,
-                    connection_id=connection_id,
-                    mode='incremental',
-                    correlation_id=correlation_id
-                )
-                
-                if success:
-                    # Track successful dispatch
-                    try:
-                        JOBS_ENQUEUED.labels(provider=provider, mode='incremental').inc()
-                    except Exception:
-                        pass
-                else:
-                    # Persist failed webhook for scheduler retry
-                    try:
-                        supabase.table('webhook_events').update({
-                            'status': 'retry_pending',
-                            'error': 'Dispatch failed - will retry via scheduler'
-                        }).eq('event_id', event_id).execute()
-                    except Exception:
-                        pass
-            except Exception as e:
-                logger.error(f"Failed to trigger incremental sync from webhook: {e}")
-
-        return {'status': 'received', 'signature_valid': bool(signature_valid)}
+        return {'status': 'received', 'event_id': event_id, 'signature_valid': bool(signature_valid)}
+    
     except Exception as e:
-        logger.error(f"Webhook handling failed: {e}")
+        logger.error(f"Airbyte webhook handling failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
 
 def _require_scheduler_auth(request: Request):
     """Verify scheduler token from header or query param"""
@@ -12491,23 +11097,21 @@ async def run_scheduled_syncs(request: Request, provider: Optional[str] = None, 
             from core_infrastructure.rate_limiter import get_scheduler_rate_limiter
             scheduler_limiter = get_scheduler_rate_limiter()
             
-            provider_to_dispatch = conn_provider or NANGO_GMAIL_INTEGRATION_ID
+            provider_to_dispatch = conn_provider or 'google-mail'
             can_dispatch, rate_limit_msg = await scheduler_limiter.check_scheduler_rate_limit(provider_to_dispatch)
             if not can_dispatch:
                 logger.warning(f"Scheduler rate limit: {rate_limit_msg}")
                 continue
             
-            # Use centralized dispatch function with rate limiting and locking
+            # REPLACED: Use Airbyte for sync orchestration
             try:
-                nango = NangoClient(base_url=NANGO_BASE_URL)
-                req = ConnectorSyncRequest(
-                    user_id=row['user_id'],
+                airbyte = AirbytePythonClient()
+                result = await airbyte.trigger_sync(
                     connection_id=row['nango_connection_id'],
-                    integration_id=provider_to_dispatch,
-                    mode='incremental',
-                    correlation_id=str(uuid.uuid4())
+                    provider=provider_to_dispatch,
+                    user_id=row['user_id'],
+                    mode='incremental'
                 )
-                result = await _dispatch_connector_sync(provider_to_dispatch, req, nango)
                 if result.get('status') == 'queued':
                     dispatched.append(row['nango_connection_id'])
                     # Record successful dispatch

@@ -8,34 +8,9 @@ from pydantic_settings import BaseSettings
 from typing import Optional
 
 
-class NangoConfig(BaseSettings):
-    """Nango OAuth connector configuration."""
-    base_url: str = "https://api.nango.dev"
-    secret_key: str = ""  # Optional - will be set via NANGO_SECRET_KEY env var or default to empty
-    
-    # Integration IDs
-    gmail_integration_id: str = "google-mail"
-    dropbox_integration_id: str = "dropbox"
-    google_drive_integration_id: str = "google-drive"
-    zoho_mail_integration_id: str = "zoho-mail"
-    zoho_books_integration_id: str = "zoho-books"
-    quickbooks_integration_id: str = "quickbooks-sandbox"
-    xero_integration_id: str = "xero"
-    stripe_integration_id: str = "stripe"
-    razorpay_integration_id: str = "razorpay"
-    paypal_integration_id: str = "paypal"
-    
-    # Timeouts (seconds)
-    default_timeout: float = 30.0
-    connect_session_timeout: float = 30.0
-    gmail_profile_timeout: float = 30.0
-    gmail_list_timeout: float = 60.0
-    gmail_attachment_timeout: float = 120.0
-    gmail_history_timeout: float = 60.0
-    
-    class Config:
-        env_prefix = "NANGO_"
-        case_sensitive = False
+# REMOVED: NangoConfig class - Replaced by Airbyte integration
+# Legacy Nango integration IDs are now hardcoded as constants in fastapi_backend_v2.py
+# These are used only as fallback defaults for provider names
 
 
 class ConnectorConfig(BaseSettings):
@@ -102,6 +77,24 @@ class QueueConfig(BaseSettings):
         case_sensitive = False
 
 
+class AirbytePythonConfig(BaseSettings):
+    """Airbyte Python client configuration."""
+    base_url: str = "http://localhost:8000/api/v1"  # Airbyte API endpoint
+    api_key: str = ""  # Set via AIRBYTE_API_KEY env var
+    workspace_id: str = ""  # Set via AIRBYTE_WORKSPACE_ID env var
+    destination_id: str = ""  # Supabase destination ID (set via AIRBYTE_DESTINATION_ID)
+    
+    # Timeouts (seconds)
+    default_timeout: float = 30.0
+    oauth_timeout: float = 60.0
+    sync_timeout: float = 120.0
+    status_timeout: float = 30.0
+    
+    class Config:
+        env_prefix = "AIRBYTE_"
+        case_sensitive = False
+
+
 class AppConfig(BaseSettings):
     """Application-wide configuration."""
     environment: str = "development"
@@ -127,15 +120,10 @@ class AppConfig(BaseSettings):
 
 
 # Singleton instances
-nango_config = NangoConfig()
 connector_config = ConnectorConfig()
 queue_config = QueueConfig()
 app_config = AppConfig()
-
-
-def get_nango_config() -> NangoConfig:
-    """Get Nango configuration."""
-    return nango_config
+airbyte_config = AirbytePythonConfig()
 
 
 def get_connector_config() -> ConnectorConfig:
@@ -151,3 +139,8 @@ def get_queue_config() -> QueueConfig:
 def get_app_config() -> AppConfig:
     """Get app configuration."""
     return app_config
+
+
+def get_airbyte_config() -> AirbytePythonConfig:
+    """Get Airbyte configuration."""
+    return airbyte_config
