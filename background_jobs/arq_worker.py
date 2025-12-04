@@ -573,15 +573,8 @@ class WorkerSettings:
     )
 
     functions = [
-        gmail_sync,
-        dropbox_sync,
-        gdrive_sync,
-        zoho_mail_sync,
-        quickbooks_sync,
-        xero_sync,
-        zoho_books_sync,
-        stripe_sync,
-        razorpay_sync,
+        # REMOVED: All sync functions (gmail_sync, dropbox_sync, etc.) are now handled by Airbyte
+        # See comment at lines 44-54 for details
         process_spreadsheet,
         process_pdf,
         learn_field_mapping_batch,  # CRITICAL FIX: Persistent field mapping learning
