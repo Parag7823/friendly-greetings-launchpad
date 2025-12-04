@@ -10876,9 +10876,13 @@ async def _process_webhook_delta_items(user_id: str, user_connection_id: str, pr
                     
                     if records:
                         await _process_api_data_through_pipeline(user_id, records, provider, str(uuid.uuid4()), user_connection_id)
-        
+                        logger.info(f"Processed {len(records)} records through pipeline")
+    except Exception as e:
         logger.error(f"Webhook delta processing error: {e}")
         return 0
+    
+    return processed
+
 
 # ============================================================================
 # AIRBYTE WEBHOOK HANDLER - Real-time sync notifications
