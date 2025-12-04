@@ -3949,7 +3949,7 @@ Be specific about filter conditions and sorting preferences."""
             
             # Query user's data sources
             connections_result = self.supabase.table('user_connections').select('*').eq('user_id', user_id).eq('status', 'active').execute()
-            connected_sources = [conn['connector_id'] for conn in connections_result.data] if connections_result.data else []
+            connected_sources = [conn['provider'] for conn in connections_result.data] if connections_result.data else []
             
             # Query uploaded files
             files_result = self.supabase.table('raw_records').select('file_name, created_at').eq('user_id', user_id).order('created_at', desc=True).limit(5).execute()

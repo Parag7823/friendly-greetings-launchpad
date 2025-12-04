@@ -370,79 +370,49 @@ async def send_websocket_progress(
 
 # FIX #20: CONSOLIDATED CONNECTOR UPSERT LOGIC
 # Replaces 3x duplicate code in _gmail_sync_run, _dropbox_sync_run, _gdrive_sync_run
-async def upsert_connector_and_connection(
+async def get_or_create_user_connection(
     supabase_client: Any,
-    transaction_manager: Any,
     user_id: str,
-    connection_id: str,
-    provider_key: str,
-    scopes: List[str],
-    endpoints_needed: List[str]
-) -> tuple:
+    provider: str,
+    airbyte_connection_id: str
+) -> str:
     """
-    FIX #20: Consolidated connector upsert logic.
+    Get or create user_connection for Airbyte.
     
-    Replaces duplicate code that appeared 3x in:
-    - _gmail_sync_run (lines 9757-9797)
-    - _dropbox_sync_run (lines 10254-10281)
-    - _gdrive_sync_run (lines 10540-10562)
+    DEPRECATED: Old connector table logic removed.
+    Now works directly with user_connections table.
     
     Args:
         supabase_client: Supabase client instance
-        transaction_manager: Transaction manager instance
         user_id: User ID
-        connection_id: Nango connection ID
-        provider_key: Provider integration ID (NANGO_GMAIL_INTEGRATION_ID, etc.)
-        scopes: OAuth scopes required
-        endpoints_needed: API endpoints needed
+        provider: Provider name (gmail, dropbox, etc.)
+        airbyte_connection_id: Airbyte connection UUID
     
     Returns:
-        Tuple of (connector_id, user_connection_id) or (None, None) on failure
+        user_connection_id or None on failure
     """
     try:
-        async with transaction_manager.transaction(
-            user_id=user_id,
-            operation_type="connector_upsert"
-        ) as tx:
-            # Upsert connector definition
-            try:
-                await tx.insert('connectors', {
-                    'provider': provider_key,
-                    'integration_id': provider_key,
-                    'auth_type': 'OAUTH2',
-                    'scopes': __import__('orjson').dumps(scopes).decode(),
-                    'endpoints_needed': __import__('orjson').dumps(endpoints_needed).decode(),
-                    'enabled': True
-                })
-            except Exception as e:
-                # Duplicate key error - connector already exists, which is fine
-                logger.debug(f"Connector already exists for {provider_key}: {e}")
-            
-            # Fetch connector id (still need sync for query)
-            connector_row = supabase_client.table('connectors').select('id').eq('provider', provider_key).limit(1).execute()
-            connector_id = connector_row.data[0]['id'] if connector_row.data else None
-            
-            # Upsert user_connection
-            try:
-                await tx.insert('user_connections', {
-                    'user_id': user_id,
-                    'connector_id': connector_id,
-                    'nango_connection_id': connection_id,
-                    'status': 'active',
-                    'sync_mode': 'pull'
-                })
-            except Exception as e:
-                # Duplicate key error - user_connection already exists, which is fine
-                logger.debug(f"User connection already exists: {e}")
-            
-            uc_row = supabase_client.table('user_connections').select('id').eq('nango_connection_id', connection_id).limit(1).execute()
-            user_connection_id = uc_row.data[0]['id'] if uc_row.data else None
-            
-            return connector_id, user_connection_id
-            
+        # Check if connection already exists
+        existing = supabase_client.table('user_connections').select('id').eq(
+            'user_id', user_id
+        ).eq('provider', provider).limit(1).execute()
+        
+        if existing and existing.data:
+            return existing.data[0]['id']
+        
+        # Create new user_connection
+        result = supabase_client.table('user_connections').insert({
+            'user_id': user_id,
+            'provider': provider,
+            'airbyte_connection_id': airbyte_connection_id,
+            'status': 'active',
+            'integration_id': provider
+        }).execute()
+        
+        return result.data[0]['id'] if result and result.data else None
     except Exception as e:
-        logger.error(f"Failed to upsert connector records for {provider_key}: {e}")
-        return None, None
+        logger.error(f"Failed to create user_connection: {e}")
+        return None
 
 
 # FIX #20: CONSOLIDATED SYNC RUN CREATION LOGIC
@@ -509,10 +479,10 @@ async def get_sync_cursor(
     default_lookback_days: int = 90
 ) -> str:
     """
-    FIX #21: Retrieve sync cursor for incremental fetching.
+    DEPRECATED: Airbyte manages cursors internally.
     
-    Enables true incremental sync by reading the last cursor value from sync_cursors table.
-    Falls back to default lookback period if no cursor exists.
+    This function is kept for backward compatibility but always returns default lookback.
+    Airbyte handles incremental sync state internally.
     
     Args:
         supabase_client: Supabase client instance
@@ -522,20 +492,11 @@ async def get_sync_cursor(
         default_lookback_days: Default lookback if no cursor (default 90 days)
     
     Returns:
-        Cursor value (timestamp, page token, history_id, etc.) or default lookback timestamp
+        Default lookback timestamp
     """
-    try:
-        cursor_row = supabase_client.table('sync_cursors').select('value').eq(
-            'user_connection_id', user_connection_id
-        ).eq('resource', resource).eq('cursor_type', cursor_type).limit(1).execute()
-        
-        if cursor_row.data and cursor_row.data[0].get('value'):
-            logger.info(f"✅ Found sync cursor for {resource}: {cursor_row.data[0]['value'][:50]}")
-            return cursor_row.data[0]['value']
-    except Exception as e:
-        logger.warning(f"Failed to retrieve sync cursor for {resource}: {e}")
+    logger.warning("get_sync_cursor called but cursors are managed by Airbyte")
     
-    # Fallback: return default lookback timestamp
+    # Return default lookback timestamp
     default_ts = (__import__('pendulum').now() - __import__('datetime').timedelta(days=default_lookback_days)).to_iso8601_string()
     logger.info(f"Using default lookback ({default_lookback_days} days) for {resource}")
     return default_ts
@@ -550,10 +511,10 @@ async def save_sync_cursor(
     cursor_type: str = 'time'
 ) -> bool:
     """
-    FIX #21: Save sync cursor for next incremental fetch.
+    DEPRECATED: Airbyte manages cursors internally.
     
-    Updates or inserts cursor value in sync_cursors table using upsert pattern.
-    Handles conflicts gracefully.
+    This function is kept for backward compatibility but is a no-op.
+    Airbyte handles incremental sync state internally.
     
     Args:
         transaction_manager: Transaction manager instance
@@ -564,27 +525,10 @@ async def save_sync_cursor(
         cursor_type: Cursor type (e.g., 'time', 'page', 'history_id')
     
     Returns:
-        True if successful, False otherwise
+        True (always succeeds as no-op)
     """
-    try:
-        async with transaction_manager.transaction(
-            user_id=user_id,
-            operation_type="sync_cursor_update"
-        ) as tx:
-            await tx.insert('sync_cursors', {
-                'user_id': user_id,
-                'user_connection_id': user_connection_id,
-                'resource': resource,
-                'cursor_type': cursor_type,
-                'value': cursor_value,
-                'updated_at': __import__('pendulum').now().to_iso8601_string()
-            }, on_conflict='(user_connection_id, resource, cursor_type)')
-        
-        logger.info(f"✅ Saved sync cursor for {resource}: {cursor_value[:50]}")
-        return True
-    except Exception as e:
-        logger.error(f"Failed to save sync cursor for {resource}: {e}")
-        return False
+    logger.warning("save_sync_cursor called but cursors are managed by Airbyte")
+    return True
 
 
 # FIX #22: EXTERNAL ITEMS ERROR TRACKING

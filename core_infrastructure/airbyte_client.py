@@ -161,12 +161,15 @@ class AirbytePythonClient:
             Dict with OAuth session token and metadata
         """
         # Map provider names to Airbyte source definitions
+        # CRITICAL FIX: Support both frontend naming conventions and Airbyte naming
         provider_to_source = {
             'gmail': 'source-gmail',
+            'google-mail': 'source-gmail',  # Frontend sends 'google-mail', Airbyte expects 'gmail'
             'google-drive': 'source-google-drive',
             'dropbox': 'source-dropbox',
             'zoho-mail': 'source-zoho-mail',
             'quickbooks': 'source-quickbooks',
+            'quickbooks-sandbox': 'source-quickbooks',  # Frontend sends 'quickbooks-sandbox', Airbyte expects 'quickbooks'
             'xero': 'source-xero',
             'stripe': 'source-stripe',
             'paypal': 'source-paypal-transaction',
@@ -353,6 +356,89 @@ class AirbytePythonClient:
                 "airbyte_sync_status_failed",
                 error=str(e),
                 job_id=job_id
+            )
+            raise
+
+    async def create_connection(
+        self,
+        source_definition_id: str,
+        destination_id: str,
+        workspace_id: str,
+        user_id: str,
+        provider: str
+    ) -> Dict[str, Any]:
+        """
+        Create an Airbyte connection (source → destination mapping).
+        
+        CRITICAL: Called after OAuth completes to create the connection
+        that maps the authorized source to Supabase destination.
+        
+        Args:
+            source_definition_id: Airbyte source definition ID (e.g., 'source-gmail')
+            destination_id: Airbyte destination ID (Supabase)
+            workspace_id: Airbyte workspace ID
+            user_id: User ID (for logging)
+            provider: Provider name (for logging)
+        
+        Returns:
+            Dict with connection_id and status
+        """
+        url = f"{self.base_url}/connections"
+        payload = {
+            "sourceDefinitionId": source_definition_id,
+            "destinationId": destination_id,
+            "workspaceId": workspace_id,
+            "name": f"{provider.capitalize()} Connection",
+            "syncMode": "incremental",
+            "status": "active"
+        }
+        
+        logger.info(
+            "airbyte_create_connection_request",
+            url=url,
+            provider=provider,
+            user_id=user_id,
+            source_definition_id=source_definition_id
+        )
+        
+        t0 = time.time()
+        try:
+            resp = await self._request_with_retry(
+                'POST',
+                url,
+                timeout=self.default_timeout,
+                json=payload,
+                headers=self._headers()
+            )
+            
+            self.AIRBYTE_API_CALLS.labels(
+                endpoint='create_connection',
+                method='POST',
+                status=str(resp.status_code)
+            ).inc()
+            
+            self.AIRBYTE_API_LATENCY.labels(
+                endpoint='create_connection',
+                method='POST'
+            ).observe(time.time() - t0)
+            
+            result = resp.json()
+            connection_id = result.get('connection', {}).get('connectionId')
+            
+            logger.info(
+                "airbyte_connection_created",
+                connection_id=connection_id,
+                provider=provider,
+                user_id=user_id
+            )
+            
+            return result
+        except Exception as e:
+            logger.error(
+                "airbyte_create_connection_failed",
+                error=str(e),
+                provider=provider,
+                user_id=user_id
             )
             raise
 

@@ -10339,7 +10339,8 @@ async def connectors_initiate(req: ConnectorSyncRequest):
     """
     await _validate_security('connectors-initiate', req.user_id, req.session_token)
     try:
-        provider = (req.integration_id or 'google-mail')
+        # Frontend sends 'provider', not 'integration_id'
+        provider = getattr(req, 'provider', None) or getattr(req, 'integration_id', None) or 'google-mail'
         
         # Use Airbyte client to create OAuth session
         airbyte = AirbytePythonClient()
@@ -10382,7 +10383,8 @@ async def connectors_sync(req: ConnectorSyncRequest):
     """
     await _validate_security('connectors-sync', req.user_id, req.session_token)
     try:
-        provider = (req.integration_id or 'google-mail')
+        # Frontend sends 'provider', not 'integration_id'
+        provider = getattr(req, 'provider', None) or getattr(req, 'integration_id', None) or 'google-mail'
         
         # Ensure correlation id
         req.correlation_id = req.correlation_id or str(uuid.uuid4())
@@ -10696,7 +10698,7 @@ async def connectors_disconnect(req: ConnectorDisconnectRequest):
     try:
         # Fetch connection row to validate ownership and gather metadata
         uc_res = supabase.table('user_connections').select(
-            'id, user_id, connector_id, integration_id, provider'
+            'id, user_id, integration_id, provider'
         ).eq('nango_connection_id', connection_id).limit(1).execute()
 
         if not uc_res.data:
@@ -10710,14 +10712,9 @@ async def connectors_disconnect(req: ConnectorDisconnectRequest):
         integration_id = conn_row.get('integration_id')
         provider = req.provider or conn_row.get('provider')
 
-        # Derive integration id if missing
-        if not integration_id and conn_row.get('connector_id'):
-            try:
-                c_res = supabase.table('connectors').select('integration_id').eq('id', conn_row['connector_id']).limit(1).execute()
-                if c_res.data:
-                    integration_id = c_res.data[0].get('integration_id')
-            except Exception:
-                integration_id = integration_id or provider
+        # Derive integration id if missing - use provider directly (connectors table deleted)
+        if not integration_id:
+            integration_id = provider
 
         # Attempt to delete connection in Airbyte first (best effort)
         airbyte = AirbytePythonClient()
@@ -10757,21 +10754,14 @@ async def connectors_disconnect(req: ConnectorDisconnectRequest):
         logger.error(f"Connector disconnect failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-
-@app.get("/api/connectors/status")
 async def connectors_status(connection_id: str, user_id: str, session_token: Optional[str] = None):
     await _validate_security('connectors-status', user_id, session_token)
     try:
         # Fetch user_connection and recent runs
-        uc_res = supabase.table('user_connections').select('id, user_id, nango_connection_id, connector_id, status, last_synced_at, created_at, provider_account_id, metadata, sync_frequency_minutes').eq('nango_connection_id', connection_id).limit(1).execute()
+        uc_res = supabase.table('user_connections').select('id, user_id, nango_connection_id, provider, status, last_synced_at, created_at, provider_account_id, metadata, sync_frequency_minutes, integration_id').eq('nango_connection_id', connection_id).limit(1).execute()
         uc = uc_res.data[0] if uc_res.data else None
-        integration_id = None
-        if uc and uc.get('connector_id'):
-            try:
-                conn_res = supabase.table('connectors').select('integration_id').eq('id', uc['connector_id']).limit(1).execute()
-                integration_id = conn_res.data[0]['integration_id'] if conn_res.data else None
-            except Exception:
-                integration_id = None
+        # Use integration_id and provider directly (connectors table deleted)
+        integration_id = uc.get('integration_id') or uc.get('provider') if uc else None
         runs = []
         if uc:
             runs_res = supabase.table('sync_runs').select('id, type, status, started_at, finished_at, stats, error').eq('user_connection_id', uc['id']).order('started_at', desc=True).limit(50).execute()
@@ -10799,16 +10789,11 @@ async def list_user_connections(req: UserConnectionsRequest):
             )
         
         # Fetch from database (connections created by webhook handler)
-        res = supabase_client.table('user_connections').select('id, user_id, nango_connection_id, connector_id, status, last_synced_at, created_at').eq('user_id', req.user_id).limit(1000).execute()
+        res = supabase_client.table('user_connections').select('id, user_id, nango_connection_id, provider, integration_id, status, last_synced_at, created_at').eq('user_id', req.user_id).limit(1000).execute()
         items = []
         for row in (res.data or []):
-            integ = None
-            try:
-                if row.get('connector_id'):
-                    c = supabase_client.table('connectors').select('integration_id, provider').eq('id', row['connector_id']).limit(1).execute()
-                    integ = (c.data[0]['integration_id'] if c.data else None)
-            except Exception:
-                integ = None
+            # Use integration_id and provider directly (connectors table deleted)
+            integ = row.get('integration_id') or row.get('provider')
             items.append({
                 'connection_id': row.get('nango_connection_id') or row.get('id'),
                 'integration_id': integ,
@@ -11069,7 +11054,7 @@ async def run_scheduled_syncs(request: Request, provider: Optional[str] = None, 
     try:
         now = datetime.utcnow()
         # Fetch active connections
-        conns = supabase.table('user_connections').select('id, user_id, nango_connection_id, sync_frequency_minutes, last_synced_at, connector_id, status').eq('status', 'active').limit(1000).execute()
+        conns = supabase.table('user_connections').select('id, user_id, nango_connection_id, sync_frequency_minutes, last_synced_at, provider, integration_id, status').eq('status', 'active').limit(1000).execute()
         dispatched = []
         for row in (conns.data or []):
             if len(dispatched) >= max(1, min(limit, 100)):
@@ -11087,13 +11072,7 @@ async def run_scheduled_syncs(request: Request, provider: Optional[str] = None, 
                 continue
 
             # Provider filter
-            conn_provider = None
-            if row.get('connector_id'):
-                try:
-                    c = supabase.table('connectors').select('integration_id').eq('id', row['connector_id']).limit(1).execute()
-                    conn_provider = c.data[0]['integration_id'] if c.data else None
-                except Exception:
-                    conn_provider = None
+            conn_provider = row.get('integration_id') or row.get('provider')
             if provider and conn_provider and provider != conn_provider:
                 continue
 
