@@ -10389,6 +10389,16 @@ async def connectors_sync(req: ConnectorSyncRequest):
         # Ensure correlation id
         req.correlation_id = req.correlation_id or str(uuid.uuid4())
         
+        # Fetch user_connection to get the ID
+        uc_res = supabase.table('user_connections').select(
+            'id, user_id, nango_connection_id'
+        ).eq('nango_connection_id', req.connection_id).limit(1).execute()
+        
+        if not uc_res.data:
+            raise HTTPException(status_code=404, detail=f"Connection {req.connection_id} not found")
+        
+        user_connection_id = uc_res.data[0]['id']
+        
         # Use Airbyte client for sync orchestration
         airbyte = AirbytePythonClient()
         
@@ -10400,19 +10410,42 @@ async def connectors_sync(req: ConnectorSyncRequest):
             mode=req.mode
         )
         
+        # Extract Airbyte job ID
+        airbyte_job_id = result.get('job', {}).get('id')
+        
+        # Create sync_run record to track this sync
+        sync_run_id = str(uuid.uuid4())
+        try:
+            supabase.table('sync_runs').insert({
+                'id': sync_run_id,
+                'user_id': req.user_id,
+                'user_connection_id': user_connection_id,
+                'type': req.mode or 'manual',
+                'status': 'queued',
+                'job_id': str(airbyte_job_id) if airbyte_job_id else None,
+                'started_at': pendulum.now().to_iso8601_string(),
+                'stats': orjson.dumps({'mode': req.mode, 'lookback_days': req.lookback_days}).decode()
+            }).execute()
+        except Exception as e:
+            logger.warning(f"Failed to create sync_run record: {e}")
+            # Don't fail the sync if we can't create the record, but log it
+        
         logger.info(
             "airbyte_sync_triggered",
             user_id=req.user_id,
             provider=provider,
             connection_id=req.connection_id,
-            correlation_id=req.correlation_id
+            correlation_id=req.correlation_id,
+            sync_run_id=sync_run_id,
+            airbyte_job_id=airbyte_job_id
         )
         
         return {
             "status": "queued",
             "provider": provider,
             "mode": req.mode,
-            "job_id": result.get('job', {}).get('id'),
+            "sync_run_id": sync_run_id,
+            "job_id": airbyte_job_id,
             "correlation_id": req.correlation_id
         }
     except HTTPException:
@@ -10421,6 +10454,69 @@ async def connectors_sync(req: ConnectorSyncRequest):
         logger.error(f"Connectors sync failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.post("/api/connectors/verify-connection")
+async def verify_connection(req: ConnectorSyncRequest):
+    """
+    Verify that a connection is valid and working.
+    
+    Called by frontend after OAuth popup closes to confirm the connection
+    was successfully created in Airbyte.
+    
+    Request:
+    {
+        "user_id": "user_123",
+        "connection_id": "nango_conn_456",
+        "session_token": "token_xyz"
+    }
+    
+    Response:
+    {
+        "status": "verified|failed",
+        "connection_id": "nango_conn_456",
+        "message": "Connection verified successfully"
+    }
+    """
+    await _validate_security('connectors-verify', req.user_id, req.session_token)
+    try:
+        # Fetch the user_connection to verify it exists
+        uc_res = supabase.table('user_connections').select(
+            'id, user_id, nango_connection_id, status, provider, integration_id'
+        ).eq('nango_connection_id', req.connection_id).limit(1).execute()
+        
+        if not uc_res.data:
+            raise HTTPException(status_code=404, detail=f"Connection {req.connection_id} not found")
+        
+        uc = uc_res.data[0]
+        
+        # Verify ownership
+        if uc['user_id'] != req.user_id:
+            raise HTTPException(status_code=403, detail="Connection does not belong to user")
+        
+        # Check connection status
+        connection_status = uc.get('status', 'unknown')
+        is_verified = connection_status == 'active'
+        
+        logger.info(
+            "connection_verified",
+            user_id=req.user_id,
+            connection_id=req.connection_id,
+            status=connection_status,
+            verified=is_verified
+        )
+        
+        return {
+            "status": "verified" if is_verified else "pending",
+            "connection_id": req.connection_id,
+            "provider": uc.get('provider'),
+            "integration_id": uc.get('integration_id'),
+            "message": "Connection verified successfully" if is_verified else "Connection is pending activation"
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Connection verification failed: {e}", connection_id=req.connection_id)
+        raise HTTPException(status_code=500, detail=str(e))
 
 # ============================================================================
 # TASK #1: ADD SYNC STATUS POLLING ENDPOINT
