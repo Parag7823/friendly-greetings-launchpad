@@ -536,39 +536,132 @@ export const DataSourcesPanel = ({ isOpen, onClose, onFilePreview }: DataSources
       // Listen for file upload events and process files
       const handleFileUpload = async (event: any) => {
         const files = event.detail?.files;
-        if (files && files.length > 0) {
-          // Show toast for batch upload
-          standardToasts.uploadStarted(files.length);
+        if (!files || files.length === 0) return;
 
-          // Process all files in parallel (not sequentially)
-          const uploadPromises = Array.from(files).map(async (file: File) => {
-            try {
-              await processFileWithFastAPI(
-                file,
-                undefined, // No custom prompt
-                (progress) => {
-                  // Progress callback
-                  console.log(`Processing ${file.name}:`, progress);
+        // ✅ FIX ISSUE #8: Track results for batch upload summary
+        const uploadResults = {
+          total: files.length,
+          succeeded: [] as string[],
+          failed: [] as { filename: string; error: string }[],
+          rateLimited: [] as string[]
+        };
 
-                  if (progress.status === 'completed') {
-                    standardToasts.processingComplete(file.name);
-                  } else if (progress.status === 'error') {
-                    standardToasts.processingFailed(file.name);
-                  }
+        standardToasts.uploadStarted(files.length);
+
+        // Process all files in parallel (not sequentially)
+        const uploadPromises = Array.from(files).map(async (file: File) => {
+          try {
+            await processFileWithFastAPI(
+              file,
+              undefined, // No custom prompt
+              (progress) => {
+                // Progress callback
+                console.log(`Processing ${file.name}:`, progress);
+
+                if (progress.status === 'completed') {
+                  uploadResults.succeeded.push(file.name);
+                  // Don't show individual success toasts - will show summary
+                } else if (progress.status === 'error') {
+                  // Don't show individual error toasts - will show summary
                 }
-              );
-            } catch (error) {
-              console.error(`File upload error for ${file.name}:`, error);
-              standardToasts.processingFailed(file.name);
+              }
+            );
+          } catch (error: any) {
+            console.error(`File upload error for ${file.name}:`, error);
+            
+            // ✅ FIX ISSUE #8: Check if rate limited (429 error)
+            if (error?.message?.includes('429') || error?.message?.includes('rate limit')) {
+              uploadResults.rateLimited.push(file.name);
+            } else {
+              uploadResults.failed.push({
+                filename: file.name,
+                error: error?.message || 'Unknown error'
+              });
             }
-          });
+          }
+        });
 
-          // Wait for all uploads to complete
-          await Promise.allSettled(uploadPromises);
-
-          // Final refresh
-          loadFiles();
+        // Wait for all uploads to complete
+        await Promise.allSettled(uploadPromises);
+        
+        // ✅ FIX ISSUE #8: Show batch upload summary with results
+        if (uploadResults.total > 1) {
+          const successCount = uploadResults.succeeded.length;
+          const failedCount = uploadResults.failed.length + uploadResults.rateLimited.length;
+          
+          if (failedCount > 0) {
+            // Show detailed summary toast with failures
+            toast({
+              title: `Batch Upload Complete`,
+              description: (
+                <div className="space-y-2">
+                  <p>✅ {successCount} of {uploadResults.total} files uploaded successfully</p>
+                  
+                  {uploadResults.rateLimited.length > 0 && (
+                    <div>
+                      <p className="font-semibold text-yellow-600">
+                        ⚠️ {uploadResults.rateLimited.length} files rate limited:
+                      </p>
+                      <ul className="text-xs ml-4 mt-1">
+                        {uploadResults.rateLimited.slice(0, 3).map(name => (
+                          <li key={name}>• {name}</li>
+                        ))}
+                        {uploadResults.rateLimited.length > 3 && (
+                          <li>• ... and {uploadResults.rateLimited.length - 3} more</li>
+                        )}
+                      </ul>
+                    </div>
+                  )}
+                  
+                  {uploadResults.failed.length > 0 && (
+                    <div>
+                      <p className="font-semibold text-red-600">
+                        ❌ {uploadResults.failed.length} files failed:
+                      </p>
+                      <ul className="text-xs ml-4 mt-1">
+                        {uploadResults.failed.slice(0, 3).map(({filename, error}) => (
+                          <li key={filename}>• {filename}: {error}</li>
+                        ))}
+                        {uploadResults.failed.length > 3 && (
+                          <li>• ... and {uploadResults.failed.length - 3} more</li>
+                        )}
+                      </ul>
+                    </div>
+                  )}
+                </div>
+              ),
+              duration: 10000,
+              action: failedCount > 0 ? (
+                <ToastAction 
+                  altText="Retry failed uploads"
+                  onClick={() => {
+                    // ✅ FIX ISSUE #8: Retry only failed files
+                    const failedFiles = [...uploadResults.rateLimited, ...uploadResults.failed.map(f => f.filename)];
+                    const retryEvent = new CustomEvent('files-selected-for-upload', {
+                      detail: { 
+                        files: Array.from(files).filter((f: File) => 
+                          failedFiles.includes(f.name)
+                        )
+                      }
+                    });
+                    window.dispatchEvent(retryEvent);
+                  }}
+                >
+                  Retry Failed
+                </ToastAction>
+              ) : undefined
+            });
+          } else {
+            // All succeeded
+            toast({
+              title: 'Batch Upload Complete',
+              description: `✅ All ${uploadResults.total} files uploaded successfully!` 
+            });
+          }
         }
+        
+        // Final refresh
+        loadFiles();
       };
 
       // Register WebSocket event listeners
