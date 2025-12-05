@@ -9810,9 +9810,8 @@ async def check_duplicate_endpoint(request: dict):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/process-excel")
-@limiter.limit("10/minute") if limiter else lambda f: f  # ✅ ISSUE #10: Rate limit 10 uploads per minute per user
 async def process_excel_endpoint(
-    request: Request,  # ✅ ISSUE #10: Required by slowapi limiter
+    request: Request,  # ISSUE #10: Required by slowapi limiter
     user_id: str = Form(...),
     filename: str = Form(...),
     storage_path: str = Form(...),
