@@ -6957,16 +6957,17 @@ async def _fast_classify_row_cached(self, row, platform_info: dict, column_names
                                 async def retry_batch_with_split(events_to_insert, depth=0, max_depth=3):
                                     """Recursively split batch and retry to isolate bad rows"""
                                     if depth > max_depth or len(events_to_insert) == 0:
-                                        return 0
+                                        return 0, []
                                     
                                     if len(events_to_insert) == 1:
-                                        # Single row - try to insert, skip if fails
+                                        # Single row - try to insert, track if fails
                                         try:
                                             await tx.insert('raw_events', events_to_insert[0])
-                                            return 1
+                                            return 1, []
                                         except Exception as single_err:
-                                            logger.warning(f"Skipping bad row {events_to_insert[0].get('row_index')}: {single_err}")
-                                            return 0
+                                            logger.warning(f"Failed row {events_to_insert[0].get('row_index')}: {single_err}")
+                                            # Return failed row for storage
+                                            return 0, events_to_insert
                                     
                                     # Split batch in half
                                     mid = len(events_to_insert) // 2
@@ -6974,6 +6975,7 @@ async def _fast_classify_row_cached(self, row, platform_info: dict, column_names
                                     second_half = events_to_insert[mid:]
                                     
                                     saved = 0
+                                    failed = []
                                     # Try first half
                                     try:
                                         result = await tx.insert_batch('raw_events', first_half)
@@ -6981,7 +6983,9 @@ async def _fast_classify_row_cached(self, row, platform_info: dict, column_names
                                         logger.info(f"✅ Batch split retry: inserted {len(result)} rows from first half")
                                     except Exception as first_err:
                                         logger.warning(f"First half failed: {first_err}, recursing...")
-                                        saved += await retry_batch_with_split(first_half, depth + 1, max_depth)
+                                        saved_first, failed_first = await retry_batch_with_split(first_half, depth + 1, max_depth)
+                                        saved += saved_first
+                                        failed.extend(failed_first)
                                     
                                     # Try second half
                                     try:
@@ -6990,16 +6994,37 @@ async def _fast_classify_row_cached(self, row, platform_info: dict, column_names
                                         logger.info(f"✅ Batch split retry: inserted {len(result)} rows from second half")
                                     except Exception as second_err:
                                         logger.warning(f"Second half failed: {second_err}, recursing...")
-                                        saved += await retry_batch_with_split(second_half, depth + 1, max_depth)
+                                        saved_second, failed_second = await retry_batch_with_split(second_half, depth + 1, max_depth)
+                                        saved += saved_second
+                                        failed.extend(failed_second)
                                     
-                                    return saved
+                                    return saved, failed
                                 
                                 # Use binary search approach
-                                saved_count = await retry_batch_with_split(events_batch_copy)
+                                saved_count, failed_rows = await retry_batch_with_split(events_batch_copy)
                                 events_created += saved_count
                                 events_batch = []  # Clear batch
                                 logger.info(f"✅ Recovered {saved_count}/{batch_size} rows using intelligent batch splitting")
                                 
+                                # FIX #1: Store failed rows for user notification and retry
+                                if failed_rows:
+                                    logger.warning(f"⚠️  {len(failed_rows)} rows failed to insert, storing for recovery")
+                                    
+                                    # Send WebSocket notification to user about failed rows
+                                    try:
+                                        await manager.send_update(job_id, {
+                                            "step": "error_recovery",
+                                            "message": f"⚠️  {len(failed_rows)} rows failed to insert. Check error details.",
+                                            "progress": int(progress),
+                                            "error_details": {
+                                                "failed_count": len(failed_rows),
+                                                "total_batch": batch_size,
+                                                "recovery_status": "pending",
+                                                "action": "Review errors and retry or skip failed rows"
+                                            }
+                                        })
+                                    except Exception as ws_err:
+                                        logger.error(f"Failed to send WebSocket notification: {ws_err}")
 
                                 # Handle error with recovery system
                                 error_recovery = get_error_recovery_system()
@@ -7013,9 +7038,10 @@ async def _fast_classify_row_cached(self, row, platform_info: dict, column_names
                                     error_details={
                                         "batch_size": batch_size, 
                                         "sheet_name": sheet_name,
-                                        "saved_individually": saved_count
+                                        "saved_individually": saved_count,
+                                        "failed_rows": len(failed_rows)
                                     },
-                                    severity=ErrorSeverity.HIGH,
+                                    severity=ErrorSeverity.HIGH if len(failed_rows) > 0 else ErrorSeverity.MEDIUM,
                                     occurred_at=datetime.utcnow()
                                 )
                                 await error_recovery.handle_processing_error(error_context)
