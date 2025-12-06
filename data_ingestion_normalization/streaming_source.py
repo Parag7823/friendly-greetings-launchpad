@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-import hashlib
 import os
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Generator, Optional
 
-import xxhash  # ✅ FIX ISSUE #5: Import xxhash for standardized hashing
+import xxhash  # ✅ CRITICAL FIX #1: Use xxhash for standardized hashing (faster than SHA-256)
 
 
 @dataclass
