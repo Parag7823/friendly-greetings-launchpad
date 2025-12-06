@@ -16,8 +16,7 @@ class StreamedFile:
     path: str
     filename: Optional[str] = None
     _size: Optional[int] = None
-    _sha256: Optional[str] = None
-    _xxh3_128: Optional[str] = None  # ✅ FIX ISSUE #5: Add xxh3_128 cache
+    _xxh3_128: Optional[str] = None  # ✅ CRITICAL FIX #1: Cache xxh3_128 hash
     _cleanup: bool = False
 
     def __post_init__(self) -> None:

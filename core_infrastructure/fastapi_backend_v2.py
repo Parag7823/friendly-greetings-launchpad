@@ -5696,32 +5696,54 @@ async def _fast_classify_row_cached(self, row, platform_info: dict, column_names
 
                         dup_type_val = getattr(getattr(dup_result, 'duplicate_type', None), 'value', None)
                         if getattr(dup_result, 'is_duplicate', False) and dup_type_val == 'exact':
+                            # HYBRID AUTO-PILOT FIX #1: Exact duplicate (100%) - Auto-skip & notify
                             duplicate_analysis = {
                                 'is_duplicate': True,
                                 'duplicate_files': dup_result.duplicate_files,
                                 'similarity_score': dup_result.similarity_score,
                                 'status': 'exact_duplicate',
-                                'requires_user_decision': True
+                                'auto_action': 'skip',  # Auto-skip, don't ask
+                                'requires_user_decision': False  # No pause
                             }
+                            
+                            # Notify user via WebSocket (no pause)
+                            latest_file = dup_result.duplicate_files[0] if dup_result.duplicate_files else {}
                             await manager.send_update(job_id, {
-                                "step": "duplicate_found",
-                                "message": format_progress_message(ProcessingStage.EXPLAIN, "Found an exact match", "I've processed this file before"),
+                                "step": "duplicate_skipped",
+                                "message": format_progress_message(
+                                    ProcessingStage.EXPLAIN, 
+                                    "Already have this file", 
+                                    f"Exact match with '{latest_file.get('filename', 'existing file')}' - skipping"
+                                ),
                                 "progress": 20,
                                 "duplicate_info": duplicate_analysis,
-                                "requires_user_decision": True
+                                "requires_user_decision": False  # No modal
                             })
+                            
+                            # Update job status to completed (skipped)
                             try:
                                 supabase.table('ingestion_jobs').update({
-                                    'status': 'waiting_user_decision',
+                                    'status': 'completed',  # Mark as done (skipped)
                                     'updated_at': pendulum.now().to_iso8601_string(),
-                                    'progress': 20,
+                                    'progress': 100,
                                     'result': {
-                                        'status': 'duplicate_detected',
-                                        'duplicate_files': dup_result.duplicate_files
+                                        'status': 'duplicate_skipped',
+                                        'duplicate_files': dup_result.duplicate_files,
+                                        'message': f"Skipped - exact match with existing file"
                                     }
                                 }).eq('id', job_id).execute()
                             except Exception as db_err:
-                                logger.warning(f"Failed to update job status on duplicate detection: {db_err}")
+                                logger.warning(f"Failed to update job status on exact duplicate: {db_err}")
+                            
+                            # Return immediately - don't ingest
+                            return {
+                                "status": "duplicate_skipped",
+                                "duplicate_analysis": duplicate_analysis,
+                                "job_id": job_id,
+                                "requires_user_decision": False,
+                                "file_hash": file_hash_for_check,
+                                "message": "File skipped - exact duplicate detected"
+                            }
                 
                 except Exception as e:
                     # Handle error with recovery system
@@ -6076,15 +6098,15 @@ async def _fast_classify_row_cached(self, row, platform_info: dict, column_names
                     user_id, file_hash, streamed_file.filename
                 )
                 if content_duplicate_analysis.get('is_content_duplicate', False):
+                    # HYBRID AUTO-PILOT FIX #2: Delta merge - Auto-merge & notify
                     await manager.send_update(job_id, {
-                        "step": "content_duplicate_found",
-                        "message": format_progress_message(ProcessingStage.UNDERSTAND, "Comparing this with data I already have"),
-                        "progress": 25,
-                        "content_duplicate_info": content_duplicate_analysis,
-                        "requires_user_decision": True
+                        "step": "analyzing_delta",
+                        "message": format_progress_message(ProcessingStage.UNDERSTAND, "Analyzing differences"),
+                        "progress": 25
                     })
 
                     delta_analysis = None
+                    existing_file_id = None
                     if content_duplicate_analysis.get('overlapping_files'):
                         existing_file_id = content_duplicate_analysis['overlapping_files'][0]['id']
                         # CRITICAL FIX: Use streaming processor directly without accumulating chunks
@@ -6094,37 +6116,88 @@ async def _fast_classify_row_cached(self, row, platform_info: dict, column_names
                             user_id, streamed_file, existing_file_id
                         )
 
+                        new_rows = delta_analysis.get('delta_analysis', {}).get('new_rows', 0)
+                        existing_rows = delta_analysis.get('delta_analysis', {}).get('existing_rows', 0)
+                        
+                        # AUTO-MERGE: Perform delta merge automatically
                         await manager.send_update(job_id, {
-                            "step": "delta_analysis_complete",
-                            "message": format_progress_message(ProcessingStage.EXPLAIN, "Spotted the differences", f"{delta_analysis['delta_analysis']['new_rows']} new rows, {delta_analysis['delta_analysis']['existing_rows']} I already know"),
-                            "progress": 30,
-                            "delta_analysis": delta_analysis,
-                            "requires_user_decision": True
+                            "step": "auto_merging_delta",
+                            "message": format_progress_message(
+                                ProcessingStage.ACT, 
+                                f"Merging {new_rows} new rows", 
+                                f"Adding to {existing_rows} existing rows"
+                            ),
+                            "progress": 35
                         })
-
-                    try:
-                        supabase.table('ingestion_jobs').update({
-                            'status': 'waiting_user_decision',
-                            'updated_at': pendulum.now().to_iso8601_string(),
-                            'progress': 30,
-                            'result': {
-                                'status': 'content_duplicate_detected',
-                                'delta_analysis': delta_analysis,
-                                'content_duplicate': content_duplicate_analysis
+                        
+                        try:
+                            # Perform delta merge automatically (no user decision needed)
+                            merge_result = await duplicate_service._perform_delta_merge(
+                                user_id=user_id,
+                                new_file_hash=file_hash_for_check,
+                                existing_file_id=existing_file_id
+                            )
+                            
+                            merged_events = merge_result.get('merged_events', 0)
+                            
+                            # NOTIFY USER: Delta merge completed
+                            await manager.send_update(job_id, {
+                                "step": "delta_merged",
+                                "message": format_progress_message(
+                                    ProcessingStage.EXPLAIN,
+                                    f"Merged {merged_events} new rows",
+                                    f"Your data is now up-to-date"
+                                ),
+                                "progress": 40,
+                                "delta_merge_result": merge_result,
+                                "requires_user_decision": False  # No pause
+                            })
+                            
+                            # Update job status to completed (merged)
+                            try:
+                                supabase.table('ingestion_jobs').update({
+                                    'status': 'completed',  # Mark as done (merged)
+                                    'updated_at': pendulum.now().to_iso8601_string(),
+                                    'progress': 40,
+                                    'result': {
+                                        'status': 'delta_merged',
+                                        'merged_events': merged_events,
+                                        'existing_file_id': existing_file_id,
+                                        'message': f"Auto-merged {merged_events} new rows"
+                                    }
+                                }).eq('id', job_id).execute()
+                            except Exception as db_err:
+                                logger.warning(f"Failed to update job status on delta merge: {db_err}")
+                            
+                            # Return immediately - delta merge is complete
+                            return {
+                                "status": "delta_merged",
+                                "delta_analysis": delta_analysis,
+                                "merge_result": merge_result,
+                                "job_id": job_id,
+                                "requires_user_decision": False,  # No pause
+                                "file_hash": file_hash_for_check,
+                                "existing_file_id": existing_file_id,
+                                "message": f"Auto-merged {merged_events} new rows"
                             }
-                        }).eq('id', job_id).execute()
-                    except Exception as db_err:
-                        logger.warning(f"Failed to persist content duplicate state: {db_err}")
-
-                    return {
-                        "status": "content_duplicate_detected",
-                        "content_duplicate_analysis": content_duplicate_analysis,
-                        "delta_analysis": delta_analysis,
-                        "job_id": job_id,
-                        "requires_user_decision": True,
-                        "file_hash": file_hash_for_check,
-                        "existing_file_id": content_duplicate_analysis['overlapping_files'][0]['id'] if content_duplicate_analysis.get('overlapping_files') else None
-                    }
+                            
+                        except Exception as merge_error:
+                            logger.error(f"Delta merge failed for job {job_id}: {merge_error}")
+                            # If merge fails, notify user and stop
+                            await manager.send_update(job_id, {
+                                "step": "error",
+                                "message": f"Delta merge failed: {str(merge_error)}",
+                                "progress": 0
+                            })
+                            try:
+                                supabase.table('ingestion_jobs').update({
+                                    'status': 'failed',
+                                    'error_message': f"Delta merge failed: {str(merge_error)}",
+                                    'updated_at': pendulum.now().to_iso8601_string()
+                                }).eq('id', job_id).execute()
+                            except Exception as db_err:
+                                logger.warning(f"Failed to update job status on merge error: {db_err}")
+                            raise HTTPException(status_code=500, detail=f"Delta merge failed: {str(merge_error)}")
 
             except Exception as e:
                 error_recovery = get_error_recovery_system()

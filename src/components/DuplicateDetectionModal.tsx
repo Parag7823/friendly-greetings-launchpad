@@ -60,7 +60,8 @@ export const DuplicateDetectionModal: React.FC<DuplicateDetectionModalProps> = (
   error
 }) => {
 
-  if (!isOpen) return null;
+  // HYBRID AUTO-PILOT FIX: Don't show modal for auto-actions
+  if (!isOpen || duplicateInfo?.auto_action) return null;
 
   // Extract duplicate type and similarity score
   const duplicateType = duplicateInfo?.duplicate_type || 'exact';
