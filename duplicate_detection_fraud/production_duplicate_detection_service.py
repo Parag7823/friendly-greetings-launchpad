@@ -1244,59 +1244,21 @@ class ProductionDuplicateDetectionService:
     
     async def check_content_duplicate_with_sheets(self, user_id: str, content_fingerprint: str, 
                                                 filename: str, sheets_data: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        FIX #34: Cross-sheet aware content duplicate detection.
-        
-        This method analyzes individual sheets to prevent false positives when the same
-        data structure appears in different sheets representing different accounts or periods.
-        
-        Args:
-            user_id: User identifier
-            content_fingerprint: Overall file content fingerprint
-            filename: Current filename for context
-            sheets_data: Dictionary of sheet data {sheet_name: [rows]}
-            
-        Returns:
-            Dictionary with cross-sheet aware duplicate analysis
-        """
+        """Use Polars anti-joins for cross-sheet duplicate detection"""
         try:
-            logger.info(f"🔍 Cross-sheet duplicate analysis for {len(sheets_data)} sheets")
+            import polars as pl
             
-            # Calculate individual sheet fingerprints
-            sheet_fingerprints = {}
+            # Hash each sheet's rows
+            sheet_hashes = {}
             for sheet_name, rows in sheets_data.items():
-                if rows:  # Only process non-empty sheets
-                    # Create sheet-specific fingerprint using polars for performance
-                    try:
-                        import polars as pl
-                        df = pl.DataFrame(rows)
-                        # FIX #5: Use centralized hashing for consistency with provenance_tracker
-                        sheet_content = df.to_pandas().to_json(orient='records', sort_keys=True)
-                        if _HAS_CENTRALIZED_HASHING:
-                            # Use centralized xxh3_128 for consistency
-                            sheet_hash = calculate_row_hash(
-                                source_filename=filename or "unknown",
-                                row_index=0,  # Sheet-level hash
-                                payload={"sheet_name": sheet_name, "content": sheet_content[:1000]}  # Sample
-                            )
-                        else:
-                            # Fallback to xxh64 if centralized not available
-                            sheet_hash = xxhash.xxh64(sheet_content.encode()).hexdigest()
-                        sheet_fingerprints[sheet_name] = {
-                            'hash': sheet_hash,
-                            'row_count': len(rows),
-                            'columns': list(df.columns) if not df.is_empty() else []
-                        }
-                        logger.debug(f"Sheet '{sheet_name}': {len(rows)} rows, hash: {sheet_hash[:16]}...")
-                    except Exception as sheet_err:
-                        logger.warning(f"Failed to fingerprint sheet '{sheet_name}': {sheet_err}")
-                        continue
+                if rows:
+                    df = pl.DataFrame(rows).with_columns(pl.struct(pl.all()).hash().alias("row_hash"))
+                    sheet_hashes[sheet_name] = set(df['row_hash'].to_list())
             
-            if not sheet_fingerprints:
-                logger.info("No valid sheets to analyze for duplicates")
+            if not sheet_hashes:
                 return {'is_content_duplicate': False, 'overlapping_files': []}
             
-            # Check for existing files with similar sheet structures
+            # Check existing files for duplicates using anti-join logic
             result = self.supabase.table('raw_records').select(
                 'id, file_name, created_at, content'
             ).eq('user_id', user_id).neq('file_hash', content_fingerprint).execute()
@@ -1308,88 +1270,52 @@ class ProductionDuplicateDetectionService:
             for record in result.data:
                 try:
                     existing_content = record.get('content', {})
-                    existing_sheets = existing_content.get('sheets', [])
+                    existing_sheets = existing_content.get('sheets', {})
                     
                     if not existing_sheets:
                         continue
                     
-                    # Compare sheet structures and content
-                    sheet_matches = 0
-                    total_sheets = len(sheet_fingerprints)
+                    # Count matching rows across sheets using anti-join logic
+                    matching_sheets = 0
+                    for sheet_name, new_hashes in sheet_hashes.items():
+                        if sheet_name in existing_sheets:
+                            existing_rows = existing_sheets[sheet_name]
+                            if existing_rows:
+                                df_existing = pl.DataFrame(existing_rows).with_columns(
+                                    pl.struct(pl.all()).hash().alias("row_hash")
+                                )
+                                existing_hashes = set(df_existing['row_hash'].to_list())
+                                
+                                # Check if rows match (no anti-join = duplicates)
+                                if new_hashes == existing_hashes:
+                                    matching_sheets += 1
                     
-                    for current_sheet, current_fp in sheet_fingerprints.items():
-                        # Look for similar sheets in existing file
-                        for existing_sheet in existing_sheets:
-                            # Check if this could be the same sheet with different name
-                            # (e.g., "January 2024" vs "February 2024" - same structure, different data)
-                            if self._sheets_are_similar_structure(current_fp, existing_sheet, existing_content):
-                                sheet_matches += 1
-                                break
-                    
-                    # Calculate similarity ratio
-                    similarity_ratio = sheet_matches / total_sheets if total_sheets > 0 else 0
-                    
-                    # Only consider it a duplicate if similarity exceeds threshold
-                    if similarity_ratio >= config.sheet_similarity_threshold:
+                    similarity = matching_sheets / len(sheet_hashes) if sheet_hashes else 0
+                    if similarity >= config.sheet_similarity_threshold:
                         overlapping_files.append({
                             'id': record['id'],
                             'filename': record['file_name'],
                             'uploaded_at': record['created_at'],
-                            'sheet_similarity': similarity_ratio,
-                            'matching_sheets': sheet_matches,
-                            'total_sheets': total_sheets
+                            'sheet_similarity': similarity
                         })
-                        logger.info(f"Cross-sheet duplicate found: {record['file_name']} "
-                                  f"({sheet_matches}/{total_sheets} sheets match, {similarity_ratio:.1%} similarity)")
+                        logger.info(f"Cross-sheet duplicate: {record['file_name']} ({similarity:.1%} match)")
                 
-                except Exception as record_err:
-                    logger.warning(f"Error analyzing record {record.get('id')}: {record_err}")
+                except Exception as e:
+                    logger.warning(f"Error analyzing record {record.get('id')}: {e}")
                     continue
             
             if overlapping_files:
                 return {
                     'is_content_duplicate': True,
                     'overlapping_files': overlapping_files,
-                    'recommendation': 'cross_sheet_analysis_required',
-                    'message': f"Found {len(overlapping_files)} file(s) with similar sheet structures. "
-                              f"Cross-sheet analysis suggests these may represent different accounts or time periods.",
-                    'cross_sheet_analysis': {
-                        'analyzed_sheets': len(sheet_fingerprints),
-                        'sheet_names': list(sheet_fingerprints.keys()),
-                        'similarity_threshold': config.sheet_similarity_threshold
-                    }
+                    'recommendation': 'cross_sheet_analysis_required'
                 }
             
             return {'is_content_duplicate': False, 'overlapping_files': []}
             
         except Exception as e:
             logger.error(f"Error in cross-sheet duplicate analysis: {e}")
-            # Fallback to regular content duplicate check
             return await self.check_content_duplicate(user_id, content_fingerprint, filename)
-    
-    def _sheets_are_similar_structure(self, current_sheet_fp: Dict, existing_sheet_name: str, 
-                                    existing_content: Dict) -> bool:
-        """
-        Check if two sheets have similar structure (columns, row count patterns).
-        
-        This helps identify when sheets represent the same type of data but for
-        different accounts, time periods, or categories.
-        """
-        try:
-            # For now, use a simple heuristic based on column similarity
-            # In a more sophisticated implementation, this could use ML-based structure comparison
-            current_columns = set(current_sheet_fp.get('columns', []))
-            current_row_count = current_sheet_fp.get('row_count', 0)
-            
-            # This is a simplified implementation - in production you might want to
-            # store more detailed sheet metadata for better comparison
-            # For now, we'll use a conservative approach and only flag obvious duplicates
-            
-            return False  # Conservative: avoid false positives for different sheets
-            
-        except Exception as e:
-            logger.warning(f"Error comparing sheet structures: {e}")
-            return False
     
     async def handle_duplicate_decision(self, user_id: str, file_hash: str, 
                                      decision: str, existing_file_id: Optional[str] = None) -> Dict[str, Any]:

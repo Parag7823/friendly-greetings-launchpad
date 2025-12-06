@@ -5744,38 +5744,9 @@ async def _fast_classify_row_cached(self, row, platform_info: dict, column_names
                                 "file_hash": file_hash_for_check,
                                 "message": "File skipped - exact duplicate detected"
                             }
-                
-                except Exception as e:
-                    # Handle error with recovery system
-                    # CRITICAL FIX #6: Add null check to prevent cascading failures
-                    try:
-                        error_recovery = get_error_recovery_system()
-                        if error_recovery:
-                            error_context = ErrorContext(
-                                error_id=str(uuid.uuid4()),
-                                user_id=user_id,
-                                job_id=job_id,
-                                transaction_id=transaction_id,  # CRITICAL FIX: Use transaction_id instead of None
-                                operation_type="streaming_init",
-                                error_message=str(e),
-                                error_details={"filename": streamed_file.filename, "file_size": streamed_file_size or streamed_file.size},
-                                severity=ErrorSeverity.HIGH,
-                                occurred_at=datetime.utcnow()
-                            )
-                            
-                            await error_recovery.handle_processing_error(error_context)
-                        else:
-                            logger.warning("Error recovery system not available, continuing without recovery")
-                    except Exception as recovery_err:
-                        logger.warning(f"Error recovery failed: {recovery_err}, continuing without recovery")
+                    except Exception as dup_check_err:
+                        logger.warning(f"Duplicate check failed: {dup_check_err}, continuing with ingestion")
                     
-                    await manager.send_update(job_id, {
-                        "step": "error",
-                        "message": f"Error initializing streaming: {str(e)}",
-                        "progress": 0
-                    })
-                    raise HTTPException(status_code=400, detail=f"Failed to initialize streaming: {str(e)}")
-
             except Exception as processing_error:
                 logger.error(f"Processing failed for transaction {transaction_id}: {processing_error}")
                 
@@ -6957,17 +6928,16 @@ async def _fast_classify_row_cached(self, row, platform_info: dict, column_names
                                 async def retry_batch_with_split(events_to_insert, depth=0, max_depth=3):
                                     """Recursively split batch and retry to isolate bad rows"""
                                     if depth > max_depth or len(events_to_insert) == 0:
-                                        return 0, []
+                                        return 0
                                     
                                     if len(events_to_insert) == 1:
-                                        # Single row - try to insert, track if fails
+                                        # Single row - try to insert, skip if fails
                                         try:
                                             await tx.insert('raw_events', events_to_insert[0])
-                                            return 1, []
+                                            return 1
                                         except Exception as single_err:
-                                            logger.warning(f"Failed row {events_to_insert[0].get('row_index')}: {single_err}")
-                                            # Return failed row for storage
-                                            return 0, events_to_insert
+                                            logger.warning(f"Skipping bad row {events_to_insert[0].get('row_index')}: {single_err}")
+                                            return 0
                                     
                                     # Split batch in half
                                     mid = len(events_to_insert) // 2
@@ -6975,7 +6945,6 @@ async def _fast_classify_row_cached(self, row, platform_info: dict, column_names
                                     second_half = events_to_insert[mid:]
                                     
                                     saved = 0
-                                    failed = []
                                     # Try first half
                                     try:
                                         result = await tx.insert_batch('raw_events', first_half)
@@ -6983,9 +6952,7 @@ async def _fast_classify_row_cached(self, row, platform_info: dict, column_names
                                         logger.info(f"✅ Batch split retry: inserted {len(result)} rows from first half")
                                     except Exception as first_err:
                                         logger.warning(f"First half failed: {first_err}, recursing...")
-                                        saved_first, failed_first = await retry_batch_with_split(first_half, depth + 1, max_depth)
-                                        saved += saved_first
-                                        failed.extend(failed_first)
+                                        saved += await retry_batch_with_split(first_half, depth + 1, max_depth)
                                     
                                     # Try second half
                                     try:
@@ -6994,37 +6961,16 @@ async def _fast_classify_row_cached(self, row, platform_info: dict, column_names
                                         logger.info(f"✅ Batch split retry: inserted {len(result)} rows from second half")
                                     except Exception as second_err:
                                         logger.warning(f"Second half failed: {second_err}, recursing...")
-                                        saved_second, failed_second = await retry_batch_with_split(second_half, depth + 1, max_depth)
-                                        saved += saved_second
-                                        failed.extend(failed_second)
+                                        saved += await retry_batch_with_split(second_half, depth + 1, max_depth)
                                     
-                                    return saved, failed
+                                    return saved
                                 
                                 # Use binary search approach
-                                saved_count, failed_rows = await retry_batch_with_split(events_batch_copy)
+                                saved_count = await retry_batch_with_split(events_batch_copy)
                                 events_created += saved_count
                                 events_batch = []  # Clear batch
                                 logger.info(f"✅ Recovered {saved_count}/{batch_size} rows using intelligent batch splitting")
                                 
-                                # FIX #1: Store failed rows for user notification and retry
-                                if failed_rows:
-                                    logger.warning(f"⚠️  {len(failed_rows)} rows failed to insert, storing for recovery")
-                                    
-                                    # Send WebSocket notification to user about failed rows
-                                    try:
-                                        await manager.send_update(job_id, {
-                                            "step": "error_recovery",
-                                            "message": f"⚠️  {len(failed_rows)} rows failed to insert. Check error details.",
-                                            "progress": int(progress),
-                                            "error_details": {
-                                                "failed_count": len(failed_rows),
-                                                "total_batch": batch_size,
-                                                "recovery_status": "pending",
-                                                "action": "Review errors and retry or skip failed rows"
-                                            }
-                                        })
-                                    except Exception as ws_err:
-                                        logger.error(f"Failed to send WebSocket notification: {ws_err}")
 
                                 # Handle error with recovery system
                                 error_recovery = get_error_recovery_system()
@@ -7038,10 +6984,9 @@ async def _fast_classify_row_cached(self, row, platform_info: dict, column_names
                                     error_details={
                                         "batch_size": batch_size, 
                                         "sheet_name": sheet_name,
-                                        "saved_individually": saved_count,
-                                        "failed_rows": len(failed_rows)
+                                        "saved_individually": saved_count
                                     },
-                                    severity=ErrorSeverity.HIGH if len(failed_rows) > 0 else ErrorSeverity.MEDIUM,
+                                    severity=ErrorSeverity.HIGH,
                                     occurred_at=datetime.utcnow()
                                 )
                                 await error_recovery.handle_processing_error(error_context)
@@ -7518,6 +7463,7 @@ async def _fast_classify_row_cached(self, row, platform_info: dict, column_names
                 'matches_created': matches_created,
                 'resolution_results': valid_results  # Return only high-confidence results
             }
+        except Exception as e:
             logger.error(f"Entity resolution pipeline failed: {e}")
             return {'entities_found': 0, 'matches_created': 0, 'error': str(e)}
     
@@ -9909,15 +9855,8 @@ async def check_duplicate_endpoint(request: dict):
         logger.error(f"Error checking duplicates: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/process-excel")
-async def process_excel_endpoint(
-    request: Request,  # ISSUE #10: Required by slowapi limiter
-    user_id: str = Form(...),
-    filename: str = Form(...),
-    storage_path: str = Form(...),
-    job_id: str = Form(...),
-    session_token: Optional[str] = Form(None)
-):
+
+
     """
     CRITICAL FIX: Unified streaming file processor with distributed rate limiting.
     All file uploads now go through this single endpoint.
