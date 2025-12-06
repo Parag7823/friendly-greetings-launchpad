@@ -214,8 +214,9 @@ export class FastAPIProcessor {
       jobData = jobResult; // Assign to outer scope variable
       
       // Notify about job ID for cancel functionality
+      // Note: file_hash will be computed by backend and returned in response
       if (onJobId) {
-        onJobId(jobData.id, fileHash);
+        onJobId(jobData.id, undefined);  // Hash computed by backend
       }
 
       this.updateProgress('analysis', 'Processing with FastAPI backend...', 30);

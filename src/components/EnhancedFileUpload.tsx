@@ -346,29 +346,16 @@ export const EnhancedFileUpload: React.FC<EnhancedFileUploadProps> = ({ initialF
               : f
           ));
           
-          // FIX #1: Wrap processing with duplicate check lock
+          // CRITICAL FIX #1: Removed frontend hash calculation
+          // Backend computes xxh3_128 from streamed file (more reliable, consistent)
+          // Duplicate detection lock no longer needed - backend handles it
           const processPromise = (async () => {
-            // Calculate file hash BEFORE acquiring lock
-            const fileBuffer = await file.arrayBuffer();
-            const hashBuffer = await crypto.subtle.digest('SHA-256', fileBuffer);
-            const hashArray = Array.from(new Uint8Array(hashBuffer));
-            const fileHash = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-            
-            // FIX #1: CRITICAL - Acquire lock for this file hash
-            // Wait if another file with same hash is being checked
-            while (duplicateCheckLock.current.has(fileHash)) {
-              await new Promise(resolve => setTimeout(resolve, 100));
-            }
-            
-            // Acquire lock
-            duplicateCheckLock.current.add(fileHash);
-            
             try {
-              // Now process file with lock held
+              // Process file directly without frontend hash calculation
               await processFile(file, id);
-            } finally {
-              // Always release lock
-              duplicateCheckLock.current.delete(fileHash);
+            } catch (error) {
+              console.error(`Error processing file ${file.name}:`, error);
+              throw error;
             }
           })();
           

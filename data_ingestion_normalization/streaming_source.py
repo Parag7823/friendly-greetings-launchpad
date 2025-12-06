@@ -62,14 +62,6 @@ class StreamedFile:
         with open(self.path, "r", encoding=encoding, errors=errors) as handle:
             return handle.read()
 
-    def compute_sha256(self) -> str:
-        hasher = hashlib.sha256()
-        for chunk in self.iter_bytes():
-            hasher.update(chunk)
-        digest = hasher.hexdigest()
-        self._sha256 = digest
-        return digest
-
     def compute_xxh3_128(self) -> str:
         """✅ FIX ISSUE #5: Standardized hash using xxh3_128 (faster than SHA-256, collision-resistant)"""
         hasher = xxhash.xxh3_128()

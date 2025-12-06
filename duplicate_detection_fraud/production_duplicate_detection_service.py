@@ -322,8 +322,10 @@ class ProductionDuplicateDetectionService:
         if not user_id or len(user_id) > 255:
             raise ValueError("Invalid user_id")
         
-        if not file_hash or len(file_hash) != 64:
-            raise ValueError("Invalid file_hash: must be SHA-256")
+        # CRITICAL FIX #1: Accept both xxh3_128 (32 chars) and SHA-256 (64 chars)
+        # Backend now uses xxh3_128 for standardized hashing
+        if not file_hash or len(file_hash) not in (32, 64):
+            raise ValueError("Invalid file_hash: must be xxh3_128 (32 chars) or SHA-256 (64 chars)")
         
         if not filename or len(filename) > config.max_filename_length:
             raise ValueError(f"Invalid filename length")

@@ -5589,11 +5589,12 @@ async def _fast_classify_row_cached(self, row, platform_info: dict, column_names
         async def _execute_with_rollback():
             """Execute processing with automatic rollback on failure"""
             try:
-                # ACCURACY FIX #11: Calculate file hash once and reuse
+                # CRITICAL FIX #1: Use xxh3_128 for standardized hashing
+                # Eliminates hash mismatch between frontend (SHA-256) and backend (xxh3_128)
                 if streamed_file_hash:
                     file_hash = streamed_file_hash
                 else:
-                    file_hash = streamed_file.sha256
+                    file_hash = streamed_file.xxh3_128  # Use xxh3_128 instead of deprecated sha256
                 file_hash_for_check = original_file_hash or file_hash
                 
                 # Step 2: Duplicate Detection (Exact and Near) using Production Service
@@ -5897,7 +5898,7 @@ async def _fast_classify_row_cached(self, row, platform_info: dict, column_names
         if streamed_file_hash:
             file_hash = streamed_file_hash
         else:
-            file_hash = streamed_file.sha256
+            file_hash = streamed_file.xxh3_128  # Use xxh3_128 instead of deprecated sha256
         file_hash_for_check = original_file_hash or file_hash
         
         # Step 2: Duplicate Detection (Exact and Near) using Production Service
