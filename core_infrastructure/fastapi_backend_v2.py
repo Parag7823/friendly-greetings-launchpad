@@ -45,12 +45,12 @@ try:
             # Error filtering
             before_send=lambda event, hint: event if event.get("level") in ["error", "fatal"] else None,
         )
-        print("✓ Sentry initialized successfully")
+        print("[OK] Sentry initialized successfully")
 except ImportError:
     # Sentry SDK not installed - this is optional, continue without it
     pass
 except Exception as e:
-    print(f"⚠ Sentry initialization failed: {e}")
+    print(f"[WARNING] Sentry initialization failed: {e}")
 
 try:
     import pandas as pd
@@ -72,7 +72,7 @@ try:
     from groq import Groq
 except ImportError:
     Groq = None
-    print("⚠️ Groq library not installed", flush=True)
+    print("[WARNING] Groq library not installed", flush=True)
 
 import re
 import asyncio
@@ -99,96 +99,96 @@ try:
     import xxhash
 except ImportError:
     xxhash = None
-    print("⚠️ xxhash not installed - dedupe hashing will use fallback", flush=True)
+    print("[WARNING] xxhash not installed - dedupe hashing will use fallback", flush=True)
 
 try:
     from glom import glom, Coalesce, Iterate
 except ImportError:
     glom = None
-    print("⚠️ glom not installed - nested data extraction will use fallback", flush=True)
+    print("[WARNING] glom not installed - nested data extraction will use fallback", flush=True)
 
 # Shared ingestion/normalization modules
 try:
     # Local/package layout
-    print("🔍 DEBUG: Importing UniversalFieldDetector...", flush=True)
+    print("[DEBUG] Importing UniversalFieldDetector...", flush=True)
     from data_ingestion_normalization.universal_field_detector import UniversalFieldDetector
-    print("🔍 DEBUG: Importing UniversalPlatformDetector...", flush=True)
+    print("[DEBUG] Importing UniversalPlatformDetector...", flush=True)
     from data_ingestion_normalization.universal_platform_detector_optimized import (
         UniversalPlatformDetectorOptimized as UniversalPlatformDetector,
     )
-    print("🔍 DEBUG: Importing UniversalDocumentClassifier...", flush=True)
+    print("[DEBUG] Importing UniversalDocumentClassifier...", flush=True)
     from data_ingestion_normalization.universal_document_classifier_optimized import (
         UniversalDocumentClassifierOptimized as UniversalDocumentClassifier,
     )
-    print("🔍 DEBUG: Importing UniversalExtractors...", flush=True)
+    print("[DEBUG] Importing UniversalExtractors...", flush=True)
     from data_ingestion_normalization.universal_extractors_optimized import (
         UniversalExtractorsOptimized as UniversalExtractors,
     )
-    print("🔍 DEBUG: Importing EntityResolver...", flush=True)
+    print("[DEBUG] Importing EntityResolver...", flush=True)
     from data_ingestion_normalization.entity_resolver_optimized import (
         EntityResolverOptimized as EntityResolver,
     )
-    print("🔍 DEBUG: Importing StreamedFile...", flush=True)
+    print("[DEBUG] Importing StreamedFile...", flush=True)
     from data_ingestion_normalization.streaming_source import StreamedFile
 except ImportError:
     # Docker layout: modules in subdirectories
-    print("🔍 DEBUG: Importing UniversalFieldDetector (flat)...", flush=True)
+    print("[DEBUG] Importing UniversalFieldDetector (flat)...", flush=True)
     from data_ingestion_normalization.universal_field_detector import UniversalFieldDetector
-    print("🔍 DEBUG: Importing UniversalPlatformDetector (flat)...", flush=True)
+    print("[DEBUG] Importing UniversalPlatformDetector (flat)...", flush=True)
     from data_ingestion_normalization.universal_platform_detector_optimized import (
         UniversalPlatformDetectorOptimized as UniversalPlatformDetector,
     )
-    print("🔍 DEBUG: Importing UniversalDocumentClassifier (flat)...", flush=True)
+    print("[DEBUG] Importing UniversalDocumentClassifier (flat)...", flush=True)
     from data_ingestion_normalization.universal_document_classifier_optimized import (
         UniversalDocumentClassifierOptimized as UniversalDocumentClassifier,
     )
-    print("🔍 DEBUG: Importing UniversalExtractors (flat)...", flush=True)
+    print("[DEBUG] Importing UniversalExtractors (flat)...", flush=True)
     from data_ingestion_normalization.universal_extractors_optimized import (
         UniversalExtractorsOptimized as UniversalExtractors,
     )
-    print("🔍 DEBUG: Importing EntityResolver (flat)...", flush=True)
+    print("[DEBUG] Importing EntityResolver (flat)...", flush=True)
     from data_ingestion_normalization.entity_resolver_optimized import (
         EntityResolverOptimized as EntityResolver,
     )
-    print("🔍 DEBUG: Importing StreamedFile (flat)...", flush=True)
+    print("[DEBUG] Importing StreamedFile (flat)...", flush=True)
     try:
         from data_ingestion_normalization.streaming_source import StreamedFile
-        print("🔍 DEBUG: StreamedFile imported successfully", flush=True)
+        print("[DEBUG] StreamedFile imported successfully", flush=True)
     except Exception as e:
-        print(f"❌ CRITICAL ERROR importing StreamedFile: {e}", flush=True)
+        print(f"[ERROR] CRITICAL ERROR importing StreamedFile: {e}", flush=True)
         raise e
 
-print("🔍 DEBUG: Importing EnhancedRelationshipDetector...", flush=True)
+print("[DEBUG] Importing EnhancedRelationshipDetector...", flush=True)
 try:
     from aident_cfo_brain.enhanced_relationship_detector import EnhancedRelationshipDetector
-    print("🔍 DEBUG: EnhancedRelationshipDetector imported successfully", flush=True)
+    print("[DEBUG] EnhancedRelationshipDetector imported successfully", flush=True)
 except Exception as e:
-    print(f"❌ CRITICAL ERROR importing EnhancedRelationshipDetector: {e}", flush=True)
+    print(f"[ERROR] CRITICAL ERROR importing EnhancedRelationshipDetector: {e}", flush=True)
     # Don't raise yet, let's see if other imports fail
     EnhancedRelationshipDetector = None
 
-print("🔍 DEBUG: Importing ProvenanceTracker...", flush=True)
+print("[DEBUG] Importing ProvenanceTracker...", flush=True)
 try:
     from core_infrastructure.provenance_tracker import normalize_business_logic, normalize_temporal_causality
-    print("🔍 DEBUG: ProvenanceTracker imported successfully", flush=True)
+    print("[DEBUG] ProvenanceTracker imported successfully", flush=True)
 except Exception as e:
-    print(f"❌ CRITICAL ERROR importing ProvenanceTracker: {e}", flush=True)
+    print(f"[ERROR] CRITICAL ERROR importing ProvenanceTracker: {e}", flush=True)
     normalize_business_logic = None
     normalize_temporal_causality = None
 
 # Lazy import for field_mapping_learner to avoid circular dependencies
 try:
-    print("🔍 DEBUG: Importing FieldMappingLearner...", flush=True)
+    print("[DEBUG] Importing FieldMappingLearner...", flush=True)
     try:
         from data_ingestion_normalization.field_mapping_learner import (
             learn_field_mapping,
             get_learned_mappings,
         )
-        print("🔍 DEBUG: FieldMappingLearner imported successfully (nested)", flush=True)
+        print("[DEBUG] FieldMappingLearner imported successfully (nested)", flush=True)
     except ImportError:
-        print("🔍 DEBUG: Importing FieldMappingLearner (flat)...", flush=True)
+        print("[DEBUG] Importing FieldMappingLearner (flat)...", flush=True)
         from data_ingestion_normalization.field_mapping_learner import learn_field_mapping, get_learned_mappings
-        print("🔍 DEBUG: FieldMappingLearner imported successfully (flat)", flush=True)
+        print("[DEBUG] FieldMappingLearner imported successfully (flat)", flush=True)
 except Exception as e:
     # logger not initialized yet here; use print for diagnostics only
     print(f"field_mapping_learner_unavailable: {e}", flush=True)
@@ -244,7 +244,7 @@ class AppConfig(BaseSettings):
     - IDE autocomplete
     """
     
-    # Required variables
+    # Supabase configuration (required)
     supabase_url: str
     supabase_service_role_key: str = Field(validation_alias='SUPABASE_KEY')
     
@@ -261,6 +261,7 @@ class AppConfig(BaseSettings):
     class Config:
         env_file = ".env"
         case_sensitive = False
+        extra = "ignore"  # Ignore extra environment variables (Pydantic v2 compatibility)
     
     @property
     def redis_url_resolved(self) -> Optional[str]:

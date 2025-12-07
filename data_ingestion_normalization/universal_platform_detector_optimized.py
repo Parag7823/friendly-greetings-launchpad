@@ -870,6 +870,11 @@ class UniversalPlatformDetectorOptimized:
         CRITICAL FIX: Validate cache version to ensure consistency across workers.
         """
         try:
+            # CRITICAL FIX: Check if cache exists and has get method
+            if not self.cache or not hasattr(self.cache, 'get'):
+                logger.warning("Cache not properly initialized, skipping version validation")
+                return True
+            
             stored_version = await self.cache.get("platform_detector_version")
             if stored_version and stored_version != self.cache_version:
                 logger.warning(f"Cache version mismatch: local={self.cache_version}, stored={stored_version}")

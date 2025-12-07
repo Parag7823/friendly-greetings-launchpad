@@ -671,7 +671,7 @@ def initialize_centralized_cache(cache_client=None):
     Raises:
         RuntimeError: If Redis cache not available
     """
-    from centralized_cache import safe_get_cache
+    from core_infrastructure.centralized_cache import safe_get_cache
     
     cache = cache_client or safe_get_cache()
     if cache is None:
