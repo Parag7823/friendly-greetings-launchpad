@@ -31,7 +31,7 @@ import structlog
 import numpy as np
 from sklearn.metrics.pairwise import cosine_similarity
 from sklearn.feature_extraction.text import TfidfVectorizer
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, field_validator, ConfigDict
 from pydantic_settings import BaseSettings
 from aiocache import cached, Cache
 from aiocache.serializers import JsonSerializer
@@ -66,26 +66,27 @@ class DocumentClassifierConfig(BaseSettings):
     update_frequency: int = 3600
     document_types_yaml: str = 'config/document_types.yaml'  # External config file
     
-    class Config:
-        env_prefix = 'DOC_CLASSIFIER_'
-        case_sensitive = False
+    model_config = ConfigDict(
+        env_prefix='DOC_CLASSIFIER_',
+        case_sensitive=False
+    )
 
 # OPTIMIZED: Type-safe document type definition with pydantic
 class DocumentTypeDefinition(BaseModel):
     """Type-safe document type definition with auto-validation"""
     name: str
     category: Literal['financial', 'business', 'legal', 'healthcare', 'government', 'personal', 'education']
-    indicators: List[str] = Field(min_items=1, max_items=100)
+    indicators: List[str] = Field(min_length=1, max_length=100)
     field_patterns: List[str] = []
-    keywords: List[str] = Field(min_items=1, max_items=20)
+    keywords: List[str] = Field(min_length=1, max_length=20)
     confidence_boost: float = Field(ge=0.0, le=1.0, default=0.8)
     
-    @validator('indicators', 'keywords')
+    @field_validator('indicators', 'keywords', mode='before')
+    @classmethod
     def lowercase_lists(cls, v):
         return [i.lower().strip() for i in v]
     
-    class Config:
-        frozen = True  # Immutable
+    model_config = ConfigDict(frozen=True)  # Immutable
 
 @dataclass
 class DocumentClassificationResult:

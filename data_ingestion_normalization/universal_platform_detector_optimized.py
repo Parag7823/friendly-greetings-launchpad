@@ -24,7 +24,7 @@ from dataclasses import dataclass
 # NASA-GRADE v4.0 LIBRARIES (Consistent with all optimized files)
 import ahocorasick  # Replaces flashtext (2x faster, async-ready)
 import structlog
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, field_validator, ConfigDict
 from pydantic_settings import BaseSettings
 from aiocache import cached, Cache
 from aiocache.serializers import JsonSerializer
@@ -47,25 +47,26 @@ class PlatformDetectorConfig(BaseSettings):
     learning_window: int = 1000
     update_frequency: int = 3600
     
-    class Config:
-        env_prefix = 'PLATFORM_DETECTOR_'
-        case_sensitive = False
+    model_config = ConfigDict(
+        env_prefix='PLATFORM_DETECTOR_',
+        case_sensitive=False
+    )
 
 # OPTIMIZED: Type-safe platform definition with pydantic
 class PlatformDefinition(BaseModel):
     """Type-safe platform definition with auto-validation"""
     name: str
     category: Literal['payment_gateway', 'banking', 'accounting', 'crm', 'ecommerce', 'cloud_services', 'payroll', 'investment']
-    indicators: List[str] = Field(min_items=1, max_items=50)
+    indicators: List[str] = Field(min_length=1, max_length=50)
     field_patterns: List[str] = []
     confidence_boost: float = Field(ge=0.0, le=1.0, default=0.8)
     
-    @validator('indicators')
+    @field_validator('indicators', mode='before')
+    @classmethod
     def indicators_lowercase(cls, v):
         return [i.lower().strip() for i in v]
     
-    class Config:
-        frozen = True  # Immutable
+    model_config = ConfigDict(frozen=True)  # Immutable
 
 @dataclass
 class PlatformDetectionResult:
@@ -643,11 +644,27 @@ class UniversalPlatformDetectorOptimized:
             if filename:
                 text_parts.append(filename.lower())
             
-            # Add all string values
+            # CRITICAL FIX: Recursively extract all strings from nested structures
+            def extract_strings(obj):
+                """Recursively extract all strings from nested dicts/lists"""
+                if isinstance(obj, str):
+                    return [obj.lower()]
+                elif isinstance(obj, dict):
+                    strings = []
+                    for v in obj.values():
+                        strings.extend(extract_strings(v))
+                    return strings
+                elif isinstance(obj, (list, tuple)):
+                    strings = []
+                    for item in obj:
+                        strings.extend(extract_strings(item))
+                    return strings
+                else:
+                    return []
+            
+            # Extract all strings from payload
             if isinstance(payload, dict):
-                for value in payload.values():
-                    if isinstance(value, str):
-                        text_parts.append(value.lower())
+                text_parts.extend(extract_strings(payload))
             elif hasattr(payload, 'values'):
                 # Handle DataFrame case
                 try:
@@ -683,10 +700,12 @@ class UniversalPlatformDetectorOptimized:
                 # Fallback: Use simple pattern matching from platform_database
                 logger.info("Using fallback pattern matching for platform detection")
                 for platform_id, platform_info in self.platform_database.items():
-                    for pattern in platform_info.get('patterns', []):
-                        if pattern.lower() in combined_text:
+                    # CRITICAL FIX: Use 'indicators' not 'patterns' - matches hardcoded database structure
+                    indicators = platform_info.get('indicators', [])
+                    for indicator in indicators:
+                        if indicator.lower() in combined_text:
                             found_matches.append(platform_id)
-                            found_indicators.append(pattern)
+                            found_indicators.append(indicator)
             
             if not found_matches:
                 return None
