@@ -492,3 +492,59 @@ def get_transaction_manager() -> DatabaseTransactionManager:
     if _transaction_manager is None:
         raise Exception("Transaction manager not initialized. Call initialize_transaction_manager() first.")
     return _transaction_manager
+
+
+# ============================================================================
+# PRELOAD PATTERN: Initialize heavy dependencies at module-load time
+# ============================================================================
+# This runs automatically when the module is imported, eliminating the
+# first-request latency that was caused by lazy-loading.
+
+_PRELOAD_COMPLETED = False
+
+def _preload_all_modules():
+    """
+    PRELOAD PATTERN: Initialize all heavy modules at module-load time.
+    Called automatically when module is imported.
+    This eliminates first-request latency.
+    """
+    global _PRELOAD_COMPLETED
+    
+    if _PRELOAD_COMPLETED:
+        return
+    
+    # Preload Supabase client
+    try:
+        from supabase import Client
+        logger.info("✅ PRELOAD: Supabase Client loaded at module-load time")
+    except Exception as e:
+        logger.warning(f"⚠️ PRELOAD: Supabase load failed: {e}")
+    
+    # Preload pendulum (date/time library)
+    try:
+        import pendulum
+        logger.info("✅ PRELOAD: pendulum loaded at module-load time")
+    except Exception as e:
+        logger.warning(f"⚠️ PRELOAD: pendulum load failed: {e}")
+    
+    # Preload pandas
+    try:
+        import pandas as pd
+        logger.info("✅ PRELOAD: pandas loaded at module-load time")
+    except Exception as e:
+        logger.warning(f"⚠️ PRELOAD: pandas load failed: {e}")
+    
+    # Preload tenacity retry logic
+    try:
+        from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+        logger.info("✅ PRELOAD: tenacity loaded at module-load time")
+    except Exception as e:
+        logger.warning(f"⚠️ PRELOAD: tenacity load failed: {e}")
+    
+    _PRELOAD_COMPLETED = True
+
+try:
+    _preload_all_modules()
+except Exception as e:
+    logger.warning(f"Module-level transaction_manager preload failed (will use fallback): {e}")
+

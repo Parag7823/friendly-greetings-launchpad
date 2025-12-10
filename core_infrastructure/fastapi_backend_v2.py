@@ -1034,7 +1034,7 @@ async def app_lifespan(app: FastAPI):
         # Import here to avoid blocking module load
         if supabase:
             try:
-                from database_optimization_utils import OptimizedDatabaseQueries
+                from core_infrastructure.database_optimization_utils import OptimizedDatabaseQueries
                 optimized_db = OptimizedDatabaseQueries(supabase)
                 logger.info("✅ Optimized database queries initialized")
             except Exception as opt_err:
@@ -1105,8 +1105,19 @@ async def app_lifespan(app: FastAPI):
                     logger.info("   ✅ Intent classifier loaded")
                     
                     logger.info("   Loading output guard (sentence-transformers)...")
-                    output_guard = get_output_guard()
-                    logger.info("   ✅ Output guard loaded")
+                    # Get Groq client for output guard
+                    try:
+                        from groq import AsyncGroq
+                        import os as preload_os
+                        groq_key = preload_os.getenv('GROQ_API_KEY')
+                        if groq_key:
+                            preload_groq = AsyncGroq(api_key=groq_key)
+                            output_guard = get_output_guard(preload_groq)
+                            logger.info("   ✅ Output guard loaded")
+                        else:
+                            logger.warning("   ⚠️ No GROQ_API_KEY - skipping output guard preload")
+                    except Exception as groq_err:
+                        logger.warning(f"   ⚠️ Output guard preload failed: {groq_err}")
                     
                     logger.info("✅ All ML models pre-loaded successfully - chat will be instant!")
                 except Exception as model_err:

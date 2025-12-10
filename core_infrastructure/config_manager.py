@@ -144,3 +144,15 @@ def get_app_config() -> AppConfig:
 def get_airbyte_config() -> AirbytePythonConfig:
     """Get Airbyte configuration."""
     return airbyte_config
+
+
+# ============================================================================
+# PRELOAD PATTERN: Config singletons are initialized at module-load time
+# ============================================================================
+# The singletons (connector_config, queue_config, app_config, airbyte_config)
+# defined above (lines 123-126) are automatically created when module is imported.
+# This is the ideal preload pattern - no additional preload code needed!
+#
+# All config values are immediately available after import:
+# - from config_manager import get_connector_config, get_app_config, etc.
+

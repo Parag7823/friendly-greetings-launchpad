@@ -626,3 +626,52 @@ def get_error_recovery_system() -> ErrorRecoverySystem:
     if _error_recovery_system is None:
         raise Exception("Error recovery system not initialized. Call initialize_error_recovery_system() first.")
     return _error_recovery_system
+
+
+# ============================================================================
+# PRELOAD PATTERN: Initialize heavy dependencies at module-load time
+# ============================================================================
+# This runs automatically when the module is imported, eliminating the
+# first-request latency that was caused by lazy-loading.
+
+_PRELOAD_COMPLETED = False
+
+def _preload_all_modules():
+    """
+    PRELOAD PATTERN: Initialize all heavy modules at module-load time.
+    Called automatically when module is imported.
+    This eliminates first-request latency.
+    """
+    global _PRELOAD_COMPLETED
+    
+    if _PRELOAD_COMPLETED:
+        return
+    
+    # Preload Supabase client
+    try:
+        from supabase import Client
+        logger.info("✅ PRELOAD: Supabase Client loaded at module-load time")
+    except Exception as e:
+        logger.warning(f"⚠️ PRELOAD: Supabase load failed: {e}")
+    
+    # Preload asyncio
+    try:
+        import asyncio
+        logger.info("✅ PRELOAD: asyncio loaded at module-load time")
+    except Exception as e:
+        logger.warning(f"⚠️ PRELOAD: asyncio load failed: {e}")
+    
+    # Preload pendulum (imported in methods)
+    try:
+        import pendulum
+        logger.info("✅ PRELOAD: pendulum loaded at module-load time")
+    except Exception as e:
+        logger.warning(f"⚠️ PRELOAD: pendulum load failed: {e}")
+    
+    _PRELOAD_COMPLETED = True
+
+try:
+    _preload_all_modules()
+except Exception as e:
+    logger.warning(f"Module-level error_recovery_system preload failed (will use fallback): {e}")
+

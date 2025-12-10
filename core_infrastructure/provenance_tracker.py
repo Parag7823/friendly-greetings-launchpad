@@ -580,3 +580,47 @@ def normalize_temporal_causality(value: Optional[str]) -> str:
             return mapped
 
     return 'unknown'
+
+
+# ============================================================================
+# PRELOAD PATTERN: Initialize heavy dependencies at module-load time
+# ============================================================================
+# The global provenance_tracker instance (line 413) is already created at
+# module-load time. This is the ideal preload pattern!
+#
+# Additional preloads for heavy dependencies:
+
+_PRELOAD_COMPLETED = False
+
+def _preload_all_modules():
+    """
+    PRELOAD PATTERN: Initialize all heavy modules at module-load time.
+    Called automatically when module is imported.
+    This eliminates first-request latency.
+    """
+    global _PRELOAD_COMPLETED
+    
+    if _PRELOAD_COMPLETED:
+        return
+    
+    # Preload orjson (fast JSON)
+    try:
+        import orjson
+        logger.info("✅ PRELOAD: orjson loaded at module-load time")
+    except Exception as e:
+        logger.warning(f"⚠️ PRELOAD: orjson load failed: {e}")
+    
+    # Preload database_optimization_utils hashing functions
+    try:
+        from core_infrastructure.database_optimization_utils import calculate_row_hash, verify_row_hash, get_normalized_tokens
+        logger.info("✅ PRELOAD: database_optimization_utils hashing loaded at module-load time")
+    except Exception as e:
+        logger.warning(f"⚠️ PRELOAD: database_optimization_utils load failed: {e}")
+    
+    _PRELOAD_COMPLETED = True
+
+try:
+    _preload_all_modules()
+except Exception as e:
+    logger.warning(f"Module-level provenance_tracker preload failed (will use fallback): {e}")
+

@@ -680,3 +680,82 @@ def create_slowapi_limiter() -> Limiter:
         default_limits=["100/minute"],  # Global default
         storage_uri=os.environ.get("REDIS_URL", "memory://")  # Redis or memory fallback
     )
+
+
+# ============================================================================
+# PRELOAD PATTERN: Initialize heavy dependencies at module-load time
+# ============================================================================
+# This runs automatically when the module is imported, eliminating the
+# first-request latency that was caused by lazy-loading.
+
+_PRELOAD_COMPLETED = False
+
+def _preload_all_modules():
+    """
+    PRELOAD PATTERN: Initialize all heavy modules at module-load time.
+    Called automatically when module is imported.
+    This eliminates first-request latency.
+    """
+    global _PRELOAD_COMPLETED
+    
+    if _PRELOAD_COMPLETED:
+        return
+    
+    # Preload bleach (XSS protection)
+    try:
+        import bleach
+        logger.info("✅ PRELOAD: bleach loaded at module-load time")
+    except Exception as e:
+        logger.warning(f"⚠️ PRELOAD: bleach load failed: {e}")
+    
+    # Preload python-magic (MIME detection)
+    try:
+        import magic
+        magic.Magic(mime=True)
+        logger.info("✅ PRELOAD: python-magic loaded at module-load time")
+    except Exception as e:
+        logger.warning(f"⚠️ PRELOAD: python-magic load failed: {e}")
+    
+    # Preload slowapi rate limiter
+    try:
+        from slowapi import Limiter
+        from slowapi.util import get_remote_address
+        logger.info("✅ PRELOAD: slowapi loaded at module-load time")
+    except Exception as e:
+        logger.warning(f"⚠️ PRELOAD: slowapi load failed: {e}")
+    
+    # Preload pydantic validators
+    try:
+        from pydantic import BaseModel, Field, validator
+        logger.info("✅ PRELOAD: pydantic loaded at module-load time")
+    except Exception as e:
+        logger.warning(f"⚠️ PRELOAD: pydantic load failed: {e}")
+    
+    # Preload orjson (fast JSON)
+    try:
+        import orjson
+        logger.info("✅ PRELOAD: orjson loaded at module-load time")
+    except Exception as e:
+        logger.warning(f"⚠️ PRELOAD: orjson load failed: {e}")
+    
+    # Preload httpx (async HTTP)
+    try:
+        import httpx
+        logger.info("✅ PRELOAD: httpx loaded at module-load time")
+    except Exception as e:
+        logger.warning(f"⚠️ PRELOAD: httpx load failed: {e}")
+    
+    # Pre-initialize the SecurityValidator singleton
+    try:
+        get_global_security_system()
+        logger.info("✅ PRELOAD: SecurityValidator singleton initialized")
+    except Exception as e:
+        logger.warning(f"⚠️ PRELOAD: SecurityValidator init failed: {e}")
+    
+    _PRELOAD_COMPLETED = True
+
+try:
+    _preload_all_modules()
+except Exception as e:
+    logger.warning(f"Module-level security_system preload failed (will use fallback): {e}")
+

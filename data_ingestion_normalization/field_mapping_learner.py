@@ -59,21 +59,8 @@ class FieldMappingLearner:
         self.batch_size = batch_size
         self.flush_interval = flush_interval
         self.max_retries = max_retries
-        
-        # CRITICAL FIX: Removed in-memory queue to prevent data loss
-        # Old: asyncio.Queue + background flush loop = data loss on restart
-        # New: Direct ARQ enqueue = persistent, no data loss
-        # self._queue: asyncio.Queue = asyncio.Queue()  # REMOVED
-        # self._flush_task: Optional[asyncio.Task] = None  # REMOVED
-        # self._running = False  # REMOVED
-        
-        # Metrics
         self._total_learned = 0
         self._total_failed = 0
-        
-    # DEAD CODE REMOVED: start() and stop() methods
-    # These managed the background flush loop which is no longer needed
-    # since we enqueue directly to ARQ without buffering
         
     async def learn_mapping(
         self,
@@ -103,14 +90,11 @@ class FieldMappingLearner:
         """
         if not user_id or not source_column or not target_field:
             return
-            
-        # CRITICAL FIX: Enqueue directly to ARQ without in-memory buffering
-        # This eliminates data loss risk from process restarts
+        
         try:
             from fastapi_backend_v2 import get_arq_pool
             pool = await get_arq_pool()
             
-            # Create mapping dict for ARQ
             mapping_data = {
                 'user_id': user_id,
                 'source_column': source_column,
@@ -124,7 +108,6 @@ class FieldMappingLearner:
                 'observed_at': datetime.utcnow().isoformat()
             }
             
-            # Enqueue single mapping to ARQ (worker will batch multiple jobs)
             await pool.enqueue_job('learn_field_mapping_batch', mappings=[mapping_data])
             self._total_learned += 1
             logger.debug(f"✅ Enqueued field mapping to ARQ: {source_column} → {target_field}")
@@ -132,16 +115,11 @@ class FieldMappingLearner:
         except Exception as e:
             logger.error(f"Failed to enqueue field mapping to ARQ: {e}")
             self._total_failed += 1
-            # Fallback: Write directly to DB if ARQ unavailable
             try:
                 if self.supabase:
                     await self._write_mapping_with_retry(mapping_data)
             except Exception as fallback_error:
                 logger.error(f"Fallback DB write also failed: {fallback_error}")
-        
-    # DEAD CODE REMOVED: _flush_loop(), _flush_batch(), _aggregate_mappings()
-    # These methods managed batching in memory before sending to ARQ
-    # Now we enqueue directly to ARQ in learn_mapping(), eliminating data loss risk
     
     def _aggregate_mappings_UNUSED(self, batch: List[FieldMappingRecord]) -> Dict[tuple, Dict]:
         """
@@ -164,7 +142,7 @@ class FieldMappingLearner:
                 record.target_field.lower(),
                 record.platform,
                 record.document_type,
-                record.filename_pattern  # FIX #10: Include filename_pattern in key
+                record.filename_pattern
             )
             
             agg = aggregated[key]
@@ -174,17 +152,12 @@ class FieldMappingLearner:
             if record.extraction_success:
                 agg['success_count'] += 1
                 
-        # Compute final aggregated mappings
         result = {}
         for key, agg in aggregated.items():
-            user_id, source_column, target_field, platform, document_type, filename_pattern = key  # FIX #10
-            
-            # Average confidence weighted by success rate
+            user_id, source_column, target_field, platform, document_type, filename_pattern = key
             avg_confidence = agg['total_confidence'] / agg['total_count']
             success_rate = agg['success_count'] / agg['total_count']
             final_confidence = avg_confidence * success_rate
-            
-            # Merge metadata
             merged_metadata = {}
             for record in agg['observations']:
                 merged_metadata.update(record.metadata)
@@ -211,22 +184,12 @@ class FieldMappingLearner:
         reraise=True
     )
     async def _write_mapping_with_retry(self, mapping_data: Dict) -> bool:
-        """
-        LIBRARY FIX: Write a single mapping to the database with exponential backoff retry.
-        
-        Uses tenacity library for automatic retry with:
-        - Exponential backoff (1s, 2s, 4s, 8s, 10s max)
-        - Automatic jitter (prevents thundering herd)
-        - Max 3 attempts
-        
-        Returns True if successful, False otherwise.
-        """
+        """Write mapping to database with exponential backoff retry."""
         if not self.supabase:
             logger.warning("No Supabase client available for field mapping learning")
             return False
         
         try:
-            # Use the upsert_field_mapping RPC function
             result = self.supabase.rpc(
                 'upsert_field_mapping',
                 {
@@ -236,16 +199,13 @@ class FieldMappingLearner:
                     'p_platform': mapping_data['platform'],
                     'p_document_type': mapping_data['document_type'],
                     'p_confidence': mapping_data['confidence'],
-                    'p_mapping_source': 'ai_learned',  # Must match CHECK constraint in DB
+                    'p_mapping_source': 'ai_learned',
                     'p_metadata': mapping_data['metadata']
                 }
             ).execute()
             
             if result.data:
-                logger.debug(
-                    f"Learned field mapping: {mapping_data['source_column']} -> {mapping_data['target_field']} "
-                    f"(confidence: {mapping_data['confidence']:.2f})"
-                )
+                logger.debug(f"Learned field mapping: {mapping_data['source_column']} -> {mapping_data['target_field']}")
                 return True
             else:
                 logger.warning("Failed to upsert field mapping")
@@ -253,7 +213,7 @@ class FieldMappingLearner:
                 
         except Exception as e:
             logger.warning(f"Error writing field mapping: {e}")
-            raise  # Let tenacity handle retry
+            raise
         
     async def get_mappings(
         self,
@@ -261,17 +221,11 @@ class FieldMappingLearner:
         platform: Optional[str] = None,
         min_confidence: float = 0.5
     ) -> Dict[str, str]:
-        """
-        Retrieve learned field mappings for a user.
-        
-        Returns a dict mapping target_field -> source_column for the highest
-        confidence mapping of each target field.
-        """
+        """Retrieve learned field mappings for a user."""
         if not self.supabase or not user_id:
             return {}
-            
+        
         try:
-            # Use the get_user_field_mappings RPC function
             result = self.supabase.rpc(
                 'get_user_field_mappings',
                 {
@@ -282,9 +236,7 @@ class FieldMappingLearner:
             
             if not result.data:
                 return {}
-                
-            # Build mapping dict: target_field -> source_column
-            # For each target field, use the highest confidence mapping
+            
             mappings = {}
             for row in result.data:
                 target_field = row.get('target_field')
@@ -293,15 +245,13 @@ class FieldMappingLearner:
                 
                 if confidence < min_confidence:
                     continue
-                    
-                # Use highest confidence mapping for each target field
+                
                 if target_field not in mappings or confidence > mappings[target_field]['confidence']:
                     mappings[target_field] = {
                         'source_column': source_column,
                         'confidence': confidence
                     }
-                    
-            # Return simplified dict
+            
             return {
                 target: data['source_column']
                 for target, data in mappings.items()
@@ -317,21 +267,12 @@ _global_learner: Optional[FieldMappingLearner] = None
 
 
 def get_field_mapping_learner(supabase: Optional[Client] = None) -> FieldMappingLearner:
-    """
-    Get or create the global field mapping learner instance.
-    
-    Args:
-        supabase: Optional Supabase client to inject
-        
-    Returns:
-        Global FieldMappingLearner instance
-    """
+    """Get or create the global field mapping learner instance."""
     global _global_learner
     
     if _global_learner is None:
         _global_learner = FieldMappingLearner(supabase=supabase)
-        
-    # Update supabase client if provided
+    
     if supabase is not None and _global_learner.supabase is None:
         _global_learner.supabase = supabase
         
@@ -349,11 +290,7 @@ async def learn_field_mapping(
     metadata: Optional[Dict[str, Any]] = None,
     supabase: Optional[Client] = None
 ):
-    """
-    Convenience function to learn a field mapping.
-    
-    This is the main entry point for learning field mappings from extraction code.
-    """
+    """Convenience function to learn a field mapping."""
     learner = get_field_mapping_learner(supabase)
     
     # Start learner if not running
@@ -378,10 +315,6 @@ async def get_learned_mappings(
     min_confidence: float = 0.5,
     supabase: Optional[Client] = None
 ) -> Dict[str, str]:
-    """
-    Convenience function to retrieve learned field mappings.
-    
-    Returns a dict mapping target_field -> source_column.
-    """
+    """Convenience function to retrieve learned field mappings."""
     learner = get_field_mapping_learner(supabase)
     return await learner.get_mappings(user_id, platform, min_confidence)

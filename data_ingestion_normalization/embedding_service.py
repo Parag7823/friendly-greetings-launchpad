@@ -353,14 +353,22 @@ def _preload_all_modules():
     except Exception as e:
         logger.warning(f"⚠️ PRELOAD: aiocache load failed: {e}")
     
-    # NOTE: We do NOT preload the actual BGE model here because it's 1.5GB RAM.
-    # The model is loaded on first use via get_embedding_model().
-    # If you want eager model loading, set PRELOAD_EMBEDDING_MODEL=true.
-    if os.environ.get('PRELOAD_EMBEDDING_MODEL', 'false').lower() == 'true':
+    # PRELOAD BGE MODEL: Default to 'true' for systems with 8GB+ RAM
+    # Set PRELOAD_EMBEDDING_MODEL=false to disable if RAM is limited
+    if os.environ.get('PRELOAD_EMBEDDING_MODEL', 'true').lower() != 'false':
         try:
             import asyncio
-            asyncio.get_event_loop().run_until_complete(get_embedding_model())
-            logger.info("✅ PRELOAD: BGE embedding model loaded at module-load time")
+            # Try to use existing event loop or create new one
+            try:
+                loop = asyncio.get_running_loop()
+                # If there's a running loop, just log that we'll preload later
+                logger.info("✅ PRELOAD: BGE embedding model will load on first async call")
+            except RuntimeError:
+                # No running loop, create one for preloading
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                loop.run_until_complete(get_embedding_model())
+                logger.info("✅ PRELOAD: BGE embedding model (1.5GB) loaded at module-load time")
         except Exception as e:
             logger.warning(f"⚠️ PRELOAD: BGE model load failed: {e}")
     
@@ -370,4 +378,6 @@ try:
     _preload_all_modules()
 except Exception as e:
     logger.warning(f"Module-level embedding_service preload failed (will use fallback): {e}")
+
+
 

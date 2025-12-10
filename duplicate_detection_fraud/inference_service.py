@@ -321,3 +321,119 @@ async def shutdown():
         _executor.shutdown(wait=True)
         _executor = None
         logger.info("inference_executor_shutdown")
+
+
+# ============================================================================
+# PRELOAD PATTERN: Initialize heavy dependencies at module-load time
+# ============================================================================
+# This runs automatically when the module is imported, eliminating the
+# first-request latency that was caused by lazy-loading.
+#
+# Heavy ML models (EasyOCR ~350MB, TF-IDF, Automaton) are NOW preloaded by default
+# for systems with 8GB+ RAM. Set PRELOAD_HEAVY_ML=false to disable.
+
+_PRELOAD_COMPLETED = False
+
+def _preload_all_modules():
+    """
+    PRELOAD PATTERN: Initialize all heavy modules at module-load time.
+    Called automatically when module is imported.
+    This eliminates first-request latency.
+    """
+    global _PRELOAD_COMPLETED
+    
+    if _PRELOAD_COMPLETED:
+        return
+    
+    # Preload aiocache decorators
+    try:
+        from aiocache import cached
+        from aiocache.serializers import PickleSerializer
+        logger.info("✅ PRELOAD: aiocache loaded at module-load time")
+    except Exception as e:
+        logger.warning(f"⚠️ PRELOAD: aiocache load failed: {e}")
+    
+    # Preload aiometer rate limiter
+    try:
+        from aiometer import AsyncRateLimiter
+        logger.info("✅ PRELOAD: aiometer loaded at module-load time")
+    except Exception as e:
+        logger.warning(f"⚠️ PRELOAD: aiometer load failed: {e}")
+    
+    # Preload PIL for image processing
+    try:
+        from PIL import Image
+        logger.info("✅ PRELOAD: PIL loaded at module-load time")
+    except Exception as e:
+        logger.warning(f"⚠️ PRELOAD: PIL load failed: {e}")
+    
+    # Preload centralized_cache
+    try:
+        from core_infrastructure.centralized_cache import safe_get_cache
+        logger.info("✅ PRELOAD: centralized_cache loaded at module-load time")
+    except Exception as e:
+        logger.warning(f"⚠️ PRELOAD: centralized_cache load failed: {e}")
+    
+    # Pre-initialize rate limiter singleton
+    try:
+        get_rate_limiter()
+        logger.info("✅ PRELOAD: Rate limiter singleton initialized")
+    except Exception as e:
+        logger.warning(f"⚠️ PRELOAD: Rate limiter init failed: {e}")
+    
+    # HEAVY ML PRELOAD: EasyOCR, TF-IDF, Automaton (for 8GB+ RAM systems)
+    # Set PRELOAD_HEAVY_ML=false to disable if RAM is limited
+    import os
+    if os.environ.get('PRELOAD_HEAVY_ML', 'true').lower() != 'false':
+        logger.info("🔄 PRELOAD: Starting heavy ML model preload (EasyOCR, TF-IDF, Automaton)...")
+        
+        # Preload EasyOCR (~350MB) - synchronous import
+        try:
+            import easyocr
+            logger.info("✅ PRELOAD: EasyOCR module loaded at module-load time")
+        except Exception as e:
+            logger.warning(f"⚠️ PRELOAD: EasyOCR load failed: {e}")
+        
+        # Preload sklearn TF-IDF vectorizer
+        try:
+            from sklearn.feature_extraction.text import TfidfVectorizer
+            logger.info("✅ PRELOAD: sklearn TfidfVectorizer loaded at module-load time")
+        except Exception as e:
+            logger.warning(f"⚠️ PRELOAD: sklearn load failed: {e}")
+        
+        # Preload ahocorasick automaton
+        try:
+            import ahocorasick
+            logger.info("✅ PRELOAD: ahocorasick loaded at module-load time")
+        except Exception as e:
+            logger.warning(f"⚠️ PRELOAD: ahocorasick load failed: {e}")
+        
+        # Call warmup() in background thread to preload actual model instances
+        try:
+            import asyncio
+            import threading
+            
+            def _warmup_thread():
+                try:
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    loop.run_until_complete(warmup())
+                    logger.info("✅ PRELOAD: Heavy ML models warmed up in background")
+                except Exception as e:
+                    logger.warning(f"⚠️ PRELOAD: Heavy ML warmup failed: {e}")
+            
+            thread = threading.Thread(target=_warmup_thread, daemon=True)
+            thread.start()
+            logger.info("✅ PRELOAD: Heavy ML warmup started in background thread")
+        except Exception as e:
+            logger.warning(f"⚠️ PRELOAD: Background warmup failed: {e}")
+    
+    _PRELOAD_COMPLETED = True
+
+try:
+    _preload_all_modules()
+except Exception as e:
+    logger.warning(f"Module-level inference_service preload failed (will use fallback): {e}")
+
+
+
