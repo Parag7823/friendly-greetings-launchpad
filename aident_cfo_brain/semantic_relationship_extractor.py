@@ -653,3 +653,53 @@ Provide: relationship_type, semantic_description, confidence (0.0-1.0), temporal
         }
 
 
+# ============================================================================
+# PRELOAD PATTERN: Initialize heavy dependencies at module-load time
+# ============================================================================
+# This runs automatically when the module is imported, eliminating the
+# first-request latency that was caused by lazy-loading.
+# 
+# BENEFITS:
+# - First request is instant (no cold-start delay)
+# - Shared across all worker instances
+# - Memory is allocated once, not per-instance
+
+_PRELOAD_COMPLETED = False
+
+async def _preload_embedding_service_async():
+    """Preload embedding service asynchronously."""
+    global _PRELOAD_COMPLETED
+    if _PRELOAD_COMPLETED:
+        return
+    
+    try:
+        await get_embedding_service()
+        logger.info("✅ PRELOAD: EmbeddingService loaded at module-load time")
+    except Exception as e:
+        logger.warning(f"⚠️ PRELOAD: EmbeddingService load failed: {e}")
+    
+    _PRELOAD_COMPLETED = True
+
+def _preload_sync():
+    """Synchronous preload wrapper for module-level execution."""
+    try:
+        # Try to get existing event loop
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            # If loop is already running, schedule the preload
+            asyncio.ensure_future(_preload_embedding_service_async())
+        else:
+            # If no loop is running, run the preload directly
+            loop.run_until_complete(_preload_embedding_service_async())
+    except RuntimeError:
+        # No event loop exists, create one
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        loop.run_until_complete(_preload_embedding_service_async())
+    except Exception as e:
+        logger.warning(f"Module-level semantic preload failed: {e}")
+
+try:
+    _preload_sync()
+except Exception as e:
+    logger.warning(f"Module-level semantic preload failed (will use fallback): {e}")

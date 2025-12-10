@@ -1594,3 +1594,58 @@ class TemporalPatternLearner:
     def get_metrics(self) -> Dict[str, Any]:
         """Get learner metrics"""
         return self.metrics.copy()
+
+
+# ============================================================================
+# PRELOAD PATTERN: Initialize heavy dependencies at module-load time
+# ============================================================================
+# This runs automatically when the module is imported, eliminating the
+# first-request latency that was caused by lazy-loading.
+# 
+# BENEFITS:
+# - First request is instant (no cold-start delay)
+# - Shared across all worker instances
+# - Memory is allocated once, not per-instance
+
+_PRELOAD_COMPLETED = False
+_STATSMODELS_LOADED = False
+_STUMPY_LOADED = False
+
+def _preload_all_modules():
+    """
+    PRELOAD PATTERN: Initialize all heavy modules at module-load time.
+    Called automatically when module is imported.
+    This eliminates first-request latency.
+    """
+    global _PRELOAD_COMPLETED, _STATSMODELS_LOADED, _STUMPY_LOADED
+    
+    if _PRELOAD_COMPLETED:
+        return
+    
+    # Preload statsmodels (used for STL decomposition)
+    if not _STATSMODELS_LOADED:
+        try:
+            from statsmodels.tsa.seasonal import seasonal_decompose
+            _STATSMODELS_LOADED = True
+            logger.info("✅ PRELOAD: statsmodels.tsa.seasonal loaded at module-load time")
+        except ImportError as e:
+            logger.warning(f"⚠️ PRELOAD: statsmodels load failed: {e}")
+            _STATSMODELS_LOADED = True  # Don't retry
+    
+    # Preload stumpy (used for motif discovery)
+    if not _STUMPY_LOADED:
+        try:
+            import stumpy
+            _STUMPY_LOADED = True
+            logger.info("✅ PRELOAD: stumpy loaded at module-load time")
+        except ImportError as e:
+            logger.warning(f"⚠️ PRELOAD: stumpy load failed: {e}")
+            _STUMPY_LOADED = True  # Don't retry
+    
+    _PRELOAD_COMPLETED = True
+
+try:
+    _preload_all_modules()
+except Exception as e:
+    logger.warning(f"Module-level temporal preload failed (will use fallback): {e}")
+
