@@ -1,0 +1,65 @@
+{"label": "FINANCIAL_KEYWORD", "pattern": [{"LOWER": "revenue"}]}
+{"label": "FINANCIAL_KEYWORD", "pattern": [{"LOWER": "expenses"}]}
+{"label": "FINANCIAL_KEYWORD", "pattern": [{"LOWER": "cash"}, {"LOWER": "flow"}]}
+{"label": "FINANCIAL_KEYWORD", "pattern": [{"LOWER": "profit"}]}
+{"label": "FINANCIAL_KEYWORD", "pattern": [{"LOWER": "margin"}]}
+{"label": "FINANCIAL_KEYWORD", "pattern": [{"LOWER": "inventory"}]}
+{"label": "FINANCIAL_KEYWORD", "pattern": [{"LOWER": "receivables"}]}
+{"label": "FINANCIAL_KEYWORD", "pattern": [{"LOWER": "payables"}]}
+{"label": "FINANCIAL_KEYWORD", "pattern": [{"LOWER": "assets"}]}
+{"label": "FINANCIAL_KEYWORD", "pattern": [{"LOWER": "liabilities"}]}
+{"label": "FINANCIAL_KEYWORD", "pattern": [{"LOWER": "equity"}]}
+{"label": "FINANCIAL_KEYWORD", "pattern": [{"LOWER": "ebitda"}]}
+{"label": "FINANCIAL_KEYWORD", "pattern": [{"LOWER": "gross"}, {"LOWER": "profit"}]}
+{"label": "FINANCIAL_KEYWORD", "pattern": [{"LOWER": "net"}, {"LOWER": "income"}]}
+{"label": "FINANCIAL_KEYWORD", "pattern": [{"LOWER": "operating"}, {"LOWER": "income"}]}
+{"label": "FINANCIAL_KEYWORD", "pattern": [{"LOWER": "cost"}, {"LOWER": "of"}, {"LOWER": "goods"}, {"LOWER": "sold"}]}
+{"label": "FINANCIAL_KEYWORD", "pattern": [{"LOWER": "cogs"}]}
+{"label": "FINANCIAL_KEYWORD", "pattern": [{"LOWER": "operating"}, {"LOWER": "expenses"}]}
+{"label": "FINANCIAL_KEYWORD", "pattern": [{"LOWER": "opex"}]}
+{"label": "FINANCIAL_KEYWORD", "pattern": [{"LOWER": "interest"}, {"LOWER": "expense"}]}
+{"label": "FINANCIAL_KEYWORD", "pattern": [{"LOWER": "tax"}, {"LOWER": "expense"}]}
+{"label": "FINANCIAL_KEYWORD", "pattern": [{"LOWER": "depreciation"}]}
+{"label": "FINANCIAL_KEYWORD", "pattern": [{"LOWER": "amortization"}]}
+{"label": "FINANCIAL_KEYWORD", "pattern": [{"LOWER": "cash"}]}
+{"label": "FINANCIAL_KEYWORD", "pattern": [{"LOWER": "debt"}]}
+{"label": "FINANCIAL_KEYWORD", "pattern": [{"LOWER": "vendor"}]}
+{"label": "FINANCIAL_KEYWORD", "pattern": [{"LOWER": "customer"}]}
+{"label": "FINANCIAL_KEYWORD", "pattern": [{"LOWER": "supplier"}]}
+{"label": "FINANCIAL_KEYWORD", "pattern": [{"LOWER": "transaction"}]}
+{"label": "FINANCIAL_KEYWORD", "pattern": [{"LOWER": "invoice"}]}
+{"label": "FINANCIAL_KEYWORD", "pattern": [{"LOWER": "payment"}]}
+{"label": "FINANCIAL_KEYWORD", "pattern": [{"LOWER": "receipt"}]}
+{"label": "FINANCIAL_KEYWORD", "pattern": [{"LOWER": "balance"}]}
+{"label": "FINANCIAL_KEYWORD", "pattern": [{"LOWER": "account"}]}
+{"label": "FINANCIAL_KEYWORD", "pattern": [{"LOWER": "budget"}]}
+{"label": "FINANCIAL_KEYWORD", "pattern": [{"LOWER": "forecast"}]}
+{"label": "FINANCIAL_KEYWORD", "pattern": [{"LOWER": "burn"}, {"LOWER": "rate"}]}
+{"label": "FINANCIAL_KEYWORD", "pattern": [{"LOWER": "runway"}]}
+{"label": "FINANCIAL_KEYWORD", "pattern": [{"LOWER": "working"}, {"LOWER": "capital"}]}
+{"label": "FINANCIAL_KEYWORD", "pattern": [{"LOWER": "ar"}, {"LOWER": "aging"}]}
+{"label": "FINANCIAL_KEYWORD", "pattern": [{"LOWER": "ap"}, {"LOWER": "aging"}]}
+{"label": "FINANCIAL_KEYWORD", "pattern": [{"LOWER": "days"}, {"LOWER": "sales"}, {"LOWER": "outstanding"}]}
+{"label": "FINANCIAL_KEYWORD", "pattern": [{"LOWER": "dso"}]}
+{"label": "FINANCIAL_KEYWORD", "pattern": [{"LOWER": "days"}, {"LOWER": "payable"}, {"LOWER": "outstanding"}]}
+{"label": "FINANCIAL_KEYWORD", "pattern": [{"LOWER": "dpo"}]}
+{"label": "FINANCIAL_KEYWORD", "pattern": [{"LOWER": "return"}, {"LOWER": "on"}, {"LOWER": "assets"}]}
+{"label": "FINANCIAL_KEYWORD", "pattern": [{"LOWER": "roa"}]}
+{"label": "FINANCIAL_KEYWORD", "pattern": [{"LOWER": "return"}, {"LOWER": "on"}, {"LOWER": "equity"}]}
+{"label": "FINANCIAL_KEYWORD", "pattern": [{"LOWER": "roe"}]}
+{"label": "FINANCIAL_KEYWORD", "pattern": [{"LOWER": "annual"}, {"LOWER": "recurring"}, {"LOWER": "revenue"}]}
+{"label": "FINANCIAL_KEYWORD", "pattern": [{"LOWER": "arr"}]}
+{"label": "FINANCIAL_KEYWORD", "pattern": [{"LOWER": "monthly"}, {"LOWER": "recurring"}, {"LOWER": "revenue"}]}
+{"label": "FINANCIAL_KEYWORD", "pattern": [{"LOWER": "mrr"}]}
+{"label": "FINANCIAL_KEYWORD", "pattern": [{"LOWER": "churn"}]}
+{"label": "FINANCIAL_KEYWORD", "pattern": [{"LOWER": "customer"}, {"LOWER": "acquisition"}, {"LOWER": "cost"}]}
+{"label": "FINANCIAL_KEYWORD", "pattern": [{"LOWER": "cac"}]}
+{"label": "FINANCIAL_KEYWORD", "pattern": [{"LOWER": "lifetime"}, {"LOWER": "value"}]}
+{"label": "FINANCIAL_KEYWORD", "pattern": [{"LOWER": "ltv"}]}
+{"label": "FINANCIAL_KEYWORD", "pattern": [{"LOWER": "payroll"}]}
+{"label": "FINANCIAL_KEYWORD", "pattern": [{"LOWER": "salary"}]}
+{"label": "FINANCIAL_KEYWORD", "pattern": [{"LOWER": "wages"}]}
+{"label": "FINANCIAL_KEYWORD", "pattern": [{"LOWER": "overhead"}]}
+{"label": "FINANCIAL_KEYWORD", "pattern": [{"LOWER": "tax"}]}
+{"label": "FINANCIAL_KEYWORD", "pattern": [{"LOWER": "vat"}]}
+{"label": "FINANCIAL_KEYWORD", "pattern": [{"LOWER": "gst"}]}

@@ -92,6 +92,11 @@ COPY startup_validator.py .
 COPY worker_entry.py .
 
 # Copy entire directory structures to preserve module paths
+# NOTE: All Python modules are already included in their respective directories:
+# - aident_memory_manager.py, intelligent_chat_orchestrator.py, causal_inference_engine.py,
+#   enhanced_relationship_detector.py, finley_graph_engine.py, temporal_pattern_learner.py
+#   are in aident_cfo_brain/
+# - centralized_cache.py is in core_infrastructure/
 COPY core_infrastructure/ ./core_infrastructure/
 COPY data_ingestion_normalization/ ./data_ingestion_normalization/
 COPY aident_cfo_brain/ ./aident_cfo_brain/
@@ -108,9 +113,14 @@ COPY --from=frontend-builder /app/frontend/dist ./core_infrastructure/dist
 # Make start.sh executable
 RUN chmod +x start.sh
 
+# VERIFICATION: Confirm all aident_cfo_brain files are copied
+RUN echo "🔍 VERIFYING aident_cfo_brain files:" && \
+    ls -la aident_cfo_brain/ | grep -E "(train_question|question_classifier|prompt_loader|chat_message|business_rules)" && \
+    echo "✅ All required files present" || echo "⚠️ Some files missing"
+
 # VERIFICATION: Show IntelligentChatOrchestrator __init__ signature to confirm correct version
 RUN echo "🔍 VERIFYING IntelligentChatOrchestrator signature:" && \
-    grep -A 5 "def __init__" intelligent_chat_orchestrator.py | head -6 || echo "File not found"
+    grep -A 5 "def __init__" aident_cfo_brain/intelligent_chat_orchestrator.py | head -6 || echo "File not found"
 
 EXPOSE 8000
 

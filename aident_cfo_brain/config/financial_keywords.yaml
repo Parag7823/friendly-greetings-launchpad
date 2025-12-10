@@ -1,0 +1,54 @@
+# Financial Keywords Configuration
+# Used by spaCy PhraseMatcher for entity extraction
+
+categories:
+  revenue:
+    - revenue
+    - sales
+    - income
+    
+  expenses:
+    - expenses
+    - costs
+    - spending
+    - cost of goods sold
+    - operating expenses
+    - interest expense
+    - tax expense
+    
+  profitability:
+    - profit
+    - margin
+    - gross profit
+    - net income
+    - operating income
+    - ebitda
+    
+  cash_management:
+    - cash flow
+    - cash
+    - receivables
+    - payables
+    - accounts receivable
+    - accounts payable
+    
+  balance_sheet:
+    - assets
+    - liabilities
+    - equity
+    - inventory
+    - debt
+    
+  operations:
+    - depreciation
+    - amortization
+    - vendor
+    - customer
+    - supplier
+    - transaction
+    - invoice
+    - payment
+    - receipt
+    - balance
+    - account
+    - budget

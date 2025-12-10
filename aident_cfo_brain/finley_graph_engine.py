@@ -13,15 +13,12 @@ import structlog
 from pydantic import BaseModel, Field
 from supabase import Client
 
-# FIX #1: Use PickleSerializer for compatibility with complex objects (igraph, datetime)
-# Msgpack cannot serialize C-extension objects or datetime, causing crashes
 try:
     from aiocache import Cache
     from aiocache.serializers import PickleSerializer
     AIOCACHE_AVAILABLE = True
 except ImportError:
     AIOCACHE_AVAILABLE = False
-    structlog.get_logger(__name__).warning("aiocache not available - using manual Redis")
 
 logger = structlog.get_logger(__name__)
 
@@ -41,20 +38,7 @@ class GraphNode(BaseModel):
 
 
 class GraphEdge(BaseModel):
-    """
-    Edge from relationship_instances + ALL enrichments.
-    
-    Layers of intelligence:
-    1. Causal: Why did this connection happen?
-    2. Temporal: When does this happen? How often?
-    3. Seasonal: Does this follow seasonal patterns?
-    4. Pattern: What learned template does this match?
-    5. Cross-platform: Is this unified across platforms?
-    6. Prediction: What will happen next?
-    7. Root cause: What caused this?
-    8. Delta: What changed?
-    9. Fraud: Is this duplicate/fraudulent?
-    """
+    """Edge with 9 layers of intelligence: causal, temporal, seasonal, pattern, cross-platform, prediction, root cause, delta, fraud"""
     # Core relationship data
     id: str
     source_id: str
@@ -176,28 +160,17 @@ class FinleyGraphEngine:
             self.node_id_to_index[node.id] = idx
             self.index_to_node_id[idx] = node.id
         
-        # Add edges with ALL 9 layers of intelligence
         edge_list = []
         edge_attrs = {
-            # Core attributes
             'edge_id': [], 'relationship_type': [], 'confidence_score': [], 'reasoning': [],
-            # Layer 1: Causal
             'causal_strength': [], 'causal_direction': [],
-            # Layer 2: Temporal
             'recurrence_frequency': [], 'recurrence_score': [], 'next_predicted_occurrence': [],
-            # Layer 3: Seasonal
             'seasonal_strength': [], 'seasonal_months': [],
-            # Layer 4: Pattern
             'pattern_name': [], 'pattern_confidence': [],
-            # Layer 5: Cross-platform
             'platform_sources': [],
-            # Layer 6: Prediction
             'prediction_confidence': [], 'prediction_reason': [],
-            # Layer 7: Root cause
             'root_cause_analysis': [],
-            # Layer 8: Delta
             'change_type': [],
-            # Layer 9: Fraud
             'is_duplicate': [], 'duplicate_confidence': []
         }
         
@@ -209,34 +182,24 @@ class FinleyGraphEngine:
                 continue
             
             edge_list.append((src_idx, tgt_idx))
-            # Core attributes
             edge_attrs['edge_id'].append(edge.id)
             edge_attrs['relationship_type'].append(edge.relationship_type)
             edge_attrs['confidence_score'].append(edge.confidence_score)
             edge_attrs['reasoning'].append(edge.reasoning or '')
-            # Layer 1: Causal
             edge_attrs['causal_strength'].append(edge.causal_strength or 0.0)
             edge_attrs['causal_direction'].append(edge.causal_direction or 'none')
-            # Layer 2: Temporal
             edge_attrs['recurrence_frequency'].append(edge.recurrence_frequency or 'none')
             edge_attrs['recurrence_score'].append(edge.recurrence_score or 0.0)
             edge_attrs['next_predicted_occurrence'].append(edge.next_predicted_occurrence or '')
-            # Layer 3: Seasonal
             edge_attrs['seasonal_strength'].append(edge.seasonal_strength or 0.0)
             edge_attrs['seasonal_months'].append(edge.seasonal_months or [])
-            # Layer 4: Pattern
             edge_attrs['pattern_name'].append(edge.pattern_name or '')
             edge_attrs['pattern_confidence'].append(edge.pattern_confidence or 0.0)
-            # Layer 5: Cross-platform
             edge_attrs['platform_sources'].append(edge.platform_sources or [])
-            # Layer 6: Prediction
             edge_attrs['prediction_confidence'].append(edge.prediction_confidence or 0.0)
             edge_attrs['prediction_reason'].append(edge.prediction_reason or '')
-            # Layer 7: Root cause
             edge_attrs['root_cause_analysis'].append(edge.root_cause_analysis or '')
-            # Layer 8: Delta
             edge_attrs['change_type'].append(edge.change_type or 'none')
-            # Layer 9: Fraud
             edge_attrs['is_duplicate'].append(edge.is_duplicate or False)
             edge_attrs['duplicate_confidence'].append(edge.duplicate_confidence or 0.0)
         
@@ -256,7 +219,7 @@ class FinleyGraphEngine:
             node_count=self.graph.vcount(),
             edge_count=self.graph.ecount(),
             avg_degree=2 * self.graph.ecount() / max(1, self.graph.vcount()),
-            density=self.graph.density(),
+            density=self.graph.density() if self.graph.vcount() > 0 else 0.0,
             connected_components=len(self.graph.connected_components(mode='weak')),
             build_time_seconds=build_time,
             last_updated=self.last_build_time
@@ -270,13 +233,7 @@ class FinleyGraphEngine:
         return stats
     
     def _get_cache(self):
-        """
-        FIX #24: Create and return aiocache Cache instance for Redis.
-        Used by clear_graph_cache() and other cache operations.
-        
-        Returns:
-            aiocache.Cache instance configured for Redis
-        """
+        """Create and return aiocache Cache instance for Redis"""
         from urllib.parse import urlparse
         parsed = urlparse(self.redis_url)
         
@@ -289,10 +246,7 @@ class FinleyGraphEngine:
         )
     
     async def clear_graph_cache(self, user_id: str):
-        """
-        Invalidate graph cache for a user.
-        Call this when new relationships are detected or entities change.
-        """
+        """Invalidate graph cache for a user"""
         if self.redis_url and AIOCACHE_AVAILABLE:
             try:
                 cache = self._get_cache()
@@ -303,7 +257,6 @@ class FinleyGraphEngine:
     
     async def _fetch_nodes(self, user_id: str) -> List[GraphNode]:
         """Fetch normalized_entities"""
-        # FIX #27: Wrap synchronous Supabase call in asyncio.to_thread() to prevent blocking event loop
         resp = await asyncio.to_thread(
             lambda: self.supabase.table('normalized_entities').select(
                 'id, entity_type, canonical_name, confidence_score, '
@@ -313,16 +266,7 @@ class FinleyGraphEngine:
         return [GraphNode(**row) for row in resp.data]
     
     async def _fetch_edges(self, user_id: str) -> List[GraphEdge]:
-        """
-        Fetch relationship_instances + ALL 9 layers of intelligence.
-        
-        FIX #4: Uses materialized view (view_enriched_relationships) instead of 10 separate queries.
-        - Reduces N+10 problem to single SQL query
-        - Eliminates connection pool exhaustion
-        - Performance: ~10x faster for 200 users
-        """
-        # FIX #4: Fetch all enriched relationships in ONE query from materialized view
-        # FIX #27: Wrap synchronous Supabase call in asyncio.to_thread() to prevent blocking event loop
+        """Fetch relationship_instances with all 9 intelligence layers from materialized view"""
         enriched_resp = await asyncio.to_thread(
             lambda: self.supabase.table('view_enriched_relationships').select(
                 'id, source_event_id, target_event_id, relationship_type, '
@@ -349,10 +293,8 @@ class FinleyGraphEngine:
             event_ids.add(rel['source_event_id'])
             event_ids.add(rel['target_event_id'])
         
-        # FIX #4: Only fetch entity mappings (1 query instead of 10)
         entity_map = await self._fetch_entity_mappings(user_id, list(event_ids))
         
-        # Build edges with FULL intelligence
         edges = []
         for rel in enriched_rels:
             src_entity = entity_map.get(rel['source_event_id'])
@@ -360,9 +302,6 @@ class FinleyGraphEngine:
             
             if not src_entity or not tgt_entity:
                 continue
-            
-            # FIX #4: All enrichments now come directly from the materialized view
-            # No need to fetch from separate maps anymore
             
             # Parse datetime safely using pendulum
             try:
@@ -372,7 +311,6 @@ class FinleyGraphEngine:
                 created_at = datetime.now()
             
             edges.append(GraphEdge(
-                # Core relationship data
                 id=rel['id'],
                 source_id=src_entity,
                 target_id=tgt_entity,
@@ -381,37 +319,28 @@ class FinleyGraphEngine:
                 detection_method=rel['detection_method'],
                 reasoning=rel.get('reasoning'),
                 created_at=created_at,
-                # Layer 1: Causal Intelligence (FIX #4: from view)
                 causal_strength=rel.get('causal_strength', 0.0),
                 causal_direction=rel.get('causal_direction', 'none'),
-                # Layer 2: Temporal Intelligence (FIX #4: from view)
                 temporal_pattern_id=rel.get('temporal_pattern_id'),
                 recurrence_score=rel.get('recurrence_score', 0.0),
                 recurrence_frequency=rel.get('recurrence_frequency', 'none'),
                 last_occurrence=rel.get('last_occurrence'),
                 next_predicted_occurrence=rel.get('next_predicted_occurrence'),
-                # Layer 3: Seasonal Intelligence (FIX #4: from view)
                 seasonal_pattern_id=rel.get('seasonal_pattern_id'),
                 seasonal_strength=rel.get('seasonal_strength', 0.0),
                 seasonal_months=rel.get('seasonal_months', []),
-                # Layer 4: Pattern Intelligence (FIX #4: from view)
                 pattern_id=rel.get('pattern_id'),
                 pattern_confidence=rel.get('pattern_confidence', 0.0),
                 pattern_name=rel.get('pattern_name', ''),
-                # Layer 5: Cross-Platform Intelligence (FIX #4: from view)
                 cross_platform_id=rel.get('cross_platform_id'),
                 platform_sources=rel.get('platform_sources', []),
-                # Layer 6: Prediction Intelligence (FIX #4: from view)
                 predicted_relationship_id=rel.get('predicted_relationship_id'),
                 prediction_confidence=rel.get('prediction_confidence', 0.0),
                 prediction_reason=rel.get('prediction_reason', ''),
-                # Layer 7: Root Cause Intelligence (FIX #4: from view)
                 root_cause_id=rel.get('root_cause_id'),
                 root_cause_analysis=rel.get('root_cause_analysis', ''),
-                # Layer 8: Change Tracking (FIX #4: from view)
                 delta_log_id=rel.get('delta_log_id'),
                 change_type=rel.get('change_type', 'none'),
-                # Layer 9: Fraud Detection (FIX #4: from view)
                 duplicate_transaction_id=rel.get('duplicate_transaction_id'),
                 is_duplicate=rel.get('is_duplicate', False),
                 duplicate_confidence=rel.get('duplicate_confidence', 0.0)
@@ -426,7 +355,6 @@ class FinleyGraphEngine:
         """Map event IDs to entity IDs"""
         if not event_ids:
             return {}
-        # FIX #27: Wrap synchronous Supabase call in asyncio.to_thread() to prevent blocking event loop
         resp = await asyncio.to_thread(
             lambda: self.supabase.table('entity_matches').select(
                 'source_row_id, normalized_entity_id'
@@ -435,11 +363,10 @@ class FinleyGraphEngine:
         return {row['source_row_id']: row['normalized_entity_id'] for row in resp.data}
     
     async def _fetch_causal_enrichments(self, user_id: str, rel_ids: List[str]) -> Dict[str, Dict]:
-        """Fetch causal_relationships - Layer 1: Why did this connection happen?"""
+        """Fetch causal relationships"""
         if not rel_ids:
             return {}
         try:
-            # FIX #27: Wrap synchronous Supabase call in asyncio.to_thread() to prevent blocking event loop
             resp = await asyncio.to_thread(
                 lambda: self.supabase.table('causal_relationships').select(
                     'relationship_id, causal_score, causal_direction'
@@ -451,11 +378,10 @@ class FinleyGraphEngine:
             return {}
     
     async def _fetch_temporal_enrichments(self, user_id: str, rel_ids: List[str]) -> Dict[str, Dict]:
-        """Fetch temporal_patterns - Layer 2: When does this happen? How often?"""
+        """Fetch temporal patterns"""
         if not rel_ids:
             return {}
         try:
-            # FIX #27: Wrap synchronous Supabase calls in asyncio.to_thread() to prevent blocking event loop
             rel_resp = await asyncio.to_thread(
                 lambda: self.supabase.table('relationship_instances').select(
                     'id, relationship_type'
@@ -511,17 +437,10 @@ class FinleyGraphEngine:
             return {}
     
     async def _fetch_seasonal_enrichments(self, user_id: str, rel_ids: List[str]) -> Dict[str, Dict]:
-        """
-        Fetch seasonal_patterns - Layer 3: Does this follow seasonal patterns?
-        
-        FIX #14: Merged seasonal_patterns into temporal_patterns table.
-        Now queries temporal_patterns.seasonal_data JSONB instead of separate table.
-        """
+        """Fetch seasonal patterns from temporal_patterns table"""
         if not rel_ids:
             return {}
         try:
-            # FIX #14: Query temporal_patterns instead of seasonal_patterns
-            # FIX #27: Wrap synchronous Supabase call in asyncio.to_thread() to prevent blocking event loop
             resp = await asyncio.to_thread(
                 lambda: self.supabase.table('temporal_patterns').select(
                     'id as relationship_id, seasonal_data'
@@ -529,7 +448,6 @@ class FinleyGraphEngine:
                  .not_('seasonal_data', 'is', None).execute()
             )
             
-            # Extract seasonal data from JSONB
             result = {}
             for row in resp.data:
                 if row.get('seasonal_data'):
@@ -543,11 +461,10 @@ class FinleyGraphEngine:
             return {}
     
     async def _fetch_pattern_enrichments(self, user_id: str, rel_ids: List[str]) -> Dict[str, Dict]:
-        """Fetch relationship_patterns - Layer 4: What learned template does this match?"""
+        """Fetch relationship patterns"""
         if not rel_ids:
             return {}
         try:
-            # FIX #27: Wrap synchronous Supabase calls in asyncio.to_thread() to prevent blocking event loop
             resp = await asyncio.to_thread(
                 lambda: self.supabase.table('relationship_instances').select(
                     'id, pattern_id'
@@ -587,11 +504,10 @@ class FinleyGraphEngine:
             return {}
     
     async def _fetch_cross_platform_enrichments(self, user_id: str, rel_ids: List[str]) -> Dict[str, Dict]:
-        """Fetch cross_platform_relationships - Layer 5: Is this unified across platforms?"""
+        """Fetch cross-platform relationships"""
         if not rel_ids:
             return {}
         try:
-            # FIX #27: Wrap synchronous Supabase call in asyncio.to_thread() to prevent blocking event loop
             resp = await asyncio.to_thread(
                 lambda: self.supabase.table('cross_platform_relationships').select(
                     'relationship_id, cross_platform_id, platform_sources'
@@ -603,11 +519,10 @@ class FinleyGraphEngine:
             return {}
     
     async def _fetch_prediction_enrichments(self, user_id: str, rel_ids: List[str]) -> Dict[str, Dict]:
-        """Fetch predicted_relationships - Layer 6: What will happen next?"""
+        """Fetch predicted relationships"""
         if not rel_ids:
             return {}
         try:
-            # FIX #27: Wrap synchronous Supabase calls in asyncio.to_thread() to prevent blocking event loop
             rel_resp = await asyncio.to_thread(
                 lambda: self.supabase.table('relationship_instances').select(
                     'id, relationship_type, source_event_id'
@@ -649,11 +564,10 @@ class FinleyGraphEngine:
             return {}
     
     async def _fetch_root_cause_enrichments(self, user_id: str, rel_ids: List[str]) -> Dict[str, Dict]:
-        """Fetch root_cause_analyses - Layer 7: What caused this?"""
+        """Fetch root cause analyses"""
         if not rel_ids:
             return {}
         try:
-            # FIX #27: Wrap synchronous Supabase call in asyncio.to_thread() to prevent blocking event loop
             resp = await asyncio.to_thread(
                 lambda: self.supabase.table('root_cause_analyses').select(
                     'relationship_id, root_cause_analysis'
@@ -665,11 +579,10 @@ class FinleyGraphEngine:
             return {}
     
     async def _fetch_delta_enrichments(self, user_id: str, rel_ids: List[str]) -> Dict[str, Dict]:
-        """Fetch event_delta_logs - Layer 8: What changed?"""
+        """Fetch event delta logs"""
         if not rel_ids:
             return {}
         try:
-            # FIX #27: Wrap synchronous Supabase call in asyncio.to_thread() to prevent blocking event loop
             resp = await asyncio.to_thread(
                 lambda: self.supabase.table('event_delta_logs').select(
                     'relationship_id, change_type'
@@ -681,17 +594,10 @@ class FinleyGraphEngine:
             return {}
     
     async def _fetch_duplicate_enrichments(self, user_id: str, rel_ids: List[str]) -> Dict[str, Dict]:
-        """
-        Fetch duplicate/fraud detection - Layer 9: Is this duplicate/fraudulent?
-        
-        FIX #14: Merged duplicate_transactions into relationship_instances table.
-        Now queries relationship_instances with is_duplicate flag instead of separate table.
-        """
+        """Fetch duplicate/fraud detection from relationship_instances"""
         if not rel_ids:
             return {}
         try:
-            # FIX #14: Query relationship_instances instead of duplicate_transactions
-            # FIX #27: Wrap synchronous Supabase call in asyncio.to_thread() to prevent blocking event loop
             resp = await asyncio.to_thread(
                 lambda: self.supabase.table('relationship_instances').select(
                     'id as relationship_id, is_duplicate, duplicate_confidence'
@@ -703,24 +609,9 @@ class FinleyGraphEngine:
             return {}
     
     async def _save_to_cache(self, user_id: str, stats: GraphStats):
-        """
-        Save to Redis using aiocache + pickle.
-        
-        FIX #1: Uses PickleSerializer for compatibility with:
-        - igraph.Graph (C-extension objects)
-        - datetime objects
-        - Complex nested structures
-        
-        Benefits:
-        - 10-20x faster (connection pooling via aiocache)
-        - Handles all Python object types automatically
-        - Consistent with centralized_cache.py implementation
-        
-        FIX #2: Reuse _get_cache() method instead of creating duplicate Cache instance
-        """
+        """Save graph to Redis cache using aiocache with PickleSerializer"""
         try:
             if AIOCACHE_AVAILABLE:
-                # FIX #2: Reuse _get_cache() method to avoid duplicate Cache instance creation
                 cache = self._get_cache()
                 
                 cache_data = {
@@ -789,7 +680,7 @@ class FinleyGraphEngine:
     
     def find_path(self, source_id: str, target_id: str, max_len: int = 5) -> Optional[PathResult]:
         """Find shortest path using igraph"""
-        if not self.graph:
+        if self.graph is None or not self.last_build_time:
             raise ValueError("Graph not built")
         
         src_idx = self.node_id_to_index.get(source_id)

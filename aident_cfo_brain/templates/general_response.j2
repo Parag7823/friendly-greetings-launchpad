@@ -1,0 +1,32 @@
+{# General Response with Context Template #}
+{{ answer }}
+
+{% if context_used %}
+
+---
+
+**📊 Based on your data:**
+{% for ctx in context_used %}
+- {{ ctx }}
+{% endfor %}
+{% endif %}
+
+{% if follow_up_questions %}
+
+---
+
+**💡 Related questions:**
+{% for question in follow_up_questions %}
+{{ loop.index }}. {{ question }}
+{% endfor %}
+{% endif %}
+
+{% if actions %}
+
+---
+
+**✅ Recommended actions:**
+{% for action in actions %}
+{{ loop.index }}. **{{ action.title }}** - {{ action.description }}
+{% endfor %}
+{% endif %}

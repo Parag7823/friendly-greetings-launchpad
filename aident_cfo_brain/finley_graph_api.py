@@ -12,49 +12,26 @@ from pydantic import BaseModel, Field
 from supabase import Client
 import structlog
 
-# FIX #16: Use absolute imports with try/except fallbacks for different deployment layouts
 try:
     from aident_cfo_brain.finley_graph_engine import FinleyGraphEngine, PathResult, GraphStats
 except ImportError:
     from finley_graph_engine import FinleyGraphEngine, PathResult, GraphStats
 
-# Import inlined get_supabase_client from fastapi_backend_v2
 try:
     from core_infrastructure.fastapi_backend_v2 import get_supabase_client
 except ImportError:
-    # Fallback for different deployment layouts
     try:
         from fastapi_backend_v2 import get_supabase_client
     except ImportError as e:
-        raise ImportError(
-            "Cannot import get_supabase_client. Ensure fastapi_backend_v2.py is available. "
-            f"Error: {e}"
-        )
+        raise ImportError(f"Cannot import get_supabase_client: {e}")
 
 logger = structlog.get_logger(__name__)
 
 router = APIRouter(prefix="/api/v1/graph", tags=["Knowledge Graph"])
 
 
-# ============================================================================
-# FIX #33: DEPENDENCY INJECTION FOR SUPABASE CLIENT
-# ============================================================================
-
 async def get_supabase_client_dependency() -> Client:
-    """
-    FastAPI dependency function for Supabase client injection.
-    
-    FIX #33: Provides proper dependency injection for all endpoints.
-    Replaces broken Depends() with no argument.
-    
-    Returns:
-        Pooled Supabase client instance
-    
-    Usage in endpoints:
-        @router.post("/endpoint")
-        async def my_endpoint(supabase: Client = Depends(get_supabase_client_dependency)):
-            ...
-    """
+    """FastAPI dependency for Supabase client injection"""
     try:
         client = get_supabase_client()
         if client is None:
@@ -70,7 +47,7 @@ async def get_supabase_client_dependency() -> Client:
 # ============================================================================
 
 class GraphBuildRequest(BaseModel):
-    user_id: str
+    user_id: str = Field(..., min_length=1)  # FIXED: Reject empty user_id
     force_rebuild: bool = False
 
 
@@ -88,11 +65,7 @@ class PathQueryRequest(BaseModel):
 
 
 class PathQueryResponse(BaseModel):
-    """
-    Enhanced path query response with all 9 intelligence layers.
-    
-    Includes temporal patterns, seasonal insights, fraud risk, root causes, and predictions.
-    """
+    """Path query response with intelligence insights"""
     status: str
     path: Optional[PathResult]
     message: str
@@ -106,18 +79,18 @@ class PathQueryResponse(BaseModel):
 
 class ImportanceQueryRequest(BaseModel):
     user_id: str
-    algorithm: str = Field(default="pagerank", regex="^(pagerank|betweenness|closeness)$")
+    algorithm: str = Field(default="pagerank", pattern="^(pagerank|betweenness|closeness)$")
     top_n: int = Field(default=20, ge=1, le=100)
 
 
 class ImportanceQueryResponse(BaseModel):
     status: str
-    top_entities: List[Dict[str, float]]
+    top_entities: List[Dict[str, Any]]  # FIXED: Contains entity_id (str), name (str), score (float)
     algorithm: str
 
 
 class CommunityQueryRequest(BaseModel):
-    user_id: str
+    user_id: str = Field(..., min_length=1)  # FIXED: Reject empty user_id
 
 
 class CommunityQueryResponse(BaseModel):
@@ -138,9 +111,6 @@ class IncrementalUpdateResponse(BaseModel):
     message: str
 
 
-# ============================================================================
-# NEW INTELLIGENCE QUERY MODELS (Phase 2)
-# ============================================================================
 
 class TemporalPatternQueryRequest(BaseModel):
     """Query for recurring temporal patterns between entities"""
@@ -227,23 +197,9 @@ async def get_graph_engine(
     supabase: Client,
     redis_url: Optional[str] = None
 ) -> FinleyGraphEngine:
-    """
-    Create and return a FinleyGraphEngine instance for the given user.
-    
-    FIX #25: Attempts to load from Redis cache first.
-    If cache miss, returns empty engine ready for building.
-    
-    Args:
-        user_id: User ID to load graph for
-        supabase: Supabase client
-        redis_url: Optional Redis URL for caching
-        
-    Returns:
-        FinleyGraphEngine instance with graph loaded from cache if available
-    """
+    """Create FinleyGraphEngine instance, attempting to load from Redis cache first"""
     engine = FinleyGraphEngine(supabase, redis_url)
     
-    # FIX #25: Attempt to load from cache
     if redis_url:
         cached_stats = await engine._load_from_cache(user_id)
         if cached_stats:
@@ -251,16 +207,9 @@ async def get_graph_engine(
                        nodes=cached_stats.node_count, edges=cached_stats.edge_count)
             return engine
     
-    # Cache miss - return empty engine for building
     return engine
 
 
-# ============================================================================
-# API ENDPOINTS
-# ============================================================================
-# FIX #1: Removed global _graph_engines dict and helper functions.
-# Each request creates a new FinleyGraphEngine instance.
-# Redis caching is handled internally by FinleyGraphEngine._load_from_cache()
 
 @router.post("/build", response_model=GraphBuildResponse)
 async def build_graph(
@@ -268,16 +217,8 @@ async def build_graph(
     supabase: Client = Depends(get_supabase_client_dependency),
     redis_url: Optional[str] = None
 ):
-    """
-    Build knowledge graph for user from Supabase tables.
-    
-    - Pulls entities from normalized_entities
-    - Pulls relationships from relationship_instances
-    - Enriches with causal/temporal/semantic metadata
-    - Caches in Redis for fast reload
-    """
+    """Build knowledge graph for user from Supabase tables"""
     try:
-        # FIX #1: Create new engine instance per request (no global state)
         engine = FinleyGraphEngine(supabase, redis_url)
         stats = await engine.build_graph(request.user_id, request.force_rebuild)
         
@@ -298,15 +239,8 @@ async def incremental_update(
     supabase: Client = Depends(get_supabase_client_dependency),
     redis_url: Optional[str] = None
 ):
-    """
-    Incrementally update graph with new data since last N minutes.
-    
-    - Fetches only new/modified entities and relationships
-    - Updates existing graph without full rebuild
-    - Much faster than full rebuild for small updates
-    """
+    """Incrementally update graph with new data since last N minutes"""
     try:
-        # FIX #1: Create new engine instance per request (no global state)
         engine = FinleyGraphEngine(supabase, redis_url)
         
         since = datetime.now() - timedelta(minutes=request.since_minutes)
@@ -330,19 +264,10 @@ async def query_path(
     supabase: Client = Depends(get_supabase_client_dependency),
     redis_url: Optional[str] = None
 ):
-    """
-    Find shortest path between two entities.
-    
-    Use cases:
-    - "How did Invoice A lead to Payment B?"
-    - "What's the connection between Vendor X and Account Y?"
-    - "Trace the flow from expense to revenue"
-    """
+    """Find shortest path between two entities"""
     try:
-        # FIX #26: Use consistent Pattern 1 initialization
         engine = FinleyGraphEngine(supabase, redis_url)
         
-        # Attempt to load from cache first
         if redis_url:
             cached_stats = await engine._load_from_cache(request.user_id)
             if not cached_stats:
@@ -383,21 +308,8 @@ async def query_importance(
     supabase: Client = Depends(get_supabase_client_dependency),
     redis_url: Optional[str] = None
 ):
-    """
-    Calculate entity importance using graph algorithms.
-    
-    Algorithms:
-    - pagerank: Weighted by causal strength (most influential entities)
-    - betweenness: Entities that connect many others (key intermediaries)
-    - closeness: Entities close to all others (central hubs)
-    
-    Use cases:
-    - "Which vendors are most critical to our operations?"
-    - "What accounts are central to cash flow?"
-    - "Find key entities in the financial network"
-    """
+    """Calculate entity importance using graph algorithms (pagerank, betweenness, closeness)"""
     try:
-        # FIX #1: Create new engine instance per request (no global state)
         engine = FinleyGraphEngine(supabase, redis_url)
         
         if not engine.graph:
@@ -439,17 +351,8 @@ async def query_communities(
     supabase: Client = Depends(get_supabase_client_dependency),
     redis_url: Optional[str] = None
 ):
-    """
-    Detect entity clusters/communities using Louvain algorithm.
-    
-    Use cases:
-    - "Group related vendors/customers"
-    - "Find operational silos"
-    - "Identify business units from transaction patterns"
-    - "Discover hidden entity relationships"
-    """
+    """Detect entity clusters/communities using Louvain algorithm"""
     try:
-        # FIX #1: Create new engine instance per request (no global state)
         engine = FinleyGraphEngine(supabase, redis_url)
         
         if not engine.graph:
@@ -479,7 +382,6 @@ async def get_graph_stats(
 ):
     """Get current graph statistics for user"""
     try:
-        # FIX #1: Create new engine instance per request (no global state)
         engine = FinleyGraphEngine(supabase, redis_url)
         
         if not engine.graph:
@@ -508,17 +410,8 @@ async def query_temporal_patterns(
     supabase: Client = Depends(get_supabase_client_dependency),
     redis_url: Optional[str] = None
 ):
-    """
-    Query for recurring temporal patterns between entities.
-    
-    Returns:
-    - Recurrence frequency (daily, weekly, monthly, yearly)
-    - Recurrence score (0-1)
-    - Next predicted occurrence
-    - Pattern history
-    """
+    """Query for recurring temporal patterns between entities"""
     try:
-        # FIX #1: Create new engine instance per request (no global state)
         engine = FinleyGraphEngine(supabase, redis_url)
         
         if not engine.graph:
@@ -572,16 +465,8 @@ async def query_seasonal_cycles(
     supabase: Client = Depends(get_supabase_client_dependency),
     redis_url: Optional[str] = None
 ):
-    """
-    Query for seasonal patterns between entities.
-    
-    Returns:
-    - Seasonal months (1-12)
-    - Seasonal strength (0-1)
-    - Seasonal confidence
-    """
+    """Query for seasonal patterns between entities"""
     try:
-        # FIX #1: Create new engine instance per request (no global state)
         engine = FinleyGraphEngine(supabase, redis_url)
         
         if not engine.graph:
@@ -628,16 +513,8 @@ async def query_fraud_detection(
     supabase: Client = Depends(get_supabase_client_dependency),
     redis_url: Optional[str] = None
 ):
-    """
-    Query for duplicate/fraudulent transactions between entities.
-    
-    Returns:
-    - Fraud alerts with duplicate confidence
-    - Overall fraud risk score
-    - Duplicate transaction details
-    """
+    """Query for duplicate/fraudulent transactions between entities"""
     try:
-        # FIX #1: Create new engine instance per request (no global state)
         engine = FinleyGraphEngine(supabase, redis_url)
         
         if not engine.graph:
@@ -690,16 +567,8 @@ async def query_root_causes(
     supabase: Client = Depends(get_supabase_client_dependency),
     redis_url: Optional[str] = None
 ):
-    """
-    Query for root cause analysis between entities.
-    
-    Returns:
-    - Root cause analysis text
-    - Causal chain (path of causality)
-    - Causal strength scores
-    """
+    """Query for root cause analysis between entities"""
     try:
-        # FIX #1: Create new engine instance per request (no global state)
         engine = FinleyGraphEngine(supabase, redis_url)
         
         if not engine.graph:
@@ -750,16 +619,8 @@ async def query_predictions(
     supabase: Client = Depends(get_supabase_client_dependency),
     redis_url: Optional[str] = None
 ):
-    """
-    Query for predicted future relationships between entities.
-    
-    Returns:
-    - Prediction confidence scores
-    - Prediction reasons
-    - Next predicted entities/events
-    """
+    """Query for predicted future relationships between entities"""
     try:
-        # FIX #1: Create new engine instance per request (no global state)
         engine = FinleyGraphEngine(supabase, redis_url)
         
         if not engine.graph:

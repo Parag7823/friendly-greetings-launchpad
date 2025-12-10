@@ -12,10 +12,12 @@ Date: 2025-11-05
 
 import structlog
 import asyncio
-import pickle
+import joblib
 import io
 import numpy as np
 import pandas as pd
+import numpy_financial as npf
+from jinja2 import Template
 try:
     import igraph as ig
 except ImportError:
@@ -42,7 +44,11 @@ from typing import Dict, List, Optional, Any, Tuple, Set
 from dataclasses import dataclass, asdict
 from enum import Enum
 
+# COMPULSORY: Embedding service for semantic intelligence
+from data_ingestion_normalization.embedding_service import get_embedding_service
+
 logger = structlog.get_logger(__name__)
+
 
 class CausalDirection(Enum):
     """Direction of causal relationship"""
@@ -133,13 +139,49 @@ class CausalInferenceEngine:
         
         logger.info("✅ CausalInferenceEngine initialized")
     
+    async def _generate_causal_embedding(self, causal_rel: 'CausalRelationship') -> Optional[List[float]]:
+        """
+        COMPULSORY: Generate BGE embedding for semantic similarity search of causal relationships.
+        
+        The embedding captures the semantic meaning of the causality for:
+        - Finding similar causal chains across different relationship types
+        - Semantic grouping of causal explanations
+        - AI-powered causal reasoning recommendations
+        """
+        try:
+            # Build semantic text from causal analysis
+            shap_explanation = causal_rel.criteria_details.get('shap_explanation', {})
+            top_factors = shap_explanation.get('top_3_factors', [])
+            top_factors_str = ', '.join([f[0] for f in top_factors]) if top_factors else 'unknown'
+            
+            embedding_text = (
+                f"causal relationship {causal_rel.causal_direction.value} "
+                f"causal score {causal_rel.bradford_hill_scores.causal_score:.2f} "
+                f"temporal precedence {causal_rel.bradford_hill_scores.temporal_precedence:.2f} "
+                f"strength {causal_rel.bradford_hill_scores.strength:.2f} "
+                f"top factors: {top_factors_str} "
+                f"{'confirmed causal' if causal_rel.is_causal else 'correlation only'}"
+            )
+            
+            embedding_service = await get_embedding_service()
+            embedding = await embedding_service.embed_text(embedding_text)
+            
+            logger.debug("Generated embedding for causal relationship", 
+                        relationship_id=causal_rel.relationship_id)
+            return embedding
+            
+        except Exception as e:
+            logger.error(f"Causal embedding generation failed: {e}")
+            return None
+
+    
     def _get_default_config(self) -> Dict[str, Any]:
         """Get default configuration"""
         return {
-            'causal_threshold': 0.7,  # Minimum score to be considered causal
-            'max_root_cause_depth': 10,  # Maximum depth for root cause tracing
-            'consistency_threshold': 5,  # Minimum pattern count for consistency
-            'temporal_window_days': 180,  # Maximum days between cause and effect
+            'causal_threshold': 0.7,
+            'max_root_cause_depth': 10,
+            'consistency_threshold': 5,
+            'temporal_window_days': 180,
         }
     
     async def analyze_causal_relationships(
@@ -162,7 +204,6 @@ class CausalInferenceEngine:
         try:
             logger.info(f"Starting causal analysis for user_id={user_id}")
             
-            # Fetch relationships to analyze
             relationships = await self._fetch_relationships(user_id, relationship_ids)
             
             if not relationships:
@@ -176,15 +217,12 @@ class CausalInferenceEngine:
             causal_relationships = []
             causal_count = 0
             
-            # Analyze each relationship
             for rel in relationships:
                 try:
                     causal_rel = await self._analyze_single_relationship(rel, user_id)
                     
                     if causal_rel:
                         causal_relationships.append(causal_rel)
-                        
-                        # Store in database
                         await self._store_causal_relationship(causal_rel, user_id, job_id)
                         
                         if causal_rel.is_causal:
@@ -196,7 +234,6 @@ class CausalInferenceEngine:
                     logger.error(f"Failed to analyze relationship {rel.get('id')}: {e}")
                     continue
             
-            # Update metrics
             if causal_relationships:
                 avg_score = sum(cr.bradford_hill_scores.causal_score for cr in causal_relationships) / len(causal_relationships)
                 self.metrics['avg_causal_score'] = avg_score
@@ -236,7 +273,6 @@ class CausalInferenceEngine:
             source_id = relationship['source_event_id']
             target_id = relationship['target_event_id']
             
-            # Call PostgreSQL function to calculate Bradford Hill scores
             result = self.supabase.rpc(
                 'calculate_bradford_hill_scores',
                 {
@@ -252,8 +288,6 @@ class CausalInferenceEngine:
                 return None
             
             scores_data = result.data
-            
-            # Build Bradford Hill scores object
             bradford_hill_scores = BradfordHillScores(
                 temporal_precedence=scores_data.get('temporal_precedence_score', 0.0),
                 strength=scores_data.get('strength_score', 0.0),
@@ -264,23 +298,15 @@ class CausalInferenceEngine:
                 causal_score=scores_data.get('causal_score', 0.0)
             )
             
-            # Determine if causal
             is_causal = bradford_hill_scores.causal_score >= self.config['causal_threshold']
+            causal_direction = self._determine_causal_direction(bradford_hill_scores, relationship)
             
-            # Determine causal direction
-            causal_direction = self._determine_causal_direction(
-                bradford_hill_scores,
-                relationship
-            )
-            
-            # Build criteria details
             criteria_details = {
                 'time_diff_days': scores_data.get('time_diff_days', 0),
                 'similar_pattern_count': scores_data.get('similar_pattern_count', 0),
                 'threshold_used': self.config['causal_threshold']
             }
             
-            # ENHANCEMENT #11: Add SHAP explanation for causal score
             shap_explanation = self._explain_causal_score_with_shap(bradford_hill_scores)
             if shap_explanation:
                 criteria_details['shap_explanation'] = shap_explanation
@@ -304,11 +330,8 @@ class CausalInferenceEngine:
         scores: BradfordHillScores,
         relationship: Dict[str, Any]
     ) -> CausalDirection:
-        """Determine the direction of causality"""
-        
-        # Use temporal precedence and semantic analysis
+        """Determine causal direction based on temporal precedence and semantic analysis"""
         if scores.temporal_precedence >= 0.7:
-            # Strong temporal precedence suggests source causes target
             temporal_causality = relationship.get('temporal_causality', '')
             
             if temporal_causality == 'source_causes_target':
@@ -318,7 +341,7 @@ class CausalInferenceEngine:
             elif temporal_causality == 'bidirectional':
                 return CausalDirection.BIDIRECTIONAL
             else:
-                return CausalDirection.SOURCE_TO_TARGET  # Default based on temporal precedence
+                return CausalDirection.SOURCE_TO_TARGET
         
         return CausalDirection.NONE
     
@@ -326,20 +349,12 @@ class CausalInferenceEngine:
         self,
         bradford_hill_scores: BradfordHillScores
     ) -> Optional[Dict[str, Any]]:
-        """
-        ENHANCEMENT #11: Use SHAP to explain which Bradford Hill criteria drove the causal score.
-        
-        Shows feature importance: which criteria matter most for causality decision.
-        
-        Returns:
-            Dictionary with SHAP explanations or None if SHAP not available
-        """
+        """Generate SHAP explanations for Bradford Hill criteria feature importance"""
         if not shap:
             logger.warning("SHAP not installed, skipping causal score explanation")
             return None
         
         try:
-            # Convert Bradford Hill scores to array
             scores_array = np.array([[
                 bradford_hill_scores.temporal_precedence,
                 bradford_hill_scores.strength,
@@ -349,7 +364,6 @@ class CausalInferenceEngine:
                 bradford_hill_scores.plausibility
             ]])
             
-            # Feature names
             feature_names = [
                 'Temporal Precedence',
                 'Strength',
@@ -359,25 +373,16 @@ class CausalInferenceEngine:
                 'Plausibility'
             ]
             
-            # Create simple model: average of scores
             def model_func(x):
                 return x.mean(axis=1)
             
-            # Create SHAP explainer with background data
             background_data = shap.sample(scores_array, min(100, len(scores_array)))
             explainer = shap.KernelExplainer(model_func, background_data)
-            
-            # Get SHAP values
             shap_values = explainer.shap_values(scores_array)
             
-            # Normalize SHAP values to percentages
             shap_sum = np.abs(shap_values[0]).sum()
-            if shap_sum > 0:
-                shap_percentages = (np.abs(shap_values[0]) / shap_sum * 100).tolist()
-            else:
-                shap_percentages = [0] * len(feature_names)
+            shap_percentages = (np.abs(shap_values[0]) / shap_sum * 100).tolist() if shap_sum > 0 else [0] * len(feature_names)
             
-            # Build explanation
             explanation = {
                 'shap_values': shap_values[0].tolist(),
                 'shap_percentages': shap_percentages,
@@ -419,7 +424,6 @@ class CausalInferenceEngine:
         try:
             logger.info(f"Starting root cause analysis for event {problem_event_id}")
             
-            # Call PostgreSQL function to find root causes
             result = self.supabase.rpc(
                 'find_root_causes',
                 {
@@ -438,22 +442,16 @@ class CausalInferenceEngine:
             root_causes = []
             
             for root_data in result.data:
-                # Fetch event details
                 root_event = await self._fetch_event_by_id(root_data['root_event_id'], user_id)
                 problem_event = await self._fetch_event_by_id(problem_event_id, user_id)
                 
                 if not root_event or not problem_event:
                     continue
                 
-                # Calculate impact
                 causal_path = root_data['causal_path']
                 affected_events = await self._get_affected_events(causal_path, user_id)
+                total_impact = sum(event.get('amount_usd', 0.0) for event in affected_events)
                 
-                total_impact = sum(
-                    event.get('amount_usd', 0.0) for event in affected_events
-                )
-                
-                # Build root cause description
                 description = self._build_root_cause_description(
                     root_event,
                     problem_event,
@@ -473,8 +471,6 @@ class CausalInferenceEngine:
                 )
                 
                 root_causes.append(root_cause)
-                
-                # Store in database
                 await self._store_root_cause_analysis(root_cause, user_id)
             
             self.metrics['root_cause_analyses'] += 1
@@ -532,7 +528,6 @@ class CausalInferenceEngine:
         try:
             logger.info(f"Starting counterfactual analysis for event {intervention_event_id}")
             
-            # Fetch intervention event
             intervention_event = await self._fetch_event_by_id(intervention_event_id, user_id)
             
             if not intervention_event:
@@ -541,14 +536,11 @@ class CausalInferenceEngine:
                     'message': 'Counterfactual analysis failed'
                 }
             
-            # Get original value
             original_value = self._get_event_value(intervention_event, intervention_type)
             
-            # Build causal graph if not already built
             if not self.causal_graph:
                 await self._build_causal_graph(user_id)
             
-            # Find downstream affected events
             affected_events = await self._propagate_counterfactual(
                 intervention_event_id,
                 intervention_type,
@@ -557,12 +549,8 @@ class CausalInferenceEngine:
                 user_id
             )
             
-            # Calculate total impact delta
-            total_impact_delta = sum(
-                event.get('impact_delta_usd', 0.0) for event in affected_events
-            )
+            total_impact_delta = sum(event.get('impact_delta_usd', 0.0) for event in affected_events)
             
-            # Build scenario description
             scenario_description = self._build_counterfactual_description(
                 intervention_event,
                 intervention_type,
@@ -581,7 +569,6 @@ class CausalInferenceEngine:
                 scenario_description=scenario_description
             )
             
-            # Store in database
             await self._store_counterfactual_analysis(counterfactual, user_id, scenario_name)
             
             self.metrics['counterfactual_analyses'] += 1
@@ -618,10 +605,8 @@ class CausalInferenceEngine:
     async def _build_causal_graph(self, user_id: str):
         """Build directed causal graph from causal relationships"""
         try:
-            # Lazy import igraph only when needed (heavy library)
             import igraph as ig
             
-            # Fetch all causal relationships
             result = self.supabase.table('causal_relationships').select(
                 'relationship_id, causal_score, is_causal, causal_direction'
             ).eq('user_id', user_id).eq('is_causal', True).execute()
@@ -630,16 +615,13 @@ class CausalInferenceEngine:
                 self.causal_graph = ig.Graph(directed=True)
                 return
             
-            # Fetch relationship details
             rel_ids = [r['relationship_id'] for r in result.data]
             relationships = self.supabase.table('relationship_instances').select(
                 'id, source_event_id, target_event_id'
             ).in_('id', rel_ids).execute()
             
-            # Build graph with igraph
             self.causal_graph = ig.Graph(directed=True)
             
-            # Collect unique vertices
             vertices = set()
             edges = []
             edge_attrs = {'relationship_id': [], 'confidence': [], 'causal_score': []}
@@ -654,11 +636,8 @@ class CausalInferenceEngine:
                 edge_attrs['confidence'].append(rel.get('confidence_score', 0.0))
                 edge_attrs['causal_score'].append(rel.get('causal_score', 0.0))
             
-            # Add vertices
             vertex_list = list(vertices)
             self.causal_graph.add_vertices(vertex_list)
-            
-            # Add edges with attributes
             self.causal_graph.add_edges(edges)
             for attr_name, attr_values in edge_attrs.items():
                 self.causal_graph.es[attr_name] = attr_values
@@ -679,18 +658,13 @@ class CausalInferenceEngine:
         counterfactual_value: Any,
         user_id: str
     ) -> List[Dict[str, Any]]:
-        """
-        Propagate counterfactual changes through causal graph.
-        
-        FIX #5: Now includes conditional logic filters (e.g., transaction status).
-        """
+        """Propagate counterfactual changes through causal graph with status filtering"""
         try:
             if not self.causal_graph or intervention_event_id not in self.causal_graph:
                 return []
             
             affected_events = []
             
-            # Find all downstream events using BFS
             try:
                 vertex_idx = self.causal_graph.vs.find(name=intervention_event_id).index
                 descendants_idx = self.causal_graph.subcomponent(vertex_idx, mode='out')
@@ -699,29 +673,20 @@ class CausalInferenceEngine:
                 descendants = []
             
             for event_id in descendants:
-                # Fetch event
                 event = await self._fetch_event_by_id(event_id, user_id)
                 
                 if not event:
                     continue
                 
-                # FIX #5: Add conditional logic - skip failed transactions
                 event_status = event.get('status', 'unknown').lower()
-                if event_status == 'failed':
-                    logger.debug(f"Skipping failed transaction {event_id} in counterfactual propagation")
+                if event_status in ('failed', 'cancelled', 'voided', 'reversed'):
+                    logger.debug(f"Skipping {event_status} transaction {event_id}")
                     continue
                 
-                # FIX #5: Skip cancelled or voided transactions
-                if event_status in ('cancelled', 'voided', 'reversed'):
-                    logger.debug(f"Skipping {event_status} transaction {event_id} in counterfactual propagation")
-                    continue
-                
-                # FIX #5: Check if event is marked as deleted
                 if event.get('is_deleted', False):
-                    logger.debug(f"Skipping deleted transaction {event_id} in counterfactual propagation")
+                    logger.debug(f"Skipping deleted transaction {event_id}")
                     continue
                 
-                # Calculate impact based on intervention type
                 impact_delta = self._calculate_counterfactual_impact(
                     intervention_type,
                     original_value,
@@ -735,7 +700,7 @@ class CausalInferenceEngine:
                     'amount_usd': event.get('amount_usd'),
                     'impact_delta_usd': impact_delta,
                     'vendor': event.get('vendor_standard'),
-                    'status': event_status  # FIX #5: Include status for transparency
+                    'status': event_status
                 })
             
             return affected_events
@@ -754,8 +719,8 @@ class CausalInferenceEngine:
         """
         Calculate impact of counterfactual on downstream event.
         
-        FIX #13: Implements date_change impact calculation including late fees,
-        interest charges, and cash flow timing effects.
+        Uses numpy-financial for accurate interest and financial calculations.
+        Implements date_change impact including late fees, interest, and cash flow timing.
         """
         
         if intervention_type == 'amount_change':
@@ -784,11 +749,9 @@ class CausalInferenceEngine:
                 event_amount = affected_event.get('amount_usd', 0.0)
                 event_type = affected_event.get('document_type', '').lower()
                 
-                # Calculate late fees and interest
                 total_impact = 0.0
                 
-                # 1. Late fees (typically 1-2% per month after due date)
-                # Assume 30-day payment terms, 1.5% monthly late fee
+                # 1. Late fees using numpy-financial (1.5% monthly after 30 days)
                 if days_diff > 30:
                     months_late = (days_diff - 30) / 30.0
                     late_fee_rate = 0.015  # 1.5% per month
@@ -796,16 +759,24 @@ class CausalInferenceEngine:
                     total_impact += late_fees
                     logger.debug(f"Late fees: ${late_fees:.2f} for {months_late:.1f} months")
                 
-                # 2. Interest charges (assume 8% annual interest for cash flow timing)
+                # 2. Interest charges using numpy-financial (8% annual)
                 if days_diff > 0:
                     annual_rate = 0.08
-                    daily_rate = annual_rate / 365.0
-                    interest = event_amount * daily_rate * days_diff
-                    total_impact += interest
-                    logger.debug(f"Interest: ${interest:.2f} for {days_diff} days")
+                    # Use numpy-financial for present value calculation
+                    # pv = present value of future payment delayed by days_diff
+                    try:
+                        pv = npf.pv(rate=annual_rate/365, nper=days_diff, pmt=0, fv=-event_amount)
+                        interest = event_amount - pv
+                        total_impact += interest
+                        logger.debug(f"Interest (npf): ${interest:.2f} for {days_diff} days")
+                    except Exception as npf_err:
+                        # Fallback to simple calculation if npf fails
+                        daily_rate = annual_rate / 365.0
+                        interest = event_amount * daily_rate * days_diff
+                        total_impact += interest
+                        logger.debug(f"Interest (fallback): ${interest:.2f} for {days_diff} days")
                 
                 # 3. Cash flow impact (opportunity cost at 5% annual)
-                # Delayed cash inflow = lost investment opportunity
                 if 'payment' in event_type or 'invoice' in event_type:
                     opportunity_cost_rate = 0.05 / 365.0
                     opportunity_cost = event_amount * opportunity_cost_rate * days_diff
@@ -813,10 +784,8 @@ class CausalInferenceEngine:
                     logger.debug(f"Opportunity cost: ${opportunity_cost:.2f}")
                 
                 # 4. Covenant violation risk (if payment is critical)
-                # If this is a loan payment and delayed, risk of covenant breach
                 if 'loan' in event_type or 'debt' in event_type:
                     if days_diff > 15:
-                        # Risk penalty: 2% of amount for covenant risk
                         covenant_risk = event_amount * 0.02
                         total_impact += covenant_risk
                         logger.debug(f"Covenant risk penalty: ${covenant_risk:.2f}")
@@ -845,15 +814,20 @@ class CausalInferenceEngine:
         problem_event: Dict[str, Any],
         path_length: int
     ) -> str:
-        """Build natural language description of root cause"""
+        """Build natural language description of root cause using Jinja2 template"""
         
-        root_type = root_event.get('document_type', 'event')
-        problem_type = problem_event.get('document_type', 'event')
-        root_vendor = root_event.get('vendor_standard', 'unknown')
+        # Jinja2 template for root cause descriptions (easily editable by non-developers)
+        template_str = (
+            "Root cause: {{ root_type }} from {{ root_vendor }} "
+            "led to {{ problem_type }} through {{ path_length }} causal step{% if path_length != 1 %}s{% endif %}"
+        )
         
-        return (
-            f"Root cause: {root_type} from {root_vendor} "
-            f"led to {problem_type} through {path_length} causal steps"
+        template = Template(template_str)
+        return template.render(
+            root_type=root_event.get('document_type', 'event'),
+            problem_type=problem_event.get('document_type', 'event'),
+            root_vendor=root_event.get('vendor_standard', 'unknown'),
+            path_length=path_length
         )
     
     def _build_counterfactual_description(
@@ -864,22 +838,45 @@ class CausalInferenceEngine:
         counterfactual_value: Any,
         affected_events: List[Dict[str, Any]]
     ) -> str:
-        """Build natural language description of counterfactual scenario"""
+        """Build natural language description of counterfactual scenario using Jinja2 template"""
         
         event_type = intervention_event.get('document_type', 'event')
+        affected_count = len(affected_events)
         
         if intervention_type == 'amount_change':
-            return (
-                f"If {event_type} amount was ${counterfactual_value:,.2f} instead of ${original_value:,.2f}, "
-                f"it would affect {len(affected_events)} downstream events"
+            # Jinja2 template for amount change scenarios
+            template_str = (
+                "If {{ event_type }} amount was ${{ counterfactual_value:,.2f }} "
+                "instead of ${{ original_value:,.2f }}, "
+                "it would affect {{ affected_count }} downstream event{% if affected_count != 1 %}s{% endif %}"
             )
-        elif intervention_type == 'date_change':
-            return (
-                f"If {event_type} date was {counterfactual_value} instead of {original_value}, "
-                f"it would affect {len(affected_events)} downstream events"
+            template = Template(template_str)
+            return template.render(
+                event_type=event_type,
+                counterfactual_value=counterfactual_value,
+                original_value=original_value,
+                affected_count=affected_count
             )
         
-        return f"Counterfactual scenario affecting {len(affected_events)} events"
+        elif intervention_type == 'date_change':
+            # Jinja2 template for date change scenarios
+            template_str = (
+                "If {{ event_type }} date was {{ counterfactual_value }} "
+                "instead of {{ original_value }}, "
+                "it would affect {{ affected_count }} downstream event{% if affected_count != 1 %}s{% endif %}"
+            )
+            template = Template(template_str)
+            return template.render(
+                event_type=event_type,
+                counterfactual_value=counterfactual_value,
+                original_value=original_value,
+                affected_count=affected_count
+            )
+        
+        # Default template for other intervention types
+        template_str = "Counterfactual scenario affecting {{ affected_count }} event{% if affected_count != 1 %}s{% endif %}"
+        template = Template(template_str)
+        return template.render(affected_count=affected_count)
     
     async def _fetch_relationships(
         self,
@@ -963,7 +960,16 @@ class CausalInferenceEngine:
             if job_id:
                 data['job_id'] = job_id
             
+            # COMPULSORY: Generate embedding for semantic intelligence
+            causal_embedding = await self._generate_causal_embedding(causal_rel)
+            if causal_embedding:
+                data['causal_embedding'] = causal_embedding
+            else:
+                logger.warning("causal_embedding_generation_failed", 
+                              relationship_id=causal_rel.relationship_id)
+            
             self.supabase.table('causal_relationships').upsert(data).execute()
+
             
             # CRITICAL FIX #3: Update normalized_events with causal metadata
             try:
@@ -1048,11 +1054,11 @@ class CausalInferenceEngine:
 
 
     async def _save_model(self, model: Any, path: str) -> bool:
-        """Save model to Supabase Storage using pickle"""
+        """Save model to Supabase Storage using joblib (more efficient than pickle)"""
         try:
-            # Serialize model
+            # Serialize model with joblib (better compression and speed than pickle)
             buffer = io.BytesIO()
-            pickle.dump(model, buffer)
+            joblib.dump(model, buffer, compress=3)  # compress=3 for good balance
             buffer.seek(0)
             
             # Upload to storage
@@ -1070,13 +1076,13 @@ class CausalInferenceEngine:
             return False
 
     async def _load_model(self, path: str) -> Optional[Any]:
-        """Load model from Supabase Storage using pickle"""
+        """Load model from Supabase Storage using joblib (more efficient than pickle)"""
         try:
             storage_path = f"models/{path}"
             response = self.supabase.storage.from_("finely-upload").download(storage_path)
             
             if response:
-                return pickle.loads(response)
+                return joblib.load(io.BytesIO(response))
             return None
         except Exception as e:
             logger.debug(f"Model not found or failed to load from {path}: {e}")

@@ -57,6 +57,12 @@ performance_metrics.log
 # Redis dump files
 dump.rdb
 
+# Large model files (downloaded during Docker build)
+*.safetensors
+*.pt
+checkpoints/
+aident_cfo_brain/models/
+
 # Temporary processing files
 /tmp/
 /temp/

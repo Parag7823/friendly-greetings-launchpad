@@ -64,10 +64,10 @@ SELECT
     NULL::UUID as delta_log_id,
     'none' as change_type,
     
-    -- Layer 9: Fraud Detection (from duplicate_transactions)
-    COALESCE(dt.id, NULL) as duplicate_transaction_id,
-    COALESCE(dt.confidence > 0.7, FALSE) as is_duplicate,
-    COALESCE(dt.confidence, 0.0) as duplicate_confidence
+    -- Layer 9: Fraud Detection (placeholder - duplicate_transactions table not yet created)
+    NULL::UUID as duplicate_transaction_id,
+    FALSE as is_duplicate,
+    0.0 as duplicate_confidence
     
 FROM relationship_instances ri
 
@@ -103,11 +103,12 @@ LEFT JOIN root_cause_analyses rca
     ON ri.source_event_id = rca.problem_event_id 
     AND ri.user_id = rca.user_id
 
--- Layer 9: Duplicate transactions (join on source_event_id and target_event_id)
-LEFT JOIN duplicate_transactions dt 
-    ON ri.source_event_id = dt.from_event_id 
-    AND ri.target_event_id = dt.to_event_id
-    AND ri.user_id = dt.user_id
+-- Layer 9: Duplicate transactions join removed (table not yet created)
+-- When duplicate_transactions table is added, uncomment:
+-- LEFT JOIN duplicate_transactions dt 
+--     ON ri.source_event_id = dt.from_event_id 
+--     AND ri.target_event_id = dt.to_event_id
+--     AND ri.user_id = dt.user_id
 
 WHERE TRUE;
 

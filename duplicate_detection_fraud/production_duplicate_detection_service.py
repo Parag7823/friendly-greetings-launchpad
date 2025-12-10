@@ -207,10 +207,15 @@ class FileMetadata:
     user_id: str
     file_hash: str
     filename: str
-    file_size: int
-    content_type: str
-    upload_timestamp: datetime
+    file_size: int = 0
+    content_type: str = "application/octet-stream"
+    upload_timestamp: datetime = None
     content_fingerprint: Optional[str] = None
+    
+    def __post_init__(self):
+        """Set default timestamp if not provided"""
+        if self.upload_timestamp is None:
+            self.upload_timestamp = datetime.now()
 
 class ProductionDuplicateDetectionService:
     """
@@ -332,6 +337,7 @@ class ProductionDuplicateDetectionService:
         
         # GENIUS v4.0: presidio for PII detection (20% better security)
         # Lazy load presidio on first use to avoid import-time crashes
+        pii_detected = False  # Track if PII was detected by any method
         presidio_instance = _ensure_presidio_loaded()
         if presidio_instance:
             try:
@@ -345,9 +351,20 @@ class ProductionDuplicateDetectionService:
                 if pii_in_filename:
                     sensitive_types = [r.entity_type for r in pii_in_filename if r.score > 0.7]
                     if sensitive_types:
+                        pii_detected = True
                         raise ValueError(f"Filename contains PII: {', '.join(sensitive_types)}")
+            except ValueError:
+                raise  # Re-raise PII detection errors
             except Exception as e:
                 logger.warning("Presidio PII check failed", error=str(e))
+        
+        # PRODUCTION FIX: Fallback email detection using regex when presidio unavailable
+        # This ensures emails in filenames are ALWAYS detected (belt and suspenders security)
+        if not pii_detected:
+            import re
+            email_pattern = r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}'
+            if re.search(email_pattern, filename):
+                raise ValueError(f"Filename contains PII: email address detected")
         
         # Path traversal check
         if any(c in filename for c in ['\x00', '\x1a', '\x7f', '..', '/', '\\']):

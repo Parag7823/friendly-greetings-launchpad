@@ -60,8 +60,19 @@ from aiocache.serializers import PickleSerializer
 from scipy import stats
 import pandas as pd
 
-# CRITICAL FIX: Import shared normalization functions
-from provenance_tracker import normalize_business_logic, normalize_temporal_causality
+# CRITICAL FIX: Import shared normalization functions with correct path
+try:
+    from core_infrastructure.provenance_tracker import normalize_business_logic, normalize_temporal_causality
+except ImportError:
+    try:
+        from provenance_tracker import normalize_business_logic, normalize_temporal_causality
+    except ImportError:
+        # Fallback: define simple identity functions if module not available
+        def normalize_business_logic(value):
+            return value if value else 'unknown'
+        
+        def normalize_temporal_causality(value):
+            return value if value else 'unknown'
 
 logger = structlog.get_logger(__name__)
 

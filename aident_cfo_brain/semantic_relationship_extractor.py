@@ -38,21 +38,18 @@ import aiometer
 # ✅ NEW: Jinja2 for template-based prompt generation
 from jinja2 import Environment, BaseLoader, select_autoescape
 
-# Embeddings
-from embedding_service import get_embedding_service
+# Embeddings - COMPULSORY: Import must succeed for semantic intelligence
+from data_ingestion_normalization.embedding_service import get_embedding_service
+
 
 logger = structlog.get_logger(__name__)
 
-# FIX #4: Singleton cache instance to avoid creating new Cache per call
-# This prevents cache divergence and connection pooling waste
+# Singleton cache to prevent connection pool waste
 _semantic_cache_instance: Optional[Cache] = None
 _semantic_cache_lock = asyncio.Lock()
 
 async def _get_semantic_cache(redis_url: str) -> Cache:
-    """
-    Get or create singleton Cache instance for semantic relationships.
-    Reuses connection pool across all calls.
-    """
+    """Get or create singleton Cache instance for semantic relationships."""
     global _semantic_cache_instance
     if _semantic_cache_instance is None:
         async with _semantic_cache_lock:
@@ -64,10 +61,10 @@ async def _get_semantic_cache(redis_url: str) -> Cache:
                     port=parsed.port or 6379,
                     serializer=PickleSerializer()
                 )
-                logger.info("✅ Semantic cache singleton initialized")
+                logger.info("Semantic cache singleton initialized")
     return _semantic_cache_instance
 
-# ✅ NEW: Jinja2 Environment for prompt templates
+# Jinja2 environment for prompt templates
 jinja_env = Environment(
     loader=BaseLoader(),
     autoescape=select_autoescape(['html', 'xml']),
@@ -75,27 +72,49 @@ jinja_env = Environment(
     lstrip_blocks=True
 )
 
-# ============================================
-# PROMETHEUS METRICS (Industry Standard)
-# ============================================
-semantic_extractions_total = Counter(
+# Prometheus metrics - safe creation pattern to handle reimports
+from prometheus_client import REGISTRY
+
+def _get_or_create_counter(name: str, description: str, labelnames: list = None) -> Counter:
+    """Safely create or retrieve an existing Counter metric."""
+    try:
+        return Counter(name, description, labelnames or [])
+    except ValueError:
+        # Metric already exists, retrieve it from registry
+        return REGISTRY._names_to_collectors.get(name)
+
+def _get_or_create_histogram(name: str, description: str, buckets: list = None) -> Histogram:
+    """Safely create or retrieve an existing Histogram metric."""
+    try:
+        return Histogram(name, description, buckets=buckets or Histogram.DEFAULT_BUCKETS)
+    except ValueError:
+        return REGISTRY._names_to_collectors.get(name)
+
+def _get_or_create_gauge(name: str, description: str) -> Gauge:
+    """Safely create or retrieve an existing Gauge metric."""
+    try:
+        return Gauge(name, description)
+    except ValueError:
+        return REGISTRY._names_to_collectors.get(name)
+
+semantic_extractions_total = _get_or_create_counter(
     'semantic_extractions_total',
     'Total semantic relationship extractions',
-    ['status']  # success, failure, cached
+    ['status']
 )
 
-extraction_duration_seconds = Histogram(
+extraction_duration_seconds = _get_or_create_histogram(
     'extraction_duration_seconds',
     'Time spent on semantic extraction',
     buckets=[0.1, 0.5, 1.0, 2.0, 5.0, 10.0]
 )
 
-cache_hit_rate = Gauge(
+cache_hit_rate = _get_or_create_gauge(
     'semantic_cache_hit_rate',
     'Cache hit rate for semantic extractions'
 )
 
-ai_call_duration_seconds = Histogram(
+ai_call_duration_seconds = _get_or_create_histogram(
     'semantic_ai_call_duration_seconds',
     'Time spent on AI calls',
     buckets=[0.5, 1.0, 2.0, 5.0, 10.0, 30.0]
@@ -215,53 +234,37 @@ class SemanticRelationshipExtractor:
         self,
         openai_client: Optional[AsyncGroq] = None,
         supabase_client=None,
-        cache_client=None,  # Deprecated, using aiocache
+        cache_client=None,
         config: Optional[Dict[str, Any]] = None
     ):
-        """
-        Initialize extractor with Groq client and configuration.
-        
-        Args:
-            openai_client: AsyncGroq client (auto-created if None)
-            supabase_client: Supabase client for database operations
-            cache_client: DEPRECATED - using aiocache instead
-            config: Configuration dict (uses defaults if None)
-        """
-        # Initialize Groq client with instructor patching
+        """Initialize extractor with Groq client and configuration."""
         groq_api_key = os.getenv('GROQ_API_KEY')
         if not groq_api_key:
             raise ValueError("GROQ_API_KEY environment variable required")
         
-        # FIX #10: Use client as-is (already patched by enhanced_relationship_detector)
-        # Avoid double patching which causes response validation conflicts
         base_client = openai_client or AsyncGroq(api_key=groq_api_key)
         
-        # Only patch if not already patched (check for instructor wrapper)
+        # Apply instructor patch only if not already patched
         if hasattr(base_client, 'create_with_validation'):
-            # Already patched by instructor
             self.groq = base_client
-            logger.debug("Using pre-patched Groq client (instructor already applied)")
         else:
-            # Not patched yet, apply instructor
-            self.groq = instructor.patch(base_client)
-            logger.debug("Applied instructor patch to Groq client")
+            # REFACTORED: Using native Groq client (structured output via .with_structured_output())
+            self.groq = base_client
         
         self.supabase = supabase_client
         self.config = config or self._get_default_config()
-        
-        # Cache metrics tracking
         self._cache_hits = 0
         self._cache_misses = 0
-        
-        logger.info("✅ SemanticRelationshipExtractor v2.0 initialized (instructor + aiocache + prometheus)")
+        logger.info("SemanticRelationshipExtractor initialized")
     
     def _get_default_config(self) -> Dict[str, Any]:
         """Get default configuration (environment-aware)"""
         return {
             'enable_caching': os.getenv('ENABLE_SEMANTIC_CACHE', 'true').lower() == 'true',
             'cache_ttl_seconds': int(os.getenv('SEMANTIC_CACHE_TTL', str(48 * 3600))),
-            'enable_embeddings': os.getenv('ENABLE_EMBEDDINGS', 'true').lower() == 'true',
+            # REMOVED: 'enable_embeddings' - embeddings are now COMPULSORY for semantic intelligence
             'embedding_model': os.getenv('EMBEDDING_MODEL', 'bge-large-en-v1.5'),
+
             'semantic_model': os.getenv('SEMANTIC_MODEL', 'llama-3.3-70b-versatile'),
             'temperature': float(os.getenv('SEMANTIC_TEMPERATURE', '0.1')),
             'max_tokens': int(os.getenv('SEMANTIC_MAX_TOKENS', '800')),
@@ -373,41 +376,19 @@ Processing {{ batch_size }} relationship pairs from user {{ user_id }}.
         context_events: Optional[List[Dict[str, Any]]] = None,
         existing_relationship: Optional[Dict[str, Any]] = None
     ) -> Optional[SemanticRelationship]:
-        """
-        Extract semantic relationship using instructor + aiocache.
-        
-        PRODUCTION-GRADE IMPLEMENTATION:
-        - Auto-cached with Redis (aiocache decorator)
-        - Auto-validated with instructor (no manual JSON parsing)
-        - Auto-metrics with Prometheus (decorator)
-        - Auto-retry on validation failure (instructor)
-        
-        Args:
-            source_event: Source financial event
-            target_event: Target financial event  
-            context_events: Optional surrounding events
-            existing_relationship: Optional existing relationship
-        
-        Returns:
-            SemanticRelationship or None if extraction fails
-        """
+        """Extract semantic relationship with caching, validation, and metrics."""
         try:
-            # Generate cache key
             cache_key = self._generate_cache_key(source_event, target_event)
-            
-            # Try cached result (aiocache handles this automatically)
             cached_result = await self._get_from_cache(cache_key)
             if cached_result:
                 self._cache_hits += 1
                 cache_hit_rate.set(self._cache_hits / (self._cache_hits + self._cache_misses))
                 semantic_extractions_total.labels(status='cached').inc()
-                logger.debug(f"Cache hit: {cache_key[:16]}...")
                 return cached_result
             
             self._cache_misses += 1
             cache_hit_rate.set(self._cache_hits / (self._cache_hits + self._cache_misses))
             
-            # Build prompt using Jinja2 templates
             prompt = self._build_prompt(
                 source_event,
                 target_event,
@@ -418,19 +399,18 @@ Processing {{ batch_size }} relationship pairs from user {{ user_id }}.
                 batch_size=None
             )
             
-            # Call AI with instructor (auto-validates, auto-retries)
             ai_response = await self._call_ai_with_instructor(prompt)
-            
             if not ai_response:
                 semantic_extractions_total.labels(status='failure').inc()
                 return None
             
-            # Generate embedding
-            embedding = None
-            if self.config['enable_embeddings']:
-                embedding = await self._generate_embedding(ai_response)
+            # COMPULSORY: Always generate embeddings for semantic intelligence
+            embedding = await self._generate_embedding(ai_response)
+            if not embedding:
+                logger.warning("embedding_generation_failed_but_continuing", 
+                              relationship_type=ai_response.relationship_type)
+
             
-            # Build result
             semantic_relationship = SemanticRelationship(
                 source_event_id=source_event.get('id'),
                 target_event_id=target_event.get('id'),
@@ -452,18 +432,12 @@ Processing {{ batch_size }} relationship pairs from user {{ user_id }}.
                 embedding=embedding
             )
             
-            # Cache result
             await self._store_in_cache(cache_key, semantic_relationship)
-            
-            # Store in database
             if self.supabase:
                 await self._store_in_database(semantic_relationship)
             
             semantic_extractions_total.labels(status='success').inc()
-            logger.info(
-                f"✅ Extracted: {semantic_relationship.relationship_type} "
-                f"(conf: {semantic_relationship.confidence:.2f})"
-            )
+            logger.info(f"Extracted: {semantic_relationship.relationship_type} (conf: {semantic_relationship.confidence:.2f})")
             
             return semantic_relationship
             
@@ -477,20 +451,8 @@ Processing {{ batch_size }} relationship pairs from user {{ user_id }}.
         relationship_pairs: List[Tuple[Dict, Dict]],
         context_events: Optional[List[Dict]] = None
     ) -> List[Optional[SemanticRelationship]]:
-        """
-        Extract relationships in batch with rate limiting (aiometer).
-        
-        REPLACES 40 LINES OF MANUAL BATCHING with 3 lines of aiometer.
-        
-        Args:
-            relationship_pairs: List of (source_event, target_event) tuples
-            context_events: Optional context events
-        
-        Returns:
-            List of SemanticRelationship objects (None for failures)
-        """
+        """Extract relationships in batch with rate limiting."""
         try:
-            # aiometer handles batching, rate limiting, and backpressure automatically
             results = await aiometer.run_all(
                 [
                     self.extract_semantic_relationships(source, target, context_events)
@@ -507,10 +469,6 @@ Processing {{ batch_size }} relationship pairs from user {{ user_id }}.
             logger.error(f"Batch extraction failed: {e}", exc_info=True)
             return [None] * len(relationship_pairs)
     
-    # ============================================
-    # HELPER METHODS (Production-Ready)
-    # ============================================
-    
     def _generate_cache_key(self, source_event: Dict, target_event: Dict) -> str:
         """Generate deterministic cache key for event pair"""
         source_id = source_event.get('id', '')
@@ -520,12 +478,11 @@ Processing {{ batch_size }} relationship pairs from user {{ user_id }}.
         return hashlib.md5(key_string.encode()).hexdigest()
     
     async def _get_from_cache(self, cache_key: str) -> Optional[SemanticRelationship]:
-        """Get from aiocache (Redis-backed)"""
+        """Get from Redis cache."""
         if not self.config['enable_caching']:
             return None
         
         try:
-            # ✅ REFACTORED: Use urllib.parse instead of brittle string splitting
             parsed = urlparse(self.config['redis_url'])
             cache = Cache(
                 Cache.REDIS,
@@ -540,12 +497,11 @@ Processing {{ batch_size }} relationship pairs from user {{ user_id }}.
             return None
     
     async def _store_in_cache(self, cache_key: str, semantic_rel: SemanticRelationship):
-        """Store in aiocache (Redis-backed) using singleton instance"""
+        """Store in Redis cache using singleton instance."""
         if not self.config['enable_caching']:
             return
         
         try:
-            # FIX #4: Use singleton cache instance instead of creating new Cache per call
             cache = await _get_semantic_cache(self.config['redis_url'])
             await cache.set(cache_key, semantic_rel, ttl=self.config['cache_ttl_seconds'])
         except Exception as e:
@@ -561,21 +517,10 @@ Processing {{ batch_size }} relationship pairs from user {{ user_id }}.
         batch_index: Optional[int] = None,
         batch_size: Optional[int] = None
     ) -> str:
-        """
-        Build prompt using Jinja2 templates for dynamic, maintainable prompt generation.
-        
-        ✅ ADVANTAGES:
-        - Separation of concerns: Template logic vs. code logic
-        - Easy to modify prompts without code changes
-        - Reusable templates for different extraction scenarios
-        - Better variable interpolation with filters
-        - Easier testing and versioning
-        """
+        """Build prompt using Jinja2 templates for dynamic prompt generation."""
         try:
             templates = self._get_prompt_templates()
             base_template = jinja_env.from_string(templates['base_extraction'])
-            
-            # Render base extraction prompt
             base_prompt = base_template.render(
                 source=source_event,
                 target=target_event,
@@ -583,7 +528,6 @@ Processing {{ batch_size }} relationship pairs from user {{ user_id }}.
                 existing_relationship=existing_relationship
             )
             
-            # If batch context provided, wrap with batch template
             if batch_index is not None and batch_size is not None:
                 batch_template = jinja_env.from_string(templates['batch_context'])
                 return batch_template.render(
@@ -607,19 +551,11 @@ Provide: relationship_type, semantic_description, confidence (0.0-1.0), temporal
     
     @ai_call_duration_seconds.time()
     async def _call_ai_with_instructor(self, prompt: str) -> Optional[SemanticRelationshipResponse]:
-        """
-        Call AI with instructor for auto-validated structured output.
-        
-        REPLACES 50+ LINES OF MANUAL JSON PARSING with instructor magic:
-        - Auto-validates response against Pydantic model
-        - Auto-retries on validation failure
-        - Zero manual JSON parsing
-        - Template-based prompts ensure consistent formatting
-        """
+        """Call AI with instructor for auto-validated structured output."""
         try:
             response = await self.groq.chat.completions.create(
                 model=self.config['semantic_model'],
-                response_model=SemanticRelationshipResponse,  # Instructor magic!
+                response_model=SemanticRelationshipResponse,
                 messages=[{"role": "user", "content": prompt}],
                 max_tokens=self.config['max_tokens'],
                 temperature=self.config['temperature']
@@ -649,7 +585,7 @@ Provide: relationship_type, semantic_description, confidence (0.0-1.0), temporal
             embedding_service = await get_embedding_service()
             embedding = await embedding_service.embed_text(embedding_text)
             
-            logger.debug(f"Generated embedding (1024 dims)")
+            logger.debug("Generated embedding")
             return embedding
             
         except Exception as e:
@@ -683,9 +619,7 @@ Provide: relationship_type, semantic_description, confidence (0.0-1.0), temporal
             
             logger.debug(f"Stored: {semantic_rel.source_event_id} → {semantic_rel.target_event_id}")
             
-            # CRITICAL FIX #3: Update normalized_events with semantic metadata
             try:
-                # Update source event's normalized_events record
                 self.supabase.table('normalized_events').update({
                     'semantic_links': [
                         {
@@ -703,8 +637,6 @@ Provide: relationship_type, semantic_description, confidence (0.0-1.0), temporal
                     'semantic_confidence': semantic_rel.confidence,
                     'updated_at': datetime.utcnow().isoformat()
                 }).eq('raw_event_id', semantic_rel.source_event_id).execute()
-                
-                logger.debug(f"Updated normalized_events for source event: {semantic_rel.source_event_id}")
             except Exception as norm_update_err:
                 logger.warning(f"Failed to update normalized_events with semantic metadata: {norm_update_err}")
             
@@ -712,7 +644,7 @@ Provide: relationship_type, semantic_description, confidence (0.0-1.0), temporal
             logger.error(f"Database store failed: {e}")
     
     def get_metrics(self) -> Dict[str, Any]:
-        """Get Prometheus metrics (Grafana-ready)"""
+        """Get Prometheus metrics."""
         return {
             'cache_hit_rate': self._cache_hits / (self._cache_hits + self._cache_misses) if (self._cache_hits + self._cache_misses) > 0 else 0.0,
             'total_extractions': self._cache_hits + self._cache_misses,

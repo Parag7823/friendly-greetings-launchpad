@@ -66,7 +66,11 @@ import pandas as pd
 # CRITICAL FIX: Import shared normalization functions
 from core_infrastructure.provenance_tracker import normalize_business_logic, normalize_temporal_causality
 
+# COMPULSORY: Embedding service for semantic intelligence
+from data_ingestion_normalization.embedding_service import get_embedding_service
+
 logger = structlog.get_logger(__name__)
+
 
 
 class PatternConfidence(Enum):
@@ -171,6 +175,37 @@ class TemporalPatternLearner:
         }
         
         logger.info("✅ TemporalPatternLearner initialized")
+    
+    async def _generate_pattern_embedding(self, pattern: 'TemporalPattern') -> Optional[List[float]]:
+        """
+        COMPULSORY: Generate BGE embedding for semantic similarity search of patterns.
+        
+        The embedding captures the semantic meaning of the pattern for:
+        - Finding similar patterns across different relationship types
+        - Semantic grouping of patterns
+        - AI-powered pattern recommendations
+        """
+        try:
+            # Build semantic text from pattern metadata
+            embedding_text = (
+                f"{pattern.relationship_type} "
+                f"{pattern.pattern_description} "
+                f"average {pattern.avg_days_between:.1f} days "
+                f"confidence {pattern.confidence_score:.2f} "
+                f"{'seasonal' if pattern.has_seasonal_pattern else 'non-seasonal'}"
+            )
+            
+            embedding_service = await get_embedding_service()
+            embedding = await embedding_service.embed_text(embedding_text)
+            
+            logger.debug("Generated embedding for temporal pattern", 
+                        relationship_type=pattern.relationship_type)
+            return embedding
+            
+        except Exception as e:
+            logger.error(f"Pattern embedding generation failed: {e}")
+            return None
+
     
     @staticmethod
     def _parse_iso_timestamp(timestamp_str: str) -> datetime:
@@ -793,7 +828,16 @@ class TemporalPatternLearner:
             if transaction_id:
                 data['transaction_id'] = transaction_id
             
+            # COMPULSORY: Generate embedding for semantic intelligence
+            pattern_embedding = await self._generate_pattern_embedding(pattern)
+            if pattern_embedding:
+                data['pattern_embedding'] = pattern_embedding
+            else:
+                logger.warning("pattern_embedding_generation_failed", 
+                              relationship_type=pattern.relationship_type)
+            
             self.supabase.table('temporal_patterns').upsert(data).execute()
+
             
             # CRITICAL FIX #3: Update normalized_events with temporal metadata
             try:

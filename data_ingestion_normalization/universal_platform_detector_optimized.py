@@ -94,6 +94,11 @@ class UniversalPlatformDetectorOptimized:
     - Real-time platform updates
     """
     
+    # CRITICAL PERFORMANCE FIX: Class-level automaton cache (built only ONCE)
+    # Problem: Each instance was rebuilding automaton (3625ms latency)
+    # Solution: Share automaton across all instances (instantaneous reuse)
+    _class_automaton = None  # Class-level cache
+    
     def __init__(self, groq_client=None, cache_client=None, supabase_client=None, config=None):
         self.groq_client = groq_client
         self.supabase = supabase_client
@@ -676,15 +681,23 @@ class UniversalPlatformDetectorOptimized:
             
             combined_text = " ".join(text_parts).lower()  # Case-insensitive
             
-            # CRITICAL FIX: Lazy-load automaton from inference service with error handling
-            # FIX #75: Add try/except to gracefully fallback if service fails
+            # CRITICAL PERFORMANCE FIX: Use class-level automaton cache
+            # Problem: Each instance was rebuilding automaton (3625ms latency)
+            # Solution: Check class cache first, build once, share across all instances
             if self.automaton is None:
-                try:
-                    from inference_service import AutomatonService
-                    self.automaton = await AutomatonService.get_platform_automaton()
-                except Exception as e:
-                    logger.warning(f"Failed to load automaton service, falling back to pattern matching: {e}")
-                    self.automaton = None  # Will use pattern matching fallback below
+                # Check class-level cache first (instantaneous)
+                if UniversalPlatformDetectorOptimized._class_automaton is not None:
+                    self.automaton = UniversalPlatformDetectorOptimized._class_automaton
+                else:
+                    # Build automaton only if not cached at class level
+                    try:
+                        from duplicate_detection_fraud.inference_service import AutomatonService
+                        self.automaton = await AutomatonService.get_platform_automaton()
+                        # Cache at class level for all future instances
+                        UniversalPlatformDetectorOptimized._class_automaton = self.automaton
+                    except Exception as e:
+                        logger.warning(f"Failed to load automaton service, falling back to pattern matching: {e}")
+                        self.automaton = None  # Will use pattern matching fallback below
             
             # GENIUS v4.0: Use pyahocorasick automaton (2x faster, async-ready)
             # Single pass through text - O(n) with Aho-Corasick algorithm

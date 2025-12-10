@@ -1,0 +1,57 @@
+{# Temporal Pattern Response Template #}
+# ⏰ Temporal Forecast: {{ question }}
+
+{% if predictions %}
+I analyzed your historical patterns and here's what I predict:
+
+## 📈 Predictions
+
+{% for pred in predictions[:5] %}
+### {{ pred.event_type }}
+- **Predicted Date**: {{ pred.predicted_date }}
+- **Confidence**: {{ "%.0f"|format(pred.confidence * 100) }}%
+- **Expected Value**: {{ pred.predicted_value }}
+{% if pred.reasoning %}
+- **Based on**: {{ pred.reasoning }}
+{% endif %}
+
+{% endfor %}
+
+## 🎯 Pattern Insights
+
+{% if temporal_insights %}
+- **Frequency**: {{ temporal_insights.frequency }}
+- **Trend**: {{ temporal_insights.trend }}
+{% if temporal_insights.seasonal %}
+- **Seasonal Pattern**: {{ temporal_insights.seasonal }}
+{% endif %}
+{% endif %}
+
+## 💡 What This Means
+
+{% if recommendations %}
+{% for rec in recommendations %}
+{{ loop.index }}. {{ rec }}
+{% endfor %}
+{% else %}
+1. Plan ahead for {{ predictions[0].event_type }}
+2. Monitor leading indicators
+3. Prepare contingency plans
+{% endif %}
+
+---
+
+**Want more details?** Ask me:
+{% for question in follow_up_questions %}
+- {{ question }}
+{% endfor %}
+
+{% else %}
+I need more historical data to make accurate temporal predictions.
+
+**To enable forecasting:**
+- Upload at least 3 months of transaction data
+- Connect recurring revenue sources (Stripe, subscriptions)
+- Enable integrations for real-time data
+
+{% endif %}

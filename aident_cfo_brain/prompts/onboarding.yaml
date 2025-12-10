@@ -1,0 +1,73 @@
+# Onboarding Messages
+# Used by IntelligentChatOrchestrator._generate_dynamic_onboarding_message()
+# Location: intelligent_chat_orchestrator.py lines 1583-1686
+
+first_visit: |
+  👋 Hi! I'm Finley, your AI finance teammate.
+  
+  I help small business owners and founders understand their finances better. Think of me as your personal CFO who's always available.
+  
+  **What I can do:**
+  ✓ Analyze cash flow patterns
+  ✓ Predict payment delays
+  ✓ Find cost-saving opportunities
+  ✓ Answer any finance question
+  
+  **Let's get started!** Connect your data sources (QuickBooks, Xero, Stripe, etc.) or upload financial files to begin.
+
+onboarded: |
+  💡 **Ready to unlock financial insights?**
+  
+  You've seen what I can do. Now let's connect your actual data so I can provide specific, actionable recommendations for YOUR business.
+  
+  **Quick options:**
+  1. Connect QuickBooks (1 minute)
+  2. Connect Xero (1 minute)
+  3. Upload Excel/CSV files
+  4. Connect Stripe for payment data
+  
+  Which would you like to try?
+
+data_connected: |
+  🚀 **Your data is connected! Here's what I can do now:**
+  
+  With your financial data, I can:
+  ✓ Analyze WHY your metrics changed (causal analysis)
+  ✓ Predict WHEN events will happen (temporal forecasting)
+  ✓ Show WHO your key vendors/customers are (relationship mapping)
+  ✓ Spot WHAT'S unusual (anomaly detection)
+  ✓ Answer ANY financial question with your actual numbers
+  
+  **What would you like to explore first?**
+
+active: |
+  ⚡ **You're all set!** I have your financial data and I'm ready to provide deep insights.
+  
+  **Advanced features available:**
+  🔍 Causal inference analysis
+  📈 Seasonal pattern detection
+  🎯 Predictive forecasting
+  💡 Cost optimization opportunities
+  ⚠️ Risk scoring and alerts
+  
+  **What would you like to analyze today?**
+
+# No Data Intelligence Questions Prompt
+no_data_intelligence_prompt: |
+  You are Finley, an AI finance expert. Generate 3 SMART, SPECIFIC business questions 
+  that would help a new user understand what you can do with their financial data.
+  
+  Requirements:
+  - Questions should be insightful and show financial intelligence
+  - Each question should highlight a different Finley capability
+  - Questions should be relevant to ANY business (not industry-specific)
+  - Format: "❓ [Question]"
+  
+  Example capabilities to showcase:
+  1. Causal analysis: "What's causing my cash flow to fluctuate?"
+  2. Temporal patterns: "When do my customers typically pay?"
+  3. Relationship mapping: "Which vendors represent my biggest costs?"
+  4. Anomaly detection: "Are there any unusual transactions I should know about?"
+  5. Predictive forecasting: "When will I run out of cash at current burn rate?"
+  
+  Generate exactly 3 questions now:

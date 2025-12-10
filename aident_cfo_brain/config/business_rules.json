@@ -1,0 +1,75 @@
+{
+    "data_mode_rules": {
+        "description": "Rules for determining user's data availability mode",
+        "rules": [
+            {
+                "name": "NO_DATA",
+                "condition": {
+                    "==": [
+                        {
+                            "var": "transaction_count"
+                        },
+                        0
+                    ]
+                },
+                "result": "NO_DATA"
+            },
+            {
+                "name": "LIMITED_DATA",
+                "condition": {
+                    "<": [
+                        {
+                            "var": "transaction_count"
+                        },
+                        50
+                    ]
+                },
+                "result": "LIMITED_DATA"
+            },
+            {
+                "name": "RICH_DATA",
+                "condition": {
+                    ">=": [
+                        {
+                            "var": "transaction_count"
+                        },
+                        50
+                    ]
+                },
+                "result": "RICH_DATA"
+            }
+        ]
+    },
+    "onboarding_thresholds": {
+        "description": "Configurable thresholds for onboarding states",
+        "minimal_data_threshold": 50,
+        "rich_data_threshold": 100,
+        "connection_required_days": 7,
+        "first_question_bonus_points": 10
+    },
+    "feature_access_rules": {
+        "description": "Rules for feature access based on data availability",
+        "rules": [
+            {
+                "feature": "causal_analysis",
+                "min_transactions": 30,
+                "enabled": true
+            },
+            {
+                "feature": "temporal_forecasting",
+                "min_transactions": 50,
+                "enabled": true
+            },
+            {
+                "feature": "relationship_mapping",
+                "min_transactions": 20,
+                "enabled": true
+            },
+            {
+                "feature": "anomaly_detection",
+                "min_transactions": 10,
+                "enabled": true
+            }
+        ]
+    }
+}

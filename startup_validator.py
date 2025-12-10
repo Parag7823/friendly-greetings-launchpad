@@ -105,6 +105,11 @@ def check_critical_files() -> bool:
         "data_ingestion_normalization/entity_resolver_optimized.py",
         "duplicate_detection_fraud/production_duplicate_detection_service.py",
         "background_jobs/arq_worker.py",
+        "aident_cfo_brain/prompt_loader.py",
+        "aident_cfo_brain/question_classifier_setfit.py",
+        "aident_cfo_brain/train_question_classifier.py",
+        "aident_cfo_brain/chat_message_store.py",
+        "aident_cfo_brain/business_rules_engine.py",
     ]
     
     all_valid = True

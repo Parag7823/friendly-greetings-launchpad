@@ -1,0 +1,51 @@
+{# Causal Analysis Response Template #}
+# 🔍 Causal Analysis: {{ question }}
+
+{% if causal_results.causal_relationships %}
+I analyzed your data and found **{{ causal_results.causal_relationships|length }} causal relationships**. Here's what's driving your metrics:
+
+## 📊 Top Causal Factors
+
+{% for rel in causal_results.causal_relationships[:3] %}
+### {{ loop.index }}. {{ rel.cause }} → {{ rel.effect }}
+- **Bradford-Hill Score**: {{ "%.2f"|format(rel.bradford_hill_score) }}/10
+- **Strength**: {{ rel.strength }}
+- **Confidence**: {{ "%.0f"|format(rel.confidence * 100) }}%
+{% if rel.reasoning %}
+- **Why**: {{ rel.reasoning }}
+{% endif %}
+
+{% endfor %}
+
+## 💡 Recommended Actions
+
+{% if actions %}
+{% for action in actions %}
+{{ loop.index }}. **{{ action.title }}**
+   - Expected Impact: {{ action.impact }}
+   - Timeline: {{ action.timeline }}
+   
+{% endfor %}
+{% else %}
+Based on these insights:
+1. **Address root cause** - Focus on {{ causal_results.causal_relationships[0].cause }}
+2. **Monitor closely** - Track {{ causal_results.causal_relationships[0].effect }} weekly
+3. **Test hypothesis** - Run a controlled experiment
+{% endif %}
+
+---
+
+**Want to dive deeper?** Ask me:
+{% for question in follow_up_questions %}
+- {{ question }}
+{% endfor %}
+
+{% else %}
+I haven't found enough data to perform causal analysis yet. 
+
+**To enable this feature:**
+- Upload more financial data (minimum 30 transactions)
+- Connect your QuickBooks or Xero account
+- Give me a few days to build your financial graph
+
+{% endif %}

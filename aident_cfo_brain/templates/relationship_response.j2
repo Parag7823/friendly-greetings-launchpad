@@ -1,0 +1,33 @@
+{# Relationship Response Template #}
+# 🔗 Relationship Analysis: {{ question }}
+
+{% if relationships %}
+I found **{{ relationships|length }} relationships** in your financial data:
+
+## 📊 By Type
+
+{% for rel_type, count in relationship_counts.items() %}
+- **{{ rel_type }}**: {{ count }} instances
+{% endfor %}
+
+## 🔍 Top Relationships
+
+{% for rel in relationships[:5] %}
+{{ loop.index }}. **{{ rel.source }} ↔ {{ rel.target }}**
+   - Type: {{ rel.relationship_type }}
+   - Strength: {{ "%.0f"|format(rel.confidence * 100) }}%
+   
+{% endfor %}
+
+{% if follow_up_questions %}
+**Want to explore more?**
+{% for question in follow_up_questions %}
+- {{ question }}
+{% endfor %}
+{% endif %}
+
+{% else %}
+I haven't detected any relationships in your data yet.
+
+Upload more transaction data to enable relationship mapping.
+{% endif %}

@@ -323,16 +323,19 @@ class EntityResolverOptimized:
         for r in results:
             if r.score > 0.7:
                 entity_type = r.entity_type.lower()
+                # FIX: RecognizerResult has start/end, not .text - extract from original text
+                entity_text = text[r.start:r.end]
                 # SECURITY FIX: Only extract safe, non-sensitive identifiers
                 if entity_type == 'email_address':
-                    identifiers['email'] = r.text
+                    identifiers['email'] = entity_text
                 elif entity_type == 'phone_number':
-                    identifiers['phone'] = r.text
+                    identifiers['phone'] = entity_text
                 # CRITICAL: DO NOT store sensitive PII (tax_id, bank_account, SSN, credit cards)
                 # If business requires storing these, use tokenization vault (Stripe, Basis Theory)
                 # or encrypt with application-level encryption before storage
         
         return identifiers
+
     
     @retry(
         stop=stop_after_attempt(3),
