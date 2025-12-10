@@ -92,12 +92,82 @@ class UniversalPlatformDetectorOptimized:
     - Async processing for high concurrency
     - Robust error handling and fallbacks
     - Real-time platform updates
+    - PRELOADED AUTOMATON: Zero first-request latency
     """
     
     # CRITICAL PERFORMANCE FIX: Class-level automaton cache (built only ONCE)
-    # Problem: Each instance was rebuilding automaton (3625ms latency)
-    # Solution: Share automaton across all instances (instantaneous reuse)
-    _class_automaton = None  # Class-level cache
+    # PRELOAD PATTERN: Automaton is built at module-load time, not on first request
+    # Eliminates 3625ms first-request latency completely
+    _class_automaton = None  # Class-level cache (preloaded at module import)
+    _automaton_preloaded = False  # Flag to track preload status
+    
+    @classmethod
+    def _preload_automaton_sync(cls):
+        """
+        PRELOAD PATTERN: Build automaton at module-load time.
+        Called automatically when module is imported.
+        This eliminates first-request latency.
+        """
+        if cls._automaton_preloaded:
+            return cls._class_automaton
+        
+        try:
+            # Build Aho-Corasick automaton from hardcoded platform database
+            import ahocorasick
+            automaton = ahocorasick.Automaton()
+            
+            # Get platform database (hardcoded fallback for preloading)
+            platform_database = cls._get_preload_platform_database()
+            
+            for platform_id, platform_info in platform_database.items():
+                for indicator in platform_info.get('indicators', []):
+                    indicator_lower = indicator.lower().strip()
+                    if indicator_lower:
+                        automaton.add_word(indicator_lower, (platform_id, indicator_lower))
+            
+            automaton.make_automaton()
+            cls._class_automaton = automaton
+            cls._automaton_preloaded = True
+            logger.info("✅ PRELOAD: Automaton built at module-load time",
+                       platforms=len(platform_database),
+                       total_indicators=sum(len(p.get('indicators', [])) for p in platform_database.values()))
+            return automaton
+        except Exception as e:
+            logger.warning(f"⚠️ PRELOAD: Automaton build failed, will use fallback: {e}")
+            cls._automaton_preloaded = True  # Don't retry
+            return None
+    
+    @classmethod
+    def _get_preload_platform_database(cls):
+        """Get platform database for preloading (static method, no instance needed)"""
+        return {
+            'stripe': {'name': 'Stripe', 'category': 'payment_gateway', 'indicators': ['stripe', 'stripe.com', 'stripe_', 'ch_', 'pi_', 'cus_', 'acct_', 'payment_intent', 'charge_id', 'customer_id', 'account_id', 'stripe payment', 'stripe charge', 'stripe customer'], 'confidence_boost': 0.9},
+            'razorpay': {'name': 'Razorpay', 'category': 'payment_gateway', 'indicators': ['razorpay', 'razorpay.com', 'rzp_', 'pay_', 'order_', 'refund_', 'razorpay payment', 'razorpay payout', 'razorpay subscription'], 'confidence_boost': 0.9},
+            'paypal': {'name': 'PayPal', 'category': 'payment_gateway', 'indicators': ['paypal', 'paypal.com', 'pp_', 'paypal payment', 'paypal transaction', 'payer_id', 'transaction_id', 'payment_id'], 'confidence_boost': 0.9},
+            'square': {'name': 'Square', 'category': 'payment_gateway', 'indicators': ['square', 'squareup.com', 'sq_', 'square payment', 'square transaction', 'square invoice', 'square payroll'], 'confidence_boost': 0.9},
+            'chase': {'name': 'Chase Bank', 'category': 'banking', 'indicators': ['chase', 'chase bank', 'jpmorgan chase', 'chase.com', 'chase account', 'chase statement', 'chase transaction'], 'confidence_boost': 0.8},
+            'wells_fargo': {'name': 'Wells Fargo', 'category': 'banking', 'indicators': ['wells fargo', 'wellsfargo.com', 'wells fargo bank', 'wells fargo account', 'wells fargo statement'], 'confidence_boost': 0.8},
+            'bank_of_america': {'name': 'Bank of America', 'category': 'banking', 'indicators': ['bank of america', 'bofa', 'bankofamerica.com', 'bofa account', 'bofa statement', 'bofa transaction'], 'confidence_boost': 0.8},
+            'quickbooks': {'name': 'QuickBooks', 'category': 'accounting', 'indicators': ['quickbooks', 'qb', 'quickbooks.com', 'intuit quickbooks', 'qb invoice', 'qb payment', 'qb expense', 'qb payroll'], 'confidence_boost': 0.9},
+            'xero': {'name': 'Xero', 'category': 'accounting', 'indicators': ['xero', 'xero.com', 'xero invoice', 'xero payment', 'xero expense', 'xero payroll', 'xero accounting'], 'confidence_boost': 0.9},
+            'freshbooks': {'name': 'FreshBooks', 'category': 'accounting', 'indicators': ['freshbooks', 'freshbooks.com', 'freshbooks invoice', 'freshbooks payment', 'freshbooks expense'], 'confidence_boost': 0.9},
+            'wave': {'name': 'Wave', 'category': 'accounting', 'indicators': ['wave', 'waveapps.com', 'wave invoice', 'wave payment', 'wave expense', 'wave accounting'], 'confidence_boost': 0.9},
+            'salesforce': {'name': 'Salesforce', 'category': 'crm', 'indicators': ['salesforce', 'salesforce.com', 'sf_', 'salesforce crm', 'lead_id', 'opportunity_id', 'account_id', 'contact_id'], 'confidence_boost': 0.9},
+            'hubspot': {'name': 'HubSpot', 'category': 'crm', 'indicators': ['hubspot', 'hubspot.com', 'hs_', 'hubspot crm', 'contact_id', 'deal_id', 'company_id'], 'confidence_boost': 0.9},
+            'pipedrive': {'name': 'Pipedrive', 'category': 'crm', 'indicators': ['pipedrive', 'pipedrive.com', 'pd_', 'pipedrive crm', 'deal_id', 'person_id', 'organization_id'], 'confidence_boost': 0.9},
+            'shopify': {'name': 'Shopify', 'category': 'ecommerce', 'indicators': ['shopify', 'shopify.com', 'shopify store', 'shopify order', 'shopify payment', 'shopify customer', 'shopify product'], 'confidence_boost': 0.9},
+            'woocommerce': {'name': 'WooCommerce', 'category': 'ecommerce', 'indicators': ['woocommerce', 'woocommerce order', 'woocommerce payment', 'woocommerce customer', 'woocommerce product'], 'confidence_boost': 0.9},
+            'amazon': {'name': 'Amazon', 'category': 'ecommerce', 'indicators': ['amazon', 'amazon.com', 'amazon order', 'amazon payment', 'amazon seller', 'amazon fba', 'amazon marketplace'], 'confidence_boost': 0.8},
+            'aws': {'name': 'Amazon Web Services', 'category': 'cloud_services', 'indicators': ['aws', 'amazon web services', 'aws billing', 'aws invoice', 'aws cost', 'aws usage', 'ec2', 's3', 'lambda'], 'confidence_boost': 0.9},
+            'azure': {'name': 'Microsoft Azure', 'category': 'cloud_services', 'indicators': ['azure', 'microsoft azure', 'azure billing', 'azure invoice', 'azure cost', 'azure usage', 'azure vm', 'azure storage'], 'confidence_boost': 0.9},
+            'google_cloud': {'name': 'Google Cloud Platform', 'category': 'cloud_services', 'indicators': ['google cloud', 'gcp', 'google cloud platform', 'gcp billing', 'gcp invoice', 'gcp cost', 'gcp usage', 'compute engine'], 'confidence_boost': 0.9},
+            'gusto': {'name': 'Gusto', 'category': 'payroll', 'indicators': ['gusto', 'gusto.com', 'gusto payroll', 'gusto employee', 'gusto salary', 'gusto benefits', 'gusto tax'], 'confidence_boost': 0.9},
+            'bamboohr': {'name': 'BambooHR', 'category': 'payroll', 'indicators': ['bamboohr', 'bamboohr.com', 'bamboo hr', 'bamboo payroll', 'bamboo employee', 'bamboo salary'], 'confidence_boost': 0.9},
+            'adp': {'name': 'ADP', 'category': 'payroll', 'indicators': ['adp', 'adp.com', 'adp payroll', 'adp employee', 'adp salary', 'adp benefits', 'adp tax'], 'confidence_boost': 0.9},
+            'robinhood': {'name': 'Robinhood', 'category': 'investment', 'indicators': ['robinhood', 'robinhood.com', 'robinhood trading', 'robinhood investment', 'robinhood portfolio'], 'confidence_boost': 0.9},
+            'etrade': {'name': 'E*TRADE', 'category': 'investment', 'indicators': ['etrade', 'etrade.com', 'e*trade', 'etrade trading', 'etrade investment', 'etrade portfolio'], 'confidence_boost': 0.9},
+            'fidelity': {'name': 'Fidelity', 'category': 'investment', 'indicators': ['fidelity', 'fidelity.com', 'fidelity investment', 'fidelity trading', 'fidelity portfolio'], 'confidence_boost': 0.9},
+        }
     
     def __init__(self, groq_client=None, cache_client=None, supabase_client=None, config=None):
         self.groq_client = groq_client
@@ -111,9 +181,9 @@ class UniversalPlatformDetectorOptimized:
         # Comprehensive platform database
         self.platform_database = self._initialize_platform_database()
         
-        # CRITICAL FIX: Lazy-load automaton via inference service
-        # This prevents 20MB+ memory per worker and initialization latency
-        self.automaton = None  # Lazy-loaded via AutomatonService
+        # PRELOAD PATTERN: Use class-level preloaded automaton (already built at module import)
+        # No lazy-loading - automaton is ready immediately
+        self.automaton = UniversalPlatformDetectorOptimized._class_automaton
         
         # Performance tracking
         self.metrics = {
@@ -137,10 +207,11 @@ class UniversalPlatformDetectorOptimized:
         self.cache_version = "v2.1.0"  # Increment when patterns change
         self.pattern_cache_ttl = 3600  # 1 hour TTL for pattern cache
         
-        logger.info("NASA-GRADE Platform Detector initialized", 
+        logger.info("NASA-GRADE Platform Detector initialized (PRELOADED automaton)", 
                    cache_size=self.config.max_cache_size,
                    platforms_loaded=len(self.platform_database),
-                   cache_version=self.cache_version)
+                   cache_version=self.cache_version,
+                   automaton_ready=self.automaton is not None)
     
     def _get_default_config(self):
         """OPTIMIZED: Get type-safe configuration with pydantic-settings"""
@@ -681,23 +752,11 @@ class UniversalPlatformDetectorOptimized:
             
             combined_text = " ".join(text_parts).lower()  # Case-insensitive
             
-            # CRITICAL PERFORMANCE FIX: Use class-level automaton cache
-            # Problem: Each instance was rebuilding automaton (3625ms latency)
-            # Solution: Check class cache first, build once, share across all instances
+            # PRELOAD PATTERN: Automaton is already built at module-load time
+            # No lazy-loading check needed - just use the preloaded automaton
             if self.automaton is None:
-                # Check class-level cache first (instantaneous)
-                if UniversalPlatformDetectorOptimized._class_automaton is not None:
-                    self.automaton = UniversalPlatformDetectorOptimized._class_automaton
-                else:
-                    # Build automaton only if not cached at class level
-                    try:
-                        from duplicate_detection_fraud.inference_service import AutomatonService
-                        self.automaton = await AutomatonService.get_platform_automaton()
-                        # Cache at class level for all future instances
-                        UniversalPlatformDetectorOptimized._class_automaton = self.automaton
-                    except Exception as e:
-                        logger.warning(f"Failed to load automaton service, falling back to pattern matching: {e}")
-                        self.automaton = None  # Will use pattern matching fallback below
+                # Fallback: Check class-level cache (should already be preloaded)
+                self.automaton = UniversalPlatformDetectorOptimized._class_automaton
             
             # GENIUS v4.0: Use pyahocorasick automaton (2x faster, async-ready)
             # Single pass through text - O(n) with Aho-Corasick algorithm
@@ -1006,3 +1065,20 @@ class UniversalPlatformDetectorOptimized:
 
 # COMPATIBILITY FIX: Alias for backward compatibility with backend imports
 UniversalPlatformDetector = UniversalPlatformDetectorOptimized
+
+
+# ============================================================================
+# PRELOAD PATTERN: Build automaton at module-load time (zero first-request latency)
+# ============================================================================
+# This runs automatically when the module is imported, eliminating the 3625ms
+# first-request latency that was caused by lazy-loading.
+# 
+# BENEFITS:
+# - First request is instant (no cold-start delay)
+# - Shared across all worker instances
+# - Memory is allocated once, not per-instance
+
+try:
+    UniversalPlatformDetectorOptimized._preload_automaton_sync()
+except Exception as e:
+    logger.warning(f"Module-level automaton preload failed (will use fallback): {e}")

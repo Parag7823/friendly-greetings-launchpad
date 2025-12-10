@@ -176,18 +176,24 @@ class UniversalDocumentClassifierOptimized:
         # Comprehensive document type database
         self.document_database = self._initialize_document_database()
         
-        # CRITICAL FIX: Lazy-load heavy models via inference service
-        # Automaton, OCR, SentenceTransformer, TF-IDF now loaded on-demand
-        # This prevents 350MB+ memory per worker and 5-30s cold starts
-        self.automaton = None  # Lazy-loaded via AutomatonService
-        self.ocr_reader = None  # Lazy-loaded via OCRService
-        self.ocr_available = False  # Will be set when OCR is used
-        self.sentence_model = None  # Lazy-loaded via SentenceModelService
-        self.row_type_embeddings = None  # Lazy-loaded
+        # PRELOAD PATTERN: Use module-level preloaded models (zero first-request latency)
+        # Models are already initialized at module import time via _initialize_global_models()
+        self.automaton = _AUTOMATON  # Preloaded at module level
+        self.ocr_reader = _OCR_READER  # Preloaded at module level
+        self.ocr_available = _OCR_READER is not None  # Set based on preload success
+        self.sentence_model = _SENTENCE_MODEL  # Preloaded at module level
+        self.row_type_embeddings = None  # Will be initialized below if model available
         # FIX #58: Use global TF-IDF cache instead of per-instance training
         self.tfidf_vectorizer = None  # Will reference global cache
         self.doc_type_vectors = None  # Will reference global cache
         self.doc_types_list = None  # Will reference global cache
+        
+        # Initialize row type embeddings if sentence model is available
+        if self.sentence_model is not None:
+            self._initialize_row_type_embeddings()
+        
+        # Initialize TF-IDF from global cache
+        self._initialize_tfidf()
         
         # Performance tracking
         self.metrics = {
@@ -209,10 +215,10 @@ class UniversalDocumentClassifierOptimized:
         self.learning_system = SharedLearningSystem()
         self.learning_enabled = True
         
-        logger.info("NASA-GRADE Document Classifier v4.0.0 initialized",
+        logger.info("NASA-GRADE Document Classifier v4.0.0 initialized (PRELOADED models)",
                    cache_size=self.config.max_cache_size,
                    document_types=len(self.document_database),
-                   automaton_finalized=True,
+                   automaton_ready=self.automaton is not None,
                    ocr_available=self.ocr_available,
                    semantic_model_loaded=self.sentence_model is not None,
                    tfidf_trained=self.tfidf_vectorizer is not None)

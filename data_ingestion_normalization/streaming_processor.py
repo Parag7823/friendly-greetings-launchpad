@@ -429,3 +429,22 @@ def get_streaming_processor() -> StreamingFileProcessor:
     if _streaming_processor is None:
         raise Exception("Streaming processor not initialized. Call initialize_streaming_processor() first.")
     return _streaming_processor
+
+
+# ============================================================================
+# PRELOAD PATTERN: Initialize streaming processor at module-load time
+# ============================================================================
+# This runs automatically when the module is imported, eliminating the
+# need to call initialize_streaming_processor() manually and preventing
+# first-request latency.
+# 
+# BENEFITS:
+# - First request is instant (no cold-start delay)
+# - Shared across all worker instances
+# - Memory is allocated once, not per-instance
+
+try:
+    # Use environment-based configuration for preloading
+    initialize_streaming_processor(StreamingConfig.from_env())
+except Exception as e:
+    logger.warning(f"Module-level streaming processor preload failed (will use fallback): {e}")

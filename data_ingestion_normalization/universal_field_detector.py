@@ -95,11 +95,57 @@ class UniversalFieldDetector:
     GENIUS FEATURES:
     - PyYAML + pydantic: External config (non-devs can edit)
     - validators: Format detection (no regex bugs)
-    - presidio: PII detection (50x faster, 99% accuracy)
+    - presidio: PII detection (50x faster, 99% accuracy) - PRELOADED
     - aiocache: Parallel + cached (10x faster)
     - polars: DataFrame filtering (1000x faster)
     - instructor + Jinja2: AI fallback (zero JSON hallucinations)
+    - PRELOAD PATTERN: Zero first-request latency
     """
+    
+    # PRELOAD PATTERN: Class-level presidio analyzer (initialized at module import)
+    # Eliminates first-request latency completely
+    _class_analyzer = None  # Class-level cache (preloaded at module import)
+    _analyzer_preloaded = False  # Flag to track preload status
+    
+    @classmethod
+    def _preload_analyzer_sync(cls):
+        """
+        PRELOAD PATTERN: Initialize presidio analyzer at module-load time.
+        Called automatically when module is imported.
+        This eliminates first-request latency for PII detection.
+        """
+        if cls._analyzer_preloaded:
+            return cls._class_analyzer
+        
+        try:
+            from presidio_analyzer import AnalyzerEngine, Pattern, PatternRecognizer
+            
+            analyzer = AnalyzerEngine()
+            
+            # Add custom financial patterns that presidio doesn't have built-in
+            invoice_pattern = Pattern(name="invoice_pattern",
+                                      regex=r"\b(INV|INVOICE)[-\s]?\d{4,10}\b",
+                                      score=0.85)
+            invoice_recognizer = PatternRecognizer(supported_entity="INVOICE_NUMBER",
+                                                  patterns=[invoice_pattern])
+            analyzer.registry.add_recognizer(invoice_recognizer)
+            
+            # Add PO number pattern
+            po_pattern = Pattern(name="po_pattern",
+                                regex=r"\b(PO|P\.O\.)[-\s]?\d{4,10}\b",
+                                score=0.85)
+            po_recognizer = PatternRecognizer(supported_entity="PO_NUMBER",
+                                             patterns=[po_pattern])
+            analyzer.registry.add_recognizer(po_recognizer)
+            
+            cls._class_analyzer = analyzer
+            cls._analyzer_preloaded = True
+            logger.info("✅ PRELOAD: Presidio analyzer built at module-load time")
+            return analyzer
+        except Exception as e:
+            logger.warning(f"⚠️ PRELOAD: Presidio analyzer build failed, will use fallback: {e}")
+            cls._analyzer_preloaded = True  # Don't retry
+            return None
     
     def __init__(self, openai_client=None):
         self.openai_client = openai_client
@@ -114,14 +160,9 @@ class UniversalFieldDetector:
         self.field_patterns = self._load_field_patterns()
         self.format_patterns = self._load_format_patterns()
         
-        # GENIUS #4: Initialize presidio for PII detection (50x faster)
-        try:
-            self.analyzer = AnalyzerEngine()
-            self._add_custom_recognizers()
-            logger.info("presidio analyzer initialized")
-        except Exception as e:
-            logger.warning("presidio initialization failed", error=str(e))
-            self.analyzer = None
+        # PRELOAD PATTERN: Use class-level preloaded analyzer (already built at module import)
+        # No lazy-loading - analyzer is ready immediately
+        self.analyzer = UniversalFieldDetector._class_analyzer
         
         # GENIUS #7: Initialize instructor for AI fallback (zero JSON hallucinations)
         if os.getenv('GROQ_API_KEY'):
@@ -130,9 +171,10 @@ class UniversalFieldDetector:
         else:
             self.groq_client = None
         
-        logger.info("NASA-GRADE UniversalFieldDetector v3.0.0 initialized",
+        logger.info("NASA-GRADE UniversalFieldDetector v3.0.0 initialized (PRELOADED analyzer)",
                    field_patterns=sum(len(v) for v in self.field_patterns.values()),
-                   format_patterns=len(self.format_patterns))
+                   format_patterns=len(self.format_patterns),
+                   analyzer_ready=self.analyzer is not None)
     
     def _load_field_patterns(self) -> Dict[str, Dict[str, FieldPattern]]:
         """GENIUS #1: Load field patterns from YAML"""
@@ -422,3 +464,20 @@ Determine the field type, category, and confidence.
             'low_confidence_count': len(low_conf),
             'unknown_count': len(unknown)
         }
+
+
+# ============================================================================
+# PRELOAD PATTERN: Initialize presidio analyzer at module-load time
+# ============================================================================
+# This runs automatically when the module is imported, eliminating the
+# first-request latency that was caused by lazy-loading.
+# 
+# BENEFITS:
+# - First request is instant (no cold-start delay)
+# - Shared across all worker instances
+# - Memory is allocated once, not per-instance
+
+try:
+    UniversalFieldDetector._preload_analyzer_sync()
+except Exception as e:
+    logger.warning(f"Module-level analyzer preload failed (will use fallback): {e}")

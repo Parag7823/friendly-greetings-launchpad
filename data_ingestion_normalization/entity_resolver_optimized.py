@@ -52,6 +52,34 @@ structlog.configure(
 
 logger = structlog.get_logger(__name__)
 
+# ============================================================================
+# PRELOAD PATTERN: Module-level presidio analyzer (zero first-request latency)
+# ============================================================================
+_PRESIDIO_ANALYZER = None  # Preloaded at module import
+_PRESIDIO_PRELOADED = False  # Flag to track preload status
+
+def _preload_presidio_analyzer():
+    """
+    PRELOAD PATTERN: Initialize presidio analyzer at module-load time.
+    Called automatically when module is imported.
+    This eliminates first-request latency for PII detection.
+    """
+    global _PRESIDIO_ANALYZER, _PRESIDIO_PRELOADED
+    
+    if _PRESIDIO_PRELOADED:
+        return _PRESIDIO_ANALYZER
+    
+    try:
+        from presidio_analyzer import AnalyzerEngine
+        _PRESIDIO_ANALYZER = AnalyzerEngine()
+        _PRESIDIO_PRELOADED = True
+        logger.info("✅ PRELOAD: Presidio analyzer built at module-load time")
+        return _PRESIDIO_ANALYZER
+    except Exception as e:
+        logger.warning(f"⚠️ PRELOAD: Presidio analyzer build failed, will use fallback: {e}")
+        _PRESIDIO_PRELOADED = True  # Don't retry
+        return None
+
 # v4.0: pydantic models for type-safe validation
 class ScoredLabel(BaseModel):
     """Scored entity label with confidence"""
@@ -110,6 +138,7 @@ class EntityResolverOptimized:
     
     REMOVED: 642 lines of custom logic
     ADDED: Industry-standard battle-tested libraries
+    PRELOAD PATTERN: Presidio analyzer is preloaded at module import time
     """
     
     def __init__(self, supabase_client: Client, groq_client=None, config: Optional[ResolutionConfig] = None, cache_client=None):
@@ -133,8 +162,18 @@ class EntityResolverOptimized:
                 "Local Redis fallback removed to prevent cache divergence across workers."
             )
         
-        # v4.0: presidio for PII/identifier detection (30x faster, +40% accuracy)
-        self.analyzer = AnalyzerEngine()
+        # PRELOAD PATTERN: Use module-level preloaded presidio analyzer (zero first-request latency)
+        # Analyzer is already initialized at module import time via _preload_presidio_analyzer()
+        self.analyzer = _PRESIDIO_ANALYZER
+        if self.analyzer is None:
+            # Fallback: try to initialize in-place if preload failed
+            try:
+                from presidio_analyzer import AnalyzerEngine
+                self.analyzer = AnalyzerEngine()
+                logger.warning("Presidio analyzer initialized in __init__ (preload failed earlier)")
+            except Exception as e:
+                logger.error(f"Failed to initialize presidio analyzer: {e}")
+                raise RuntimeError("Presidio analyzer required but failed to initialize")
         
         # Metrics
         self.metrics = {
@@ -147,7 +186,10 @@ class EntityResolverOptimized:
             'avg_confidence': 0.0
         }
         
-        logger.info("entity_resolver_initialized", version="4.0.0", libraries="rapidfuzz+presidio+polars+aiocache+tenacity")
+        logger.info("entity_resolver_initialized (PRELOADED analyzer)", 
+                   version="4.0.0", 
+                   libraries="rapidfuzz+presidio+polars+aiocache+tenacity",
+                   analyzer_ready=self.analyzer is not None)
     
     def _get_instructor_client(self):
         """FIX #90: Lazy load instructor client on first use"""
@@ -583,3 +625,20 @@ class EntityResolverOptimized:
             'fuzzy_match_rate': self.metrics['fuzzy_matches'] / self.metrics['resolutions_performed'] if self.metrics['resolutions_performed'] > 0 else 0.0,
             'new_entity_rate': self.metrics['new_entities_created'] / self.metrics['resolutions_performed'] if self.metrics['resolutions_performed'] > 0 else 0.0
         }
+
+
+# ============================================================================
+# PRELOAD PATTERN: Initialize presidio analyzer at module-load time
+# ============================================================================
+# This runs automatically when the module is imported, eliminating the
+# first-request latency that was caused by per-instance initialization.
+# 
+# BENEFITS:
+# - First request is instant (no cold-start delay)
+# - Shared across all worker instances
+# - Memory is allocated once, not per-instance
+
+try:
+    _preload_presidio_analyzer()
+except Exception as e:
+    logger.warning(f"Module-level presidio preload failed (will use fallback): {e}")
