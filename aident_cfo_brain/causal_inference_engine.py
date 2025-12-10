@@ -1367,3 +1367,76 @@ class CausalInferenceEngine:
         """Get engine metrics"""
         return self.metrics.copy()
 
+
+# ============================================================================
+# PRELOAD PATTERN: Initialize heavy dependencies at module-load time
+# ============================================================================
+# This runs automatically when the module is imported, eliminating the
+# first-request latency that was caused by lazy-loading.
+# 
+# BENEFITS:
+# - First request is instant (no cold-start delay)
+# - Shared across all worker instances
+# - Memory is allocated once, not per-instance
+
+_PRELOAD_COMPLETED = False
+
+def _preload_all_modules():
+    """
+    PRELOAD PATTERN: Initialize all heavy modules at module-load time.
+    Called automatically when module is imported.
+    This eliminates first-request latency.
+    """
+    global _PRELOAD_COMPLETED
+    
+    if _PRELOAD_COMPLETED:
+        return
+    
+    # Note: igraph, dowhy, econml, shap, sklearn are already imported at top
+    # with try/except fallbacks. The preload here ensures they're fully initialized.
+    
+    # Preload numpy (critical for all numerical operations)
+    try:
+        import numpy as np
+        _ = np.array([1, 2, 3])  # Force numpy to fully initialize
+        logger.info("✅ PRELOAD: numpy loaded at module-load time")
+    except Exception as e:
+        logger.warning(f"⚠️ PRELOAD: numpy load failed: {e}")
+    
+    # Preload numpy-financial
+    try:
+        import numpy_financial as npf
+        logger.info("✅ PRELOAD: numpy_financial loaded at module-load time")
+    except Exception as e:
+        logger.warning(f"⚠️ PRELOAD: numpy_financial load failed: {e}")
+    
+    # Preload igraph (used for causal graph)
+    try:
+        import igraph as ig
+        if ig is not None:
+            logger.info("✅ PRELOAD: igraph loaded at module-load time")
+    except Exception as e:
+        logger.warning(f"⚠️ PRELOAD: igraph load failed: {e}")
+    
+    # Preload shap (used for explainability)
+    try:
+        import shap
+        if shap is not None:
+            logger.info("✅ PRELOAD: shap loaded at module-load time")
+    except Exception as e:
+        logger.warning(f"⚠️ PRELOAD: shap load failed: {e}")
+    
+    # Preload sklearn (used for CausalForestDML)
+    try:
+        from sklearn.ensemble import GradientBoostingRegressor
+        if GradientBoostingRegressor is not None:
+            logger.info("✅ PRELOAD: sklearn loaded at module-load time")
+    except Exception as e:
+        logger.warning(f"⚠️ PRELOAD: sklearn load failed: {e}")
+    
+    _PRELOAD_COMPLETED = True
+
+try:
+    _preload_all_modules()
+except Exception as e:
+    logger.warning(f"Module-level causal preload failed (will use fallback): {e}")

@@ -1072,3 +1072,71 @@ class FinleyGraphEngine:
                 logger.warning("aiocache not available, cannot clear Redis cache")
         except Exception as e:
             logger.warning(f"Failed to clear Redis cache for user {user_id}: {e}")
+
+
+# ============================================================================
+# PRELOAD PATTERN: Initialize heavy dependencies at module-load time
+# ============================================================================
+# This runs automatically when the module is imported, eliminating the
+# first-request latency that was caused by lazy-loading.
+# 
+# BENEFITS:
+# - First request is instant (no cold-start delay)
+# - Shared across all worker instances
+# - Memory is allocated once, not per-instance
+
+_PRELOAD_COMPLETED = False
+
+def _preload_all_modules():
+    """
+    PRELOAD PATTERN: Initialize all heavy modules at module-load time.
+    Called automatically when module is imported.
+    This eliminates first-request latency.
+    """
+    global _PRELOAD_COMPLETED
+    
+    if _PRELOAD_COMPLETED:
+        return
+    
+    # Preload igraph (critical for graph operations - 13-32x faster than networkx)
+    try:
+        import igraph as ig
+        # Force igraph to fully initialize by creating a test graph
+        test_graph = ig.Graph(directed=True)
+        test_graph.add_vertices(2)
+        test_graph.add_edges([(0, 1)])
+        del test_graph
+        logger.info("✅ PRELOAD: igraph loaded at module-load time")
+    except Exception as e:
+        logger.warning(f"⚠️ PRELOAD: igraph load failed: {e}")
+    
+    # Preload aiocache (used for Redis caching)
+    try:
+        if AIOCACHE_AVAILABLE:
+            from aiocache import Cache
+            from aiocache.serializers import PickleSerializer
+            logger.info("✅ PRELOAD: aiocache loaded at module-load time")
+    except Exception as e:
+        logger.warning(f"⚠️ PRELOAD: aiocache load failed: {e}")
+    
+    # Preload pydantic models (force model validation)
+    try:
+        GraphNode.model_validate({
+            'id': 'test',
+            'entity_type': 'test',
+            'canonical_name': 'Test',
+            'confidence_score': 0.9,
+            'first_seen_at': datetime.now(),
+            'last_seen_at': datetime.now()
+        })
+        logger.info("✅ PRELOAD: Pydantic models loaded at module-load time")
+    except Exception as e:
+        logger.warning(f"⚠️ PRELOAD: Pydantic models load failed: {e}")
+    
+    _PRELOAD_COMPLETED = True
+
+try:
+    _preload_all_modules()
+except Exception as e:
+    logger.warning(f"Module-level graph preload failed (will use fallback): {e}")
+
