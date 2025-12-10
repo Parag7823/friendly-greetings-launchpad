@@ -131,3 +131,21 @@ def get_lsh_service() -> PersistentLSHService:
     if _lsh_service is None:
         _lsh_service = PersistentLSHService()
     return _lsh_service
+
+
+# ============================================================================
+# PRELOAD PATTERN: Initialize LSH service at module-load time
+# ============================================================================
+# This runs automatically when the module is imported, eliminating the
+# first-request latency that was caused by lazy-loading.
+# 
+# BENEFITS:
+# - First request is instant (no cold-start delay)
+# - Shared across all worker instances
+# - Memory is allocated once, not per-instance
+
+try:
+    _lsh_service = PersistentLSHService()
+    logger.info("✅ PRELOAD: PersistentLSHService initialized at module-load time")
+except Exception as e:
+    logger.warning(f"Module-level LSH service preload failed (will use fallback): {e}")

@@ -137,6 +137,52 @@ except ImportError as e:
         f"Error: {str(e)}"
     ) from e
 
+# ============================================================================
+# PRELOAD PATTERN: Module-level preloading for heavy dependencies
+# ============================================================================
+# These globals will be populated at module import time (see bottom of file)
+_PRESIDIO_PRELOADED = False
+_RAPIDFUZZ_PRELOADED = False
+_NUMPY_PRELOADED = False
+
+def _preload_all_modules():
+    """
+    PRELOAD PATTERN: Initialize all heavy modules at module-load time.
+    Called automatically when module is imported.
+    This eliminates first-request latency.
+    """
+    global _PRESIDIO_PRELOADED, _RAPIDFUZZ_PRELOADED, _NUMPY_PRELOADED
+    
+    # Preload rapidfuzz
+    if not _RAPIDFUZZ_PRELOADED:
+        try:
+            _load_rapidfuzz()
+            _RAPIDFUZZ_PRELOADED = True
+            logger.info("✅ PRELOAD: rapidfuzz module loaded at module-load time")
+        except Exception as e:
+            logger.warning(f"⚠️ PRELOAD: rapidfuzz load failed: {e}")
+            _RAPIDFUZZ_PRELOADED = True  # Don't retry
+    
+    # Preload presidio
+    if not _PRESIDIO_PRELOADED:
+        try:
+            _ensure_presidio_loaded()
+            _PRESIDIO_PRELOADED = True
+            logger.info("✅ PRELOAD: presidio module loaded at module-load time")
+        except Exception as e:
+            logger.warning(f"⚠️ PRELOAD: presidio load failed: {e}")
+            _PRESIDIO_PRELOADED = True  # Don't retry
+    
+    # Preload numpy
+    if not _NUMPY_PRELOADED:
+        try:
+            _load_numpy()
+            _NUMPY_PRELOADED = True
+            logger.info("✅ PRELOAD: numpy module loaded at module-load time")
+        except Exception as e:
+            logger.warning(f"⚠️ PRELOAD: numpy load failed: {e}")
+            _NUMPY_PRELOADED = True  # Don't retry
+
 # FIX #3: Check if presidio is available (will be lazy-loaded on first use)
 PRESIDIO_AVAILABLE = AnalyzerEngine is not None
 
@@ -1908,3 +1954,21 @@ class ProductionDuplicateDetectionService:
     
     # DELETED: __del__ method - no ThreadPoolExecutor to cleanup
     # Using asyncio.to_thread instead (built-in, no manual shutdown needed)
+
+
+# ============================================================================
+# PRELOAD PATTERN: Initialize heavy modules at module-load time
+# ============================================================================
+# This runs automatically when the module is imported, eliminating the
+# first-request latency that was caused by lazy-loading.
+# 
+# BENEFITS:
+# - First request is instant (no cold-start delay)
+# - Shared across all worker instances
+# - Memory is allocated once, not per-instance
+
+try:
+    _preload_all_modules()
+except Exception as e:
+    logger.warning(f"Module-level preload failed (will use fallback): {e}")
+

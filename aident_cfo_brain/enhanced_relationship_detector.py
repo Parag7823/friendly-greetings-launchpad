@@ -339,6 +339,68 @@ def _load_numpy():
             raise ImportError("numpy is required. Install with: pip install numpy")
     return np
 
+
+# ============================================================================
+# PRELOAD PATTERN: Module-level preloading for heavy dependencies
+# ============================================================================
+# These flags track preload status to avoid repeated initialization attempts
+_PRELOAD_COMPLETED = False
+
+def _preload_all_modules():
+    """
+    PRELOAD PATTERN: Initialize all heavy modules at module-load time.
+    Called automatically when module is imported.
+    This eliminates first-request latency.
+    """
+    global _PRELOAD_COMPLETED
+    
+    if _PRELOAD_COMPLETED:
+        return
+    
+    # Preload EmbeddingService
+    try:
+        _ensure_embedding_service_loaded()
+        logger.info("✅ PRELOAD: EmbeddingService loaded at module-load time")
+    except Exception as e:
+        logger.warning(f"⚠️ PRELOAD: EmbeddingService load failed: {e}")
+    
+    # Preload SemanticRelationshipExtractor
+    try:
+        _load_semantic_relationship_extractor()
+        logger.info("✅ PRELOAD: SemanticRelationshipExtractor loaded at module-load time")
+    except Exception as e:
+        logger.warning(f"⚠️ PRELOAD: SemanticRelationshipExtractor load failed: {e}")
+    
+    # Preload CausalInferenceEngine
+    try:
+        _load_causal_inference_engine()
+        logger.info("✅ PRELOAD: CausalInferenceEngine loaded at module-load time")
+    except Exception as e:
+        logger.warning(f"⚠️ PRELOAD: CausalInferenceEngine load failed: {e}")
+    
+    # Preload TemporalPatternLearner
+    try:
+        _load_temporal_pattern_learner()
+        logger.info("✅ PRELOAD: TemporalPatternLearner loaded at module-load time")
+    except Exception as e:
+        logger.warning(f"⚠️ PRELOAD: TemporalPatternLearner load failed: {e}")
+    
+    # Preload numpy
+    try:
+        _load_numpy()
+        logger.info("✅ PRELOAD: numpy loaded at module-load time")
+    except Exception as e:
+        logger.warning(f"⚠️ PRELOAD: numpy load failed: {e}")
+    
+    # Preload rapidfuzz
+    try:
+        _load_rapidfuzz()
+        logger.info("✅ PRELOAD: rapidfuzz loaded at module-load time")
+    except Exception as e:
+        logger.warning(f"⚠️ PRELOAD: rapidfuzz load failed: {e}")
+    
+    _PRELOAD_COMPLETED = True
+
 class EnhancedRelationshipDetector:
     """Enhanced relationship detector that actually finds relationships between events"""
     
@@ -1744,3 +1806,20 @@ if __name__ == "__main__":
     import asyncio
     result = asyncio.run(test_enhanced_relationship_detection())
     print(result)
+
+
+# ============================================================================
+# PRELOAD PATTERN: Initialize heavy modules at module-load time
+# ============================================================================
+# This runs automatically when the module is imported, eliminating the
+# first-request latency that was caused by lazy-loading.
+# 
+# BENEFITS:
+# - First request is instant (no cold-start delay)
+# - Shared across all worker instances
+# - Memory is allocated once, not per-instance
+
+try:
+    _preload_all_modules()
+except Exception as e:
+    logger.warning(f"Module-level preload failed (will use fallback): {e}")
