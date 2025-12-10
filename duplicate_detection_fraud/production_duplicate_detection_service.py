@@ -345,20 +345,16 @@ class ProductionDuplicateDetectionService:
         start_time = time.time()
         
         try:
-            # Handle StreamedFile or fallback to bytes
             if streamed_file is not None:
                 from streaming_source import StreamedFile
                 if not isinstance(streamed_file, StreamedFile):
                     raise TypeError("streamed_file must be a StreamedFile instance")
-                # Use streamed file for validation
                 await self._validate_inputs_from_path(streamed_file, file_metadata)
             elif file_content is not None:
-                # Legacy bytes path
                 await self._validate_inputs(file_content, file_metadata)
             else:
                 raise ValueError("Either streamed_file or file_content must be provided")
             
-            # Check cache first
             cache_key = self._generate_cache_key(file_metadata)
             cached_result = await self._get_from_cache(cache_key)
             if cached_result:
@@ -368,7 +364,6 @@ class ProductionDuplicateDetectionService:
             
             self.metrics['cache_misses'] += 1
             
-            # Phase 1: Exact duplicate detection
             exact_result = await self._detect_exact_duplicates(file_metadata)
             if exact_result.is_duplicate:
                 self.metrics['exact_duplicates_found'] += 1
@@ -376,7 +371,6 @@ class ProductionDuplicateDetectionService:
                 await self._set_cache(cache_key, result)
                 return result
             
-            # Phase 2: Near-duplicate detection (if enabled)
             if enable_near_duplicate:
                 if streamed_file is not None:
                     near_result = await self._detect_near_duplicates_from_path(streamed_file, file_metadata)
@@ -388,16 +382,13 @@ class ProductionDuplicateDetectionService:
                     await self._set_cache(cache_key, result)
                     return result
             
-            # Phase 3: Content-level duplicate detection (row-level fingerprinting)
             if enable_content_duplicate and (file_content or streamed_file):
                 try:
-                    # Calculate content fingerprint
                     if streamed_file is not None:
                         content_fingerprint = await self._calculate_content_fingerprint_from_path(streamed_file)
                     else:
                         content_fingerprint = await self._calculate_content_fingerprint(file_content)
                     
-                    # FIX #34: Check for content duplicates with cross-sheet awareness
                     if config.enable_cross_sheet_awareness and sheets_data:
                         content_result = await self.check_content_duplicate_with_sheets(
                             file_metadata.user_id,
@@ -413,7 +404,6 @@ class ProductionDuplicateDetectionService:
                         )
                     
                     if content_result.get('is_content_duplicate'):
-                        # Phase 4: Delta analysis for intelligent merging
                         delta_analysis = None
                         if sheets_data and content_result.get('overlapping_files'):
                             existing_file_id = content_result['overlapping_files'][0]['id']
@@ -424,11 +414,10 @@ class ProductionDuplicateDetectionService:
                             )
                             delta_analysis = delta_result.get('delta_analysis')
                         
-                        # Return content duplicate with delta analysis
                         result = DuplicateResult(
                             is_duplicate=True,
                             duplicate_type=DuplicateType.CONTENT,
-                            similarity_score=1.0,  # Content fingerprint match
+                            similarity_score=1.0,
                             duplicate_files=content_result.get('overlapping_files', []),
                             recommendation=DuplicateAction.MERGE,
                             message=content_result.get('message', 'Content-level duplicate detected'),
@@ -436,7 +425,6 @@ class ProductionDuplicateDetectionService:
                             processing_time_ms=int((time.time() - start_time) * 1000)
                         )
                         
-                        # Attach delta analysis if available
                         if delta_analysis:
                             result.delta_analysis = delta_analysis
                         
@@ -444,16 +432,12 @@ class ProductionDuplicateDetectionService:
                         return result
                         
                 except Exception as e:
-                    # CRITICAL FIX #4: Raise error instead of silent failure
-                    # Silent failures cause false negatives - duplicates get uploaded
                     logger.error(f"Content duplicate detection failed: {e}", exc_info=True)
-                    # Re-raise to prevent false negatives
                     raise DuplicateDetectionError(
                         f"Content duplicate detection failed: {str(e)}. "
                         f"Cannot proceed with ingestion due to detection failure."
                     ) from e
             
-            # No duplicates found
             result = DuplicateResult(
                 is_duplicate=False,
                 duplicate_type=DuplicateType.NONE,
@@ -484,15 +468,7 @@ class ProductionDuplicateDetectionService:
             )
     
     async def _validate_inputs_from_path(self, streamed_file, file_metadata: FileMetadata) -> None:
-        """
-        OPTIMIZED: Fast input validation from StreamedFile
-        
-        Args:
-            streamed_file: StreamedFile object
-            file_metadata: File metadata
-            
-        Raises:
-            ValueError: If inputs are invalid
+        """Fast input validation from StreamedFile.
         """
         from streaming_source import StreamedFile
         if not isinstance(streamed_file, StreamedFile):

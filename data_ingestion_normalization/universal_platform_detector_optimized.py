@@ -541,70 +541,71 @@ class UniversalPlatformDetectorOptimized:
         """
         start_time = time.time()
         
-        # Validate schema first
-        validation_result = await self.security.validate_schema(payload, "platform_detection_payload")
-        if not validation_result["valid"]:
-            logger.warning(f"Schema validation failed: {validation_result['error']}")
-            # Low severity, just log
+        try:
+            # Validate schema first
+            validation_result = await self.security.validate_schema(payload, "platform_detection_payload")
+            if not validation_result["valid"]:
+                logger.warning(f"Schema validation failed: {validation_result['error']}")
+                # Low severity, just log
 
-        # 1. Try Cache First (Speed: <5ms)
-        if self.config.enable_caching:
-            # FIX #79: Use shared cache key generator
-            detection_id = generate_cache_key(payload, filename, user_id or "anonymous")
+            # 1. Try Cache First (Speed: <5ms)
+            if self.config.enable_caching:
+                # FIX #79: Use shared cache key generator
+                detection_id = generate_cache_key(payload, filename, user_id or "anonymous")
+                
+                # CRITICAL FIX: Use versioned cache keys
+                versioned_key = await self.get_cache_key_with_version(detection_id)
+                cached_result = await self.cache.get(versioned_key)
+                
+                if cached_result:
+                    self.metrics['cache_hits'] += 1
+                    return cached_result
+                self.metrics['cache_misses'] += 1
             
-            # CRITICAL FIX: Use versioned cache keys
-            versioned_key = await self.get_cache_key_with_version(detection_id)
-            cached_result = await self.cache.get(versioned_key)
+            # 2. Try Pattern Detection (Speed: <10ms)
+            # GENIUS v4.0: Now with Aho-Corasick algorithm (O(n) complexity)
+            pattern_result = await self._detect_platform_with_patterns(payload, filename)
             
-            if cached_result:
-                self.metrics['cache_hits'] += 1
-                return cached_result
-            self.metrics['cache_misses'] += 1
-        
-        # 2. Try Pattern Detection (Speed: <10ms)
-        # GENIUS v4.0: Now with Aho-Corasick algorithm (O(n) complexity)
-        pattern_result = await self._detect_platform_with_patterns(payload, filename)
-        
-        # 3. Try AI Detection (if enabled and needed)
-        # Only use AI if pattern match is low confidence
-        ai_result = None
-        if self.config.enable_ai_detection and self.groq_client and (not pattern_result or pattern_result['confidence'] < self.config.confidence_threshold):
-             # FIX: Pass user_id for rate limiting
-            ai_result = await self._detect_platform_with_ai(payload, filename, user_id)
-        
-        # 4. Combine Results
-        final_result = None
-        if ai_result and pattern_result:
-            final_result = await self._combine_detection_results(ai_result, pattern_result)
-        elif pattern_result:
-            final_result = pattern_result
-        elif ai_result:
-            final_result = ai_result
-        else:
-            final_result = await self._detect_platform_fallback(payload, filename)
-        
-        final_result['processing_time'] = (time.time() - start_time) * 1000
-        
-        # 5. Cache Result
-        if self.config.enable_caching:
-            # Re-generate key if needed or reuse
-            detection_id = generate_cache_key(payload, filename, user_id or "anonymous")
-            versioned_key = await self.get_cache_key_with_version(detection_id)
-            await self.cache.set(versioned_key, final_result, ttl=self.pattern_cache_ttl)
-        
-        # 6. Update Metrics & Learning (Async)
-        self._update_detection_metrics(final_result)
-        asyncio.create_task(self._log_detection_audit(detection_id, final_result, user_id or "system"))
-        
-        # Update learning system (using transaction manager)
-        if self.config.enable_learning:
-            asyncio.create_task(self._update_learning_system(final_result, payload, filename, user_id))
+            # 3. Try AI Detection (if enabled and needed)
+            # Only use AI if pattern match is low confidence
+            ai_result = None
+            if self.config.enable_ai_detection and self.groq_client and (not pattern_result or pattern_result['confidence'] < self.config.confidence_threshold):
+                 # FIX: Pass user_id for rate limiting
+                ai_result = await self._detect_platform_with_ai(payload, filename, user_id)
             
-        return final_result
+            # 4. Combine Results
+            final_result = None
+            if ai_result and pattern_result:
+                final_result = await self._combine_detection_results(ai_result, pattern_result)
+            elif pattern_result:
+                final_result = pattern_result
+            elif ai_result:
+                final_result = ai_result
+            else:
+                final_result = await self._detect_platform_fallback(payload, filename)
+            
+            final_result['processing_time'] = (time.time() - start_time) * 1000
+            
+            # 5. Cache Result
+            if self.config.enable_caching:
+                # Re-generate key if needed or reuse
+                detection_id = generate_cache_key(payload, filename, user_id or "anonymous")
+                versioned_key = await self.get_cache_key_with_version(detection_id)
+                await self.cache.set(versioned_key, final_result, ttl=self.pattern_cache_ttl)
+            
+            # 6. Update Metrics & Learning (Async)
+            self._update_detection_metrics(final_result)
+            asyncio.create_task(self._log_detection_audit(detection_id, final_result, user_id or "system"))
+            
+            # Update learning system (using transaction manager)
+            if self.config.enable_learning:
+                asyncio.create_task(self._update_learning_system(final_result, payload, filename, user_id))
+                
+            return final_result
             
         except Exception as e:
             error_result = {
-                'detection_id': detection_id,
+                'detection_id': detection_id if 'detection_id' in dir() else 'unknown',
                 'platform': 'unknown',
                 'confidence': 0.0,
                 'method': 'error',
@@ -631,7 +632,7 @@ class UniversalPlatformDetectorOptimized:
             Analyze the following data structure and identify the originating SaaS platform, ERP system, or bank.
             
             Input Data:
-            {context[:4000]}  # Truncate to avoid token limits
+            {context[:4000]}
             
             Task:
             1. Identify the specific platform (e.g., "Stripe", "QuickBooks", "Shopify", "Chase Bank", "Salesforce").
@@ -644,77 +645,6 @@ class UniversalPlatformDetectorOptimized:
             
             # Call Groq API with instructor (Optimized)
             result = await self._safe_groq_call_with_instructor(prompt, temperature=0.1, max_tokens=256, user_id=user_id)
-            return result
-            
-        except Exception as e:
-            logger.error(f"AI platform detection failed: {e}")
-            return None
-    
-    async def _detect_platform_with_ai(self, payload: Dict, filename: str = None, user_id: str = None) -> Optional[Dict[str, Any]]:
-        """Use AI to detect platform with enhanced prompting"""
-        try:
-            # Prepare comprehensive context for AI based on payload structure
-            context = self._construct_detection_context(payload, filename)
-            
-            # Construct prompt for Groq Llama-3
-            prompt = f"""
-            Analyze the following data structure and identify the originating SaaS platform, ERP system, or bank.
-            
-            Input Data:
-            {context[:4000]}  # Truncate to avoid token limits
-            
-            Task:
-            1. Identify the specific platform (e.g., "Stripe", "QuickBooks", "Shopify", "Chase Bank", "Salesforce").
-            2. Assign a confidence score (0.0 to 1.0).
-            3. List specific indicators found (keys, values, formats).
-            4. If unknown, output "unknown" with low confidence.
-            
-            Return ONLY a valid JSON object matching the requested schema.
-            """
-            
-            # Call Groq API with instructor (Optimized)
-            result = await self._safe_groq_call_with_instructor(prompt, temperature=0.1, max_tokens=256, user_id=user_id)
-                context_parts.append(f"Field names: {', '.join(field_names)}")
-                
-                # Add sample values for analysis
-                sample_values = []
-                for key, value in list(payload.items())[:10]:  # Limit to first 10 fields
-                    if isinstance(value, str) and len(str(value)) < 100:  # Avoid very long values
-                        sample_values.append(f"{key}={value}")
-                if sample_values:
-                    context_parts.append(f"Sample values: {', '.join(sample_values)}")
-            
-            context = "\n".join(context_parts)
-            
-            # Enhanced AI prompt with comprehensive platform list
-            platform_list = "\n".join([f"- {info['name']}: {', '.join(info['indicators'][:5])}" 
-                                      for info in self.platform_database.values()])
-            
-            prompt = f"""
-            Analyze this financial data to detect the platform or service it came from:
-            
-            {context}
-            
-            Supported platforms:
-            {platform_list}
-            
-            Respond with JSON format:
-            {{
-                "platform": "detected_platform_name",
-                "confidence": 0.0-1.0,
-                "indicators": ["list", "of", "found", "indicators"],
-                "reasoning": "detailed explanation of detection logic",
-                "category": "platform_category",
-                "alternative_platforms": ["other", "possible", "platforms"]
-            }}
-            """
-            
-            # GENIUS v4.0: Use instructor for structured output (40% more reliable)
-            result = await self._safe_groq_call_with_instructor(
-                prompt,
-                self.config.ai_temperature,
-                self.config.ai_max_tokens
-            )
             
             if result and result.get('platform') != 'unknown':
                 return {
