@@ -253,5 +253,52 @@ def generate_sample_training_data() -> List[Tuple[str, str]]:
         
         # Unknown
         ("asdfasdf", "unknown"),
-        ("???", "unknown"),
+        (\"???\", \"unknown\"),
     ]
+
+
+# ============================================================================
+# PRELOAD PATTERN: Initialize heavy dependencies at module-load time
+# ============================================================================
+# This runs automatically when the module is imported, eliminating the
+# first-request latency that was caused by lazy-loading.
+# 
+# SetFit model loading is HEAVY (~5-10 seconds) - preloading eliminates cold-start.
+
+_PRELOAD_COMPLETED = False
+
+def _preload_all_modules():
+    """
+    PRELOAD PATTERN: Initialize all heavy modules at module-load time.
+    Called automatically when module is imported.
+    This eliminates first-request latency.
+    """
+    global _PRELOAD_COMPLETED
+    
+    if _PRELOAD_COMPLETED:
+        return
+    
+    # Preload SetFit model (HEAVY - 5-10 seconds)
+    try:
+        if SETFIT_AVAILABLE:
+            from setfit import SetFitModel
+            from sentence_transformers import SentenceTransformer
+            logger.info("✅ PRELOAD: SetFit and SentenceTransformers loaded")
+    except Exception as e:
+        logger.warning(f"⚠️ PRELOAD: SetFit load failed: {e}")
+    
+    # Pre-initialize the classifier singleton (loads the actual model)
+    try:
+        if SETFIT_AVAILABLE:
+            get_question_classifier_setfit()
+            logger.info("✅ PRELOAD: QuestionClassifierSetFit singleton initialized")
+    except Exception as e:
+        logger.warning(f"⚠️ PRELOAD: QuestionClassifierSetFit init failed: {e}")
+    
+    _PRELOAD_COMPLETED = True
+
+try:
+    _preload_all_modules()
+except Exception as e:
+    logger.warning(f"Module-level question_classifier preload failed (will use fallback): {e}")
+

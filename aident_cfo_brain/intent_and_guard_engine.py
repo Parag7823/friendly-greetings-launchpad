@@ -433,3 +433,70 @@ def get_output_guard(llm_client: AsyncGroq, embedding_service=None) -> OutputGua
 
 # REMOVED: get_response_variation_engine() function
 # REASON: ResponseVariationEngine is dead code - OutputGuard handles variation internally
+
+
+# ============================================================================
+# PRELOAD PATTERN: Initialize heavy dependencies at module-load time
+# ============================================================================
+# This runs automatically when the module is imported, eliminating the
+# first-request latency that was caused by lazy-loading.
+
+_PRELOAD_COMPLETED = False
+
+def _preload_all_modules():
+    """
+    PRELOAD PATTERN: Initialize all heavy modules at module-load time.
+    Called automatically when module is imported.
+    This eliminates first-request latency.
+    """
+    global _PRELOAD_COMPLETED
+    
+    if _PRELOAD_COMPLETED:
+        return
+    
+    # Preload LangChain memory components
+    try:
+        from langchain.memory import ConversationSummaryBufferMemory
+        logger.info("✅ PRELOAD: LangChain ConversationSummaryBufferMemory loaded")
+    except Exception as e:
+        logger.warning(f"⚠️ PRELOAD: LangChain memory load failed: {e}")
+    
+    # Preload LangChain LCEL components
+    try:
+        from langchain_core.prompts import ChatPromptTemplate
+        from langchain_core.runnables import RunnableBranch
+        from langchain_core.output_parsers import StrOutputParser
+        logger.info("✅ PRELOAD: LangChain LCEL components loaded")
+    except Exception as e:
+        logger.warning(f"⚠️ PRELOAD: LangChain LCEL load failed: {e}")
+    
+    # Preload ChatGroq (LLM client)
+    try:
+        from langchain_groq import ChatGroq
+        logger.info("✅ PRELOAD: ChatGroq loaded at module-load time")
+    except Exception as e:
+        logger.warning(f"⚠️ PRELOAD: ChatGroq load failed: {e}")
+    
+    # Preload AsyncGroq (async LLM client)
+    try:
+        from groq import AsyncGroq
+        logger.info("✅ PRELOAD: AsyncGroq loaded at module-load time")
+    except Exception as e:
+        logger.warning(f"⚠️ PRELOAD: AsyncGroq load failed: {e}")
+    
+    # Pre-initialize the IntentClassifier singleton
+    # This is the heaviest operation (builds LCEL chain)
+    try:
+        if os.getenv("GROQ_API_KEY"):
+            get_intent_classifier()
+            logger.info("✅ PRELOAD: IntentClassifier singleton initialized")
+    except Exception as e:
+        logger.warning(f"⚠️ PRELOAD: IntentClassifier init failed: {e}")
+    
+    _PRELOAD_COMPLETED = True
+
+try:
+    _preload_all_modules()
+except Exception as e:
+    logger.warning(f"Module-level intent_and_guard preload failed (will use fallback): {e}")
+

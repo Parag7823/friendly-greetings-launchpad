@@ -329,3 +329,66 @@ class AidentMemoryManager:
     def update_conversation_state(self, user_message: str, assistant_response: str) -> None:
         """Deprecated - kept for backward compatibility. No-op."""
         pass
+
+
+# ============================================================================
+# PRELOAD PATTERN: Initialize heavy dependencies at module-load time
+# ============================================================================
+# This runs automatically when the module is imported, eliminating the
+# first-request latency that was caused by lazy-loading.
+# 
+# BENEFITS:
+# - First request is instant (no cold-start delay)
+# - Shared across all worker instances
+# - Memory is allocated once, not per-instance
+
+_PRELOAD_COMPLETED = False
+
+def _preload_all_modules():
+    """
+    PRELOAD PATTERN: Initialize all heavy modules at module-load time.
+    Called automatically when module is imported.
+    This eliminates first-request latency.
+    """
+    global _PRELOAD_COMPLETED
+    
+    if _PRELOAD_COMPLETED:
+        return
+    
+    # Preload LangChain memory components
+    try:
+        from langchain.memory import ConversationSummaryBufferMemory
+        logger.info("✅ PRELOAD: LangChain ConversationSummaryBufferMemory loaded at module-load time")
+    except Exception as e:
+        logger.warning(f"⚠️ PRELOAD: LangChain memory load failed: {e}")
+    
+    # Preload ChatGroq (LLM client)
+    try:
+        from langchain_groq import ChatGroq
+        logger.info("✅ PRELOAD: ChatGroq loaded at module-load time")
+    except Exception as e:
+        logger.warning(f"⚠️ PRELOAD: ChatGroq load failed: {e}")
+    
+    # Preload Redis async client
+    try:
+        if REDIS_AVAILABLE:
+            import redis.asyncio as aioredis
+            logger.info("✅ PRELOAD: redis.asyncio loaded at module-load time")
+    except Exception as e:
+        logger.warning(f"⚠️ PRELOAD: redis.asyncio load failed: {e}")
+    
+    # Preload RedisChatMessageHistory (if available)
+    try:
+        if LANGCHAIN_REDIS_AVAILABLE:
+            from langchain_community.chat_message_histories import RedisChatMessageHistory
+            logger.info("✅ PRELOAD: RedisChatMessageHistory loaded at module-load time")
+    except Exception as e:
+        logger.warning(f"⚠️ PRELOAD: RedisChatMessageHistory load failed: {e}")
+    
+    _PRELOAD_COMPLETED = True
+
+try:
+    _preload_all_modules()
+except Exception as e:
+    logger.warning(f"Module-level memory preload failed (will use fallback): {e}")
+

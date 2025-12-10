@@ -3514,3 +3514,89 @@ DATA STATUS: {{ data_status }}""")
         
         except Exception as e:
             logger.error("Failed to store chat message", error=str(e))
+
+
+# ============================================================================
+# PRELOAD PATTERN: Initialize heavy dependencies at module-load time
+# ============================================================================
+# This runs automatically when the module is imported, eliminating the
+# first-request latency that was caused by lazy-loading.
+# 
+# Note: spaCy is already preloaded at line 78 via _load_spacy_model()
+# 
+# BENEFITS:
+# - First request is instant (no cold-start delay)
+# - Shared across all worker instances
+# - Memory is allocated once, not per-instance
+
+_PRELOAD_COMPLETED = False
+
+def _preload_all_modules():
+    """
+    PRELOAD PATTERN: Initialize all heavy modules at module-load time.
+    Called automatically when module is imported.
+    This eliminates first-request latency.
+    """
+    global _PRELOAD_COMPLETED
+    
+    if _PRELOAD_COMPLETED:
+        return
+    
+    # Note: spaCy already preloaded at line 78 via _load_spacy_model()
+    
+    # Preload LangGraph (used for state machine)
+    try:
+        from langgraph.graph import StateGraph, END
+        from langgraph.types import RetryPolicy, Send
+        logger.info("✅ PRELOAD: LangGraph loaded at module-load time")
+    except Exception as e:
+        logger.warning(f"⚠️ PRELOAD: LangGraph load failed: {e}")
+    
+    # Preload Groq (LLM client)
+    try:
+        from groq import AsyncGroq
+        logger.info("✅ PRELOAD: AsyncGroq loaded at module-load time")
+    except Exception as e:
+        logger.warning(f"⚠️ PRELOAD: AsyncGroq load failed: {e}")
+    
+    # Preload aiocache (Redis caching)
+    try:
+        from aiocache import cached, Cache
+        from aiocache.serializers import JsonSerializer
+        logger.info("✅ PRELOAD: aiocache loaded at module-load time")
+    except Exception as e:
+        logger.warning(f"⚠️ PRELOAD: aiocache load failed: {e}")
+    
+    # Preload Jinja2 (response templating)
+    try:
+        from jinja2 import Template, Environment, FileSystemLoader
+        logger.info("✅ PRELOAD: Jinja2 loaded at module-load time")
+    except Exception as e:
+        logger.warning(f"⚠️ PRELOAD: Jinja2 load failed: {e}")
+    
+    # Preload tenacity (retry logic)
+    try:
+        from tenacity import retry, stop_after_attempt, wait_exponential
+        logger.info("✅ PRELOAD: tenacity loaded at module-load time")
+    except Exception as e:
+        logger.warning(f"⚠️ PRELOAD: tenacity load failed: {e}")
+    
+    # Force Pydantic model compilation
+    try:
+        # Validating a model forces schema compilation
+        QuestionClassification.model_validate({
+            'metrics': ['revenue'],
+            'time_periods': ['Q1'],
+            'confidence': 0.9
+        })
+        logger.info("✅ PRELOAD: Pydantic models compiled at module-load time")
+    except Exception as e:
+        logger.warning(f"⚠️ PRELOAD: Pydantic model compilation failed: {e}")
+    
+    _PRELOAD_COMPLETED = True
+
+try:
+    _preload_all_modules()
+except Exception as e:
+    logger.warning(f"Module-level orchestrator preload failed (will use fallback): {e}")
+

@@ -180,3 +180,40 @@ def create_message_store(
         raise ValueError("PostgreSQL connection_string is required")
     
     return ChatMessageStore(connection_string, user_id, chat_id)
+
+
+# ============================================================================
+# PRELOAD PATTERN: Initialize heavy dependencies at module-load time
+# ============================================================================
+# This runs automatically when the module is imported, eliminating the
+# first-request latency that was caused by lazy-loading.
+
+_PRELOAD_COMPLETED = False
+
+def _preload_all_modules():
+    """
+    PRELOAD PATTERN: Initialize all heavy modules at module-load time.
+    Called automatically when module is imported.
+    This eliminates first-request latency.
+    """
+    global _PRELOAD_COMPLETED
+    
+    if _PRELOAD_COMPLETED:
+        return
+    
+    # Preload LangChain PostgresChatMessageHistory
+    try:
+        if LANGCHAIN_AVAILABLE:
+            from langchain_community.chat_message_histories import PostgresChatMessageHistory
+            from langchain_core.messages import HumanMessage, AIMessage
+            logger.info("✅ PRELOAD: PostgresChatMessageHistory loaded at module-load time")
+    except Exception as e:
+        logger.warning(f"⚠️ PRELOAD: PostgresChatMessageHistory load failed: {e}")
+    
+    _PRELOAD_COMPLETED = True
+
+try:
+    _preload_all_modules()
+except Exception as e:
+    logger.warning(f"Module-level chat_message_store preload failed (will use fallback): {e}")
+

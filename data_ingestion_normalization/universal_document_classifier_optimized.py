@@ -25,7 +25,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import ahocorasick
-import easyocr  # 92% OCR accuracy vs 60% tesseract - PRELOADED
+import easyocr
 import structlog
 import numpy as np
 from sklearn.metrics.pairwise import cosine_similarity
@@ -35,17 +35,16 @@ from pydantic_settings import BaseSettings
 from aiocache import cached, Cache
 from aiocache.serializers import JsonSerializer
 import yaml
-from sentence_transformers import SentenceTransformer  # PRELOADED
+from sentence_transformers import SentenceTransformer
 
 logger = structlog.get_logger(__name__)
 
-# PRELOADED MODELS - Initialized at module load time (standard Python practice)
-# These are shared across all instances to prevent duplicate loading
-_SENTENCE_MODEL = None  # Will be initialized on first use
-_OCR_READER = None  # Will be initialized on first use
-_AUTOMATON = None  # Will be initialized on first use
+# Global preloaded models (shared across all instances)
+_SENTENCE_MODEL = None
+_OCR_READER = None
+_AUTOMATON = None
 
-# FIX #58: Global TF-IDF cache to prevent re-training on every instance
+# Global TF-IDF cache (prevents re-training on every instance)
 _TFIDF_CACHE = {
     'vectorizer': None,
     'doc_type_vectors': None,
@@ -54,51 +53,42 @@ _TFIDF_CACHE = {
 }
 
 def _initialize_global_models():
-    """Initialize all global models at module load time.
-    Standard Python practice: imports and initialization at top level.
-    """
+    """Preload all models at module import time (standard Python practice)."""
     global _SENTENCE_MODEL, _OCR_READER, _AUTOMATON
     
     try:
-        # Preload SentenceTransformer for semantic classification
         if _SENTENCE_MODEL is None:
             logger.info("Preloading SentenceTransformer model...")
             _SENTENCE_MODEL = SentenceTransformer('all-MiniLM-L6-v2')
-            logger.info("✅ SentenceTransformer preloaded successfully")
+            logger.info("✅ SentenceTransformer preloaded")
     except Exception as e:
         logger.warning(f"Failed to preload SentenceTransformer: {e}")
         _SENTENCE_MODEL = None
     
     try:
-        # Preload EasyOCR for document OCR processing
         if _OCR_READER is None:
             logger.info("Preloading EasyOCR reader...")
             _OCR_READER = easyocr.Reader(['en'], gpu=False)
-            logger.info("✅ EasyOCR preloaded successfully")
+            logger.info("✅ EasyOCR preloaded")
     except Exception as e:
         logger.warning(f"Failed to preload EasyOCR: {e}")
         _OCR_READER = None
     
     try:
-        # Preload Ahocorasick automaton for pattern matching
         if _AUTOMATON is None:
             logger.info("Preloading Ahocorasick automaton...")
             _AUTOMATON = ahocorasick.Automaton()
-            # Common financial keywords for pattern matching
-            keywords = [
-                'invoice', 'receipt', 'payment', 'transaction', 'balance',
-                'account', 'deposit', 'withdrawal', 'transfer', 'salary',
-                'expense', 'revenue', 'income', 'tax', 'refund'
-            ]
+            keywords = ['invoice', 'receipt', 'payment', 'transaction', 'balance',
+                       'account', 'deposit', 'withdrawal', 'transfer', 'salary',
+                       'expense', 'revenue', 'income', 'tax', 'refund']
             for keyword in keywords:
                 _AUTOMATON.add_word(keyword, keyword)
             _AUTOMATON.make_deterministic()
-            logger.info("✅ Ahocorasick automaton preloaded successfully")
+            logger.info("✅ Ahocorasick automaton preloaded")
     except Exception as e:
         logger.warning(f"Failed to preload Ahocorasick: {e}")
         _AUTOMATON = None
 
-# OPTIMIZED: Type-safe configuration with pydantic-settings
 class DocumentClassifierConfig(BaseSettings):
     """Type-safe configuration with auto-validation"""
     enable_caching: bool = True
@@ -121,7 +111,6 @@ class DocumentClassifierConfig(BaseSettings):
         case_sensitive=False
     )
 
-# OPTIMIZED: Type-safe document type definition with pydantic
 class DocumentTypeDefinition(BaseModel):
     """Type-safe document type definition with auto-validation"""
     name: str
@@ -169,30 +158,22 @@ class UniversalDocumentClassifierOptimized:
         self.supabase = supabase_client
         self.config = config or self._get_default_config()
         
-        # FIX #52: Use shared cache initialization utility
         from core_infrastructure.utils.helpers import initialize_centralized_cache
         self.cache = initialize_centralized_cache(cache_client)
-        
-        # Comprehensive document type database
         self.document_database = self._initialize_document_database()
         
-        # PRELOAD PATTERN: Use module-level preloaded models (zero first-request latency)
-        # Models are already initialized at module import time via _initialize_global_models()
-        self.automaton = _AUTOMATON  # Preloaded at module level
-        self.ocr_reader = _OCR_READER  # Preloaded at module level
-        self.ocr_available = _OCR_READER is not None  # Set based on preload success
-        self.sentence_model = _SENTENCE_MODEL  # Preloaded at module level
-        self.row_type_embeddings = None  # Will be initialized below if model available
-        # FIX #58: Use global TF-IDF cache instead of per-instance training
-        self.tfidf_vectorizer = None  # Will reference global cache
-        self.doc_type_vectors = None  # Will reference global cache
-        self.doc_types_list = None  # Will reference global cache
+        # Use preloaded models (initialized at module import time)
+        self.automaton = _AUTOMATON
+        self.ocr_reader = _OCR_READER
+        self.ocr_available = _OCR_READER is not None
+        self.sentence_model = _SENTENCE_MODEL
+        self.row_type_embeddings = None
+        self.tfidf_vectorizer = None
+        self.doc_type_vectors = None
+        self.doc_types_list = None
         
-        # Initialize row type embeddings if sentence model is available
         if self.sentence_model is not None:
             self._initialize_row_type_embeddings()
-        
-        # Initialize TF-IDF from global cache
         self._initialize_tfidf()
         
         # Performance tracking
@@ -224,21 +205,17 @@ class UniversalDocumentClassifierOptimized:
                    tfidf_trained=self.tfidf_vectorizer is not None)
     
     def _get_default_config(self):
-        """OPTIMIZED: Get type-safe configuration with pydantic-settings"""
+        """Get type-safe configuration with pydantic-settings"""
         return DocumentClassifierConfig()
     
     def _initialize_row_type_embeddings(self):
-        """
-        PRELOADED: Initialize row type embeddings using preloaded SentenceTransformer.
-        Standard Python practice: Initialize at module/instance load time.
-        """
+        """Initialize row type embeddings using preloaded SentenceTransformer."""
         if self.sentence_model is None:
             logger.warning("SentenceTransformer not available, row type embeddings skipped")
             self.row_type_embeddings = None
             return
         
         try:
-            # Define row types with natural language descriptions
             self.row_types = {
                 'revenue_income': 'payment received from client, sales revenue, income, money coming in',
                 'operating_expense': 'business expense, vendor payment, cost, money going out',
@@ -249,11 +226,8 @@ class UniversalDocumentClassifierOptimized:
                 'transfer': 'transfer between accounts, internal transfer'
             }
             
-            # Compute embeddings for all row types (PRELOADED)
             row_type_texts = list(self.row_types.values())
             embeddings = self.sentence_model.encode(row_type_texts)
-            
-            # Store as dict for lookup
             self.row_type_embeddings = {
                 row_type: embedding 
                 for row_type, embedding in zip(self.row_types.keys(), embeddings)
