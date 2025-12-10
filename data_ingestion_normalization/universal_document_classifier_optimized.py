@@ -25,8 +25,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import ahocorasick
-# REMOVED: Direct easyocr import - lazy-loaded via inference_service (line 200)
-# import easyocr  # 92% OCR accuracy vs 60% tesseract
+import easyocr  # 92% OCR accuracy vs 60% tesseract - PRELOADED
 import structlog
 import numpy as np
 from sklearn.metrics.pairwise import cosine_similarity
@@ -36,9 +35,15 @@ from pydantic_settings import BaseSettings
 from aiocache import cached, Cache
 from aiocache.serializers import JsonSerializer
 import yaml
-from sentence_transformers import SentenceTransformer
+from sentence_transformers import SentenceTransformer  # PRELOADED
 
 logger = structlog.get_logger(__name__)
+
+# PRELOADED MODELS - Initialized at module load time (standard Python practice)
+# These are shared across all instances to prevent duplicate loading
+_SENTENCE_MODEL = None  # Will be initialized on first use
+_OCR_READER = None  # Will be initialized on first use
+_AUTOMATON = None  # Will be initialized on first use
 
 # FIX #58: Global TF-IDF cache to prevent re-training on every instance
 _TFIDF_CACHE = {
@@ -47,6 +52,51 @@ _TFIDF_CACHE = {
     'doc_types_list': None,
     'initialized': False
 }
+
+def _initialize_global_models():
+    """Initialize all global models at module load time.
+    Standard Python practice: imports and initialization at top level.
+    """
+    global _SENTENCE_MODEL, _OCR_READER, _AUTOMATON
+    
+    try:
+        # Preload SentenceTransformer for semantic classification
+        if _SENTENCE_MODEL is None:
+            logger.info("Preloading SentenceTransformer model...")
+            _SENTENCE_MODEL = SentenceTransformer('all-MiniLM-L6-v2')
+            logger.info("✅ SentenceTransformer preloaded successfully")
+    except Exception as e:
+        logger.warning(f"Failed to preload SentenceTransformer: {e}")
+        _SENTENCE_MODEL = None
+    
+    try:
+        # Preload EasyOCR for document OCR processing
+        if _OCR_READER is None:
+            logger.info("Preloading EasyOCR reader...")
+            _OCR_READER = easyocr.Reader(['en'], gpu=False)
+            logger.info("✅ EasyOCR preloaded successfully")
+    except Exception as e:
+        logger.warning(f"Failed to preload EasyOCR: {e}")
+        _OCR_READER = None
+    
+    try:
+        # Preload Ahocorasick automaton for pattern matching
+        if _AUTOMATON is None:
+            logger.info("Preloading Ahocorasick automaton...")
+            _AUTOMATON = ahocorasick.Automaton()
+            # Common financial keywords for pattern matching
+            keywords = [
+                'invoice', 'receipt', 'payment', 'transaction', 'balance',
+                'account', 'deposit', 'withdrawal', 'transfer', 'salary',
+                'expense', 'revenue', 'income', 'tax', 'refund'
+            ]
+            for keyword in keywords:
+                _AUTOMATON.add_word(keyword, keyword)
+            _AUTOMATON.make_deterministic()
+            logger.info("✅ Ahocorasick automaton preloaded successfully")
+    except Exception as e:
+        logger.warning(f"Failed to preload Ahocorasick: {e}")
+        _AUTOMATON = None
 
 # OPTIMIZED: Type-safe configuration with pydantic-settings
 class DocumentClassifierConfig(BaseSettings):
@@ -171,80 +221,48 @@ class UniversalDocumentClassifierOptimized:
         """OPTIMIZED: Get type-safe configuration with pydantic-settings"""
         return DocumentClassifierConfig()
     
-    def _initialize_ocr(self):
+    def _initialize_row_type_embeddings(self):
         """
-        FIX #63: Use inference_service for lazy OCR loading with proper error handling.
-        Old: Direct easyocr.Reader initialization = slow cold start, high memory
-        New: Lazy loading via inference_service = on-demand, shared across workers
-        
-        Error handling: If OCR service fails, gracefully degrade without silent failures
+        PRELOADED: Initialize row type embeddings using preloaded SentenceTransformer.
+        Standard Python practice: Initialize at module/instance load time.
         """
-        # REMOVED: Direct easyocr initialization
-        # self.ocr_reader = easyocr.Reader(['en'], gpu=False)
-        
-        # OCR will be loaded lazily via inference_service when needed
-        self.ocr_reader = None  # Lazy-loaded via OCRService
-        self.ocr_available = False  # Don't assume available - will be checked on first use
-        self._ocr_error = None  # Track any OCR initialization errors
-        
-        logger.info("ocr_deferred_to_inference_service", 
-                   lazy_loading=True,
-                   accuracy="92%",
-                   error_handling="graceful_degradation")
-        return True
-    
-    async def _ensure_ocr_available(self) -> bool:
-        """
-        FIX #63: Lazy-load OCR with error handling.
-        Returns True if OCR is available, False otherwise.
-        Logs errors instead of failing silently.
-        """
-        if self.ocr_reader is not None:
-            return self.ocr_available
+        if self.sentence_model is None:
+            logger.warning("SentenceTransformer not available, row type embeddings skipped")
+            self.row_type_embeddings = None
+            return
         
         try:
-            # Try to load OCR from inference service
-            from inference_service import OCRService
-            self.ocr_reader = await OCRService.get_ocr_reader()
-            self.ocr_available = True
-            logger.info("✅ OCR service loaded successfully")
-            return True
+            # Define row types with natural language descriptions
+            self.row_types = {
+                'revenue_income': 'payment received from client, sales revenue, income, money coming in',
+                'operating_expense': 'business expense, vendor payment, cost, money going out',
+                'payroll_expense': 'employee salary, wages, payroll, staff payment',
+                'tax_payment': 'tax payment, IRS, government tax, tax withholding',
+                'loan_payment': 'loan payment, debt payment, financing payment',
+                'investment': 'investment, stock purchase, bond, mutual fund',
+                'transfer': 'transfer between accounts, internal transfer'
+            }
+            
+            # Compute embeddings for all row types (PRELOADED)
+            row_type_texts = list(self.row_types.values())
+            embeddings = self.sentence_model.encode(row_type_texts)
+            
+            # Store as dict for lookup
+            self.row_type_embeddings = {
+                row_type: embedding 
+                for row_type, embedding in zip(self.row_types.keys(), embeddings)
+            }
+            
+            logger.info("✅ Row type embeddings preloaded successfully",
+                       row_types=len(self.row_type_embeddings),
+                       embedding_model="all-MiniLM-L6-v2")
         except Exception as e:
-            self._ocr_error = str(e)
-            self.ocr_available = False
-            logger.error(f"❌ OCR service failed to load: {e}. Document classification will continue without OCR.")
-            return False
+            logger.warning(f"Failed to initialize row type embeddings: {e}")
+            self.row_type_embeddings = None
     
-    def _initialize_sentence_model(self):
-        """
-        CRITICAL FIX: Use inference_service for lazy model loading.
-        Old: Direct SentenceTransformer loading = 350MB per worker + 5-30s cold start
-        New: Lazy loading via inference_service = shared model, on-demand loading
-        """
-        # REMOVED: Direct SentenceTransformer loading
-        # self.sentence_model = SentenceTransformer('all-MiniLM-L6-v2')
-        
-        # Model will be loaded lazily via inference_service when needed
-        self.sentence_model = None  # Lazy-loaded via SentenceModelService
-        
-        # Define row types with natural language descriptions
-        self.row_types = {
-            'revenue_income': 'payment received from client, sales revenue, income, money coming in',
-            'operating_expense': 'business expense, vendor payment, cost, money going out',
-            'payroll_expense': 'employee salary, wages, payroll, staff payment',
-            'tax_payment': 'tax payment, IRS, government tax, tax withholding',
-            'loan_payment': 'loan payment, debt payment, financing payment',
-            'investment': 'investment, stock purchase, bond, mutual fund',
-            'transfer': 'transfer between accounts, internal transfer'
-        }
-        
-        # Embeddings will be computed lazily via inference_service
-        self.row_type_embeddings = None  # Lazy-loaded
-        
-        logger.info("sentence_model_deferred_to_inference_service", 
-                   model="all-MiniLM-L6-v2",
-                   row_types=len(self.row_types),
-                   lazy_loading=True)
+    # REMOVED: Old lazy-loading methods (_initialize_ocr, _ensure_ocr_available, _initialize_sentence_model)
+    # Models are now PRELOADED at module level following standard Python developer practices
+    # See _initialize_global_models() function at module top for preloading logic
     
     def _initialize_tfidf(self):
         """FIX #58: Initialize TF-IDF vectorizer with global caching to prevent re-training"""
@@ -1234,3 +1252,13 @@ class UniversalDocumentClassifierOptimized:
         if doc_type_id in self.document_database:
             self.document_database[doc_type_id].update(updates)
             logger.info(f"Updated document type: {doc_type_id}")
+
+
+# ============================================================================
+# MODULE-LEVEL INITIALIZATION - Standard Python Practice
+# ============================================================================
+# Initialize all global models when module is imported
+# This follows standard Python developer practices: imports and initialization at top level
+logger.info("Initializing UniversalDocumentClassifier global models at module load time...")
+_initialize_global_models()
+logger.info("✅ UniversalDocumentClassifier module initialization complete")

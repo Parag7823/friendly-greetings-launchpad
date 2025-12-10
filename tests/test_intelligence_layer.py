@@ -28,16 +28,12 @@ from hypothesis import given, strategies as st, settings, HealthCheck
 # Add parent to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-# ============================================================================
 # Phase 1: Core Data Structures and Helpers
-# ============================================================================
 
 class TestPhase1CoreDataStructures:
     """Test core data structures used across the intelligence layer."""
     
-    # -------------------------------------------------------------------------
     # Test 1.1: QuestionType Enum
-    # -------------------------------------------------------------------------
     
     def test_question_type_enum_has_all_types(self):
         """Verify QuestionType enum contains all expected question types."""
@@ -60,9 +56,7 @@ class TestPhase1CoreDataStructures:
         for qt in QuestionType:
             assert qt.value == qt.value.lower(), f"{qt.name} value is not lowercase: {qt.value}"
     
-    # -------------------------------------------------------------------------
     # Test 1.2: ChatResponse Dataclass
-    # -------------------------------------------------------------------------
     
     def test_chat_response_required_fields(self):
         """ChatResponse must have answer, question_type, confidence."""
@@ -136,9 +130,7 @@ class TestPhase1CoreDataStructures:
         # Confidence is stored as-is (validation happens at usage)
         assert response.confidence == confidence
     
-    # -------------------------------------------------------------------------
     # Test 1.3: Error Response Helper
-    # -------------------------------------------------------------------------
     
     def test_create_error_response_basic(self):
         """_create_error_response should create structured error."""
@@ -170,9 +162,7 @@ class TestPhase1CoreDataStructures:
         assert result["error"] is True
         assert len(result) == 3  # error, operation, message
     
-    # -------------------------------------------------------------------------
     # Test 1.4: Fallback Entities Helper
-    # -------------------------------------------------------------------------
     
     def test_get_fallback_entities_with_keywords(self):
         """_get_fallback_entities should extract financial keywords."""
@@ -209,16 +199,12 @@ class TestPhase1CoreDataStructures:
         assert "confidence" in result
 
 
-# ============================================================================
 # Phase 2: Intent Classification (intent_and_guard_engine.py)
-# ============================================================================
 
 class TestPhase2IntentClassification:
     """Test IntentClassifier from intent_and_guard_engine.py"""
     
-    # -------------------------------------------------------------------------
     # Test 2.1: UserIntent Enum
-    # -------------------------------------------------------------------------
     
     def test_user_intent_has_all_intents(self):
         """UserIntent enum should have all expected intent types."""
@@ -242,9 +228,7 @@ class TestPhase2IntentClassification:
         for ui in UserIntent:
             assert ui.value == ui.value.lower(), f"{ui.name} value is not lowercase: {ui.value}"
     
-    # -------------------------------------------------------------------------
     # Test 2.2: IntentResult Dataclass
-    # -------------------------------------------------------------------------
     
     def test_intent_result_structure(self):
         """IntentResult should have intent, confidence, method, reasoning."""
@@ -262,9 +246,7 @@ class TestPhase2IntentClassification:
         assert result.method == "langchain_structured_routing"
         assert "hello" in result.reasoning.lower()
     
-    # -------------------------------------------------------------------------
     # Test 2.3: IntentClassifier Initialization
-    # -------------------------------------------------------------------------
     
     def test_intent_classifier_requires_groq_api_key(self):
         """IntentClassifier should raise if GROQ_API_KEY not set."""
@@ -293,9 +275,7 @@ class TestPhase2IntentClassification:
         assert classifier.groq_client is not None
         assert classifier.langchain_llm is not None
     
-    # -------------------------------------------------------------------------
     # Test 2.4: Intent Classification (Real LLM Calls)
-    # -------------------------------------------------------------------------
     
     @pytest.mark.skipif(not os.getenv("GROQ_API_KEY"), reason="GROQ_API_KEY required")
     @pytest.mark.asyncio
@@ -347,16 +327,12 @@ class TestPhase2IntentClassification:
         assert result.confidence > 0.6
 
 
-# ============================================================================
 # Phase 3: Output Guard (intent_and_guard_engine.py)
-# ============================================================================
 
 class TestPhase3OutputGuard:
     """Test OutputGuard from intent_and_guard_engine.py"""
     
-    # -------------------------------------------------------------------------
     # Test 3.1: OutputGuard Initialization
-    # -------------------------------------------------------------------------
     
     @pytest.mark.skipif(not os.getenv("GROQ_API_KEY"), reason="GROQ_API_KEY required")
     def test_output_guard_initializes(self):
@@ -370,9 +346,7 @@ class TestPhase3OutputGuard:
         assert guard.memory is not None
         assert guard.langchain_llm is not None
     
-    # -------------------------------------------------------------------------
     # Test 3.2: Repetition Detection
-    # -------------------------------------------------------------------------
     
     @pytest.mark.skipif(not os.getenv("GROQ_API_KEY"), reason="GROQ_API_KEY required")
     def test_check_repetition_no_memory(self):
@@ -437,16 +411,12 @@ class TestPhase3OutputGuard:
         assert isinstance(result_frustrated, bool)
 
 
-# ============================================================================
 # Phase 4: Aident Memory Manager
-# ============================================================================
 
 class TestPhase4AidentMemoryManager:
     """Test AidentMemoryManager from aident_memory_manager.py"""
     
-    # -------------------------------------------------------------------------
     # Test 4.1: Memory Manager Initialization
-    # -------------------------------------------------------------------------
     
     @pytest.mark.skipif(not os.getenv("GROQ_API_KEY"), reason="GROQ_API_KEY required")
     def test_memory_manager_requires_user_id(self):
@@ -465,9 +435,7 @@ class TestPhase4AidentMemoryManager:
         manager = AidentMemoryManager(user_id="test", max_token_limit=5000)
         assert manager.max_token_limit == 5000
     
-    # -------------------------------------------------------------------------
     # Test 4.2: Message Operations
-    # -------------------------------------------------------------------------
     
     @pytest.mark.skipif(not os.getenv("GROQ_API_KEY"), reason="GROQ_API_KEY required")
     @pytest.mark.asyncio
@@ -497,9 +465,7 @@ class TestPhase4AidentMemoryManager:
         
         assert isinstance(context, str)
     
-    # -------------------------------------------------------------------------
     # Test 4.3: Entity Tracking (New Feature)
-    # -------------------------------------------------------------------------
     
     @pytest.mark.skipif(not os.getenv("GROQ_API_KEY"), reason="GROQ_API_KEY required")
     def test_resolve_reference_no_entities(self):
@@ -565,9 +531,7 @@ class TestPhase4AidentMemoryManager:
         assert len(manager._entity_stack) == 10
         assert manager._entity_stack[0] == "Entity5"  # First 5 should be removed
     
-    # -------------------------------------------------------------------------
     # Test 4.4: Memory Stats
-    # -------------------------------------------------------------------------
     
     @pytest.mark.skipif(not os.getenv("GROQ_API_KEY"), reason="GROQ_API_KEY required")
     @pytest.mark.asyncio
@@ -584,9 +548,7 @@ class TestPhase4AidentMemoryManager:
         assert stats["user_id"] == "test-stats"
 
 
-# ============================================================================
 # Phase 5: Integration Tests (Full Flow)
-# ============================================================================
 
 class TestPhase5IntegrationFlow:
     """Test the full integration flow across all three modules."""
@@ -622,9 +584,7 @@ class TestPhase5IntegrationFlow:
         assert len(messages) >= 6  # 3 user + 3 assistant
 
 
-# ============================================================================
 # Hypothesis Edge Case Tests
-# ============================================================================
 
 class TestHypothesisEdgeCases:
     """Property-based tests using Hypothesis for edge case coverage."""
