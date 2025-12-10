@@ -695,3 +695,53 @@ async def stop_health_check_monitor():
             pass
         _health_check_task = None
         logger.info("health_check_monitor_stopped")
+
+
+# ============================================================================
+# PRELOAD PATTERN: Initialize heavy dependencies at module-load time
+# ============================================================================
+# This runs automatically when the module is imported, eliminating the
+# first-request latency that was caused by lazy-loading.
+
+_PRELOAD_COMPLETED = False
+
+def _preload_all_modules():
+    """
+    PRELOAD PATTERN: Initialize all heavy modules at module-load time.
+    Called automatically when module is imported.
+    This eliminates first-request latency.
+    """
+    global _PRELOAD_COMPLETED
+    
+    if _PRELOAD_COMPLETED:
+        return
+    
+    # Preload aiocache components
+    try:
+        from aiocache import Cache, caches
+        from aiocache.serializers import PickleSerializer, JsonSerializer
+        logger.info("✅ PRELOAD: aiocache loaded at module-load time")
+    except Exception as e:
+        logger.warning(f"⚠️ PRELOAD: aiocache load failed: {e}")
+    
+    # Preload Redis asyncio client
+    try:
+        import redis.asyncio as redis_async
+        logger.info("✅ PRELOAD: redis.asyncio loaded at module-load time")
+    except Exception as e:
+        logger.warning(f"⚠️ PRELOAD: redis.asyncio load failed: {e}")
+    
+    # Preload orjson (fast JSON parser)
+    try:
+        import orjson
+        logger.info("✅ PRELOAD: orjson loaded at module-load time")
+    except Exception as e:
+        logger.warning(f"⚠️ PRELOAD: orjson load failed: {e}")
+    
+    _PRELOAD_COMPLETED = True
+
+try:
+    _preload_all_modules()
+except Exception as e:
+    logger.warning(f"Module-level centralized_cache preload failed (will use fallback): {e}")
+

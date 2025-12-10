@@ -307,3 +307,67 @@ async def get_embedding_service(cache_client=None, enable_embeddings=True) -> Em
         await _embedding_service.initialize()
     
     return _embedding_service
+
+
+# ============================================================================
+# PRELOAD PATTERN: Initialize heavy dependencies at module-load time
+# ============================================================================
+# This runs automatically when the module is imported, eliminating the
+# first-request latency that was caused by lazy-loading.
+#
+# NOTE: SentenceTransformer model loading is HEAVY (~5-10 seconds, ~1.5GB RAM).
+# Only preload if PRELOAD_EMBEDDING_MODEL env var is set to 'true'.
+
+_PRELOAD_COMPLETED = False
+
+def _preload_all_modules():
+    """
+    PRELOAD PATTERN: Initialize all heavy modules at module-load time.
+    Called automatically when module is imported.
+    This eliminates first-request latency.
+    """
+    global _PRELOAD_COMPLETED
+    
+    if _PRELOAD_COMPLETED:
+        return
+    
+    # Preload numpy (lazy-loaded above, but trigger it now)
+    try:
+        _load_numpy()
+        logger.info("✅ PRELOAD: numpy loaded at module-load time")
+    except Exception as e:
+        logger.warning(f"⚠️ PRELOAD: numpy load failed: {e}")
+    
+    # Preload sentence-transformers (HEAVY - only import, don't load model)
+    try:
+        from sentence_transformers import SentenceTransformer
+        logger.info("✅ PRELOAD: sentence-transformers loaded at module-load time")
+    except Exception as e:
+        logger.warning(f"⚠️ PRELOAD: sentence-transformers load failed: {e}")
+    
+    # Preload aiocache decorator
+    try:
+        from aiocache import cached
+        from aiocache.serializers import JsonSerializer
+        logger.info("✅ PRELOAD: aiocache loaded at module-load time")
+    except Exception as e:
+        logger.warning(f"⚠️ PRELOAD: aiocache load failed: {e}")
+    
+    # NOTE: We do NOT preload the actual BGE model here because it's 1.5GB RAM.
+    # The model is loaded on first use via get_embedding_model().
+    # If you want eager model loading, set PRELOAD_EMBEDDING_MODEL=true.
+    if os.environ.get('PRELOAD_EMBEDDING_MODEL', 'false').lower() == 'true':
+        try:
+            import asyncio
+            asyncio.get_event_loop().run_until_complete(get_embedding_model())
+            logger.info("✅ PRELOAD: BGE embedding model loaded at module-load time")
+        except Exception as e:
+            logger.warning(f"⚠️ PRELOAD: BGE model load failed: {e}")
+    
+    _PRELOAD_COMPLETED = True
+
+try:
+    _preload_all_modules()
+except Exception as e:
+    logger.warning(f"Module-level embedding_service preload failed (will use fallback): {e}")
+

@@ -240,15 +240,9 @@ class UniversalDocumentClassifierOptimized:
             logger.warning(f"Failed to initialize row type embeddings: {e}")
             self.row_type_embeddings = None
     
-    # REMOVED: Old lazy-loading methods (_initialize_ocr, _ensure_ocr_available, _initialize_sentence_model)
-    # Models are now PRELOADED at module level following standard Python developer practices
-    # See _initialize_global_models() function at module top for preloading logic
-    
     def _initialize_tfidf(self):
-        """FIX #58: Initialize TF-IDF vectorizer with global caching to prevent re-training"""
+        """Initialize TF-IDF vectorizer with global caching to prevent re-training"""
         global _TFIDF_CACHE
-        
-        # Check if already initialized globally
         if _TFIDF_CACHE['initialized']:
             self.tfidf_vectorizer = _TFIDF_CACHE['vectorizer']
             self.doc_type_vectors = _TFIDF_CACHE['doc_type_vectors']
@@ -259,24 +253,19 @@ class UniversalDocumentClassifierOptimized:
         try:
             corpus = []
             doc_types_list = []
-            
             for doc_type, info in self.document_database.items():
-                # Combine indicators into document representation
                 doc_text = ' '.join(info['indicators'] + info['keywords'] + info['field_patterns'])
                 corpus.append(doc_text)
                 doc_types_list.append(doc_type)
             
-            # Train TF-IDF on indicator corpus (only once globally)
             tfidf_vectorizer = TfidfVectorizer()
             doc_type_vectors = tfidf_vectorizer.fit_transform(corpus)
             
-            # Store in global cache
             _TFIDF_CACHE['vectorizer'] = tfidf_vectorizer
             _TFIDF_CACHE['doc_type_vectors'] = doc_type_vectors
             _TFIDF_CACHE['doc_types_list'] = doc_types_list
             _TFIDF_CACHE['initialized'] = True
             
-            # Reference from instance
             self.tfidf_vectorizer = tfidf_vectorizer
             self.doc_type_vectors = doc_type_vectors
             self.doc_types_list = doc_types_list
@@ -289,15 +278,12 @@ class UniversalDocumentClassifierOptimized:
             self.tfidf_vectorizer = None
     
     def _initialize_document_database(self) -> Dict[str, Dict[str, Any]]:
-        """OPTIMIZED: Load document types from YAML (non-devs can edit!)"""
+        """Load document types from YAML file or fallback to hardcoded defaults"""
         try:
-            # Try to load from external YAML file
             yaml_path = Path(self.config.document_types_yaml)
             if yaml_path.exists():
                 with open(yaml_path, 'r', encoding='utf-8') as f:
                     yaml_data = yaml.safe_load(f)
-                
-                # Flatten nested structure: {category: {doc_type: {...}}} -> {doc_type: {...}}
                 document_database = {}
                 for category, doc_types in yaml_data.items():
                     for doc_type_id, doc_info in doc_types.items():
@@ -313,7 +299,6 @@ class UniversalDocumentClassifierOptimized:
         except Exception as e:
             logger.error("Failed to load YAML, using hardcoded defaults", error=str(e))
         
-        # Fallback to hardcoded document types
         return {
             # Financial Documents
             'invoice': {
@@ -1234,11 +1219,7 @@ class UniversalDocumentClassifierOptimized:
             logger.info(f"Updated document type: {doc_type_id}")
 
 
-# ============================================================================
-# MODULE-LEVEL INITIALIZATION - Standard Python Practice
-# ============================================================================
-# Initialize all global models when module is imported
-# This follows standard Python developer practices: imports and initialization at top level
-logger.info("Initializing UniversalDocumentClassifier global models at module load time...")
+# Module-level initialization: preload all models at import time
+logger.info("Initializing UniversalDocumentClassifier models...")
 _initialize_global_models()
-logger.info("✅ UniversalDocumentClassifier module initialization complete")
+logger.info("✅ UniversalDocumentClassifier initialized")

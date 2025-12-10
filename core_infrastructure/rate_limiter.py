@@ -567,3 +567,58 @@ def get_scheduler_rate_limiter() -> SchedulerRateLimiter:
     if _scheduler_rate_limiter is None:
         _scheduler_rate_limiter = SchedulerRateLimiter()
     return _scheduler_rate_limiter
+
+
+# ============================================================================
+# PRELOAD PATTERN: Initialize heavy dependencies at module-load time
+# ============================================================================
+# This runs automatically when the module is imported, eliminating the
+# first-request latency that was caused by lazy-loading.
+
+_PRELOAD_COMPLETED = False
+
+def _preload_all_modules():
+    """
+    PRELOAD PATTERN: Initialize all heavy modules at module-load time.
+    Called automatically when module is imported.
+    This eliminates first-request latency.
+    """
+    global _PRELOAD_COMPLETED
+    
+    if _PRELOAD_COMPLETED:
+        return
+    
+    # Preload asyncio.Semaphore (lightweight but ensures module loaded)
+    try:
+        import asyncio
+        logger.info("✅ PRELOAD: asyncio loaded at module-load time")
+    except Exception as e:
+        logger.warning(f"⚠️ PRELOAD: asyncio load failed: {e}")
+    
+    # Preload config_manager
+    try:
+        from core_infrastructure.config_manager import get_connector_config
+        get_connector_config()
+        logger.info("✅ PRELOAD: ConnectorConfig loaded at module-load time")
+    except Exception as e:
+        logger.warning(f"⚠️ PRELOAD: config_manager load failed: {e}")
+    
+    # Pre-initialize rate limiter singletons (only if cache available)
+    try:
+        from core_infrastructure.centralized_cache import safe_get_cache
+        if safe_get_cache():
+            get_global_rate_limiter()
+            get_sync_lock()
+            get_sync_deduplicator()
+            get_scheduler_rate_limiter()
+            logger.info("✅ PRELOAD: Rate limiter singletons initialized")
+    except Exception as e:
+        logger.warning(f"⚠️ PRELOAD: Rate limiter init failed: {e}")
+    
+    _PRELOAD_COMPLETED = True
+
+try:
+    _preload_all_modules()
+except Exception as e:
+    logger.warning(f"Module-level rate_limiter preload failed (will use fallback): {e}")
+

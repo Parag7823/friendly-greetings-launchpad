@@ -198,3 +198,46 @@ def get_business_rules_engine(config_path: Optional[str] = None) -> BusinessRule
         _business_rules_engine = BusinessRulesEngine(config_path)
     
     return _business_rules_engine
+
+
+# ============================================================================
+# PRELOAD PATTERN: Initialize heavy dependencies at module-load time
+# ============================================================================
+# This runs automatically when the module is imported, eliminating the
+# first-request latency that was caused by lazy-loading.
+
+_PRELOAD_COMPLETED = False
+
+def _preload_all_modules():
+    """
+    PRELOAD PATTERN: Initialize all heavy modules at module-load time.
+    Called automatically when module is imported.
+    This eliminates first-request latency.
+    """
+    global _PRELOAD_COMPLETED
+    
+    if _PRELOAD_COMPLETED:
+        return
+    
+    # Preload json-logic
+    try:
+        if JSON_LOGIC_AVAILABLE:
+            from json_logic import jsonLogic
+            logger.info("✅ PRELOAD: json-logic loaded at module-load time")
+    except Exception as e:
+        logger.warning(f"⚠️ PRELOAD: json-logic load failed: {e}")
+    
+    # Pre-initialize the BusinessRulesEngine singleton (loads JSON config)
+    try:
+        get_business_rules_engine()
+        logger.info("✅ PRELOAD: BusinessRulesEngine singleton initialized")
+    except Exception as e:
+        logger.warning(f"⚠️ PRELOAD: BusinessRulesEngine init failed: {e}")
+    
+    _PRELOAD_COMPLETED = True
+
+try:
+    _preload_all_modules()
+except Exception as e:
+    logger.warning(f"Module-level business_rules preload failed (will use fallback): {e}")
+

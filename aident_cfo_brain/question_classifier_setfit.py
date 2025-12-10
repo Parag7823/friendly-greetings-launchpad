@@ -253,7 +253,7 @@ def generate_sample_training_data() -> List[Tuple[str, str]]:
         
         # Unknown
         ("asdfasdf", "unknown"),
-        (\"???\", \"unknown\"),
+        ("???", "unknown"),
     ]
 
 

@@ -166,3 +166,52 @@ def get_prompt_loader(config_path: Optional[str] = None) -> PromptLoader:
         _prompt_loader = PromptLoader(config_path)
     
     return _prompt_loader
+
+
+# ============================================================================
+# PRELOAD PATTERN: Initialize heavy dependencies at module-load time
+# ============================================================================
+# This runs automatically when the module is imported, eliminating the
+# first-request latency that was caused by lazy-loading.
+
+_PRELOAD_COMPLETED = False
+
+def _preload_all_modules():
+    """
+    PRELOAD PATTERN: Initialize all heavy modules at module-load time.
+    Called automatically when module is imported.
+    This eliminates first-request latency.
+    """
+    global _PRELOAD_COMPLETED
+    
+    if _PRELOAD_COMPLETED:
+        return
+    
+    # Preload YAML parser
+    try:
+        import yaml
+        logger.info("✅ PRELOAD: PyYAML loaded at module-load time")
+    except Exception as e:
+        logger.warning(f"⚠️ PRELOAD: PyYAML load failed: {e}")
+    
+    # Preload Jinja2 templates
+    try:
+        from jinja2 import Template
+        logger.info("✅ PRELOAD: Jinja2 Template loaded at module-load time")
+    except Exception as e:
+        logger.warning(f"⚠️ PRELOAD: Jinja2 load failed: {e}")
+    
+    # Pre-initialize the PromptLoader singleton (loads YAML config)
+    try:
+        get_prompt_loader()
+        logger.info("✅ PRELOAD: PromptLoader singleton initialized")
+    except Exception as e:
+        logger.warning(f"⚠️ PRELOAD: PromptLoader init failed: {e}")
+    
+    _PRELOAD_COMPLETED = True
+
+try:
+    _preload_all_modules()
+except Exception as e:
+    logger.warning(f"Module-level prompt_loader preload failed (will use fallback): {e}")
+
