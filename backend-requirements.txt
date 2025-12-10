@@ -128,7 +128,7 @@ sktime>=0.25.0  # Time series analysis toolkit (AutoML forecasting)
 dowhy>=0.11  # Microsoft's causal inference: automatic causal graphs, counterfactuals, identification
 econml>=0.15.0  # Microsoft EconML: heterogeneous treatment effects, causal ML
 joblib>=1.3.0  # Efficient model serialization (replaces pickle for ML models)
-numpy-financial>=1.1.0  # Financial calculations: interest, NPV, IRR (replaces manual calculations)
+numpy-financial==1.0.0  # Financial calculations: interest, NPV, IRR (replaces manual calculations)
 
 # SEMANTIC RELATIONSHIP EXTRACTOR v2.0.0 - PRODUCTION-GRADE
 # Replaces 77 lines of custom caching + 50 lines of metrics with industry standards
