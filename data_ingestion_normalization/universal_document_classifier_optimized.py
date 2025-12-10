@@ -155,10 +155,12 @@ class UniversalDocumentClassifierOptimized:
     
     def __init__(self, groq_client=None, cache_client=None, supabase_client=None, config=None):
         self.groq_client = groq_client
+        self.security = SecurityValidator()
+        self.rate_limiter = GlobalRateLimiter()
+        self.transaction_manager = DatabaseTransactionManager(supabase_client) if supabase_client else None
         self.supabase = supabase_client
         self.config = config or self._get_default_config()
         
-        from core_infrastructure.utils.helpers import initialize_centralized_cache
         self.cache = initialize_centralized_cache(cache_client)
         self.document_database = self._initialize_document_database()
         
@@ -536,7 +538,6 @@ class UniversalDocumentClassifierOptimized:
         Classify document using comprehensive AI-powered analysis with caching and learning.
         """
         start_time = time.time()
-        classification_id = self._generate_classification_id(payload, filename, user_id)
         
         # Build deterministic cache content for AI cache integration (safe for non-JSON payloads)
         try:
@@ -555,91 +556,58 @@ class UniversalDocumentClassifierOptimized:
         }
         
         try:
-            # 1. OPTIMIZED: Check centralized Redis cache
+            # Validate schema first
+            validation_result = await self.security.validate_schema(payload, "document_classification_payload")
+            if not validation_result["valid"]:
+                logger.warning(f"Schema validation failed: {validation_result['error']}")
+                # Proceed with caution or return error? For now, we proceed but log it.
+
+            # 1. Try Cache First (Speed: <5ms)
             if self.config.enable_caching:
+                classification_id = self._generate_classification_id(payload, filename, user_id or "anonymous")
                 cached_result = await self.cache.get(classification_id)
                 if cached_result:
                     self.metrics['cache_hits'] += 1
-                    logger.debug("Cache hit", classification_id=classification_id)
                     return cached_result
-            
-            self.metrics['cache_misses'] += 1
-            
-            # 2. AI-powered classification (primary method)
-            ai_result = None
-            if self.config.enable_ai_classification and self.groq_client:
-                ai_result = await self._classify_document_with_ai(payload, filename)
-                if ai_result and ai_result['confidence'] >= 0.8:
-                    self.metrics['ai_classifications'] += 1
-                    final_result = ai_result
-                else:
-                    ai_result = None
-            
-            # 3. OCR-based classification (if image content available)
-            ocr_result = None
-            if self.config.enable_ocr_classification and self.ocr_available and file_content:
-                ocr_result = await self._classify_document_with_ocr(file_content, filename)
-                if ocr_result and ocr_result['confidence'] >= 0.7:
-                    self.metrics['ocr_classifications'] += 1
-                    if not ai_result or ocr_result['confidence'] > ai_result['confidence']:
-                        final_result = ocr_result
-                    else:
-                        # Combine AI and OCR results
-                        final_result = await self._combine_classification_results(ai_result, ocr_result)
-                else:
-                    ocr_result = None
-            
-            # 4. Pattern-based classification (fallback/enhancement)
+                self.metrics['cache_misses'] += 1
+
+            # 2. Try Pattern Matching (Speed: <20ms)
+            # GENIUS v4.0: Now with TF-IDF weighting and zero cold-start latency
             pattern_result = await self._classify_document_with_patterns(payload, filename)
-            if pattern_result and pattern_result['confidence'] >= 0.6:
-                self.metrics['pattern_classifications'] += 1
-                if not ai_result and not ocr_result:
-                    final_result = pattern_result
-                elif ai_result and pattern_result['confidence'] > ai_result['confidence']:
-                    final_result = pattern_result
-                elif ocr_result and pattern_result['confidence'] > ocr_result['confidence']:
-                    final_result = pattern_result
-                else:
-                    # Combine with existing results
-                    if ai_result:
-                        final_result = await self._combine_classification_results(ai_result, pattern_result)
-                    elif ocr_result:
-                        final_result = await self._combine_classification_results(ocr_result, pattern_result)
-            elif not ai_result and not ocr_result:
-                # 5. Fallback classification
+            
+            # 3. Try AI Classification (if enabled and needed)
+            # Only use AI if pattern match is low confidence
+            ai_result = None
+            if self.config.enable_ai and (not pattern_result or pattern_result['confidence'] < self.config.min_confidence_score):
+                ai_result = await self._classify_document_with_ai(payload, filename, user_id)
+            
+            # 4. Combine Results
+            final_result = None
+            if ai_result and pattern_result:
+                final_result = await self._combine_classification_results(ai_result, pattern_result)
+            elif pattern_result:
+                final_result = pattern_result
+            elif ai_result:
+                final_result = ai_result
+            else:
                 final_result = await self._classify_document_fallback(payload, filename)
-                self.metrics['fallback_classifications'] += 1
             
-            # 6. Enhance result with metadata
-            final_result.update({
-                'classification_id': classification_id,
-                'processing_time': time.time() - start_time,
-                'timestamp': datetime.utcnow().isoformat(),
-                'metadata': {
-                    'filename': filename,
-                    'user_id': user_id,
-                    'payload_keys': list(payload.keys()) if isinstance(payload, dict) else [],
-                    'classification_methods_used': [final_result['method']],
-                    'ocr_available': self.ocr_available,
-                    'ai_available': self.groq_client is not None  # FIX #76: Use groq_client instead of anthropic
-                }
-            })
+            final_result['processing_time'] = (time.time() - start_time) * 1000
             
-            # 7. OPTIMIZED: Cache with centralized Redis cache
+            # 5. Cache Result
             if self.config.enable_caching:
+                # Re-generate key if needed or reuse
+                classification_id = self._generate_classification_id(payload, filename, user_id or "anonymous")
                 await self.cache.set(classification_id, final_result)
             
-            # 8. Update metrics and learning
+            # 6. Update Metrics & Learning (Async)
             self._update_classification_metrics(final_result)
+            asyncio.create_task(self._log_classification_audit(classification_id, final_result, user_id or "system"))
+            
+            # Update learning system (using transaction manager)
             if self.config.enable_learning:
-                await self._update_learning_system(final_result, payload, filename, user_id)
-            
-            # 9. Audit logging
-            await self._log_classification_audit(classification_id, final_result, user_id)
-            
-            # 10. Audit logging via structlog
-            logger.info("document_classified", document_type=final_result['document_type'], confidence=final_result['confidence'], method=final_result['method'])
-            
+                asyncio.create_task(self._update_learning_system(final_result, payload, filename, user_id))
+                
             return final_result
             
         except Exception as e:
@@ -660,7 +628,7 @@ class UniversalDocumentClassifierOptimized:
             
             return error_result
     
-    async def _classify_document_with_ai(self, payload: Dict, filename: str = None) -> Optional[Dict[str, Any]]:
+    async def _classify_document_with_ai(self, payload: Dict, filename: str = None, user_id: str = None) -> Optional[Dict[str, Any]]:
         """Use AI to classify document type with enhanced prompting"""
         try:
             # Prepare comprehensive context for AI
@@ -970,9 +938,16 @@ class UniversalDocumentClassifierOptimized:
         from core_infrastructure.utils.helpers import generate_cache_key
         return generate_cache_key('classify', payload, filename, user_id)
     
-    async def _safe_groq_call(self, prompt: str, temperature: float, max_tokens: int) -> str:
-        """Safe Groq API call with error handling for cost-effective document classification"""
+    async def _safe_groq_call(self, prompt: str, temperature: float, max_tokens: int, user_id: str = None) -> str:
+        """Safe Groq API call with rate limiting and error handling"""
         try:
+            # FIX #12: Apply Global Rate Limiting
+            if user_id:
+                can_sync, msg = await self.rate_limiter.check_global_rate_limit("groq_classification", user_id)
+                if not can_sync:
+                    logger.warning(f"Rate limit exceeded: {msg}")
+                    return '{"document_type": "unknown", "confidence": 0.0, "indicators": [], "reasoning": "Rate limit exceeded"}'
+
             # FIX #67: Use injected groq_client instead of creating new client per call
             # Problem: Creating NEW Groq client on EVERY call wastes resources and causes rate limiting
             # Solution: Use injected client or fail gracefully
@@ -1038,7 +1013,11 @@ class UniversalDocumentClassifierOptimized:
         if not self.config.enable_learning:
             return
         
-        await self.learning_system.log_classification(result, payload, filename, user_id, self.supabase)
+        if self.transaction_manager:
+             async with self.transaction_manager.transaction("learning_update") as tx:
+                 await self.learning_system.log_classification(result, payload, filename, user_id, self.supabase)
+        else:
+             await self.learning_system.log_classification(result, payload, filename, user_id, self.supabase)
     
     async def classify_rows_batch(self, rows: List[Dict], platform_info: Dict, column_names: List[str], user_id: str = None) -> List[Dict[str, Any]]:
         """

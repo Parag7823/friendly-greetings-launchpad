@@ -120,11 +120,17 @@ class EmbeddingService:
         # FIX #1: Initialize cache if not provided
         if self.cache is None:
             try:
-                from core_infrastructure.centralized_cache import get_cache
-                self.cache = get_cache()
-            except (ImportError, RuntimeError):
-                logger.warning("Centralized cache not available - embeddings will not be cached")
-                self.cache = None
+                from core_infrastructure.centralized_cache import safe_get_cache, initialize_cache
+                self.cache = safe_get_cache()
+                # If cache is still None, try to initialize it
+                if self.cache is None:
+                    try:
+                        self.cache = initialize_cache()
+                        logger.info("Centralized cache initialized for embeddings")
+                    except Exception as init_err:
+                        logger.warning(f"Could not initialize cache: {init_err}")
+            except ImportError as e:
+                logger.warning(f"Centralized cache not available - embeddings will not be cached: {e}")
     
     @cached(ttl=86400, namespace="embeddings")
     async def embed_text(self, text: str) -> List[float]:

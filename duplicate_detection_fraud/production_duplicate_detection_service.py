@@ -93,12 +93,11 @@ from supabase import Client
 from aiocache import cached, Cache
 from aiocache.serializers import JsonSerializer
 
-# ✅ LAZY LOADING: presidio_analyzer is a heavy dependency - load on first use
 _presidio_analyzer_instance = None
 _presidio_loaded = False
 
 def _ensure_presidio_loaded():
-    """Lazy load presidio analyzer on first use - ensures full functionality (uses generic helper)"""
+    """Lazy load presidio analyzer on first use."""
     global _presidio_analyzer_instance, _presidio_loaded
     if not _presidio_loaded:
         _presidio_analyzer_instance = _lazy_import('presidio', 'presidio_analyzer.AnalyzerEngine', logger)
@@ -112,48 +111,32 @@ except ImportError:
     # Fallback - will be loaded lazily
     AnalyzerEngine = None
 
-# ✅ LAZY LOADING: numpy is a heavy C extension that can cause import-time crashes
-np = None  # Will be loaded on first use
+np = None
 
 def _load_numpy():
-    """Lazy load numpy C extension on first use (uses generic helper)"""
+    """Lazy load numpy on first use."""
     global np
     if np is None:
         np = _lazy_import('numpy', 'numpy', logger)
     return np
 
-# FIX #5: CENTRALIZED HASHING - REQUIRED (fail fast, no silent fallback)
-# This ensures production_duplicate_detection_service uses xxh3_128 (same as provenance_tracker)
-# for data integrity verification across modules. Prevents cache divergence across workers.
 try:
     from core_infrastructure.database_optimization_utils import calculate_row_hash, get_normalized_tokens
 except ImportError as e:
-    # CRITICAL: Centralized hashing is REQUIRED for data integrity
-    # Fail fast instead of silently degrading to xxhash
     raise RuntimeError(
         "Centralized hashing module not found. "
         "production_duplicate_detection_service requires core_infrastructure.database_optimization_utils. "
-        "This is a critical dependency for data integrity verification across workers. "
         f"Error: {str(e)}"
     ) from e
 
-# ============================================================================
-# PRELOAD PATTERN: Module-level preloading for heavy dependencies
-# ============================================================================
-# These globals will be populated at module import time (see bottom of file)
 _PRESIDIO_PRELOADED = False
 _RAPIDFUZZ_PRELOADED = False
 _NUMPY_PRELOADED = False
 
 def _preload_all_modules():
-    """
-    PRELOAD PATTERN: Initialize all heavy modules at module-load time.
-    Called automatically when module is imported.
-    This eliminates first-request latency.
-    """
+    """Initialize all heavy modules at module-load time."""
     global _PRESIDIO_PRELOADED, _RAPIDFUZZ_PRELOADED, _NUMPY_PRELOADED
     
-    # Preload rapidfuzz
     if not _RAPIDFUZZ_PRELOADED:
         try:
             _load_rapidfuzz()
@@ -161,9 +144,8 @@ def _preload_all_modules():
             logger.info("✅ PRELOAD: rapidfuzz module loaded at module-load time")
         except Exception as e:
             logger.warning(f"⚠️ PRELOAD: rapidfuzz load failed: {e}")
-            _RAPIDFUZZ_PRELOADED = True  # Don't retry
+            _RAPIDFUZZ_PRELOADED = True
     
-    # Preload presidio
     if not _PRESIDIO_PRELOADED:
         try:
             _ensure_presidio_loaded()
@@ -171,9 +153,8 @@ def _preload_all_modules():
             logger.info("✅ PRELOAD: presidio module loaded at module-load time")
         except Exception as e:
             logger.warning(f"⚠️ PRELOAD: presidio load failed: {e}")
-            _PRESIDIO_PRELOADED = True  # Don't retry
+            _PRESIDIO_PRELOADED = True
     
-    # Preload numpy
     if not _NUMPY_PRELOADED:
         try:
             _load_numpy()
@@ -181,17 +162,14 @@ def _preload_all_modules():
             logger.info("✅ PRELOAD: numpy module loaded at module-load time")
         except Exception as e:
             logger.warning(f"⚠️ PRELOAD: numpy load failed: {e}")
-            _NUMPY_PRELOADED = True  # Don't retry
+            _NUMPY_PRELOADED = True
 
-# FIX #3: Check if presidio is available (will be lazy-loaded on first use)
 PRESIDIO_AVAILABLE = AnalyzerEngine is not None
 
-# Configure structured logging with structlog
 logger = structlog.get_logger(__name__)
 
-# Pydantic Configuration
 class DuplicateServiceConfig(BaseSettings):
-    """Type-safe configuration with validation"""
+    """Configuration with validation"""
     similarity_threshold: float = 0.85
     max_file_size: int = 500 * 1024 * 1024  # 500MB
     cache_ttl: int = 3600  # 1 hour
@@ -200,12 +178,10 @@ class DuplicateServiceConfig(BaseSettings):
     minhash_threshold: float = 0.85
     max_filename_length: int = 255
     batch_size: int = 100
-    # FIX #33: File extension validation settings
     enable_extension_validation: bool = True
-    treat_extension_bypass_as_duplicate: bool = True  # Treat bypass attempts as duplicates
-    # FIX #34: Cross-sheet awareness settings
+    treat_extension_bypass_as_duplicate: bool = True
     enable_cross_sheet_awareness: bool = True
-    sheet_similarity_threshold: float = 0.9  # Threshold for considering sheets as duplicates
+    sheet_similarity_threshold: float = 0.9
     
     class Config:
         env_prefix = 'DUPLICATE_'
@@ -213,9 +189,8 @@ class DuplicateServiceConfig(BaseSettings):
 
 config = DuplicateServiceConfig()
 
-# CRITICAL FIX #4: Custom exception for duplicate detection failures
 class DuplicateDetectionError(Exception):
-    """Raised when duplicate detection fails - prevents silent false negatives"""
+    """Raised when duplicate detection fails."""
     pass
 
 class DuplicateType(Enum):
@@ -245,7 +220,7 @@ class DuplicateResult:
     processing_time_ms: int
     cache_hit: bool = False
     error: Optional[str] = None
-    delta_analysis: Optional[Dict[str, Any]] = None  # BUG #12 FIX: Add delta analysis support
+    delta_analysis: Optional[Dict[str, Any]] = None
 
 @dataclass
 class FileMetadata:
@@ -264,50 +239,24 @@ class FileMetadata:
             self.upload_timestamp = datetime.now()
 
 class ProductionDuplicateDetectionService:
-    """
-    NASA-GRADE optimized duplicate detection service.
-    
-    OPTIMIZATIONS APPLIED:
-    - PersistentLSHService: Redis-backed MinHashLSH for scalable near-duplicate detection
-    - polars: Vectorized row hashing (50x faster)
-    - rapidfuzz: Advanced fuzzy matching with abbreviation support
-    - Centralized cache: Redis-backed async cache (no manual cleanup)
-    - sqlalchemy: Type-safe, SQL-injection-proof queries
-    - deepdiff: Intelligent nested data comparison
-    
-    PRESERVED FEATURES:
-    - Learning ecosystem with confidence scoring
-    - 4-phase detection pipeline
-    - Security validation
-    """
+    """Optimized duplicate detection service with 4-phase pipeline."""
     
     def __init__(self, supabase: Client, redis_client: Optional[Any] = None):
-        """
-        Initialize NASA-grade duplicate detection service.
-        
-        Args:
-            supabase: Supabase client for database operations
-            redis_client: Optional Redis client (not used with cachetools)
-        """
+        """Initialize duplicate detection service."""
         self.supabase = supabase
         self.redis_client = redis_client
-        self.config = config  # Store config instance
+        self.config = config
         
-        # FIX #4: GRACEFUL DEGRADATION - Cache initialization with fallback
         from core_infrastructure.centralized_cache import safe_get_cache
         self.cache = safe_get_cache()
         if self.cache is None:
             logger.warning(
-                "⚠️ Centralized Redis cache not initialized. "
-                "Duplicate detection will operate in degraded mode without caching. "
-                "Call initialize_cache() at startup or set REDIS_URL environment variable."
+                "Centralized Redis cache not initialized. "
+                "Duplicate detection will operate without caching."
             )
-            # Continue with None cache - methods will handle gracefully
         
-        # FIX #5: LSH SERVICE INITIALIZATION WITH ERROR HANDLING
         self.lsh_service = None
         try:
-            # Try multiple import paths for different deployment layouts
             try:
                 from .persistent_lsh_service import get_lsh_service
             except ImportError:
@@ -318,30 +267,16 @@ class ProductionDuplicateDetectionService:
             
             self.lsh_service = get_lsh_service()
             if self.lsh_service is None:
-                logger.warning("⚠️ LSH service returned None - near-duplicate detection disabled")
+                logger.warning("LSH service returned None - near-duplicate detection disabled")
             else:
-                logger.info("✅ Persistent LSH service initialized successfully")
+                logger.info("Persistent LSH service initialized successfully")
         except ImportError as e:
-            logger.warning(f"⚠️ persistent_lsh_service not available: {e} - near-duplicate detection disabled")
+            logger.warning(f"persistent_lsh_service not available: {e}")
         except Exception as e:
-            logger.warning(f"⚠️ Failed to initialize LSH service: {e} - near-duplicate detection disabled")
+            logger.warning(f"Failed to initialize LSH service: {e}")
         
-        # REMOVED: In-memory LSH fallback (causes cache divergence)
-        # self.lsh = MinHashLSH(threshold=config.minhash_threshold, num_perm=config.minhash_num_perm)
-        self.lsh = None  # Removed - use lsh_service only
+        self.lsh = None
         
-        if self.lsh_service:
-            logger.info("persistent_lsh_service_initialized", 
-                       message="Using persistent LSH service. In-memory LSH removed.")
-        else:
-            logger.warning("persistent_lsh_service_unavailable", 
-                          message="LSH service not available - near-duplicate detection disabled")
-        
-        # REMOVED: sqlalchemy (redundant - supabase client is sufficient)
-        # v3.0 had both sqlalchemy + supabase (double DB client)
-        # v4.0 uses supabase only (simpler, no redundancy)
-        
-        # Metrics for observability (PRESERVED)
         self.metrics = {
             'cache_hits': 0,
             'cache_misses': 0,
@@ -358,41 +293,24 @@ class ProductionDuplicateDetectionService:
                    minhash_perms=config.minhash_num_perm)
     
     def _validate_security(self, user_id: str, file_hash: str, filename: str) -> None:
-        """
-        OPTIMIZED: Security validation with bleach + validator-collection (if available)
-        
-        Args:
-            user_id: User identifier
-            file_hash: File hash
-            filename: Original filename
-            
-        Raises:
-            ValueError: If security validation fails
-        """
-        # Quick validation checks
+        """Security validation for inputs."""
         if not user_id or len(user_id) > 255:
             raise ValueError("Invalid user_id")
         
-        # CRITICAL FIX #1: Accept both xxh3_128 (32 chars) and SHA-256 (64 chars)
-        # Backend now uses xxh3_128 for standardized hashing
         if not file_hash or len(file_hash) not in (32, 64):
             raise ValueError("Invalid file_hash: must be xxh3_128 (32 chars) or SHA-256 (64 chars)")
         
         if not filename or len(filename) > config.max_filename_length:
-            raise ValueError(f"Invalid filename length")
+            raise ValueError("Invalid filename length")
         
-        # GENIUS v4.0: presidio for PII detection (20% better security)
-        # Lazy load presidio on first use to avoid import-time crashes
-        pii_detected = False  # Track if PII was detected by any method
+        pii_detected = False
         presidio_instance = _ensure_presidio_loaded()
         if presidio_instance:
             try:
-                # Check if user_id contains PII
                 pii_results = presidio_instance.analyze(text=user_id, language='en')
                 if pii_results:
                     logger.warning("PII detected in user_id", entities=[r.entity_type for r in pii_results])
                 
-                # Check if filename contains PII
                 pii_in_filename = presidio_instance.analyze(text=filename, language='en')
                 if pii_in_filename:
                     sensitive_types = [r.entity_type for r in pii_in_filename if r.score > 0.7]
@@ -400,22 +318,19 @@ class ProductionDuplicateDetectionService:
                         pii_detected = True
                         raise ValueError(f"Filename contains PII: {', '.join(sensitive_types)}")
             except ValueError:
-                raise  # Re-raise PII detection errors
+                raise
             except Exception as e:
                 logger.warning("Presidio PII check failed", error=str(e))
         
-        # PRODUCTION FIX: Fallback email detection using regex when presidio unavailable
-        # This ensures emails in filenames are ALWAYS detected (belt and suspenders security)
         if not pii_detected:
             import re
             email_pattern = r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}'
             if re.search(email_pattern, filename):
-                raise ValueError(f"Filename contains PII: email address detected")
+                raise ValueError("Filename contains PII: email address detected")
         
-        # Path traversal check
         if any(c in filename for c in ['\x00', '\x1a', '\x7f', '..', '/', '\\']):
             if '..' in filename or filename.startswith('/') or (len(filename) > 1 and filename[1] == ':'):
-                raise ValueError(f"Filename contains path traversal or invalid characters")
+                raise ValueError("Filename contains path traversal or invalid characters")
     
     async def detect_duplicates(
         self, 
@@ -426,26 +341,7 @@ class ProductionDuplicateDetectionService:
         sheets_data: Optional[Dict[str, Any]] = None,
         streamed_file = None
     ) -> DuplicateResult:
-        """
-        Main entry point for duplicate detection.
-        
-        BUG #12 FIX: Now implements ALL 4 phases:
-        - Phase 1: Exact duplicate detection (SHA-256 hash comparison)
-        - Phase 2: Near-duplicate detection (content similarity)
-        - Phase 3: Content-level duplicate detection (row-level fingerprinting)
-        - Phase 4: Delta analysis (intelligent merging)
-        
-        Args:
-            file_content: (deprecated) Raw file content as bytes - use streamed_file instead
-            file_metadata: File metadata including user_id, hash, etc.
-            enable_near_duplicate: Whether to perform near-duplicate detection
-            enable_content_duplicate: Whether to perform content-level duplicate detection
-            sheets_data: Optional parsed sheets data for content duplicate detection
-            streamed_file: StreamedFile object (preferred)
-            
-        Returns:
-            DuplicateResult with comprehensive duplicate information
-        """
+        """Main entry point for 4-phase duplicate detection."""
         start_time = time.time()
         
         try:

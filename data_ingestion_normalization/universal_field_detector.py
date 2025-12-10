@@ -38,12 +38,10 @@ from core_infrastructure.centralized_cache import safe_get_cache
 logger = structlog.get_logger(__name__)
 
 
-# ============================================================================
-# PYDANTIC MODELS (Type-Safe Configuration)
-# ============================================================================
+# Pydantic models for type-safe configuration
 
 class FieldPattern(BaseModel):
-    """Type-safe field pattern with validation"""
+    """Field pattern with validation"""
     patterns: List[str]
     confidence: float = Field(ge=0.0, le=1.0)
     
@@ -55,7 +53,7 @@ class FieldPattern(BaseModel):
 
 
 class FormatPattern(BaseModel):
-    """Type-safe format pattern with validation"""
+    """Format pattern with validation"""
     regex: str
     confidence: float = Field(ge=0.0, le=1.0)
     format: str
@@ -63,7 +61,7 @@ class FormatPattern(BaseModel):
 
 
 class FieldDetectorConfig(BaseSettings):
-    """Type-safe configuration"""
+    """Configuration settings"""
     field_patterns_yaml: str = "config/field_patterns.yaml"
     format_patterns_yaml: str = "config/format_patterns.yaml"
     enable_caching: bool = True
@@ -77,65 +75,37 @@ class FieldDetectorConfig(BaseSettings):
 
 
 class FieldType(BaseModel):
-    """Structured AI output (instructor magic - zero JSON hallucinations)"""
+    """Structured AI output from instructor"""
     type: str
     confidence: float = Field(ge=0.0, le=1.0)
     category: str
     reasoning: str = ""
 
 
-# ============================================================================
-# NASA-GRADE UNIVERSAL FIELD DETECTOR (95 lines vs 275 lines)
-# ============================================================================
-
 class UniversalFieldDetector:
-    """
-    NASA-GRADE Universal Field Detector with 65% code reduction.
+    """Universal Field Detector with YAML config, validators, presidio, and AI fallback."""
     
-    GENIUS FEATURES:
-    - PyYAML + pydantic: External config (non-devs can edit)
-    - validators: Format detection (no regex bugs)
-    - presidio: PII detection (50x faster, 99% accuracy) - PRELOADED
-    - aiocache: Parallel + cached (10x faster)
-    - polars: DataFrame filtering (1000x faster)
-    - instructor + Jinja2: AI fallback (zero JSON hallucinations)
-    - PRELOAD PATTERN: Zero first-request latency
-    """
-    
-    # PRELOAD PATTERN: Class-level presidio analyzer (initialized at module import)
-    # Eliminates first-request latency completely
-    _class_analyzer = None  # Class-level cache (preloaded at module import)
-    _analyzer_preloaded = False  # Flag to track preload status
+    _class_analyzer = None
+    _analyzer_preloaded = False
     
     @classmethod
     def _preload_analyzer_sync(cls):
-        """
-        PRELOAD PATTERN: Initialize presidio analyzer at module-load time.
-        Called automatically when module is imported.
-        This eliminates first-request latency for PII detection.
-        """
+        """Initialize presidio analyzer at module-load time."""
         if cls._analyzer_preloaded:
             return cls._class_analyzer
         
         try:
             from presidio_analyzer import AnalyzerEngine, Pattern, PatternRecognizer
-            
             analyzer = AnalyzerEngine()
-            
-            # Add custom financial patterns that presidio doesn't have built-in
             invoice_pattern = Pattern(name="invoice_pattern",
                                       regex=r"\b(INV|INVOICE)[-\s]?\d{4,10}\b",
                                       score=0.85)
-            invoice_recognizer = PatternRecognizer(supported_entity="INVOICE_NUMBER",
-                                                  patterns=[invoice_pattern])
+            invoice_recognizer = PatternRecognizer(supported_entity="INVOICE_NUMBER", patterns=[invoice_pattern])
             analyzer.registry.add_recognizer(invoice_recognizer)
-            
-            # Add PO number pattern
             po_pattern = Pattern(name="po_pattern",
                                 regex=r"\b(PO|P\.O\.)[-\s]?\d{4,10}\b",
                                 score=0.85)
-            po_recognizer = PatternRecognizer(supported_entity="PO_NUMBER",
-                                             patterns=[po_pattern])
+            po_recognizer = PatternRecognizer(supported_entity="PO_NUMBER", patterns=[po_pattern])
             analyzer.registry.add_recognizer(po_recognizer)
             
             cls._class_analyzer = analyzer
@@ -150,21 +120,11 @@ class UniversalFieldDetector:
     def __init__(self, openai_client=None):
         self.openai_client = openai_client
         self.config = FieldDetectorConfig()
-        
-        # FIX #52: Use shared cache initialization utility
         from core_infrastructure.utils.helpers import initialize_centralized_cache
         self.cache = initialize_centralized_cache(None)
-        logger.info("Centralized cache initialized for field detector")
-        
-        # GENIUS #1: Load patterns from YAML (non-devs can edit!)
         self.field_patterns = self._load_field_patterns()
         self.format_patterns = self._load_format_patterns()
-        
-        # PRELOAD PATTERN: Use class-level preloaded analyzer (already built at module import)
-        # No lazy-loading - analyzer is ready immediately
         self.analyzer = UniversalFieldDetector._class_analyzer
-        
-        # GENIUS #7: Initialize instructor for AI fallback (zero JSON hallucinations)
         if os.getenv('GROQ_API_KEY'):
             self.groq_client = AsyncGroq(api_key=os.getenv('GROQ_API_KEY'))
             self.groq_client = instructor.patch(self.groq_client)
@@ -177,7 +137,7 @@ class UniversalFieldDetector:
                    analyzer_ready=self.analyzer is not None)
     
     def _load_field_patterns(self) -> Dict[str, Dict[str, FieldPattern]]:
-        """GENIUS #1: Load field patterns from YAML"""
+        """Load field patterns from YAML"""
         try:
             yaml_path = Path(self.config.field_patterns_yaml)
             if yaml_path.exists():
@@ -193,7 +153,7 @@ class UniversalFieldDetector:
         return {}
     
     def _load_format_patterns(self) -> Dict[str, FormatPattern]:
-        """GENIUS #1: Load format patterns from YAML"""
+        """Load format patterns from YAML"""
         try:
             yaml_path = Path(self.config.format_patterns_yaml)
             if yaml_path.exists():
@@ -206,20 +166,13 @@ class UniversalFieldDetector:
         return {}
     
     def _add_custom_recognizers(self):
-        """Add custom financial field recognizers to presidio
-        
-        LIBRARY FIX: Using presidio's built-in recognizers + minimal custom patterns
-        Presidio already includes: EMAIL, PHONE_NUMBER, CREDIT_CARD, IBAN, etc.
-        """
-        # Add custom financial patterns that presidio doesn't have built-in
+        """Add custom financial field recognizers to presidio."""
         invoice_pattern = Pattern(name="invoice_pattern",
                                   regex=r"\b(INV|INVOICE)[-\s]?\d{4,10}\b",
                                   score=0.85)
         invoice_recognizer = PatternRecognizer(supported_entity="INVOICE_NUMBER",
                                               patterns=[invoice_pattern])
         self.analyzer.registry.add_recognizer(invoice_recognizer)
-        
-        # Add PO number pattern
         po_pattern = Pattern(name="po_pattern",
                             regex=r"\b(PO|P\.O\.)[-\s]?\d{4,10}\b",
                             score=0.85)
@@ -227,19 +180,13 @@ class UniversalFieldDetector:
                                          patterns=[po_pattern])
         self.analyzer.registry.add_recognizer(po_recognizer)
     
-    # ========================================================================
-    # MAIN DETECTION METHOD (GENIUS: Parallel + Cached)
-    # ========================================================================
-    
     async def detect_field_types_universal(
         self, 
         data: Dict[str, Any], 
         filename: str = None,
         context: Dict[str, Any] = None
     ) -> Dict[str, Any]:
-        """
-        GENIUS #5: Parallel + cached field detection (10x faster)
-        """
+        """Parallel + cached field detection."""
         try:
             if not data:
                 return {
@@ -249,7 +196,6 @@ class UniversalFieldDetector:
                     'detected_fields': []
                 }
             
-            # GENIUS #5: Parallel processing with asyncio.gather() + aiocache
             tasks = [
                 self._cached_analyze_field(name, value)
                 for name, value in data.items() if value is not None
@@ -301,7 +247,7 @@ class UniversalFieldDetector:
     
     @cached(ttl=3600, serializer=JsonSerializer())
     async def _cached_analyze_field(self, field_name: str, field_value: Any) -> Dict[str, Any]:
-        """GENIUS #5: Cached field analysis (aiocache decorator)"""
+        """Cached field analysis with aiocache."""
         field_name_lower = field_name.lower()
         field_value_str = str(field_value).strip()
         
@@ -313,13 +259,11 @@ class UniversalFieldDetector:
             'patterns_matched': []
         }
         
-        # GENIUS #2: validators for format detection (no regex bugs!)
         format_match = self._detect_format_with_validators(field_value_str)
         if format_match:
             analysis['format'] = format_match['format']
             analysis['confidence'] += format_match['confidence']
         
-        # GENIUS #3: Check semantic patterns (pattern-based field detection)
         semantic_match = self._check_semantic_patterns(field_name_lower)
         if semantic_match:
             analysis['type'] = semantic_match['type']
@@ -327,13 +271,11 @@ class UniversalFieldDetector:
             analysis['confidence'] += semantic_match['confidence']
             analysis['patterns_matched'] = semantic_match['patterns']
         
-        # GENIUS #4: presidio for PII/content detection (50x faster, 99% accuracy)
         if analysis['confidence'] < self.config.confidence_threshold and self.analyzer:
             pii_match = await self._detect_pii_with_presidio(field_value_str)
             if pii_match:
                 analysis.update(pii_match)
         
-        # GENIUS #7: AI fallback with instructor (zero JSON hallucinations)
         if analysis['confidence'] < self.config.confidence_threshold and self.config.enable_ai_fallback and self.groq_client:
             ai_match = await self._ai_fallback_with_instructor(field_name, field_value_str)
             if ai_match:
@@ -346,15 +288,13 @@ class UniversalFieldDetector:
     
     @lru_cache(maxsize=1000)
     def _detect_format_with_validators(self, value: str) -> Optional[Dict[str, Any]]:
-        """GENIUS #2: validators library (no regex bugs, handles edge cases)"""
+        """Detect format using validators library."""
         if validators.email(value):
             return {'format': 'email', 'confidence': 0.95}
         if validators.url(value):
             return {'format': 'url', 'confidence': 0.92}
         if validators.uuid(value):
             return {'format': 'uuid', 'confidence': 0.98}
-        
-        # Fallback to YAML patterns for custom formats
         for format_name, pattern in self.format_patterns.items():
             import re
             if re.match(pattern.regex, value, re.IGNORECASE):
@@ -378,7 +318,7 @@ class UniversalFieldDetector:
         return None
     
     async def _detect_pii_with_presidio(self, value: str) -> Optional[Dict[str, Any]]:
-        """GENIUS #4: presidio-analyzer (Microsoft NLP, 99% accuracy)"""
+        """Detect PII using presidio-analyzer."""
         try:
             results = self.analyzer.analyze(text=value, language='en')
             if results:
@@ -393,9 +333,8 @@ class UniversalFieldDetector:
         return None
     
     async def _ai_fallback_with_instructor(self, field_name: str, sample_value: str) -> Optional[Dict[str, Any]]:
-        """GENIUS #7: instructor + Jinja2 (zero JSON hallucinations)"""
+        """AI fallback using instructor + Jinja2."""
         try:
-            # Jinja2 template for prompt (non-devs can edit!)
             prompt_template = Template("""
 You are a financial data expert. Analyze this field:
 Field Name: {{ field_name }}
@@ -405,8 +344,6 @@ Determine the field type, category, and confidence.
 """)
             
             prompt = prompt_template.render(field_name=field_name, sample_value=sample_value[:100])
-            
-            # instructor magic: Guaranteed pydantic output, zero JSON hallucinations
             result: FieldType = await self.groq_client.chat.completions.create(
                 model="llama-3.3-70b-versatile",
                 messages=[{"role": "user", "content": prompt}],
@@ -426,7 +363,7 @@ Determine the field type, category, and confidence.
         return None
     
     async def get_field_suggestions(self, detected_fields: List[Dict]) -> Dict[str, Any]:
-        """GENIUS #6: polars for 1000x faster filtering"""
+        """Get field suggestions using polars for fast filtering."""
         if not detected_fields:
             return {
                 'suggestions': [],
@@ -435,7 +372,6 @@ Determine the field type, category, and confidence.
                 'confidence_score': 0.0
             }
         
-        # GENIUS #6: polars DataFrame (1000x faster than manual loops)
         df = pl.DataFrame(detected_fields)
         
         low_conf = df.filter(pl.col('confidence') < 0.5)
@@ -466,18 +402,8 @@ Determine the field type, category, and confidence.
         }
 
 
-# ============================================================================
-# PRELOAD PATTERN: Initialize presidio analyzer at module-load time
-# ============================================================================
-# This runs automatically when the module is imported, eliminating the
-# first-request latency that was caused by lazy-loading.
-# 
-# BENEFITS:
-# - First request is instant (no cold-start delay)
-# - Shared across all worker instances
-# - Memory is allocated once, not per-instance
-
+# Initialize presidio analyzer at module-load time
 try:
     UniversalFieldDetector._preload_analyzer_sync()
 except Exception as e:
-    logger.warning(f"Module-level analyzer preload failed (will use fallback): {e}")
+    logger.warning(f"Module-level analyzer preload failed: {e}")

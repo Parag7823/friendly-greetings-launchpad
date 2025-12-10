@@ -171,11 +171,13 @@ class UniversalPlatformDetectorOptimized:
     
     def __init__(self, groq_client=None, cache_client=None, supabase_client=None, config=None):
         self.groq_client = groq_client
+        self.security = SecurityValidator()
+        self.rate_limiter = GlobalRateLimiter()
+        self.transaction_manager = DatabaseTransactionManager(supabase_client) if supabase_client else None
         self.supabase = supabase_client
         self.config = config or self._get_default_config()
         
         # FIX #52: Use shared cache initialization utility
-        from core_infrastructure.utils.helpers import initialize_centralized_cache
         self.cache = initialize_centralized_cache(cache_client)
         
         # Comprehensive platform database
@@ -538,81 +540,67 @@ class UniversalPlatformDetectorOptimized:
         Detect platform using comprehensive AI-powered analysis with caching and learning.
         """
         start_time = time.time()
-        detection_id = self._generate_detection_id(payload, filename, user_id)
         
-        try:
-            # 1. OPTIMIZED: Check centralized Redis cache with versioning
-            if self.config.enable_caching:
-                # Validate cache version first
-                await self.validate_cache_version()
-                
-                # Use versioned cache key
-                versioned_key = await self.get_cache_key_with_version(detection_id)
-                cached_result = await self.cache.get(versioned_key)
-                if cached_result:
-                    self.metrics['cache_hits'] += 1
-                    logger.debug("Cache hit", detection_id=versioned_key)
-                    return cached_result
+        # Validate schema first
+        validation_result = await self.security.validate_schema(payload, "platform_detection_payload")
+        if not validation_result["valid"]:
+            logger.warning(f"Schema validation failed: {validation_result['error']}")
+            # Low severity, just log
+
+        # 1. Try Cache First (Speed: <5ms)
+        if self.config.enable_caching:
+            # FIX #79: Use shared cache key generator
+            detection_id = generate_cache_key(payload, filename, user_id or "anonymous")
             
+            # CRITICAL FIX: Use versioned cache keys
+            versioned_key = await self.get_cache_key_with_version(detection_id)
+            cached_result = await self.cache.get(versioned_key)
+            
+            if cached_result:
+                self.metrics['cache_hits'] += 1
+                return cached_result
             self.metrics['cache_misses'] += 1
+        
+        # 2. Try Pattern Detection (Speed: <10ms)
+        # GENIUS v4.0: Now with Aho-Corasick algorithm (O(n) complexity)
+        pattern_result = await self._detect_platform_with_patterns(payload, filename)
+        
+        # 3. Try AI Detection (if enabled and needed)
+        # Only use AI if pattern match is low confidence
+        ai_result = None
+        if self.config.enable_ai_detection and self.groq_client and (not pattern_result or pattern_result['confidence'] < self.config.confidence_threshold):
+             # FIX: Pass user_id for rate limiting
+            ai_result = await self._detect_platform_with_ai(payload, filename, user_id)
+        
+        # 4. Combine Results
+        final_result = None
+        if ai_result and pattern_result:
+            final_result = await self._combine_detection_results(ai_result, pattern_result)
+        elif pattern_result:
+            final_result = pattern_result
+        elif ai_result:
+            final_result = ai_result
+        else:
+            final_result = await self._detect_platform_fallback(payload, filename)
+        
+        final_result['processing_time'] = (time.time() - start_time) * 1000
+        
+        # 5. Cache Result
+        if self.config.enable_caching:
+            # Re-generate key if needed or reuse
+            detection_id = generate_cache_key(payload, filename, user_id or "anonymous")
+            versioned_key = await self.get_cache_key_with_version(detection_id)
+            await self.cache.set(versioned_key, final_result, ttl=self.pattern_cache_ttl)
+        
+        # 6. Update Metrics & Learning (Async)
+        self._update_detection_metrics(final_result)
+        asyncio.create_task(self._log_detection_audit(detection_id, final_result, user_id or "system"))
+        
+        # Update learning system (using transaction manager)
+        if self.config.enable_learning:
+            asyncio.create_task(self._update_learning_system(final_result, payload, filename, user_id))
             
-            # 2. AI-powered detection (primary method)
-            ai_result = None
-            if self.config.enable_ai_detection and self.groq_client:
-                ai_result = await self._detect_platform_with_ai(payload, filename)
-                if ai_result and ai_result['confidence'] >= 0.8:
-                    self.metrics['ai_detections'] += 1
-                    final_result = ai_result
-                else:
-                    ai_result = None
-            
-            # 3. Pattern-based detection (fallback/enhancement)
-            pattern_result = await self._detect_platform_with_patterns(payload, filename)
-            if pattern_result and pattern_result['confidence'] >= 0.7:
-                self.metrics['pattern_detections'] += 1
-                if not ai_result or pattern_result['confidence'] > ai_result['confidence']:
-                    final_result = pattern_result
-                else:
-                    # Combine AI and pattern results
-                    final_result = await self._combine_detection_results(ai_result, pattern_result)
-            elif ai_result:
-                final_result = ai_result
-            else:
-                # 4. Fallback detection
-                final_result = await self._detect_platform_fallback(payload, filename)
-                self.metrics['fallback_detections'] += 1
-            
-            # 5. Enhance result with metadata
-            final_result.update({
-                'detection_id': detection_id,
-                'processing_time': time.time() - start_time,
-                'timestamp': datetime.utcnow().isoformat(),
-                'metadata': {
-                    'filename': filename,
-                    'user_id': user_id,
-                    'payload_keys': list(payload.keys()) if isinstance(payload, dict) else [],
-                    'detection_methods_used': [final_result['method']]
-                }
-            })
-            
-            # 6. OPTIMIZED: Cache with centralized Redis cache using versioned key
-            if self.config.enable_caching:
-                versioned_key = await self.get_cache_key_with_version(detection_id)
-                await self.cache.set(versioned_key, final_result, ttl=self.pattern_cache_ttl)
-            
-            # 7. Update metrics and learning
-            self._update_detection_metrics(final_result)
-            if self.config.enable_learning:
-                await self._update_learning_system(final_result, payload, filename, user_id)
-            
-            # 8. Audit logging
-            await self._log_detection_audit(detection_id, final_result, user_id)
-            
-            # 9. Debug logging for developer console
-            # Log platform detection result via structlog
-            logger.info("platform_detected", platform=final_result['platform'], confidence=final_result['confidence'], method=final_result['method'])
-            
-            return final_result
+        return final_result
             
         except Exception as e:
             error_result = {
@@ -631,26 +619,61 @@ class UniversalPlatformDetectorOptimized:
             logger.error("Platform detection failed", error=str(e))
             
             return error_result
-    
-    async def _detect_platform_with_ai(self, payload: Dict, filename: str = None) -> Optional[Dict[str, Any]]:
-        """Use AI to detect platform from data content with enhanced prompting"""
+
+    async def _detect_platform_with_ai(self, payload: Dict, filename: str = None, user_id: str = None) -> Optional[Dict[str, Any]]:
+        """Use AI to detect platform with enhanced prompting"""
         try:
-            # Prepare comprehensive context for AI
-            context_parts = []
+            # Prepare comprehensive context for AI based on payload structure
+            context = self._construct_detection_context(payload, filename)
             
-            # Add filename if available
-            if filename:
-                context_parts.append(f"Filename: {filename}")
+            # Construct prompt for Groq Llama-3
+            prompt = f"""
+            Analyze the following data structure and identify the originating SaaS platform, ERP system, or bank.
             
-            # Add key fields that might indicate platform
-            key_fields = ['description', 'memo', 'notes', 'platform', 'source', 'reference', 'id', 'type', 'category']
-            for field in key_fields:
-                if field in payload and payload[field]:
-                    context_parts.append(f"{field}: {payload[field]}")
+            Input Data:
+            {context[:4000]}  # Truncate to avoid token limits
             
-            # Add all field names as context
-            if isinstance(payload, dict):
-                field_names = list(payload.keys())
+            Task:
+            1. Identify the specific platform (e.g., "Stripe", "QuickBooks", "Shopify", "Chase Bank", "Salesforce").
+            2. Assign a confidence score (0.0 to 1.0).
+            3. List specific indicators found (keys, values, formats).
+            4. If unknown, output "unknown" with low confidence.
+            
+            Return ONLY a valid JSON object matching the requested schema.
+            """
+            
+            # Call Groq API with instructor (Optimized)
+            result = await self._safe_groq_call_with_instructor(prompt, temperature=0.1, max_tokens=256, user_id=user_id)
+            return result
+            
+        except Exception as e:
+            logger.error(f"AI platform detection failed: {e}")
+            return None
+    
+    async def _detect_platform_with_ai(self, payload: Dict, filename: str = None, user_id: str = None) -> Optional[Dict[str, Any]]:
+        """Use AI to detect platform with enhanced prompting"""
+        try:
+            # Prepare comprehensive context for AI based on payload structure
+            context = self._construct_detection_context(payload, filename)
+            
+            # Construct prompt for Groq Llama-3
+            prompt = f"""
+            Analyze the following data structure and identify the originating SaaS platform, ERP system, or bank.
+            
+            Input Data:
+            {context[:4000]}  # Truncate to avoid token limits
+            
+            Task:
+            1. Identify the specific platform (e.g., "Stripe", "QuickBooks", "Shopify", "Chase Bank", "Salesforce").
+            2. Assign a confidence score (0.0 to 1.0).
+            3. List specific indicators found (keys, values, formats).
+            4. If unknown, output "unknown" with low confidence.
+            
+            Return ONLY a valid JSON object matching the requested schema.
+            """
+            
+            # Call Groq API with instructor (Optimized)
+            result = await self._safe_groq_call_with_instructor(prompt, temperature=0.1, max_tokens=256, user_id=user_id)
                 context_parts.append(f"Field names: {', '.join(field_names)}")
                 
                 # Add sample values for analysis
@@ -881,9 +904,22 @@ class UniversalPlatformDetectorOptimized:
         reasoning: str
         category: str = "unknown"
     
-    async def _safe_groq_call_with_instructor(self, prompt: str, temperature: float, max_tokens: int) -> Dict[str, Any]:
+    async def _safe_groq_call_with_instructor(self, prompt: str, temperature: float, max_tokens: int, user_id: str = None) -> Dict[str, Any]:
         """GENIUS v4.0: instructor for structured AI output (40% more reliable, zero JSON hallucinations)"""
         try:
+            # FIX #12: Apply Global Rate Limiting
+            if user_id:
+                can_sync, msg = await self.rate_limiter.check_global_rate_limit("groq_detection", user_id)
+                if not can_sync:
+                    logger.warning(f"Rate limit exceeded: {msg}")
+                    return {
+                        "platform": "unknown",
+                        "confidence": 0.0,
+                        "indicators": [],
+                        "reasoning": "Rate limit exceeded",
+                        "category": "unknown"
+                    }
+
             # Lazy load instructor and groq to prevent import errors and reduce startup time
             import instructor
             from groq import AsyncGroq
@@ -1001,7 +1037,11 @@ class UniversalPlatformDetectorOptimized:
         if not self.config.enable_learning:
             return
         
-        await self.learning_system.log_detection(result, payload, filename, user_id, self.supabase)
+        if self.transaction_manager:
+            async with self.transaction_manager.transaction("learning_update") as tx:
+                await self.learning_system.log_detection(result, payload, filename, user_id, self.supabase)
+        else:
+            await self.learning_system.log_detection(result, payload, filename, user_id, self.supabase)
     
     async def _log_detection_audit(self, detection_id: str, result: Dict[str, Any], user_id: str):
         """Log detection audit information"""

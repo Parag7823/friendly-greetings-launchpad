@@ -228,8 +228,8 @@ def _load_causal_inference_engine():
     global CausalInferenceEngine, CAUSAL_INFERENCE_AVAILABLE
     if CausalInferenceEngine is None:
         try:
-            # Try root-level import first (causal_inference_engine.py is at root)
-            from causal_inference_engine import CausalInferenceEngine as CIE
+            # CausalInferenceEngine is in aident_cfo_brain folder
+            from aident_cfo_brain.causal_inference_engine import CausalInferenceEngine as CIE
             CausalInferenceEngine = CIE
             CAUSAL_INFERENCE_AVAILABLE = True
             logger.info("✅ CausalInferenceEngine loaded")
@@ -247,8 +247,8 @@ def _load_temporal_pattern_learner():
     global TemporalPatternLearner, TEMPORAL_PATTERN_LEARNER_AVAILABLE
     if TemporalPatternLearner is None:
         try:
-            # Try root-level import first (temporal_pattern_learner.py is at root)
-            from temporal_pattern_learner import TemporalPatternLearner as TPL
+            # TemporalPatternLearner is in aident_cfo_brain folder
+            from aident_cfo_brain.temporal_pattern_learner import TemporalPatternLearner as TPL
             TemporalPatternLearner = TPL
             TEMPORAL_PATTERN_LEARNER_AVAILABLE = True
             logger.info("✅ TemporalPatternLearner loaded")
