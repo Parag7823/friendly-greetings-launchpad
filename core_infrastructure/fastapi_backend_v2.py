@@ -5411,7 +5411,9 @@ async def upload_simple_endpoint(
             
             # Parse Excel with polars
             import polars as pl
-            sheets = pl.read_excel(temp_path, sheet_name=None, engine='calamine')
+            # Read single sheet (safer across polars versions)
+            df = pl.read_excel(temp_path, engine='calamine')
+            sheets = {"Sheet1": df}
             
             sheets_info = {}
             total_rows = 0
