@@ -101,7 +101,7 @@ def _ensure_embedding_service_loaded():
 
 try:
     try:
-        from duplicate_detection_fraud.production_duplicate_detection_service import ProductionDuplicateDetectionService
+        from data_ingestion_normalization.production_duplicate_detection_service import ProductionDuplicateDetectionService
     except ImportError:
         from production_duplicate_detection_service import ProductionDuplicateDetectionService
     DUPLICATE_SERVICE_AVAILABLE = True

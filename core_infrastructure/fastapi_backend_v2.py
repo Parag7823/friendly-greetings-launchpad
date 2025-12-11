@@ -666,16 +666,24 @@ def _db_update(table: str, updates: dict, eq_col: str, eq_val):
 
 # Import production duplicate detection service
 try:
-    from duplicate_detection_fraud.production_duplicate_detection_service import (
-        ProductionDuplicateDetectionService, 
-        FileMetadata, 
-        DuplicateType,
-        DuplicateDetectionError
-    )
+    try:
+        from data_ingestion_normalization.production_duplicate_detection_service import (
+            ProductionDuplicateDetectionService, 
+            FileMetadata, 
+            DuplicateType,
+            DuplicateDetectionError
+        )
+    except ImportError:
+        from production_duplicate_detection_service import (
+            ProductionDuplicateDetectionService, 
+            FileMetadata, 
+            DuplicateType,
+            DuplicateDetectionError
+        )
     PRODUCTION_DUPLICATE_SERVICE_AVAILABLE = True
-    logger.info("âœ… Production duplicate detection service available")
+    logger.info("✅ Production duplicate detection service available")
 except ImportError as e:
-    logger.warning(f"âš ï¸ Production duplicate detection service not available: {e}")
+    logger.warning(f"⚠️ Production duplicate detection service not available: {e}")
     PRODUCTION_DUPLICATE_SERVICE_AVAILABLE = False
 
 # Custom JSON encoder for datetime objects

@@ -17,7 +17,18 @@ import asyncio
 from groq import AsyncGroq  # CHANGED: Using Groq instead of Anthropic
 
 from langgraph.graph import StateGraph, END
-from langgraph.types import RetryPolicy
+try:
+    from langgraph.types import RetryPolicy
+except ImportError:
+    # Fallback for newer langgraph versions where RetryPolicy moved
+    try:
+        from langgraph.pregel import RetryPolicy
+    except ImportError:
+        # If still not available, create a simple fallback
+        class RetryPolicy:
+            def __init__(self, max_retries=3, backoff_factor=1.0):
+                self.max_retries = max_retries
+                self.backoff_factor = backoff_factor
 from typing_extensions import TypedDict
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 import spacy
