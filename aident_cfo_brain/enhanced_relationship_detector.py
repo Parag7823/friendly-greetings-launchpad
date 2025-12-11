@@ -83,9 +83,12 @@ def _ensure_embedding_service_loaded():
     if not _embedding_service_loaded:
         try:
             try:
-                from data_ingestion_normalization.embedding_service import EmbeddingService as EmbeddingServiceClass
+                from core_infrastructure.embedding_service import EmbeddingService as EmbeddingServiceClass
             except ImportError:
-                from embedding_service import EmbeddingService as EmbeddingServiceClass
+                try:
+                    from data_ingestion_normalization.embedding_service import EmbeddingService as EmbeddingServiceClass
+                except ImportError:
+                    from embedding_service import EmbeddingService as EmbeddingServiceClass
             
             EmbeddingService = EmbeddingServiceClass
             _embedding_service_instance = EmbeddingServiceClass()

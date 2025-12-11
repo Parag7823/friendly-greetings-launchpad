@@ -17,6 +17,13 @@ from core_infrastructure.database_optimization_utils import OptimizedDatabaseQue
 
 logger = structlog.get_logger(__name__)
 
+# Check if aiocache is available
+try:
+    import aiocache
+    AIOCACHE_AVAILABLE = True
+except ImportError:
+    AIOCACHE_AVAILABLE = False
+
 
 class GraphNode(BaseModel):
     """Node from normalized_entities"""

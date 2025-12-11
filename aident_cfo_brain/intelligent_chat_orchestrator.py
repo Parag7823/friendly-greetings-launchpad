@@ -86,6 +86,12 @@ except ImportError:
 logger = structlog.get_logger(__name__)
 
 # Package imports with graceful fallback
+FinleyGraphEngine = None
+AidentMemoryManager = None
+CausalInferenceEngine = None
+TemporalPatternLearner = None
+EnhancedRelationshipDetector = None
+
 try:
     from aident_cfo_brain.finley_graph_engine import FinleyGraphEngine
     from aident_cfo_brain.aident_memory_manager import AidentMemoryManager
@@ -103,11 +109,8 @@ except ImportError as e:
         from enhanced_relationship_detector import EnhancedRelationshipDetector
         logger.warning("Using direct imports (not in package context)")
     except ImportError as e2:
-        logger.critical(f"Failed to import intelligence engines: {e2}")
-        raise ImportError(
-            "Intelligence engines not found. Ensure proper package structure: "
-            "aident_cfo_brain/{finley_graph_engine,aident_memory_manager,...}.py"
-        ) from e
+        logger.warning(f"Intelligence engines not fully available: {e2} - some features will be disabled")
+        # Don't raise - allow graceful degradation
 
 try:
     from data_ingestion_normalization.entity_resolver_optimized import EntityResolverOptimized as EntityResolver
