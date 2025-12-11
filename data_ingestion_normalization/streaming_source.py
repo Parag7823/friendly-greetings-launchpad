@@ -97,7 +97,7 @@ class StreamedFile:
         return cls(path=temp.name, filename=filename, _size=len(data), _cleanup=True)
 
     @classmethod
-    def from_upload(
+    async def from_upload(
         cls,
         upload_file,
         temp_dir: Optional[str] = None,
@@ -119,22 +119,10 @@ class StreamedFile:
         
         temp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix, dir=temp_dir_str)
         try:
-            # Check if it has a file attribute (FastAPI UploadFile)
-            if hasattr(upload_file, 'file'):
-                source = upload_file.file
-            else:
-                source = upload_file
-                
-            # Ensure at start
-            if hasattr(source, 'seek'):
-                try:
-                    source.seek(0)
-                except Exception:
-                    pass  # Might not be seekable
-            
+            # FastAPI UploadFile: use async read
             # Stream in chunks (1MB at a time)
             while True:
-                chunk = source.read(1024 * 1024)
+                chunk = await upload_file.read(1024 * 1024)
                 if not chunk:
                     break
                 temp.write(chunk)
