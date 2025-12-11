@@ -168,5 +168,6 @@ pytest-cov>=4.0.0
 # Model Explainability (SHAP) - ENHANCEMENT #11
 # Explains WHY models make predictions (feature importance)
 shap==0.43.0  # SHAP values for model interpretability (local library, no API key needed)
-f a s t e x c e l > = 0 . 9 . 0  
- 
+
+# Excel parsing with calamine engine (fast, memory-efficient)
+fastexcel>=0.9.0
