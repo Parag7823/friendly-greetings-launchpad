@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Generator, Optional
 
-import xxhash  # ✅ CRITICAL FIX #1: Use xxhash for standardized hashing (faster than SHA-256)
+import xxhash
 
 
 @dataclass
@@ -16,7 +16,7 @@ class StreamedFile:
     path: str
     filename: Optional[str] = None
     _size: Optional[int] = None
-    _xxh3_128: Optional[str] = None  # ✅ CRITICAL FIX #1: Cache xxh3_128 hash
+    _xxh3_128: Optional[str] = None
     _cleanup: bool = False
 
     def __post_init__(self) -> None:
@@ -31,15 +31,8 @@ class StreamedFile:
         return self._size
 
     @property
-    def sha256(self) -> str:
-        """DEPRECATED: Use xxh3_128 instead for better performance"""
-        if self._sha256 is None:
-            self._sha256 = self.compute_sha256()
-        return self._sha256
-
-    @property
     def xxh3_128(self) -> str:
-        """✅ FIX ISSUE #5: Compute xxh3_128 hash (fastest + collision-resistant)"""
+        """Compute xxh3_128 hash (fastest + collision-resistant)"""
         if self._xxh3_128 is None:
             self._xxh3_128 = self.compute_xxh3_128()
         return self._xxh3_128
@@ -61,7 +54,7 @@ class StreamedFile:
             return handle.read()
 
     def compute_xxh3_128(self) -> str:
-        """✅ FIX ISSUE #5: Standardized hash using xxh3_128 (faster than SHA-256, collision-resistant)"""
+        """Compute xxh3_128 hash (faster than SHA-256, collision-resistant)"""
         hasher = xxhash.xxh3_128()
         for chunk in self.iter_bytes():
             hasher.update(chunk)
@@ -94,10 +87,60 @@ class StreamedFile:
         temp_dir: Optional[str] = None,
     ) -> "StreamedFile":
         suffix = suffix or Path(filename).suffix
-        temp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix, dir=temp_dir)
+        temp_dir_str = str(temp_dir) if temp_dir is not None else None
+        temp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix, dir=temp_dir_str)
         try:
             temp.write(data)
             temp.flush()
         finally:
             temp.close()
         return cls(path=temp.name, filename=filename, _size=len(data), _cleanup=True)
+
+    @classmethod
+    def from_upload(
+        cls,
+        upload_file,
+        temp_dir: Optional[str] = None,
+    ) -> "StreamedFile":
+        """
+        Create StreamedFile from FastAPI UploadFile.
+        Streams content to disk to avoid memory issues.
+        
+        Args:
+            upload_file: FastAPI UploadFile or any file-like object with .file and .filename
+            temp_dir: Optional temp directory for the file
+            
+        Returns:
+            StreamedFile instance
+        """
+        filename = getattr(upload_file, 'filename', 'uploaded_file')
+        suffix = Path(filename).suffix
+        temp_dir_str = str(temp_dir) if temp_dir is not None else None
+        
+        temp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix, dir=temp_dir_str)
+        try:
+            # Check if it has a file attribute (FastAPI UploadFile)
+            if hasattr(upload_file, 'file'):
+                source = upload_file.file
+            else:
+                source = upload_file
+                
+            # Ensure at start
+            if hasattr(source, 'seek'):
+                try:
+                    source.seek(0)
+                except Exception:
+                    pass  # Might not be seekable
+            
+            # Stream in chunks (1MB at a time)
+            while True:
+                chunk = source.read(1024 * 1024)
+                if not chunk:
+                    break
+                temp.write(chunk)
+            temp.flush()
+            size = temp.tell()
+        finally:
+            temp.close()
+            
+        return cls(path=temp.name, filename=filename, _size=size, _cleanup=True)

@@ -1,13 +1,4 @@
-"""
-Rate limiting and concurrency control using aiometer library + Redis.
-Replaces manual asyncio.Semaphore usage throughout the codebase.
-
-CRITICAL FIX #1: Global rate limiting across all users
-- Prevents 50+ users from overwhelming provider APIs
-- Uses Redis for distributed rate limiting across workers
-- Implements queue depth limits per provider and user
-- Tracks active syncs globally
-"""
+"""Rate limiting and concurrency control using Redis for distributed rate limiting across workers."""
 
 import asyncio
 import time
@@ -33,18 +24,8 @@ def get_rate_limiter() -> asyncio.Semaphore:
     return _rate_limiter
 
 
-# CRITICAL FIX #1: Global rate limiting using Redis
 class GlobalRateLimiter:
-    """
-    Distributed rate limiter using Redis.
-    Prevents multiple users from overwhelming provider APIs.
-    
-    Example:
-        limiter = GlobalRateLimiter()
-        can_sync, msg = await limiter.check_global_rate_limit('gmail', user_id)
-        if not can_sync:
-            raise HTTPException(status_code=429, detail=msg)
-    """
+    """Distributed rate limiter using Redis to prevent overwhelming provider APIs."""
     
     def __init__(self):
         self.cache = safe_get_cache()
@@ -177,24 +158,8 @@ class GlobalRateLimiter:
             logger.error("sync_slot_release_failed", error=str(e))
 
 
-# CRITICAL FIX #2: Distributed sync locking to prevent duplicate syncs
 class DistributedSyncLock:
-    """
-    Distributed lock using Redis to prevent concurrent syncs for same connection.
-    
-    Prevents: User clicks "Sync Gmail" twice → TWO concurrent jobs
-    
-    Example:
-        lock = DistributedSyncLock()
-        acquired = await lock.acquire_sync_lock(user_id, provider, connection_id)
-        if not acquired:
-            raise HTTPException(status_code=409, detail="Sync already in progress")
-        
-        try:
-            # Run sync...
-        finally:
-            await lock.release_sync_lock(user_id, provider, connection_id)
-    """
+    """Distributed lock using Redis to prevent concurrent syncs for same connection."""
     
     def __init__(self):
         self.cache = safe_get_cache()
@@ -567,6 +532,82 @@ def get_scheduler_rate_limiter() -> SchedulerRateLimiter:
     if _scheduler_rate_limiter is None:
         _scheduler_rate_limiter = SchedulerRateLimiter()
     return _scheduler_rate_limiter
+
+
+class UploadRateLimiter:
+    """
+    Rate limits file uploads to prevent abuse.
+    Limit: 5 uploads per minute per user.
+    
+    Example:
+        upload_limiter = get_upload_rate_limiter()
+        can_upload, msg = await upload_limiter.check_upload_rate_limit(user_id)
+        if not can_upload:
+            raise HTTPException(status_code=429, detail=msg)
+        
+        await upload_limiter.record_upload(user_id)
+    """
+    
+    def __init__(self, max_uploads_per_minute: int = 10):
+        self.cache = safe_get_cache()
+        self.max_uploads = max_uploads_per_minute
+    
+    async def check_upload_rate_limit(self, user_id: str) -> Tuple[bool, str]:
+        """
+        Check if user can upload a file.
+        
+        Returns:
+            (can_upload: bool, message: str)
+        """
+        if not self.cache:
+            return True, "OK"
+        
+        try:
+            upload_key = f"upload:count:{user_id}"
+            upload_count = await self.cache.get(upload_key) or 0
+            
+            if upload_count >= self.max_uploads:
+                msg = (
+                    f"Upload rate limit exceeded: {upload_count}/{self.max_uploads} uploads this minute. "
+                    f"Please wait before uploading more files."
+                )
+                logger.warning("upload_rate_limit_exceeded", user_id=user_id, upload_count=upload_count)
+                return False, msg
+            
+            return True, "OK"
+            
+        except Exception as e:
+            logger.error("upload_rate_limit_check_failed", error=str(e))
+            return True, "OK"  # Fail open
+    
+    async def record_upload(self, user_id: str) -> None:
+        """Record an upload for rate limiting."""
+        if not self.cache:
+            return
+        
+        try:
+            upload_key = f"upload:count:{user_id}"
+            current = await self.cache.get(upload_key) or 0
+            new_count = current + 1
+            
+            # Reset counter every minute
+            await self.cache.set(upload_key, new_count, ex=60)
+            
+            logger.info("upload_recorded", user_id=user_id, upload_count=new_count)
+        except Exception as e:
+            logger.error("upload_record_failed", error=str(e))
+
+
+# Singleton instances
+_upload_rate_limiter: Optional[UploadRateLimiter] = None
+
+
+def get_upload_rate_limiter() -> UploadRateLimiter:
+    """Get or create upload rate limiter."""
+    global _upload_rate_limiter
+    if _upload_rate_limiter is None:
+        _upload_rate_limiter = UploadRateLimiter()
+    return _upload_rate_limiter
 
 
 # ============================================================================

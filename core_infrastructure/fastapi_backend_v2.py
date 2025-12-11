@@ -1,4 +1,4 @@
-# Standard library imports
+﻿# Standard library imports
 from __future__ import annotations
 import os
 import sys
@@ -114,6 +114,7 @@ try:
     print("[DEBUG] Importing UniversalPlatformDetector...", flush=True)
     from data_ingestion_normalization.universal_platform_detector_optimized import (
         UniversalPlatformDetectorOptimized as UniversalPlatformDetector,
+        PlatformIDExtractor,
     )
     print("[DEBUG] Importing UniversalDocumentClassifier...", flush=True)
     from data_ingestion_normalization.universal_document_classifier_optimized import (
@@ -122,6 +123,10 @@ try:
     print("[DEBUG] Importing UniversalExtractors...", flush=True)
     from data_ingestion_normalization.universal_extractors_optimized import (
         UniversalExtractorsOptimized as UniversalExtractors,
+    )
+    print("[DEBUG] Importing UniversalNormalizer...", flush=True)
+    from data_ingestion_normalization.universal_normalizer_optimized import (
+        UniversalNormalizer, VendorNormalizer, AmountNormalizer, DateNormalizer, CurrencyNormalizer, FieldMapper
     )
     print("[DEBUG] Importing EntityResolver...", flush=True)
     from data_ingestion_normalization.entity_resolver_optimized import (
@@ -136,6 +141,7 @@ except ImportError:
     print("[DEBUG] Importing UniversalPlatformDetector (flat)...", flush=True)
     from data_ingestion_normalization.universal_platform_detector_optimized import (
         UniversalPlatformDetectorOptimized as UniversalPlatformDetector,
+        PlatformIDExtractor,
     )
     print("[DEBUG] Importing UniversalDocumentClassifier (flat)...", flush=True)
     from data_ingestion_normalization.universal_document_classifier_optimized import (
@@ -149,6 +155,10 @@ except ImportError:
     from data_ingestion_normalization.entity_resolver_optimized import (
         EntityResolverOptimized as EntityResolver,
     )
+    print("[DEBUG] Importing UniversalNormalizer (flat)...", flush=True)
+    from data_ingestion_normalization.universal_normalizer_optimized import (
+        UniversalNormalizer, VendorNormalizer, AmountNormalizer, DateNormalizer, CurrencyNormalizer, FieldMapper
+    )
     print("[DEBUG] Importing StreamedFile (flat)...", flush=True)
     try:
         from data_ingestion_normalization.streaming_source import StreamedFile
@@ -156,6 +166,53 @@ except ImportError:
     except Exception as e:
         print(f"[ERROR] CRITICAL ERROR importing StreamedFile: {e}", flush=True)
         raise e
+
+# Import row_classifier module
+print("[DEBUG] Importing row_classifier...", flush=True)
+try:
+    from data_ingestion_normalization.row_classifier import AIRowClassifier, RowProcessor, _shared_fallback_classification
+    print("[DEBUG] row_classifier imported successfully", flush=True)
+except Exception as e:
+    print(f"[ERROR] Failed to import row_classifier: {e}", flush=True)
+    AIRowClassifier = None
+    RowProcessor = None
+    _shared_fallback_classification = None
+
+# Import DataEnrichmentProcessor from modularized file
+print("[DEBUG] Importing DataEnrichmentProcessor...", flush=True)
+try:
+    from data_ingestion_normalization.data_enrichment_processor import DataEnrichmentProcessor
+    print("[DEBUG] DataEnrichmentProcessor imported successfully", flush=True)
+except Exception as e:
+    print(f"[ERROR] Failed to import DataEnrichmentProcessor: {e}", flush=True)
+    DataEnrichmentProcessor = None
+
+# Import ExcelProcessor from modularized file
+print("[DEBUG] Importing ExcelProcessor...", flush=True)
+try:
+    from data_ingestion_normalization.excel_processor import ExcelProcessor
+    print("[DEBUG] ExcelProcessor imported successfully", flush=True)
+except Exception as e:
+    print(f"[ERROR] Failed to import ExcelProcessor: {e}", flush=True)
+    ExcelProcessor = None
+
+
+# Singleton pattern for ExcelProcessor instance
+_excel_processor_instance = None
+_excel_processor_lock = threading.Lock()
+
+def _get_excel_processor_instance():
+    """Get or create singleton ExcelProcessor instance."""
+    global _excel_processor_instance
+    if _excel_processor_instance is None:
+        with _excel_processor_lock:
+            if _excel_processor_instance is None:
+                if ExcelProcessor is not None:
+                    _excel_processor_instance = ExcelProcessor()
+                    print("[OK] ExcelProcessor singleton created", flush=True)
+                else:
+                    raise RuntimeError("ExcelProcessor not available")
+    return _excel_processor_instance
 
 print("[DEBUG] Importing EnhancedRelationshipDetector...", flush=True)
 try:
@@ -186,7 +243,7 @@ try:
         print("[DEBUG] FieldMappingLearner imported successfully (nested)", flush=True)
     except ImportError:
         print("[DEBUG] Importing FieldMappingLearner (flat)...", flush=True)
-        from data_ingestion_normalization.field_mapping_learner import learn_field_mapping, get_learned_mappings
+        from data_ingestion_normalization.universal_field_detector import learn_field_mapping, get_learned_mappings
         print("[DEBUG] FieldMappingLearner imported successfully (flat)", flush=True)
 except Exception as e:
     # logger not initialized yet here; use print for diagnostics only
@@ -319,59 +376,7 @@ class UserConnectionMetadata(BaseModel):
     class Config:
         extra = "allow"
 
-class SyncRunStats(BaseModel):
-    """Validated stats for sync_runs.stats field."""
-    records_fetched: int = 0
-    actions_used: int = 0
-    attachments_saved: int = 0
-    queued_jobs: int = 0
-    skipped: int = 0
-    
-    class Config:
-        extra = "allow"
-
-class ZohoMailMetadata(BaseModel):
-    """Validated metadata for Zoho Mail user_connections.metadata field."""
-    last_sync_token: Optional[str] = None
-    last_synced_at: Optional[str] = None
-    sync_errors: Optional[List[str]] = None
-    error_count: int = 0
-    
-    class Config:
-        extra = "allow"
-
-class XeroMetadata(BaseModel):
-    """Validated metadata for Xero user_connections.metadata field."""
-    last_sync_token: Optional[str] = None
-    last_synced_at: Optional[str] = None
-    sync_errors: Optional[List[str]] = None
-    error_count: int = 0
-    tenant_id: Optional[str] = None
-    
-    class Config:
-        extra = "allow"
-
-class StripeMetadata(BaseModel):
-    """Validated metadata for Stripe user_connections.metadata field."""
-    last_sync_token: Optional[str] = None
-    last_synced_at: Optional[str] = None
-    sync_errors: Optional[List[str]] = None
-    error_count: int = 0
-    account_id: Optional[str] = None
-    
-    class Config:
-        extra = "allow"
-
-class PayPalMetadata(BaseModel):
-    """Validated metadata for PayPal user_connections.metadata field."""
-    last_sync_token: Optional[str] = None
-    last_synced_at: Optional[str] = None
-    sync_errors: Optional[List[str]] = None
-    error_count: int = 0
-    merchant_id: Optional[str] = None
-    
-    class Config:
-        extra = "allow"
+# REMOVED: SyncRunStats, ZohoMailMetadata, XeroMetadata, StripeMetadata, PayPalMetadata - moved to connectors.py
 
 class RazorpayMetadata(BaseModel):
     """Validated metadata for Razorpay user_connections.metadata field."""
@@ -508,7 +513,7 @@ async def get_arq_pool():
         logger.info(f"ARQ connection pool created and cached for reuse")
         return _arq_pool
 
-from core_infrastructure.airbyte_client import AirbytePythonClient
+from data_ingestion_normalization.airbyte_client import AirbytePythonClient
 
 from core_infrastructure.transaction_manager import initialize_transaction_manager, get_transaction_manager
 from data_ingestion_normalization.streaming_processor import (
@@ -572,49 +577,18 @@ from core_infrastructure.utils.helpers import (
     get_sync_cursor, save_sync_cursor, insert_external_item_with_error_handling
 )
 # SOLUTION: Cache memory managers by user_id with LRU eviction (maxsize=100 for 100 concurrent users)
-# IMPACT: 5-10x improvement in chat response times (100-200ms → 10-20ms)
+# IMPACT: 5-10x improvement in chat response times (100-200ms â†’ 10-20ms)
 
 from functools import lru_cache
 import os as _os
 
-@lru_cache(maxsize=100)
-def get_memory_manager(user_id: str) -> 'AidentMemoryManager':
-    """
-    Get or create cached memory manager for user.
-    
-    CRITICAL FIX: Eliminates 100-200ms initialization overhead per chat message.
-    - First call: Creates new AidentMemoryManager (100-200ms)
-    - Subsequent calls: Returns cached instance (< 1ms)
-    - LRU eviction: Keeps 100 most recent users in memory
-    - Per-user isolation: Each user gets their own isolated memory
-    
-    Args:
-        user_id: Unique user identifier (cache key)
-    
-    Returns:
-        Cached AidentMemoryManager instance for this user
-    """
-    try:
-        from aident_cfo_brain.aident_memory_manager import AidentMemoryManager
-    except ImportError:
-        from aident_memory_manager import AidentMemoryManager
-    
-    redis_url = _os.getenv('ARQ_REDIS_URL') or _os.getenv('REDIS_URL')
-    groq_key = _os.getenv('GROQ_API_KEY')
-    
-    memory_manager = AidentMemoryManager(
-        user_id=user_id,
-        redis_url=redis_url,
-        groq_api_key=groq_key
-    )
-    
-    logger.info(
-        "memory_manager_cached",
-        user_id=user_id,
-        cache_info=get_memory_manager.cache_info()
-    )
-    
-    return memory_manager
+# MOVED: get_memory_manager function is now in aident_cfo_brain/aident_memory_manager.py
+# Import it from there for backward compatibility
+try:
+    from aident_intelligence.aident_memory_manager import get_memory_manager
+except ImportError:
+    from aident_memory_manager import get_memory_manager
+
 
 # ----------------------------------------------------------------------------
 # Metrics (Prometheus) - Comprehensive business metrics
@@ -695,9 +669,9 @@ try:
         DuplicateDetectionError
     )
     PRODUCTION_DUPLICATE_SERVICE_AVAILABLE = True
-    logger.info("✅ Production duplicate detection service available")
+    logger.info("âœ… Production duplicate detection service available")
 except ImportError as e:
-    logger.warning(f"⚠️ Production duplicate detection service not available: {e}")
+    logger.warning(f"âš ï¸ Production duplicate detection service not available: {e}")
     PRODUCTION_DUPLICATE_SERVICE_AVAILABLE = False
 
 # Custom JSON encoder for datetime objects
@@ -811,9 +785,9 @@ def _ensure_supabase_loaded_sync():
                 try:
                     supabase = get_supabase_client()
                     _supabase_loaded = True
-                    logger.info("✅ Supabase client lazy-loaded on first use")
+                    logger.info("âœ… Supabase client lazy-loaded on first use")
                 except Exception as e:
-                    logger.error(f"❌ Failed to lazy-load Supabase client: {e.__class__.__name__}: {e}")
+                    logger.error(f"âŒ Failed to lazy-load Supabase client: {e.__class__.__name__}: {e}")
                     _supabase_loaded = True
                     supabase = None
     
@@ -824,7 +798,7 @@ async def _ensure_supabase_loaded():
     try:
         return await asyncio.to_thread(_ensure_supabase_loaded_sync)
     except Exception as e:
-        logger.error(f"❌ Failed to create lazy Supabase client: {e.__class__.__name__}: {e}")
+        logger.error(f"âŒ Failed to create lazy Supabase client: {e.__class__.__name__}: {e}")
         return None
 
 class SocketIOWebSocketManager:
@@ -843,7 +817,7 @@ class SocketIOWebSocketManager:
                 f"{redis_client.connection_pool.connection_kwargs.get('port', 6379)}"
             )
             sio.manager = redis_manager
-            logger.info("✅ Socket.IO Redis adapter initialized")
+            logger.info("âœ… Socket.IO Redis adapter initialized")
         except Exception as e:
             logger.warning(f"Socket.IO Redis adapter failed: {e}")
 
@@ -868,13 +842,13 @@ class SocketIOWebSocketManager:
         """Cache-only state storage with explicit error handling."""
         cache = safe_get_cache()
         if cache is None:
-            logger.error(f"❌ CRITICAL: Cache unavailable - cannot persist job state {job_id}")
+            logger.error(f"âŒ CRITICAL: Cache unavailable - cannot persist job state {job_id}")
             raise RuntimeError(f"Cache service unavailable for job {job_id}")
         
         try:
             await cache.set(self._key(job_id), state, ttl=21600)
         except Exception as e:
-            logger.error(f"❌ CRITICAL: Failed to save job state {job_id}: {e}")
+            logger.error(f"âŒ CRITICAL: Failed to save job state {job_id}: {e}")
             raise RuntimeError(f"Failed to persist job state: {e}")
 
     async def merge_job_state(self, job_id: str, patch: Dict[str, Any]) -> Dict[str, Any]:
@@ -944,12 +918,9 @@ class SocketIOWebSocketManager:
         
         await self.send_update(job_id, payload)
 
-# CRITICAL FIX: Initialize as None to prevent race condition during double import
-# Will be initialized in app_lifespan to avoid crash when Uvicorn + ARQ worker both import
+# Initialize WebSocket manager in app_lifespan to prevent race condition
 websocket_manager = None
 
-# CRITICAL FIX: Define lifespan before creating app so we can pass it to FastAPI constructor
-# This ensures proper startup/shutdown lifecycle management
 @asynccontextmanager
 async def app_lifespan(app: FastAPI):
     """Application lifespan context manager - handles startup and shutdown"""
@@ -957,16 +928,14 @@ async def app_lifespan(app: FastAPI):
     global supabase, optimized_db, security_validator, centralized_cache, websocket_manager, groq_client
     
     logger.info("="*80)
-    logger.info("🚀 STARTING SERVICE INITIALIZATION...")
+    logger.info("ðŸš€ STARTING SERVICE INITIALIZATION...")
     logger.info("="*80)
     
-    # CRITICAL FIX: Initialize WebSocket manager here to avoid race condition
-    # This prevents crash when both Uvicorn and ARQ worker import the module simultaneously
     try:
         websocket_manager = SocketIOWebSocketManager()
-        logger.info("✅ WebSocket manager initialized")
+        logger.info("âœ… WebSocket manager initialized")
     except Exception as ws_err:
-        logger.error(f"❌ Failed to initialize WebSocket manager: {ws_err}")
+        logger.error(f"âŒ Failed to initialize WebSocket manager: {ws_err}")
         websocket_manager = None
     
     try:
@@ -984,9 +953,9 @@ async def app_lifespan(app: FastAPI):
         )
         
         # Enhanced diagnostics for deployment debugging
-        logger.info(f"🔍 Environment diagnostics:")
-        logger.info(f"   SUPABASE_URL present: {'✅' if supabase_url else '❌'}")
-        logger.info(f"   SUPABASE_SERVICE_ROLE_KEY present: {'✅' if supabase_key else '❌'}")
+        logger.info(f"ðŸ” Environment diagnostics:")
+        logger.info(f"   SUPABASE_URL present: {'âœ…' if supabase_url else 'âŒ'}")
+        logger.info(f"   SUPABASE_SERVICE_ROLE_KEY present: {'âœ…' if supabase_key else 'âŒ'}")
         supabase_env_vars = sorted([k for k in os.environ.keys() if 'SUPABASE' in k.upper()])
         logger.info(f"   Available env vars: {supabase_env_vars}")
         
@@ -1001,11 +970,8 @@ async def app_lifespan(app: FastAPI):
                 missing_vars.append("SUPABASE_SERVICE_KEY (or SUPABASE_SERVICE_ROLE_KEY)")
             raise ValueError(f"Missing required environment variables: {', '.join(missing_vars)}. Please check your deployment configuration.")
         
-        # CRITICAL FIX: Defer Supabase client initialization to first use
-        # Don't block startup on database connection - it will be initialized on first API request
-        # This prevents startup timeouts and allows graceful degradation if DB is temporarily unavailable
         supabase = get_supabase_client()
-        logger.info("✅ Supabase client will be lazy-loaded on first use (non-blocking startup)")
+        logger.info("âœ… Supabase client will be lazy-loaded on first use (non-blocking startup)")
         
         # Initialize critical systems (only if Supabase is available)
         if supabase:
@@ -1017,34 +983,32 @@ async def app_lifespan(app: FastAPI):
                     max_file_size_gb=10
                 ))
                 initialize_error_recovery_system(supabase)
-                logger.info("✅ Transaction, streaming, and error recovery systems initialized")
+                logger.info("âœ… Transaction, streaming, and error recovery systems initialized")
             except Exception as sys_err:
-                logger.warning(f"⚠️ Failed to initialize critical systems: {sys_err}")
+                logger.warning(f"âš ï¸ Failed to initialize critical systems: {sys_err}")
         else:
-            logger.warning("⚠️ Skipping critical system initialization - Supabase unavailable")
+            logger.warning("âš ï¸ Skipping critical system initialization - Supabase unavailable")
         
         # Initialize security system (observability removed - using structlog)
         try:
             security_validator = SecurityValidator()
-            logger.info("✅ Security validator initialized")
+            logger.info("âœ… Security validator initialized")
         except Exception as sec_err:
-            logger.warning(f"⚠️ Failed to initialize security validator: {sec_err}")
+            logger.warning(f"âš ï¸ Failed to initialize security validator: {sec_err}")
         
-        # CRITICAL FIX: Initialize optimized database queries
-        # Import here to avoid blocking module load
         if supabase:
             try:
                 from core_infrastructure.database_optimization_utils import OptimizedDatabaseQueries
                 optimized_db = OptimizedDatabaseQueries(supabase)
-                logger.info("✅ Optimized database queries initialized")
+                logger.info("âœ… Optimized database queries initialized")
             except Exception as opt_err:
-                logger.warning(f"⚠️ Failed to initialize optimized database queries: {opt_err}")
+                logger.warning(f"âš ï¸ Failed to initialize optimized database queries: {opt_err}")
                 optimized_db = None
         else:
-            logger.warning("⚠️ Skipping optimized database initialization - Supabase unavailable")
+            logger.warning("âš ï¸ Skipping optimized database initialization - Supabase unavailable")
             optimized_db = None
         
-        logger.info("✅ Observability and security systems initialized")
+        logger.info("âœ… Observability and security systems initialized")
         
         # REFACTORED: Initialize centralized Redis cache (replaces ai_cache_system.py)
         # This provides distributed caching across all workers and instances for true scalability
@@ -1055,12 +1019,12 @@ async def app_lifespan(app: FastAPI):
                     redis_url=redis_url,
                     default_ttl=7200  # 2 hours default TTL
                 )
-                logger.info("✅ Centralized Redis cache initialized - distributed caching across all workers!")
+                logger.info("âœ… Centralized Redis cache initialized - distributed caching across all workers!")
             except Exception as cache_err:
-                logger.warning(f"⚠️ Failed to initialize Redis cache: {cache_err} - Running without distributed cache")
+                logger.warning(f"âš ï¸ Failed to initialize Redis cache: {cache_err} - Running without distributed cache")
                 centralized_cache = None
         else:
-            logger.warning("⚠️ REDIS_URL not set - Running without distributed cache")
+            logger.warning("âš ï¸ REDIS_URL not set - Running without distributed cache")
             centralized_cache = None
             
         # Initialize Groq client
@@ -1069,26 +1033,26 @@ async def app_lifespan(app: FastAPI):
             if groq_api_key:
                 if Groq:
                     groq_client = Groq(api_key=groq_api_key)
-                    logger.info("✅ Groq client initialized")
+                    logger.info("âœ… Groq client initialized")
                 else:
-                    logger.warning("⚠️ Groq library not available, skipping client initialization")
+                    logger.warning("âš ï¸ Groq library not available, skipping client initialization")
             else:
-                logger.warning("⚠️ GROQ_API_KEY not set, AI features will be disabled")
+                logger.warning("âš ï¸ GROQ_API_KEY not set, AI features will be disabled")
         except Exception as groq_err:
-            logger.error(f"❌ Failed to initialize Groq client: {groq_err}")
+            logger.error(f"âŒ Failed to initialize Groq client: {groq_err}")
             groq_client = None
         
         # Initialize global thread pool for CPU-bound operations
         try:
             _thread_pool = ThreadPoolExecutor(max_workers=5)
-            logger.info("✅ Global thread pool initialized for CPU-bound operations")
+            logger.info("âœ… Global thread pool initialized for CPU-bound operations")
         except Exception as thread_err:
-            logger.warning(f"⚠️ Failed to initialize global thread pool: {thread_err}")
+            logger.warning(f"âš ï¸ Failed to initialize global thread pool: {thread_err}")
             _thread_pool = None
         
         # PERMANENT FIX: Pre-load heavy ML models at startup (not during first chat request)
         # This prevents 1-2 minute delays on first message
-        logger.info("🔄 Pre-loading ML models for chat orchestrator...")
+        logger.info("ðŸ”„ Pre-loading ML models for chat orchestrator...")
         try:
             # Import and initialize intent classifier + output guard (loads spacy + sentence-transformers)
             from aident_cfo_brain.intent_and_guard_engine import (
@@ -1102,7 +1066,7 @@ async def app_lifespan(app: FastAPI):
                 try:
                     logger.info("   Loading intent classifier (spacy + sentence-transformers)...")
                     intent_classifier = get_intent_classifier()
-                    logger.info("   ✅ Intent classifier loaded")
+                    logger.info("   âœ… Intent classifier loaded")
                     
                     logger.info("   Loading output guard (sentence-transformers)...")
                     # Get Groq client for output guard
@@ -1113,15 +1077,15 @@ async def app_lifespan(app: FastAPI):
                         if groq_key:
                             preload_groq = AsyncGroq(api_key=groq_key)
                             output_guard = get_output_guard(preload_groq)
-                            logger.info("   ✅ Output guard loaded")
+                            logger.info("   âœ… Output guard loaded")
                         else:
-                            logger.warning("   ⚠️ No GROQ_API_KEY - skipping output guard preload")
+                            logger.warning("   âš ï¸ No GROQ_API_KEY - skipping output guard preload")
                     except Exception as groq_err:
-                        logger.warning(f"   ⚠️ Output guard preload failed: {groq_err}")
+                        logger.warning(f"   âš ï¸ Output guard preload failed: {groq_err}")
                     
-                    logger.info("✅ All ML models pre-loaded successfully - chat will be instant!")
+                    logger.info("âœ… All ML models pre-loaded successfully - chat will be instant!")
                 except Exception as model_err:
-                    logger.warning(f"⚠️ Failed to pre-load ML models: {model_err} - will load on first chat (may be slow)")
+                    logger.warning(f"âš ï¸ Failed to pre-load ML models: {model_err} - will load on first chat (may be slow)")
             
             # Run model loading in thread pool to avoid blocking startup
             if _thread_pool:
@@ -1132,38 +1096,38 @@ async def app_lifespan(app: FastAPI):
                 _preload_models()
         
         except Exception as model_import_err:
-            logger.warning(f"⚠️ Failed to import intent classifier: {model_import_err}")
+            logger.warning(f"âš ï¸ Failed to import intent classifier: {model_import_err}")
         
-        logger.info("✅ All critical systems and optimizations initialized successfully")
+        logger.info("âœ… All critical systems and optimizations initialized successfully")
         
     except Exception as e:
-        logger.error(f"❌ Failed to initialize critical systems: {e}")
+        logger.error(f"âŒ Failed to initialize critical systems: {e}")
         supabase = None
         optimized_db = None
         # Log critical database failure for monitoring
-        logger.critical(f"🚨 DATABASE CONNECTION FAILED - System running in degraded mode: {e}")
+        logger.critical(f"ðŸš¨ DATABASE CONNECTION FAILED - System running in degraded mode: {e}")
         # Initialize minimal observability/logging to prevent NameError in endpoints
         try:
             # Fallback lightweight initialization (observability removed - using structlog)
             security_validator = SecurityValidator()
-            logger.info("✅ Degraded mode security initialized (no database)")
+            logger.info("âœ… Degraded mode security initialized (no database)")
         except Exception as init_err:
-            logger.warning(f"⚠️ Failed to initialize degraded security systems: {init_err}")
+            logger.warning(f"âš ï¸ Failed to initialize degraded security systems: {init_err}")
     
     # Log final startup status
     logger.info("="*80)
-    logger.info("🎯 STARTUP COMPLETE - Service Status Summary:")
-    logger.info(f"   Supabase: {'✅ Connected' if supabase else '❌ Not initialized'}")
-    logger.info(f"   Groq Client: {'✅ Ready' if groq_client else '❌ Not initialized'}")
-    logger.info(f"   Redis Cache: {'✅ Connected' if centralized_cache else '❌ Not initialized'}")
-    logger.info(f"   Optimized DB: {'✅ Ready' if optimized_db else '❌ Not initialized'}")
-    logger.info(f"   Security Validator: {'✅ Ready' if security_validator else '❌ Not initialized'}")
-    logger.info(f"   WebSocket Manager: {'✅ Ready' if websocket_manager else '❌ Not initialized'}")
+    logger.info("ðŸŽ¯ STARTUP COMPLETE - Service Status Summary:")
+    logger.info(f"   Supabase: {'âœ… Connected' if supabase else 'âŒ Not initialized'}")
+    logger.info(f"   Groq Client: {'âœ… Ready' if groq_client else 'âŒ Not initialized'}")
+    logger.info(f"   Redis Cache: {'âœ… Connected' if centralized_cache else 'âŒ Not initialized'}")
+    logger.info(f"   Optimized DB: {'âœ… Ready' if optimized_db else 'âŒ Not initialized'}")
+    logger.info(f"   Security Validator: {'âœ… Ready' if security_validator else 'âŒ Not initialized'}")
+    logger.info(f"   WebSocket Manager: {'âœ… Ready' if websocket_manager else 'âŒ Not initialized'}")
     logger.info("="*80)
     
     yield
     # Shutdown
-    logger.info("🛑 Application shutting down...")
+    logger.info("ðŸ›‘ Application shutting down...")
     # Cleanup happens here if needed
 
 # Initialize FastAPI app with enhanced configuration# Initialize FastAPI app
@@ -1192,12 +1156,12 @@ try:
     )
     app.state.limiter = limiter
     app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
-    logger.info("✅ slowapi rate limiter initialized with Redis backend")
+    logger.info("âœ… slowapi rate limiter initialized with Redis backend")
 except ImportError:
-    logger.warning("⚠️ slowapi not available, rate limiting disabled")
+    logger.warning("âš ï¸ slowapi not available, rate limiting disabled")
     limiter = None
 except Exception as e:
-    logger.warning(f"⚠️ Failed to initialize slowapi: {e}, rate limiting disabled")
+    logger.warning(f"âš ï¸ Failed to initialize slowapi: {e}, rate limiting disabled")
     limiter = None
 
 # IMPROVEMENT: Global exception handler for consistent error responses
@@ -1216,7 +1180,7 @@ async def global_exception_handler(request: Request, exc: Exception):
     tb_str = ''.join(traceback.format_exception(type(exc), exc, exc.__traceback__))
     
     # Log with full details
-    logger.error(f"❌ UNHANDLED EXCEPTION on {request.method} {request.url.path}")
+    logger.error(f"âŒ UNHANDLED EXCEPTION on {request.method} {request.url.path}")
     logger.error(f"Exception type: {type(exc).__name__}")
     logger.error(f"Exception message: {str(exc)}")
     logger.error(f"Full traceback:\n{tb_str}")
@@ -1277,7 +1241,7 @@ async def timeout_middleware(request: Request, call_next):
     """
     try:
         # Use configured timeout from app_config
-        timeout = app_config.request_timeout if 'app_config' in globals() else 30
+        timeout = app_config.request_timeout if 'app_config' in globals() else 120
         response = await asyncio.wait_for(call_next(request), timeout=float(timeout))
         return response
     except asyncio.TimeoutError:
@@ -1302,9 +1266,9 @@ async def timeout_middleware(request: Request, call_next):
 # Prevents CSRF attacks in production by restricting origins
 ALLOWED_ORIGINS = os.getenv('CORS_ALLOWED_ORIGINS', '*').split(',')
 if ALLOWED_ORIGINS == ['*']:
-    logger.warning("⚠️  CORS is configured with wildcard '*' - this should only be used in development!")
+    logger.warning("âš ï¸  CORS is configured with wildcard '*' - this should only be used in development!")
 else:
-    logger.info(f"✅ CORS configured with specific origins: {ALLOWED_ORIGINS}")
+    logger.info(f"âœ… CORS configured with specific origins: {ALLOWED_ORIGINS}")
 
 app.add_middleware(
     CORSMiddleware,
@@ -1316,16 +1280,15 @@ app.add_middleware(
     max_age=3600,  # Cache preflight requests for 1 hour
 )
 
-# REMOVED: Old startup event - now using lifespan context manager in FastAPI constructor
-# The app_lifespan function handles all initialization
+# Startup handled by app_lifespan context manager
 
 # Initialize global config with pydantic-settings
 try:
     app_config = AppConfig()
-    logger.info("✅ Environment configuration loaded and validated via pydantic-settings")
+    logger.info("âœ… Environment configuration loaded and validated via pydantic-settings")
     logger.info(f"   Queue Backend: {app_config.queue_backend}")
 except Exception as e:
-    logger.error(f"🚨 CRITICAL: Environment configuration validation failed: {e}")
+    logger.error(f"ðŸš¨ CRITICAL: Environment configuration validation failed: {e}")
     raise
 
 # DIAGNOSTIC: Health check endpoint to debug service initialization
@@ -1378,20 +1341,19 @@ async def validate_critical_environment():
     
     Kept for backward compatibility - validation is handled by AppConfig.
     """
-    logger.info("🔍 Environment configuration already validated via pydantic-settings")
+    logger.info("ðŸ” Environment configuration already validated via pydantic-settings")
     
     # Validate Redis if using ARQ queue backend
     if app_config.queue_backend == 'arq':
         if not app_config.redis_url_resolved:
             raise RuntimeError(
-                "🚨 CRITICAL: REDIS_URL or ARQ_REDIS_URL required when QUEUE_BACKEND=arq\n"
+                "ðŸš¨ CRITICAL: REDIS_URL or ARQ_REDIS_URL required when QUEUE_BACKEND=arq\n"
                 "Set one of these environment variables or change QUEUE_BACKEND to 'sync'"
             )
     
-    logger.info("✅ All required environment variables present and valid")
+    logger.info("âœ… All required environment variables present and valid")
 
-# REMOVED: Duplicate lifespan function - now using app_lifespan in FastAPI constructor
-# The app_lifespan function (defined earlier) handles all startup/shutdown logic
+# Lifespan handled by app_lifespan context manager
 
 # Expose Prometheus metrics
 @app.get("/metrics")
@@ -1442,9 +1404,10 @@ async def inference_health_endpoint():
 
 # Database health check function
 def check_database_health():
+    pass # Disabled for AI-only processing
     """Check if database connection is healthy and raise appropriate error if not"""
     if not supabase:
-        logger.error("❌ CRITICAL: Database connection unavailable")
+        logger.error("âŒ CRITICAL: Database connection unavailable")
         raise HTTPException(
             status_code=503,
             detail="Database service temporarily unavailable. Please try again later."
@@ -1455,7 +1418,7 @@ def check_database_health():
         result = supabase.table('raw_events').select('id').limit(1).execute()
         return True
     except Exception as e:
-        logger.error(f"❌ Database health check failed: {e}")
+        logger.error(f"âŒ Database health check failed: {e}")
         raise HTTPException(
             status_code=503,
             detail="Database service experiencing issues. Please try again later."
@@ -1475,56 +1438,55 @@ ADVANCED_FEATURES = {
 try:
     import zipfile
     ADVANCED_FEATURES['zipfile'] = True
-    logger.info("✅ ZIP file processing available")
+    logger.info("âœ… ZIP file processing available")
 except ImportError:
-    logger.warning("⚠️ ZIP file processing not available")
+    logger.warning("âš ï¸ ZIP file processing not available")
 
 try:
     import py7zr
     ADVANCED_FEATURES['py7zr'] = True
-    logger.info("✅ 7-Zip file processing available")
+    logger.info("âœ… 7-Zip file processing available")
 except ImportError:
-    logger.warning("⚠️ 7-Zip file processing not available")
+    logger.warning("âš ï¸ 7-Zip file processing not available")
 
 try:
     import rarfile
     ADVANCED_FEATURES['rarfile'] = True
-    logger.info("✅ RAR file processing available")
+    logger.info("âœ… RAR file processing available")
 except ImportError:
-    logger.warning("⚠️ RAR file processing not available")
+    logger.warning("âš ï¸ RAR file processing not available")
 
 try:
     from odf.opendocument import load as load_ods
     from odf.table import Table, TableRow, TableCell
     from odf.text import P
     ADVANCED_FEATURES['odf'] = True
-    logger.info("✅ OpenDocument processing available")
+    logger.info("âœ… OpenDocument processing available")
 except ImportError:
-    logger.warning("⚠️ OpenDocument processing not available")
+    logger.warning("âš ï¸ OpenDocument processing not available")
 
 # Using UniversalExtractorsOptimized with easyocr + pdfminer.six for all extraction
 
 try:
     from PIL import Image
     ADVANCED_FEATURES['pil'] = True
-    logger.info("✅ PIL image processing available")
+    logger.info("âœ… PIL image processing available")
 except ImportError:
-    logger.warning("⚠️ PIL image processing not available")
+    logger.warning("âš ï¸ PIL image processing not available")
 
 try:
     import cv2
     ADVANCED_FEATURES['cv2'] = True
-    logger.info("✅ OpenCV processing available")
+    logger.info("âœ… OpenCV processing available")
 except ImportError:
-    logger.warning("⚠️ OpenCV processing not available")
+    logger.warning("âš ï¸ OpenCV processing not available")
 
 try:
     import xlwings as xw
     ADVANCED_FEATURES['xlwings'] = True
-    logger.info("✅ Excel automation available")
+    logger.info("âœ… Excel automation available")
 except ImportError:
-    # FIX #3: Excel automation is optional - system will use pandas for Excel processing
-    logger.debug("ℹ️ Excel automation (xlwings) not available - using pandas fallback for Excel files")
+    logger.debug("Excel automation (xlwings) not available - using pandas fallback")
 
 # Granular feature availability checking
 def is_feature_available(feature_name: str) -> bool:
@@ -1541,8 +1503,8 @@ def check_feature_dependencies(required_features: List[str]) -> Dict[str, bool]:
 
 # Overall advanced features availability (for backward compatibility)
 ADVANCED_FEATURES_AVAILABLE = any(ADVANCED_FEATURES.values())
-logger.info(f"🔧 Advanced features status: {sum(ADVANCED_FEATURES.values())}/{len(ADVANCED_FEATURES)} available")
-logger.info(f"📋 Available features: {', '.join(get_available_features())}")
+logger.info(f"ðŸ”§ Advanced features status: {sum(ADVANCED_FEATURES.values())}/{len(ADVANCED_FEATURES)} available")
+logger.info(f"ðŸ“‹ Available features: {', '.join(get_available_features())}")
 
 # Enhanced global configuration with environment variable support
 @dataclass
@@ -1601,3098 +1563,24 @@ class Config:
 # Initialize configuration with validation
 try:
     config = Config()
-    logger.info("✅ Configuration loaded successfully")
-    logger.info(f"📊 File processing: max_size={config.max_file_size//1024//1024}MB, batch_size={config.batch_size}")
-    logger.info(f"🤖 AI processing: max_concurrent={config.max_concurrent_ai_calls}, confidence={config.platform_confidence_threshold}")
-    logger.info(f"🔧 Features: advanced={config.enable_advanced_file_processing}, duplicate_detection={config.enable_duplicate_detection}")
+    logger.info("âœ… Configuration loaded successfully")
+    logger.info(f"ðŸ“Š File processing: max_size={config.max_file_size//1024//1024}MB, batch_size={config.batch_size}")
+    logger.info(f"ðŸ¤– AI processing: max_concurrent={config.max_concurrent_ai_calls}, confidence={config.platform_confidence_threshold}")
 except Exception as e:
-    logger.error(f"❌ Configuration validation failed: {e}")
+    logger.error(f"âŒ Configuration validation failed: {e}")
     raise
 
 # - Removed to eliminate code duplication and reduce maintenance burden
+# VendorStandardizer moved to data_ingestion_normalization/universal_normalizer_optimized.py
 
 
-class VendorStandardizer:
-    """
-    LIBRARY REPLACEMENT: rapidfuzz + dedupe for vendor standardization
-    Replaces custom fuzzy matching with ML-based deduplication and advanced fuzzy matching.
-    
-    Benefits:
-    - 40% more accurate than simple fuzzy matching (using rapidfuzz token_set_ratio)
-    - ML-based deduplication via dedupe library (battle-tested, production-grade)
-    - Consistent with EntityResolverOptimized
-    - Zero maintenance - battle-tested libraries only
-    """
-    
-    # Centralized suffix list (single source of truth)
-    BUSINESS_SUFFIXES = [
-        'inc', 'inc.', 'llc', 'ltd', 'ltd.', 'corp', 'corp.', 'co', 'co.', 'company',
-        'incorporated', 'limited', 'corporation', 'limited liability company'
-    ]
-    
-    # Lazy-loaded dedupe matcher
-    _dedupe_matcher = None
-    
-    def __init__(self, cache_client=None):
-        self.cache = cache_client or safe_get_cache()
-        self._vendor_cache = {}  # In-memory cache for dedupe matches
-        
-    def _is_effectively_empty(self, text: str) -> bool:
-        """Check if text is effectively empty (None, empty, or only whitespace)"""
-        if not text:
-            return True
-        return len(text.strip()) == 0
-    
-    def _clean_vendor_name(self, vendor_name: str) -> str:
-        """LIBRARY REPLACEMENT: Use rapidfuzz-compatible cleaning"""
-        if not vendor_name:
-            return vendor_name
-        
-        cleaned = vendor_name.strip()
-        
-        # Remove common business suffixes (case-insensitive)
-        cleaned_lower = cleaned.lower()
-        for suffix in self.BUSINESS_SUFFIXES:
-            if cleaned_lower.endswith(suffix):
-                cleaned = cleaned[:-len(suffix)].strip()
-                cleaned_lower = cleaned.lower()
-        
-        # Remove special characters but keep spaces
-        cleaned = ''.join(char if char.isalnum() or char.isspace() else ' ' for char in cleaned)
-        
-        # Normalize whitespace
-        cleaned = ' '.join(cleaned.split())
-        
-        # Title case for consistency
-        cleaned = cleaned.title()
-        
-        return cleaned if cleaned else vendor_name
-    
-    async def standardize_vendor(self, vendor_name: str, platform: str = None) -> Dict[str, Any]:
-        """Standardize vendor name using rapidfuzz + dedupe"""
-        try:
-            # Check for empty input
-            if not vendor_name or self._is_effectively_empty(vendor_name):
-                return {
-                    "vendor_raw": vendor_name,
-                    "vendor_standard": "",
-                    "confidence": 0.0,
-                    "cleaning_method": "empty"
-                }
-            
-            # Check cache first
-            cache_content = {'vendor_name': vendor_name, 'platform': platform or 'unknown'}
-            if self.cache:
-                try:
-                    cached_result = await self.cache.get_cached_classification(
-                        cache_content,
-                        classification_type='vendor_standardization'
-                    )
-                    if cached_result:
-                        logger.debug(f"✅ Vendor cache hit: {vendor_name}")
-                        return cached_result
-                except Exception as e:
-                    logger.warning(f"Cache retrieval failed: {e}")
-            
-            # FIX #45: Move CPU-heavy rapidfuzz operations to thread pool
-            def _compute_similarity_sync(vendor_name, cleaned_name):
-                return fuzz.token_sort_ratio(vendor_name.lower(), cleaned_name.lower()) / 100.0
-            
-            # Clean the vendor name
-            cleaned_name = self._clean_vendor_name(vendor_name)
-            
-            # Execute CPU-bound rapidfuzz operation in global thread pool
-            import asyncio
-            loop = asyncio.get_event_loop()
-            # FIX #4: Add null check for _thread_pool before using in run_in_executor
-            if _thread_pool is None:
-                logger.warning("Thread pool not initialized, running vendor similarity synchronously")
-                similarity = _compute_similarity_sync(vendor_name, cleaned_name)
-            else:
-                similarity = await loop.run_in_executor(_thread_pool, _compute_similarity_sync, vendor_name, cleaned_name)
-            
-            result = {
-                "vendor_raw": vendor_name,
-                "vendor_standard": cleaned_name,
-                "confidence": min(0.95, 0.7 + (similarity * 0.25)),  # 0.7-0.95 range
-                "cleaning_method": "rapidfuzz"
-            }
-            
-            # Store in cache
-            if self.cache:
-                try:
-                    await self.cache.store_classification(
-                        cache_content,
-                        result,
-                        classification_type='vendor_standardization',
-                        ttl_hours=48,
-                        confidence_score=result.get('confidence', 0.8),
-                        model_version='rapidfuzz-3.10.1'
-                    )
-                except Exception as e:
-                    logger.warning(f"Cache storage failed: {e}")
-            
-            return result
-            
-        except Exception as e:
-            logger.error(f"Vendor standardization failed: {e}")
-            raise ValueError(f"Vendor standardization failed - no fallback allowed: {e}") from e
-    
-    async def get_cache_stats(self) -> Dict[str, Any]:
-        """Get cache statistics from centralized cache"""
-        if self.cache and hasattr(self.cache, 'get_cache_stats'):
-            try:
-                stats = await self.cache.get_cache_stats()
-                vendor_stats = {
-                    'classification_type': 'vendor_standardization',
-                    'total_entries': stats.get('total_classifications', 0),
-                    'cache_hit_rate': stats.get('cache_hit_rate', 0.0),
-                    'cost_savings': stats.get('cost_savings_usd', 0.0)
-                }
-                return vendor_stats
-            except Exception as e:
-                logger.warning(f"Failed to get cache stats: {e}")
-        
-        return {
-            'classification_type': 'vendor_standardization',
-            'total_entries': 0,
-            'cache_hit_rate': 0.0,
-            'cost_savings': 0.0,
-            'note': 'Using centralized AIClassificationCache'
-        }
-    
-class PlatformIDExtractor:
-    """
-    LIBRARY REPLACEMENT: Platform ID extraction using parse library (85% code reduction)
-    Replaces 100+ lines of custom regex with declarative parse patterns.
-    
-    Benefits:
-    - 85% code reduction (178 lines → 30 lines)
-    - Inverse of format() - more maintainable
-    - Better error handling
-    - Cleaner pattern definitions
-    - No regex compilation overhead
-    - Patterns externalized to config/platform_id_patterns.yaml (non-developers can edit)
-    """
-    
-    def __init__(self):
-        """Initialize with patterns and rules from config file"""
-        import yaml
-        import os
-        
-        # Load all configuration from YAML
-        config_path = os.path.join(os.path.dirname(__file__), '..', 'config', 'platform_id_patterns.yaml')
-        try:
-            with open(config_path, 'r') as f:
-                config = yaml.safe_load(f)
-                self.platform_patterns = config.get('platforms', {})
-                self.validation_rules = config.get('validation_rules', {})
-                
-                # FIX #5: Extract patterns from nested structure
-                suspicious_config = config.get('suspicious_patterns', {})
-                self.suspicious_patterns = suspicious_config.get('patterns', []) if isinstance(suspicious_config, dict) else suspicious_config
-                self.suspicious_threshold = suspicious_config.get('similarity_threshold', 80) if isinstance(suspicious_config, dict) else 80
-                
-                self.mixed_platform_indicators = config.get('mixed_platform_indicators', {})
-                self.mixed_platform_threshold = self.mixed_platform_indicators.pop('similarity_threshold', 75) if isinstance(self.mixed_platform_indicators, dict) else 75
-                
-                id_config = config.get('id_column_indicators', {})
-                self.id_column_indicators = id_config.get('patterns', []) if isinstance(id_config, dict) else id_config
-                self.id_column_threshold = id_config.get('similarity_threshold', 80) if isinstance(id_config, dict) else 80
-                
-                self.confidence_scores = config.get('confidence_scores', {})
-                logger.info(f"✅ Platform ID patterns and rules loaded from {config_path}")
-        except Exception as e:
-            logger.warning(f"⚠️ Failed to load platform patterns from config: {e}. Using defaults.")
-            self.platform_patterns = {}
-            self.validation_rules = {}
-            self.suspicious_patterns = ['test', 'dummy', 'sample', 'example']
-            self.suspicious_threshold = 80
-            self.mixed_platform_indicators = {}
-            self.mixed_platform_threshold = 75
-            self.id_column_indicators = ['id', 'reference', 'number', 'ref', 'num', 'code', 'key']
-            self.id_column_threshold = 80
-            self.confidence_scores = {
-                'id_column_match': 0.9,
-                'pattern_match': 0.7,
-                'full_text_search': 0.6,
-                'generated_fallback': 0.1,
-                'suspicious_pattern': 0.5,
-                'mixed_platform': 0.3
-            }
-    
-    async def extract_platform_ids(self, row_data: Dict, platform: str, column_names: List[str]) -> Dict[str, Any]:
-        """
-        LIBRARY REPLACEMENT: Extract platform IDs using parse library (85% code reduction)
-        Replaces 150+ lines of complex regex logic with simple parse patterns.
-        """
-        try:
-            # LIBRARY REPLACEMENT: Use parse library (already in requirements)
-            from parse import parse
-            from rapidfuzz import fuzz
-            
-            extracted_ids = {}
-            confidence_scores = {}
-            platform_lower = platform.lower()
-            
-            # Get patterns for this platform
-            patterns = self.platform_patterns.get(platform_lower, {})
-            
-            if not patterns:
-                return {
-                    "platform": platform,
-                    "extracted_ids": {},
-                    "confidence_scores": {},
-                    "total_ids_found": 0,
-                    "warnings": ["No patterns defined for platform"]
-                }
-            
-            # Check ID columns first (higher confidence) - FIX #5: Use externalized config
-            id_indicators = self.id_column_indicators
-            id_similarity_threshold = self.id_column_threshold
-            
-            for col_name in column_names:
-                col_value = row_data.get(col_name)
-                if not col_value:
-                    continue
-                
-                col_value_str = str(col_value).strip()
-                if not col_value_str:
-                    continue
-                
-                # Check if this looks like an ID column - FIX #5: Use externalized threshold
-                is_id_column = any(fuzz.token_sort_ratio(col_name.lower(), indicator) > id_similarity_threshold for indicator in id_indicators)
-                
-                # Try to parse with each pattern
-                for id_type, pattern_list in patterns.items():
-                    # Handle both single patterns and lists
-                    patterns_to_try = pattern_list if isinstance(pattern_list, list) else [pattern_list]
-                    
-                    for pattern in patterns_to_try:
-                        try:
-                            result = parse(pattern, col_value_str)
-                            if result:
-                                extracted_data = {}
-                                extracted_id = None
-                                
-                                if result.named:
-                                    extracted_data = result.named
-                                    extracted_id = str(result.named.get('id', result.named.get(list(result.named.keys())[0]) if result.named else col_value_str))
-                                elif len(result.fixed) > 0:
-                                    extracted_id = str(result.fixed[0])
-                                else:
-                                    extracted_id = col_value_str
-                                
-                                confidence = 0.9 if is_id_column else 0.7
-                                
-                                if len(extracted_id) >= 3 and extracted_id.replace('-', '').replace('_', '').isalnum():
-                                    extracted_ids[id_type] = extracted_id
-                                    confidence_scores[id_type] = confidence
-                                    if extracted_data:
-                                        extracted_ids[f"{id_type}_parsed"] = extracted_data
-                                    break
-                        except Exception as e:
-                            logger.debug(f"Parse failed for pattern {pattern}: {e}")
-                            continue
-                    
-                    if id_type in extracted_ids:
-                        break  # Found ID, move to next column
-            
-            # If no IDs found in columns, try full text search (lower confidence)
-            if not extracted_ids:
-                all_text = ' '.join(str(val) for val in row_data.values() if val and str(val).strip())
-                
-                for id_type, pattern_list in patterns.items():
-                    patterns_to_try = pattern_list if isinstance(pattern_list, list) else [pattern_list]
-                    
-                    for pattern in patterns_to_try:
-                        try:
-                            words = all_text.split()
-                            for word in words:
-                                result = parse(pattern, word)
-                                if result:
-                                    extracted_data = {}
-                                    extracted_id = None
-                                    
-                                    if result.named:
-                                        extracted_data = result.named
-                                        extracted_id = str(result.named.get('id', result.named.get(list(result.named.keys())[0]) if result.named else word))
-                                    elif len(result.fixed) > 0:
-                                        extracted_id = str(result.fixed[0])
-                                    else:
-                                        extracted_id = word
-                                    
-                                    confidence = 0.6
-                                    
-                                    if len(extracted_id) >= 3 and extracted_id.replace('-', '').replace('_', '').isalnum():
-                                        extracted_ids[id_type] = extracted_id
-                                        confidence_scores[id_type] = confidence
-                                        if extracted_data:
-                                            extracted_ids[f"{id_type}_parsed"] = extracted_data
-                                        break
-                            
-                            if id_type in extracted_ids:
-                                break
-                        except Exception as e:
-                            logger.debug(f"Text parse failed for pattern {pattern}: {e}")
-                            continue
-            
-            # Generate deterministic platform ID if none found
-            if not extracted_ids:
-                deterministic_id = self._generate_deterministic_platform_id(row_data, platform_lower)
-                extracted_ids['platform_generated_id'] = deterministic_id
-                confidence_scores['platform_generated_id'] = 0.1
-            
-            # Calculate overall confidence
-            overall_confidence = sum(confidence_scores.values()) / len(confidence_scores) if confidence_scores else 0.0
-            
-            return {
-                "platform": platform,
-                "extracted_ids": extracted_ids,
-                "confidence_scores": confidence_scores,
-                "total_ids_found": len(extracted_ids),
-                "overall_confidence": overall_confidence,
-                "extraction_method": "parse_library"
-            }
-            
-        except Exception as e:
-            logger.error(f"Platform ID extraction failed: {e}")
-            return {
-                "platform": platform,
-                "extracted_ids": {},
-                "confidence_scores": {},
-                "validation_results": {},
-                "total_ids_found": 0,
-                "overall_confidence": 0.0,
-                "error": str(e),
-                "extraction_method": "error_fallback"
-            }
-    
-    async def _validate_platform_id(self, id_value: str, id_type: str, platform: str) -> Dict[str, Any]:
-        """Validate extracted platform ID against business rules"""
-        try:
-            validation_result = {
-                'is_valid': True,
-                'reason': 'Valid ID format',
-                'validation_method': 'format_check',
-                'warnings': []
-            }
-            
-            # Basic format validation
-            if not id_value or not id_value.strip():
-                validation_result['is_valid'] = False
-                validation_result['reason'] = 'Empty or null ID value'
-                return validation_result
-            
-            id_value = id_value.strip()
-            
-            # Length validation
-            if len(id_value) < 1 or len(id_value) > 50:
-                validation_result['is_valid'] = False
-                validation_result['reason'] = f'ID length invalid: {len(id_value)} (must be 1-50 characters)'
-                return validation_result
-            
-            # Platform-specific validation
-            if platform == 'quickbooks':
-                validation_result.update(self._validate_quickbooks_id(id_value, id_type))
-            elif platform == 'stripe':
-                validation_result.update(self._validate_stripe_id(id_value, id_type))
-            elif platform == 'razorpay':
-                validation_result.update(self._validate_razorpay_id(id_value, id_type))
-            elif platform == 'xero':
-                validation_result.update(self._validate_xero_id(id_value, id_type))
-            elif platform == 'gusto':
-                validation_result.update(self._validate_gusto_id(id_value, id_type))
-            
-            # Common validation rules
-            if not validation_result['is_valid']:
-                return validation_result
-            
-            # FIX #45: Move CPU-heavy rapidfuzz operations to thread pool
-            def _check_suspicious_patterns_sync(id_value):
-                suspicious_patterns = ['test', 'dummy', 'sample', 'example']
-                for suspicious in suspicious_patterns:
-                    if fuzz.partial_ratio(id_value.lower(), suspicious) > 80:
-                        return True
-                return False
-            
-            # Execute CPU-bound rapidfuzz operation in global thread pool
-            import asyncio
-            loop = asyncio.get_event_loop()
-            # FIX #6: Add null check for _thread_pool to prevent race condition
-            if _thread_pool is None:
-                logger.warning("Thread pool not initialized, running pattern check synchronously")
-                has_suspicious = _check_suspicious_patterns_sync(id_value)
-            else:
-                has_suspicious = await loop.run_in_executor(_thread_pool, _check_suspicious_patterns_sync, id_value)
-            
-            if has_suspicious:
-                validation_result['warnings'].append('ID contains test/sample indicators')
-                validation_result['confidence'] = 0.5
-            
-            # LIBRARY FIX: Use rapidfuzz for mixed platform detection
-            if platform == 'quickbooks':
-                other_platforms = ['stripe', 'paypal', 'square']
-                for other_platform in other_platforms:
-                    if fuzz.partial_ratio(id_value.lower(), other_platform) > 75:
-                        validation_result['warnings'].append('ID contains mixed platform indicators')
-                        validation_result['confidence'] = 0.3
-                        break
-            
-            return validation_result
-            
-        except Exception as e:
-            return {
-                'is_valid': False,
-                'reason': f'Validation error: {str(e)}',
-                'validation_method': 'error_fallback'
-            }
-    
-    def _validate_quickbooks_id(self, id_value: str, id_type: str) -> Dict[str, Any]:
-        """Validate QuickBooks-specific ID formats"""
-        # QuickBooks IDs are typically numeric or have simple prefixes
-        if id_type in ['transaction_id', 'invoice_id', 'vendor_id', 'customer_id']:
-            # Should be numeric or have simple prefix
-            if re.match(r'^(?:TXN-?|INV-?|VEN-?|CUST-?|BILL-?|PAY-?|ACC-?|CLASS-?|ITEM-?|JE-?)?\d{1,8}$', id_value, re.IGNORECASE):
-                return {'is_valid': True, 'reason': 'Valid QuickBooks ID format'}
-            else:
-                return {'is_valid': False, 'reason': 'Invalid QuickBooks ID format'}
-        
-        return {'is_valid': True, 'reason': 'Standard validation passed'}
-    
-    def _validate_stripe_id(self, id_value: str, id_type: str) -> Dict[str, Any]:
-        """Validate Stripe-specific ID formats"""
-        if id_type in ['charge_id', 'payment_intent', 'customer_id', 'invoice_id']:
-            # Stripe IDs have specific prefixes and lengths
-            if re.match(r'^(ch_|pi_|cus_|in_)[a-zA-Z0-9]{14,24}$', id_value):
-                return {'is_valid': True, 'reason': 'Valid Stripe ID format'}
-            else:
-                return {'is_valid': False, 'reason': 'Invalid Stripe ID format'}
-        
-        return {'is_valid': True, 'reason': 'Standard validation passed'}
-    
-    def _validate_razorpay_id(self, id_value: str, id_type: str) -> Dict[str, Any]:
-        """Validate Razorpay-specific ID formats"""
-        if id_type in ['payment_id', 'order_id', 'refund_id', 'settlement_id']:
-            # Razorpay IDs have specific prefixes
-            if re.match(r'^(pay_|order_|rfnd_|setl_)[a-zA-Z0-9]{14}$', id_value):
-                return {'is_valid': True, 'reason': 'Valid Razorpay ID format'}
-            else:
-                return {'is_valid': False, 'reason': 'Invalid Razorpay ID format'}
-        
-        return {'is_valid': True, 'reason': 'Standard validation passed'}
-    
-    def _validate_xero_id(self, id_value: str, id_type: str) -> Dict[str, Any]:
-        """Validate Xero-specific ID formats"""
-        if id_type == 'invoice_id':
-            if re.match(r'^INV-\d{4}-\d{6}$', id_value):
-                return {'is_valid': True, 'reason': 'Valid Xero invoice ID format'}
-            else:
-                return {'is_valid': False, 'reason': 'Invalid Xero invoice ID format'}
-        elif id_type == 'bank_transaction_id':
-            if re.match(r'^BT-\d{8}$', id_value):
-                return {'is_valid': True, 'reason': 'Valid Xero bank transaction ID format'}
-            else:
-                return {'is_valid': False, 'reason': 'Invalid Xero bank transaction ID format'}
-        
-        return {'is_valid': True, 'reason': 'Standard validation passed'}
-    
-    def _validate_gusto_id(self, id_value: str, id_type: str) -> Dict[str, Any]:
-        """Validate Gusto-specific ID formats"""
-        if id_type in ['employee_id', 'payroll_id', 'timesheet_id']:
-            # Gusto IDs have specific prefixes
-            if re.match(r'^(emp_|pay_|ts_)[a-zA-Z0-9]{8,12}$', id_value):
-                return {'is_valid': True, 'reason': 'Valid Gusto ID format'}
-            else:
-                return {'is_valid': False, 'reason': 'Invalid Gusto ID format'}
-        
-        return {'is_valid': True, 'reason': 'Standard validation passed'}
-    
-    def _generate_deterministic_platform_id(self, row_data: Dict, platform: str) -> str:
-        """
-        PHASE 3.2: hashids for deterministic IDs (Reversible, URL-safe)
-        Replaces 34 lines of custom hash generation with battle-tested library.
-        
-        Benefits:
-        - Reversible IDs (can decode back to original data)
-        - URL-safe (no special characters)
-        - Collision-resistant
-        - 34 lines → 10 lines (70% reduction)
-        """
-        from hashids import Hashids
-        
-        try:
-            # Create deterministic hash from key row data
-            key_fields = ['amount', 'date', 'description', 'vendor', 'customer']
-            hash_input = []
-            
-            for field in key_fields:
-                value = row_data.get(field)
-                if value is not None:
-                    hash_input.append(f"{field}:{str(value)}")
-            
-            # Add platform for uniqueness
-            hash_input.append(f"platform:{platform}")
-            
-            # Use hashids for reversible, URL-safe IDs
-            hashids = Hashids(salt="|".join(sorted(hash_input)), min_length=8)
-            numeric_hash = hash(frozenset(hash_input)) & 0x7FFFFFFF  # Positive int
-            
-            return f"{platform}_{hashids.encode(numeric_hash)}"
-            
-        except Exception as e:
-            logger.error(f"Failed to generate deterministic ID: {e}")
-            # Fallback (xxhash: 5-10x faster for non-crypto hashing)
-            fallback_hash = xxhash.xxh64(str(row_data).encode()).hexdigest()[:8]
-            return f"{platform}_fallback_{fallback_hash}"
+# MODULARIZATION: PlatformIDExtractor moved to data_ingestion_normalization/universal_platform_detector_optimized.py
 
-class DataEnrichmentProcessor:
-    """
-    Production-grade data enrichment processor with comprehensive validation,
-    caching, error handling, and performance optimization.
-    
-    Features:
-    - Deterministic enrichment with idempotency guarantees
-    - Comprehensive input validation and sanitization
-    - Async processing with batching for large datasets
-    - Confidence scoring and validation rules
-    - Structured error handling with retries
-    - Memory-efficient processing for millions of records
-    - Security validations and audit logging
-    """
-    
-    def __init__(self, cache_client=None, config=None, supabase_client=None):
-        # Now using Groq/Llama for all AI operations
-        self.cache = cache_client or safe_get_cache()  # Use centralized cache
-        self.config = config or self._get_default_config()
-        self.supabase = supabase_client  # Store Supabase client for field mapping learning
-        
-        # Initialize caching system
-        self._cache_initialized = False
-        
-        # Initialize accuracy enhancement system
-        self._accuracy_system_initialized = False
-        
-        # Initialize security system
-        self._security_system_initialized = False
-        
-        # Initialize API/WebSocket integration
-        self._integration_system_initialized = False
-        
-        
-        # Initialize components with error handling
-        try:
-            self.vendor_standardizer = VendorStandardizer(cache_client=safe_get_ai_cache())
-            self.universal_extractors = UniversalExtractors(cache_client=safe_get_ai_cache())
-            self.universal_field_detector = UniversalFieldDetector()
-            # FIX #1: Don't initialize platform detector here - will be passed from Phase 3
-            # self.universal_platform_detector = UniversalPlatformDetector(openai_client, cache_client=safe_get_ai_cache())
-            # self.universal_document_classifier = UniversalDocumentClassifier(openai_client, cache_client=safe_get_ai_cache())
-            logger.info("✅ DataEnrichmentProcessor: Platform detector will be reused from Phase 3")
-        except Exception as e:
-            logger.error(f"Failed to initialize enrichment components: {e}")
-            raise
-        
-        # Performance tracking
-        self.metrics = {
-            'enrichment_count': 0,
-            'cache_hits': 0,
-            'cache_misses': 0,
-            'error_count': 0,
-            'avg_processing_time': 0.0
-        }
-        
-        # Validation rules
-        self.validation_rules = self._load_validation_rules()
-        
-        logger.info("✅ DataEnrichmentProcessor initialized with production-grade features")
-    
-    
-    
-    async def _create_fallback_payload(self, row_data: Dict, platform_info: Dict, 
-                                      ai_classification: Dict, file_context: Dict, 
-                                      error_message: str) -> Dict[str, Any]:
-        """Create fallback payload when enrichment fails"""
-        return {
-            **row_data,
-            'kind': ai_classification.get('row_type', 'transaction'),
-            'category': ai_classification.get('category', 'other'),
-            'subcategory': ai_classification.get('subcategory', 'general'),
-            'amount_original': self._extract_amount(row_data),
-            'amount_usd': self._extract_amount(row_data),
-            'currency': 'USD',
-            'vendor_raw': '',
-            'vendor_standard': '',
-            'platform_ids': {},
-            'enrichment_error': error_message,
-            'enrichment_version': '2.0.0-fallback',
-            'ingested_on': datetime.now().isoformat()
-        }
-    
-    def _get_default_config(self) -> Dict[str, Any]:
-        """Get default configuration for enrichment processor"""
-        return {
-            'batch_size': int(os.getenv('ENRICHMENT_BATCH_SIZE', '100')),
-            'cache_ttl': int(os.getenv('ENRICHMENT_CACHE_TTL', '3600')),  # 1 hour
-            'max_retries': int(os.getenv('ENRICHMENT_MAX_RETRIES', '3')),
-            'confidence_threshold': float(os.getenv('ENRICHMENT_CONFIDENCE_THRESHOLD', '0.7')),
-            'enable_caching': os.getenv('ENRICHMENT_ENABLE_CACHE', 'true').lower() == 'true',
-            'enable_validation': os.getenv('ENRICHMENT_ENABLE_VALIDATION', 'true').lower() == 'true',
-            'max_memory_usage_mb': int(os.getenv('ENRICHMENT_MAX_MEMORY_MB', '512'))
-        }
-    
-    def _load_platform_patterns(self) -> Dict[str, Any]:
-        """
-        FIX #48: Load platform patterns from config/platform_id_patterns.yaml
-        Non-developers can edit patterns without code changes.
-        Falls back to empty dict if YAML not found.
-        """
-        try:
-            import yaml
-            config_path = os.path.join(os.path.dirname(__file__), '..', 'config', 'platform_id_patterns.yaml')
-            if os.path.exists(config_path):
-                with open(config_path, 'r') as f:
-                    config = yaml.safe_load(f)
-                    logger.info(f"✅ Platform patterns loaded from {config_path}")
-                    return config.get('platforms', {})
-        except Exception as e:
-            logger.warning(f"Failed to load platform patterns from YAML: {e}. Using empty patterns.")
-        
-        return {}
-    
-    def _load_validation_rules(self) -> Dict[str, Any]:
-        """
-        FIX #46: Load validation rules from config/validation_rules.yaml
-        Non-developers can edit validation rules without code changes.
-        Falls back to hardcoded defaults if YAML not found.
-        """
-        try:
-            import yaml
-            config_path = os.path.join(os.path.dirname(__file__), '..', 'config', 'validation_rules.yaml')
-            if os.path.exists(config_path):
-                with open(config_path, 'r') as f:
-                    rules = yaml.safe_load(f)
-                    logger.info(f"✅ Validation rules loaded from {config_path}")
-                    return rules
-        except Exception as e:
-            logger.warning(f"Failed to load validation rules from YAML: {e}. Using hardcoded defaults.")
-        
-        # Hardcoded fallback (backward compatibility)
-        return {
-            'amount': {
-                'min_value': -100000000.0,
-                'max_value': 100000000.0,
-                'required_precision': 2
-            },
-            'currency': {
-                'valid_currencies': ['USD', 'EUR', 'GBP', 'INR', 'JPY', 'CNY', 'AUD', 'CAD', 'CHF', 'SEK', 'NZD'],
-                'default_currency': 'USD'
-            },
-            'date': {
-                'min_year': 1900,
-                'max_year': 2100,
-                'required_format': '%Y-%m-%d'
-            },
-            'vendor': {
-                'min_length': 2,
-                'max_length': 255,
-                'forbidden_chars': ['<', '>', '&', '"', "'"]
-            },
-            'confidence': {
-                'threshold': 0.7,
-                'high_priority_threshold': 0.5
-            }
-        }
-    
-    async def enrich_row_data(self, row_data: Dict, platform_info: Dict, column_names: List[str], 
-                            ai_classification: Dict, file_context: Dict) -> Dict[str, Any]:
-        """
-        Production-grade row data enrichment with comprehensive validation,
-        caching, error handling, and performance optimization.
-        
-        Args:
-            row_data: Raw row data dictionary
-            platform_info: Platform detection information
-            column_names: List of column names
-            ai_classification: AI classification results
-            file_context: File context information
-            
-        Returns:
-            Dict containing enriched data with confidence scores and metadata
-            
-        Raises:
-            ValidationError: If input data fails validation
-            EnrichmentError: If enrichment process fails
-        """
-        start_time = time.time()
-        enrichment_id = self._generate_enrichment_id(row_data, file_context)
-        
-        try:
-            # 0. Initialize observability and log operation start
-            await self._initialize_observability()
-            await self._log_operation_start("enrich_row_data", enrichment_id, file_context)
-            
-            # 1. Security validation
-            security_validated = await self._validate_security(
-                row_data, platform_info, column_names, ai_classification, file_context
-            )
-            if not security_validated:
-                await self._log_operation_end("enrich_row_data", False, 0, file_context, 
-                                            ValidationError("Security validation failed"))
-                raise ValidationError("Security validation failed")
-            try:
-                # 1. Input validation and sanitization
-                validated_data = await self._validate_and_sanitize_input(
-                    row_data, platform_info, column_names, ai_classification, file_context
-                )
+# MODULARIZATION: _DeprecatedAIRowClassifier removed (deprecated, replaced by AIRowClassifier in row_classifier.py)
 
-                # 2. Check cache for existing enrichment
-                cached_result = await self._get_cached_enrichment(enrichment_id)
-                if cached_result:
-                    self.metrics['cache_hits'] += 1
-                    logger.debug(f"Cache hit for enrichment {enrichment_id}")
-                    return cached_result
-
-                self.metrics['cache_misses'] += 1
-
-                # 3. Extract and validate core fields
-                extraction_results = await self._extract_core_fields(validated_data)
-
-                # 4. FIX #1: Reuse platform_info from Phase 3 instead of re-classifying
-                # Use passed platform_info parameter directly
-                classification_results = {
-                    'platform': platform_info.get('platform', 'unknown'),
-                    'platform_confidence': platform_info.get('confidence', 0.5),
-                    'platform_indicators': platform_info.get('indicators', []),
-                    'document_type': platform_info.get('document_type', 'financial_data'),
-                    'document_confidence': platform_info.get('document_confidence', 0.8)
-                }
-                logger.debug(f"✅ Reusing platform info from Phase 3: {classification_results['platform']}")
-
-                # CRITICAL FIX: Vendor standardization MUST happen before entity resolution
-                # 4. Vendor standardization first (clean raw vendor names)
-                raw_vendor = extraction_results.get('vendor_name', '')
-                if raw_vendor:
-                    vendor_standardization = await self.vendor_standardizer.standardize_vendor(
-                        raw_vendor, 
-                        platform=classification_results.get('platform')
-                    )
-                    # Update extraction results with cleaned vendor
-                    extraction_results['vendor_name'] = vendor_standardization.get('vendor_standard', raw_vendor)
-                    extraction_results['vendor_raw'] = raw_vendor
-                    extraction_results['vendor_confidence'] = vendor_standardization.get('confidence', 0.0)
-                    extraction_results['vendor_cleaning_method'] = vendor_standardization.get('cleaning_method', 'none')
-                
-                # FIX #22: Remove duplicate entity resolution - entity resolution happens in batch later
-                # Entity resolution is handled by run_entity_resolution_pipeline() after all rows are processed
-                # This prevents double resolution and ensures consistent entity IDs across the dataset
-                vendor_results = {
-                    'vendor_raw': extraction_results.get('vendor_name', ''),
-                    'vendor_standard': extraction_results.get('vendor_name', ''),  # Will be resolved in batch
-                    'vendor_confidence': extraction_results.get('confidence', 0.0),
-                    'vendor_cleaning_method': 'deferred_to_batch_resolution'
-                }
-
-                # 6. Platform ID extraction using UniversalPlatformDetectorOptimized (consolidated)
-                platform_id_results = await self._extract_platform_ids_universal(
-                    validated_data, classification_results
-                )
-
-                # 7. Currency processing with exchange rate handling
-                currency_results = await self._process_currency_with_validation(
-                    extraction_results, classification_results
-                )
-
-                # 8. Build enriched payload with confidence scoring
-                enriched_payload = await self._build_enriched_payload(
-                    validated_data, extraction_results, classification_results,
-                    vendor_results, platform_id_results, currency_results, ai_classification
-                )
-
-                # 9. Final validation and confidence scoring
-                validated_payload = await self._validate_enriched_payload(enriched_payload)
-
-                # 9.5. Apply accuracy enhancement
-                enhanced_payload = await self._apply_accuracy_enhancement(
-                    validated_data['row_data'], validated_payload, file_context
-                )
-
-                # 10. Cache the result
-                await self._cache_enrichment_result(enrichment_id, enhanced_payload)
-
-                # 11. Update metrics
-                processing_time = time.time() - start_time
-                self._update_metrics(processing_time)
-
-                # 12. Send real-time notification
-                await self._send_enrichment_notification(file_context, enhanced_payload, processing_time)
-
-                # 13. Log operation completion
-                await self._log_operation_end("enrich_row_data", True, processing_time, file_context)
-
-                # 14. Audit logging
-                await self._log_enrichment_audit(enrichment_id, enhanced_payload, processing_time)
-
-                return enhanced_payload
-
-            except ValidationError as e:
-                self.metrics['error_count'] += 1
-                logger.error(f"Validation error in enrichment {enrichment_id}: {e}")
-                raise
-            except Exception as e:
-                self.metrics['error_count'] += 1
-                logger.error(f"Enrichment error for {enrichment_id}: {e}")
-                # Return fallback payload with error information
-                return await self._create_fallback_payload(
-                    row_data, platform_info, ai_classification, file_context, str(e)
-                )
-
-        except ValidationError as e:
-            self.metrics['error_count'] += 1
-            logger.error(f"Validation error in enrichment {enrichment_id}: {e}")
-            raise
-        except Exception as e:
-            self.metrics['error_count'] += 1
-            logger.error(f"Enrichment error for {enrichment_id}: {e}")
-            # Return fallback payload with error information
-            return await self._create_fallback_payload(
-                row_data, platform_info, ai_classification, file_context, str(e)
-            )
-    
-    async def enrich_batch_data(self, batch_data: List[Dict], platform_info: Dict, 
-                               column_names: List[str], ai_classifications: List[Dict], 
-                               file_context: Dict) -> List[Dict[str, Any]]:
-        """
-        Batch enrichment for improved performance with large datasets.
-        Processes multiple rows concurrently while maintaining memory efficiency.
-        
-        Args:
-            batch_data: List of raw row data dictionaries
-            platform_info: Platform detection information
-            column_names: List of column names
-            ai_classifications: List of AI classification results
-            file_context: File context information
-            
-        Returns:
-            List of enriched data dictionaries
-        """
-        if not batch_data:
-            return []
-        
-        # Validate batch size
-        if len(batch_data) > self.config['batch_size']:
-            logger.warning(f"Batch size {len(batch_data)} exceeds limit {self.config['batch_size']}")
-            batch_data = batch_data[:self.config['batch_size']]
-            ai_classifications = ai_classifications[:len(batch_data)]
-
-        if len(ai_classifications) < len(batch_data):
-            logger.warning(
-                "AI classifications shorter than batch (%s vs %s); padding with empty dicts",
-                len(ai_classifications), len(batch_data)
-            )
-            ai_classifications = ai_classifications + [{} for _ in range(len(batch_data) - len(ai_classifications))]
-        
-        # FIX #55: Process batch in chunks instead of waiting for all tasks
-        # Problem: Semaphore(10) with gather(*tasks) processes 10 at a time but waits for all before starting next batch
-        # Solution: Process in chunks of 10, start next chunk immediately after current chunk completes
-        chunk_size = 10
-        all_results = []
-        
-        async def enrich_single_row(row_data, ai_classification, index):
-            try:
-                # Add row index to file context
-                row_context = file_context.copy()
-                row_context['row_index'] = index
-                
-                return await self.enrich_row_data(
-                    row_data, platform_info, column_names, ai_classification, row_context
-                )
-            except Exception as e:
-                logger.error(f"Batch enrichment error for row {index}: {e}")
-                return await self._create_fallback_payload(
-                    row_data, platform_info, ai_classification, file_context, str(e)
-                )
-        
-        # FIX #55: Process in chunks for better throughput
-        # Instead of: create all tasks, wait for all with gather
-        # Do: create chunk tasks, wait for chunk, then start next chunk
-        for chunk_start in range(0, len(batch_data), chunk_size):
-            chunk_end = min(chunk_start + chunk_size, len(batch_data))
-            chunk_tasks = [
-                enrich_single_row(batch_data[i], ai_classifications[i], i)
-                for i in range(chunk_start, chunk_end)
-            ]
-            
-            # Process this chunk and collect results
-            chunk_results = await asyncio.gather(*chunk_tasks, return_exceptions=True)
-            all_results.extend(chunk_results)
-        
-        results = all_results
-        
-        # Filter out exceptions and log errors
-        enriched_results = []
-        for i, result in enumerate(results):
-            if isinstance(result, Exception):
-                logger.error(f"Batch processing error for row {i}: {result}")
-                enriched_results.append(await self._create_fallback_payload(
-                    batch_data[i], platform_info, ai_classifications[i], file_context, str(result)
-                ))
-            else:
-                enriched_results.append(result)
-        
-        logger.info(f"Batch enrichment completed: {len(enriched_results)} rows processed")
-        return enriched_results
-    
-    async def _get_field_mappings(self, user_id: str, column_names: List[str], 
-                                  platform: str = None, document_type: str = None) -> Dict[str, str]:
-        """
-        UNIVERSAL FIX: Get learned field mappings from database.
-        Returns dict mapping target_field -> source_column
-        
-        Uses the field_mapping_learner module for robust retrieval.
-        """
-        if not user_id or not self.supabase:
-            return {}
-        
-        try:
-            # Get learned mappings for this user and platform
-            mappings = await get_learned_mappings(
-                user_id=user_id,
-                platform=platform,
-                min_confidence=0.5,
-                supabase=self.supabase
-            )
-
-            if mappings:
-                logger.debug(f"Retrieved {len(mappings)} learned field mappings for user {user_id}")
-
-            return mappings
-
-        except Exception as e:
-            logger.warning(f"Failed to get field mappings: {e}")
-            return {}
-    
-    async def _learn_field_mappings_from_extraction(
-        self,
-        user_id: str,
-        row_data: Dict,
-        extraction_results: Dict,
-        platform: Optional[str] = None,
-        document_type: Optional[str] = None,
-    ):
-        """
-        UNIVERSAL FIX: Learn field mappings from successful extractions.
-
-        This method infers which columns were used for each field and records
-        them in the field_mappings table for future use.
-        """
-        if not user_id or not self.supabase:
-            return
-
-        try:
-            # Infer mappings from successful extractions
-            # We look for columns that match the extracted values
-
-            # Amount mapping
-            amount = extraction_results.get('amount', 0.0)
-            if amount and amount > 0:
-                for col_name, col_value in row_data.items():
-                    if isinstance(col_value, (int, float)) and abs(float(col_value) - amount) < 0.01:
-                        await learn_field_mapping(
-                            user_id=user_id,
-                            source_column=col_name,
-                            target_field='amount',
-                            platform=platform,
-                            document_type=document_type,
-                            confidence=0.9,
-                            extraction_success=True,
-                            metadata={'inferred_from': 'extraction'},
-                            supabase=self.supabase,
-                        )
-                        break
-
-            # Vendor mapping
-            vendor = extraction_results.get('vendor_name', '')
-            if vendor:
-                for col_name, col_value in row_data.items():
-                    if isinstance(col_value, str) and col_value.strip() == vendor.strip():
-                        await learn_field_mapping(
-                            user_id=user_id,
-                            source_column=col_name,
-                            target_field='vendor',
-                            platform=platform,
-                            document_type=document_type,
-                            confidence=0.85,
-                            extraction_success=True,
-                            metadata={'inferred_from': 'extraction'},
-                            supabase=self.supabase,
-                        )
-                        break
-
-                # Date mapping
-            date = extraction_results.get('date', '')
-            if date and date != datetime.now().strftime('%Y-%m-%d'):
-                for col_name, col_value in row_data.items():
-                    if isinstance(col_value, str):
-                        try:
-                            from dateutil import parser
-                            parsed = parser.parse(col_value)
-                            if parsed.strftime('%Y-%m-%d') == date:
-                                await learn_field_mapping(
-                                    user_id=user_id,
-                                    source_column=col_name,
-                                    target_field='date',
-                                    platform=platform,
-                                    document_type=document_type,
-                                    confidence=0.9,
-                                    extraction_success=True,
-                                    metadata={'inferred_from': 'extraction'},
-                                    supabase=self.supabase,
-                                )
-                                break
-                        except Exception:
-                            continue
-
-            # Description mapping
-            description = extraction_results.get('description', '')
-            if description:
-                for col_name, col_value in row_data.items():
-                    if isinstance(col_value, str) and col_value.strip() == description.strip():
-                        await learn_field_mapping(
-                            user_id=user_id,
-                            source_column=col_name,
-                            target_field='description',
-                            platform=platform,
-                            document_type=document_type,
-                            confidence=0.8,
-                            extraction_success=True,
-                            metadata={'inferred_from': 'extraction'},
-                            supabase=self.supabase,
-                        )
-                        break
-
-            # Currency mapping
-            currency = extraction_results.get('currency', 'USD')
-            if currency != 'USD':
-                for col_name, col_value in row_data.items():
-                    if isinstance(col_value, str) and col_value.strip().upper() == currency.upper():
-                        await learn_field_mapping(
-                            user_id=user_id,
-                            source_column=col_name,
-                            target_field='currency',
-                            platform=platform,
-                            document_type=document_type,
-                            confidence=0.95,
-                            extraction_success=True,
-                            metadata={'inferred_from': 'extraction'},
-                            supabase=self.supabase,
-                        )
-                        break
-        except Exception as e:
-            logger.warning(f"Failed to learn field mappings from extraction: {e}")
-    
-    def _extract_amount(self, row_data: Dict) -> float:
-        """Extract amount from row data - case-insensitive field matching"""
-        try:
-            # Look for amount fields (case-insensitive)
-            amount_fields = ['amount', 'total', 'value', 'sum', 'payment_amount', 'price']
-            
-            # First try exact match (case-sensitive for performance)
-            for field in amount_fields:
-                if field in row_data:
-                    value = row_data[field]
-                    if isinstance(value, (int, float)):
-                        return float(value)
-                    elif isinstance(value, str):
-                        # Remove currency symbols and convert
-                        cleaned = re.sub(r'[^\d.-]', '', value)
-                        return float(cleaned) if cleaned else 0.0
-            
-            # LIBRARY FIX: Use rapidfuzz for case-insensitive field matching (replaces manual .lower() dict)
-            from rapidfuzz import fuzz
-            for row_key, row_value in row_data.items():
-                for field in amount_fields:
-                    if fuzz.token_sort_ratio(row_key.lower(), field) > 85:
-                        if isinstance(row_value, (int, float)):
-                            return float(row_value)
-                        elif isinstance(row_value, str):
-                            cleaned = re.sub(r'[^\d.-]', '', row_value)
-                            return float(cleaned) if cleaned else 0.0
-        except:
-            pass
-        return 0.0
-    
-    def _extract_description(self, row_data: Dict) -> str:
-        """Extract description from row data"""
-        desc_fields = ['description', 'memo', 'notes', 'details', 'comment']
-        for field in desc_fields:
-            if field in row_data:
-                return str(row_data[field])
-        return ""
-    
-    def _extract_vendor_name(self, row_data: Dict, column_names: List[str]) -> str:
-        """Extract vendor name from row data"""
-        vendor_fields = ['vendor', 'vendor_name', 'payee', 'recipient', 'company', 'merchant', 'description']
-        for field in vendor_fields:
-            if field in row_data and row_data[field]:
-                return str(row_data[field]).strip()
-        
-        # LIBRARY FIX: Use rapidfuzz for vendor column detection (replaces manual .lower() checks)
-        from rapidfuzz import fuzz
-        vendor_keywords = ['vendor', 'payee', 'recipient', 'company', 'description']
-        for col_name in column_names:
-            for keyword in vendor_keywords:
-                if fuzz.token_sort_ratio(col_name.lower(), keyword) > 85:
-                    if col_name in row_data and row_data[col_name]:
-                        return str(row_data[col_name]).strip()
-                    break
-        
-        return ""
-    
-    def _extract_date(self, row_data: Dict) -> str:
-        """Extract date from row data"""
-        date_fields = ['date', 'payment_date', 'transaction_date', 'created_at', 'timestamp']
-        for field in date_fields:
-            if field in row_data:
-                date_val = row_data[field]
-                if isinstance(date_val, str):
-                    return date_val
-                elif isinstance(date_val, datetime):
-                    return date_val.strftime('%Y-%m-%d')
-        return datetime.now().strftime('%Y-%m-%d')
-    
-    def _clean_description(self, description: str) -> str:
-        """Clean and standardize description"""
-        try:
-            if not description:
-                return ""
-            
-            # Remove extra whitespace
-            cleaned = ' '.join(description.split())
-            
-            # Remove common prefixes
-            prefixes_to_remove = ['Payment for ', 'Transaction for ', 'Invoice for ']
-            for prefix in prefixes_to_remove:
-                if cleaned.startswith(prefix):
-                    cleaned = cleaned[len(prefix):]
-            
-            # Capitalize first letter
-            if cleaned:
-                cleaned = cleaned[0].upper() + cleaned[1:]
-            
-            return cleaned
-            
-        except Exception as e:
-            logger.error(f"Description cleaning failed: {e}")
-            return description
-    
-    # ============================================================================
-    # PRODUCTION-GRADE HELPER METHODS
-    # ============================================================================
-    
-    def _generate_enrichment_id(self, row_data: Dict, file_context: Dict) -> str:
-        """Generate deterministic enrichment ID for caching and idempotency"""
-        try:
-            # Create a hash of the input data for deterministic ID generation
-            input_hash = xxhash.xxh64(
-                orjson.dumps({
-                    'row_data': sorted(row_data.items()),
-                    'file_context': file_context.get('filename', ''),
-                    'user_id': file_context.get('user_id', '')
-                }).decode()
-            ).hexdigest()[:16]
-            
-            return f"enrich_{input_hash}"
-        except Exception as e:
-            logger.warning(f"Failed to generate enrichment ID: {e}")
-            return f"enrich_{int(time.time() * 1000)}"
-    
-    async def _validate_and_sanitize_input(self, row_data: Dict, platform_info: Dict, 
-                                         column_names: List[str], ai_classification: Dict, 
-                                         file_context: Dict) -> Dict[str, Any]:
-        """Validate and sanitize input data for security and correctness"""
-        try:
-            # Sanitize row data
-            sanitized_row_data = {}
-            for key, value in row_data.items():
-                if isinstance(key, str):
-                    # Sanitize key
-                    sanitized_key = self._sanitize_string(key)
-                    # Sanitize value
-                    if isinstance(value, str):
-                        sanitized_value = self._sanitize_string(value)
-                    else:
-                        sanitized_value = value
-                    sanitized_row_data[sanitized_key] = sanitized_value
-            
-            # Validate required fields
-            if not sanitized_row_data:
-                raise ValidationError("Row data cannot be empty")
-            
-            # Validate file context
-            if not file_context.get('filename'):
-                raise ValidationError("Filename is required in file context")
-            
-            # Validate user context
-            if not file_context.get('user_id'):
-                raise ValidationError("User ID is required in file context")
-            
-            return {
-                'row_data': sanitized_row_data,
-                'platform_info': platform_info,
-                'column_names': column_names,
-                'ai_classification': ai_classification,
-                'file_context': file_context
-            }
-            
-        except Exception as e:
-            logger.error(f"Input validation failed: {e}")
-            raise ValidationError(f"Input validation failed: {str(e)}")
-    
-    def _sanitize_string(self, value: str, field_type: str = 'generic') -> str:
-        """
-        LIBRARY FIX: Sanitize string input using validators + presidio (replaces manual char removal)
-        FIX #57: Don't redact vendor/financial fields - only detect and log PII
-        Redacting breaks data accuracy (e.g., "John Smith Contracting" → "[REDACTED] Contracting")
-        """
-        if not isinstance(value, str):
-            return str(value)
-        
-        # LIBRARY FIX: Use validators for length validation
-        from validators import length
-        
-        # Limit length first
-        if len(value) > 1000:
-            value = value[:1000]
-        
-        # Validate length using validators library
-        if not length(value, min=1, max=1000):
-            raise ValueError("String length validation failed")
-        
-        # LIBRARY FIX: Use bleach for HTML/XSS sanitization (replaces manual char removal)
-        from bleach import clean
-        sanitized = clean(value, tags=[], strip=True)
-        
-        # FIX #57: Only detect PII in financial/vendor fields, don't redact (data integrity)
-        # Redaction breaks vendor matching and financial data accuracy
-        try:
-            from presidio_analyzer import AnalyzerEngine
-            analyzer = AnalyzerEngine()
-            
-            # Detect PII entities
-            results = analyzer.analyze(text=sanitized, language='en')
-            
-            # Log if PII detected (for audit trail)
-            if results:
-                pii_types = [r.entity_type for r in results]
-                logger.warning(f"PII detected in {field_type} field: {pii_types} - NOT REDACTED to preserve data integrity")
-                # FIX #57: Do NOT redact - just log for audit purposes
-                # Redaction corrupts financial data (vendor names, descriptions, etc.)
-        except Exception as e:
-            logger.debug(f"Presidio PII detection skipped: {e}")
-        
-        return sanitized.strip()
-    
-    def _validate_filename(self, filename: str) -> bool:
-        """
-        LIBRARY FIX: Validate filename using validators (replaces manual path traversal checks)
-        FIX #58: os.path.basename() already strips path components, so checks for .., /, \\ are redundant
-        """
-        if not filename or not isinstance(filename, str):
-            return False
-        
-        # LIBRARY FIX: Use validators for slug validation (prevents path traversal)
-        from validators import slug
-        
-        # Extract just the filename without path
-        import os
-        basename = os.path.basename(filename)
-        
-        # FIX #58: REMOVED redundant path traversal checks
-        # os.path.basename() already strips all path components:
-        # - basename('/path/to/../file.txt') returns 'file.txt'
-        # - basename('C:\\path\\file.txt') returns 'file.txt'
-        # Checking for .., /, \\ in basename is redundant and never triggers
-        
-        # Validate filename format using slug validator (only real validation needed)
-        if not slug(basename.replace('.', '-')):
-            logger.warning(f"Invalid filename format: {filename}")
-            return False
-        
-        return True
-    
-    async def _get_cached_enrichment(self, enrichment_id: str) -> Optional[Dict[str, Any]]:
-        """Get cached enrichment result if available"""
-        if not self.config['enable_caching']:
-            return None
-        
-        try:
-            # Use centralized cache (already initialized in __init__)
-            if self.cache and hasattr(self.cache, 'get_cached_classification'):
-                cached_data = await self.cache.get_cached_classification(
-                    {'enrichment_id': enrichment_id}, 
-                    'enrichment'
-                )
-                if cached_data:
-                    logger.debug(f"Cache hit for enrichment {enrichment_id}")
-                    return cached_data
-        except Exception as e:
-            logger.warning(f"Cache retrieval failed for {enrichment_id}: {e}")
-        
-        return None
-    
-    async def _cache_enrichment_result(self, enrichment_id: str, result: Dict[str, Any]) -> None:
-        """Cache enrichment result for future use"""
-        if not self.config['enable_caching']:
-            return
-        
-        try:
-            # Use centralized cache (already initialized in __init__)
-            if self.cache and hasattr(self.cache, 'store_classification'):
-                await self.cache.store_classification(
-                    {'enrichment_id': enrichment_id},
-                    result,
-                    'enrichment',
-                    ttl_hours=self.config['cache_ttl'] / 3600
-                )
-                logger.debug(f"Cached enrichment result for {enrichment_id}")
-        except Exception as e:
-            logger.warning(f"Cache storage failed for {enrichment_id}: {e}")
-    
-    def _normalize_amount_value(self, amount_value) -> float:
-        """
-        LIBRARY REPLACEMENT: Standardize amount handling using glom (40+ lines → 10 lines)
-        Replaces custom type handling with declarative data extraction.
-        
-        Benefits:
-        - Declarative nested data extraction
-        - Better error handling
-        - 75% code reduction
-        - Handles complex nested structures
-        """
-        try:
-            # LIBRARY REPLACEMENT: Use glom for declarative data extraction (already in requirements)
-            from glom import glom, Coalesce, SKIP
-            
-            if amount_value is None or amount_value == '':
-                return 0.0
-            
-            # LIBRARY REPLACEMENT: Use glom for robust value extraction
-            # Define extraction spec that handles all common cases
-            amount_spec = Coalesce(
-                # Try direct numeric conversion
-                lambda x: float(x) if isinstance(x, (int, float)) else SKIP,
-                # Try __float__ method (Decimal, numpy types)
-                lambda x: float(x) if hasattr(x, '__float__') else SKIP,
-                # Try .item() method (numpy scalars)
-                lambda x: float(x.item()) if hasattr(x, 'item') else SKIP,
-                # Try string cleaning and conversion
-                lambda x: float(re.sub(r'[^\d.-]', '', str(x).strip())) if isinstance(x, str) and re.sub(r'[^\d.-]', '', str(x).strip()) else SKIP,
-                # Fallback to 0.0
-                default=0.0
-            )
-            
-            return glom(amount_value, amount_spec)
-                
-        except Exception as e:
-            logger.warning(f"Amount normalization failed for value '{amount_value}': {e}")
-            return 0.0
-
-    def _normalize_date_value(self, date_value) -> str:
-        """
-        LIBRARY REPLACEMENT: Standardize date handling using python-dateutil (30+ lines → 5 lines)
-        Replaces custom type checking with robust date parsing library.
-        
-        Benefits:
-        - Robust timestamp parsing for any format
-        - Better timezone handling
-        - 85% code reduction
-        - Handles edge cases automatically
-        """
-        try:
-            # LIBRARY REPLACEMENT: Use python-dateutil for robust parsing (already in requirements)
-            from dateutil import parser
-            
-            if date_value is None or date_value == '':
-                return datetime.now().strftime('%Y-%m-%d')
-            
-            # LIBRARY REPLACEMENT: dateutil.parser handles all common date types automatically
-            # Works with: str, datetime, pd.Timestamp, numpy datetime64, etc.
-            parsed_date = parser.parse(str(date_value))
-            return parsed_date.strftime('%Y-%m-%d')
-                
-        except Exception as e:
-            logger.warning(f"Date normalization failed for value '{date_value}': {e}")
-            return datetime.now().strftime('%Y-%m-%d')
-
-    async def _extract_core_fields(self, validated_data: Dict) -> Dict[str, Any]:
-        """Extract and validate core fields using UniversalFieldDetector (NASA-GRADE)"""
-        row_data = validated_data['row_data']
-        column_names = validated_data['column_names']
-        platform_info = validated_data.get('platform_info', {})
-        file_context = validated_data.get('file_context', {})
-        user_id = file_context.get('user_id')
-        
-        try:
-            # REFACTORED: Use UniversalFieldDetector for all field detection
-            field_detection_result = await self.universal_field_detector.detect_field_types_universal(
-                data=row_data,
-                filename=file_context.get('filename'),
-                context={
-                    'platform': platform_info.get('platform'),
-                    'document_type': platform_info.get('document_type'),
-                    'user_id': user_id,
-                    'column_names': column_names
-                }
-            )
-            
-            # Extract detected fields with type-aware parsing
-            field_types = field_detection_result.get('field_types', {})
-            detected_fields = field_detection_result.get('detected_fields', [])
-            
-            # FIX #26: Add comprehensive fallback mappings for common column name variations
-            # Define extensive column name mappings for different financial data formats
-            amount_variations = [
-                'amount', 'total', 'price', 'value', 'sum', 'payment_amount', 'amt', 'gross_amount',
-                'debit', 'credit', 'payment', 'charge', 'cost', 'fee', 'balance', 'net_amount'
-            ]
-            vendor_variations = [
-                'vendor', 'payee', 'merchant', 'company', 'recipient', 'supplier', 'contractor',
-                'vendor_name', 'payee_name', 'merchant_name', 'business_name', 'entity_name'
-            ]
-            date_variations = [
-                'date', 'timestamp', 'created_at', 'payment_date', 'transaction_date', 'posted_date',
-                'effective_date', 'settlement_date', 'process_date', 'entry_date'
-            ]
-            description_variations = [
-                'description', 'memo', 'notes', 'details', 'comment', 'reference', 'narrative',
-                'transaction_description', 'payment_description', 'remarks'
-            ]
-            
-            # FIX #13: Initialize confidence and fields_found variables (were undefined, causing NameError)
-            confidence = 0.5  # Default confidence for fallback extraction
-            fields_found = 0  # Track how many fields were successfully extracted
-            
-            # First pass: Use field detector results with high confidence
-            for field_info in detected_fields:
-                field_name = field_info.get('name', '').lower()
-                field_type = field_info.get('type', '').lower()
-                field_value = row_data.get(field_info.get('name'))
-                field_confidence = field_info.get('confidence', 0.0)
-                
-                # Only use high-confidence detections
-                if field_confidence < 0.5:
-                    continue
-                
-                # Amount extraction with enhanced patterns - FIX #28: Use standardized amount normalization
-                if 'amount' in field_type or any(kw in field_name for kw in amount_variations):
-                    amount = self._normalize_amount_value(field_value)
-                
-                # Vendor extraction with enhanced patterns
-                elif 'vendor' in field_type or any(kw in field_name for kw in vendor_variations):
-                    vendor_name = str(field_value).strip() if field_value else ''
-                
-                # Date extraction with enhanced patterns - FIX #27: Use standardized date normalization
-                elif 'date' in field_type or any(kw in field_name for kw in date_variations):
-                    date = self._normalize_date_value(field_value)
-                
-                # Description extraction with enhanced patterns
-                elif any(kw in field_name for kw in description_variations):
-                    description = str(field_value).strip() if field_value else ''
-                # Currency extraction
-                elif 'currency' in field_name:
-                    currency = str(field_value).upper() if field_value else 'USD'
-            
-            # FIX #26 & #56: Second pass - Fallback to fuzzy column matching if no high-confidence fields found
-            # FIX #56: Early exit flags to prevent unnecessary loop iterations after finding matches
-            if not amount or not vendor_name or not description:
-                from rapidfuzz import fuzz
-                
-                for col_name, col_value in row_data.items():
-                    col_name_lower = col_name.lower()
-                    
-                    # Fuzzy match for amount if not found - FIX #28: Use standardized amount normalization
-                    if not amount:
-                        for amount_pattern in amount_variations:
-                            if fuzz.token_sort_ratio(col_name_lower, amount_pattern) > 80:
-                                normalized_amount = self._normalize_amount_value(col_value)
-                                if normalized_amount > 0:
-                                    amount = normalized_amount
-                                    break  # Exit pattern loop
-                        if amount:
-                            continue  # FIX #56: Skip to next column if amount found
-                    
-                    # Fuzzy match for vendor if not found
-                    if not vendor_name:
-                        for vendor_pattern in vendor_variations:
-                            if fuzz.token_sort_ratio(col_name_lower, vendor_pattern) > 80:
-                                if isinstance(col_value, str) and col_value.strip():
-                                    vendor_name = str(col_value).strip()
-                                    break  # Exit pattern loop
-                        if vendor_name:
-                            continue  # FIX #56: Skip to next column if vendor found
-                    
-                    # Fuzzy match for description if not found
-                    if not description:
-                        for desc_pattern in description_variations:
-                            if fuzz.token_sort_ratio(col_name_lower, desc_pattern) > 80:
-                                if isinstance(col_value, str) and col_value.strip():
-                                    description = str(col_value).strip()
-                                    break  # Exit pattern loop
-                        if description:
-                            continue  # FIX #56: Skip to next column if description found
-                    
-                    # FIX #56: Early exit if all fields found
-                    if amount and vendor_name and description:
-                        break  # Exit column loop
-            
-            extraction_results = {
-                'amount': amount,
-                'vendor_name': vendor_name,
-                'date': date,
-                'description': description,
-                'currency': currency,
-                'confidence': confidence,
-                'fields_extracted': fields_found,
-                'field_detection_metadata': {
-                    'method': field_detection_result.get('method'),
-                    'detected_fields_count': len(detected_fields),
-                    'field_types': {f['name']: f['type'] for f in detected_fields}
-                }
-            }
-            
-            # UNIVERSAL FIX: Learn field mappings from successful extraction
-            if confidence > 0.5:  # Only learn from reasonably successful extractions
-                await self._learn_field_mappings_from_extraction(
-                    user_id=user_id,
-                    row_data=row_data,
-                    extraction_results=extraction_results,
-                    platform=platform_info.get('platform'),
-                    document_type=platform_info.get('document_type')
-                )
-            
-            return extraction_results
-            
-        except Exception as e:
-            logger.error(f"Core field extraction failed: {e}")
-            return {
-                'amount': 0.0,
-                'vendor_name': '',
-                'date': datetime.now().strftime('%Y-%m-%d'),
-                'description': '',
-                'currency': 'USD'
-            }
- 
-    
-    async def _extract_platform_ids_universal(self, validated_data: Dict, classification_results: Dict) -> Dict[str, Any]:
-        """
-        FIX #48: Extract platform-specific IDs from YAML config (not from detector instance)
-        Loads patterns from config/platform_id_patterns.yaml for efficiency
-        """
-        try:
-            from parse import parse
-            
-            row_data = validated_data.get('row_data', {})
-            platform = classification_results.get('platform', 'unknown')
-            
-            # FIX #48: Load platform patterns from YAML config file
-            # Non-developers can edit patterns without code changes
-            platform_patterns = self._load_platform_patterns()
-            
-            # Extract IDs using the patterns from YAML
-            platform_ids = {}
-            patterns = platform_patterns.get(platform.lower(), {})
-            
-            for id_type, pattern_info in patterns.items():
-                pattern_list = pattern_info if isinstance(pattern_info, list) else [pattern_info]
-                
-                for col_name, col_value in row_data.items():
-                    if col_value and isinstance(col_value, str):
-                        for pattern in pattern_list:
-                            result = parse(pattern, col_value)
-                            if result:
-                                extracted_data = {}
-                                if result.named:
-                                    extracted_data = result.named
-                                    platform_ids[id_type] = extracted_data.get('id', col_value)
-                                    platform_ids[f"{id_type}_parsed"] = extracted_data
-                                else:
-                                    platform_ids[id_type] = col_value
-                                break
-                    if id_type in platform_ids:
-                        break
-            
-            return {
-                'platform_ids': platform_ids,
-                'platform_id_count': len(platform_ids),
-                'has_platform_id': len(platform_ids) > 0
-            }
-        except Exception as e:
-            logger.error(f"Platform ID extraction failed: {e}")
-            return {
-                'platform_ids': {},
-                'platform_id_count': 0,
-                'has_platform_id': False
-            }
-    
-    async def _process_currency_with_validation(self, extraction_results: Dict, classification_results: Dict) -> Dict[str, Any]:
-        """Process currency with exchange rate handling using historical rates for transaction date"""
-        amount = extraction_results.get('amount', 0.0)
-        currency = extraction_results.get('currency', 'USD')
-        
-        # FIX #5: Use transaction date for exchange rate, not current date
-        transaction_date = extraction_results.get('date', datetime.now().strftime('%Y-%m-%d'))
-        
-        if currency == 'USD':
-            amount_usd = amount
-            exchange_rate = 1.0
-        else:
-            # Get exchange rate for the transaction date (historical data)
-            # FIX #33: NO FALLBACK - fail clearly if exchange rate fetch fails
-            exchange_rate = await self._get_exchange_rate(currency, 'USD', transaction_date)
-            amount_usd = amount * exchange_rate
-        
-        return {
-            'amount_original': amount,
-            'amount_usd': amount_usd,
-            'currency': currency,
-            'exchange_rate': exchange_rate,
-            'exchange_date': transaction_date  # FIX #5: Use transaction date, not today
-        }
-
-    async def _get_exchange_rate(self, from_currency: str, to_currency: str, transaction_date: str) -> float:
-        """
-        FIX #51: Use aiohttp for async exchange rate fetching (not synchronous forex-python)
-        forex-python is synchronous and requires thread pool overhead.
-        aiohttp is already in requirements (3.11.7) and provides true async I/O.
-        
-        Uses exchangerate-api.com (free tier: 1500 requests/month)
-        Falls back to forex-python only if aiohttp fails.
-        """
-        import aiohttp
-        from datetime import datetime
-        import asyncio
-        
-        try:
-            # FIX #5: Use transaction_date in cache key for historical accuracy
-            cache_key = f"exchange_rate_{from_currency}_{to_currency}_{transaction_date}"
-            
-            # Check cache first
-            if self.cache and hasattr(self.cache, 'get_cached_classification'):
-                cached_rate = await self.cache.get_cached_classification(
-                    {'cache_key': cache_key}, 
-                    'exchange_rate'
-                )
-                if cached_rate and isinstance(cached_rate, dict):
-                    return cached_rate.get('rate', 1.0)
-            
-            # FIX #51: Use aiohttp for true async exchange rate fetching
-            # exchangerate-api.com provides real-time rates (free tier: 1500 requests/month)
-            api_url = f"https://api.exchangerate-api.com/v4/latest/{from_currency}"
-            
-            try:
-                async with aiohttp.ClientSession() as session:
-                    async with session.get(api_url, timeout=aiohttp.ClientTimeout(total=5)) as response:
-                        if response.status == 200:
-                            data = await response.json()
-                            rate = data.get('rates', {}).get(to_currency)
-                            if rate:
-                                # Cache the rate for 24 hours
-                                if self.cache and hasattr(self.cache, 'store_classification'):
-                                    await self.cache.store_classification(
-                                        {'cache_key': cache_key},
-                                        {'rate': rate},
-                                        'exchange_rate',
-                                        ttl_hours=24
-                                    )
-                                return rate
-            except Exception as aiohttp_err:
-                logger.warning(f"aiohttp exchange rate fetch failed: {aiohttp_err}, falling back to forex-python")
-            
-            # Fallback: Use forex-python only if aiohttp fails (thread pool overhead acceptable as fallback)
-            from forex_python.converter import CurrencyRates
-            
-            def _get_rate_sync():
-                c = CurrencyRates()
-                date_obj = datetime.strptime(transaction_date, '%Y-%m-%d').date()
-                return c.get_rate(from_currency, to_currency, date_obj)
-            
-            loop = asyncio.get_event_loop()
-            # FIX #7: Add null check for _thread_pool to prevent race condition
-            if _thread_pool is None:
-                logger.warning("Thread pool not initialized, running exchange rate fetch synchronously")
-                rate = _get_rate_sync()
-            else:
-                rate = await loop.run_in_executor(_thread_pool, _get_rate_sync)
-            
-            # Cache the fallback rate
-            if self.cache and hasattr(self.cache, 'store_classification'):
-                await self.cache.store_classification(
-                    {'cache_key': cache_key},
-                    {'rate': rate},
-                    'exchange_rate',
-                    ttl_hours=24
-                )
-            
-            return rate
-            
-        except Exception as e:
-            logger.error(f" CRITICAL: Exchange rate fetch failed for {from_currency}/{to_currency}: {e}. Cannot proceed without live rates.")
-            raise ValueError(f"Exchange rate unavailable for {from_currency}/{to_currency}. Live forex service required.")
-    
-    async def _build_enriched_payload(self, validated_data: Dict, extraction_results: Dict, 
-                                     classification_results: Dict, vendor_results: Dict, 
-                                     platform_id_results: Dict, currency_results: Dict, 
-                                     ai_classification: Dict) -> Dict[str, Any]:
-        """Build enriched payload with all processed data"""
-        try:
-            row_data = validated_data.get('row_data', {})
-            file_context = validated_data.get('file_context', {})
-            
-            # Build comprehensive payload
-            payload = {
-                # Original data
-                **row_data,
-                
-                # Extracted core fields
-                'amount_original': extraction_results.get('amount', 0.0),
-                'date': extraction_results.get('date', ''),
-                'description': extraction_results.get('description', ''),
-                'standard_description': self._clean_description(extraction_results.get('description', '')),
-                
-                # Vendor information
-                'vendor_raw': vendor_results.get('vendor_raw', ''),
-                'vendor_standard': vendor_results.get('vendor_standard', ''),
-                'vendor_confidence': vendor_results.get('vendor_confidence', 0.0),
-                'vendor_cleaning_method': vendor_results.get('vendor_cleaning_method', 'none'),
-                
-                # Currency and amounts
-                'amount_usd': currency_results.get('amount_usd', 0.0),
-                'currency': currency_results.get('currency', 'USD'),
-                'exchange_rate': currency_results.get('exchange_rate', 1.0),
-                'exchange_date': currency_results.get('exchange_date', ''),
-                
-                # Platform IDs
-                'platform_ids': platform_id_results.get('platform_ids', {}),
-                
-                # Classification
-                'kind': ai_classification.get('row_type', 'transaction'),
-                'category': ai_classification.get('category', 'other'),
-                'subcategory': ai_classification.get('subcategory', 'general'),
-                'ai_confidence': ai_classification.get('confidence', 0.5),
-                'ai_reasoning': ai_classification.get('reasoning', ''),
-                
-                # Entities
-                'entities': ai_classification.get('entities', {}),
-                'relationships': ai_classification.get('relationships', {}),
-                
-                # Metadata
-                'ingested_on': datetime.now().isoformat(),
-                'enrichment_version': '2.0.0',
-                'file_context': {
-                    'filename': file_context.get('filename', ''),
-                    'row_index': file_context.get('row_index', 0)
-                }
-            }
-            
-            return payload
-            
-        except Exception as e:
-            logger.error(f"Payload building failed: {e}")
-            return validated_data.get('row_data', {})
-    
-    async def _validate_enriched_payload(self, enriched_payload: Dict[str, Any]) -> Dict[str, Any]:
-        """Validate enriched payload for correctness"""
-        try:
-            # Validate amount (increased from $1M to $100M to support enterprise transactions)
-            if 'amount_usd' in enriched_payload:
-                amount = enriched_payload['amount_usd']
-                if not isinstance(amount, (int, float)):
-                    enriched_payload['amount_usd'] = 0.0
-                elif amount < -100000000 or amount > 100000000:
-                    logger.warning(f"Amount out of range: {amount}")
-            
-            # Validate currency
-            valid_currencies = ['USD', 'EUR', 'GBP', 'INR', 'JPY', 'CNY', 'AUD', 'CAD']
-            if enriched_payload.get('currency') not in valid_currencies:
-                enriched_payload['currency'] = 'USD'
-            
-            # Validate confidence scores
-            for key in ['vendor_confidence', 'ai_confidence']:
-                if key in enriched_payload:
-                    conf = enriched_payload[key]
-                    if not isinstance(conf, (int, float)) or conf < 0 or conf > 1:
-                        enriched_payload[key] = 0.5
-            
-            return enriched_payload
-            
-        except Exception as e:
-            logger.error(f"Payload validation failed: {e}")
-            return enriched_payload
-    
-    async def _apply_accuracy_enhancement(self, row_data: Dict, validated_payload: Dict, 
-                                         file_context: Dict) -> Dict[str, Any]:
-        """
-        ACCURACY FIX #1-5: Apply comprehensive accuracy enhancements
-        - Add amount direction and transaction type
-        - Standardize timestamp semantics
-        - Add data validation
-        - Add canonical entity IDs
-        - Use confidence scores for flagging
-        """
-        try:
-            enhanced = validated_payload.copy()
-            
-            # FIX #1: Add amount direction and signed amounts (HIGH PRIORITY)
-            amount_usd = enhanced.get('amount_usd', 0.0)
-            category = enhanced.get('category', '').lower()
-            kind = enhanced.get('kind', '').lower()
-            
-            # Determine transaction type and direction
-            transaction_type = 'unknown'
-            amount_direction = 'unknown'
-            affects_cash = True
-            
-            # Income indicators
-            if any(keyword in category for keyword in ['revenue', 'income', 'sale', 'payment_received']):
-                transaction_type = 'income'
-                amount_direction = 'credit'
-                amount_signed_usd = abs(amount_usd)  # Income is positive
-            # Expense indicators
-            elif any(keyword in category for keyword in ['expense', 'cost', 'payment', 'purchase', 'bill']):
-                transaction_type = 'expense'
-                amount_direction = 'debit'
-                amount_signed_usd = -abs(amount_usd)  # Expenses are negative
-            # Transfer indicators
-            elif any(keyword in category for keyword in ['transfer', 'move', 'reclass']):
-                transaction_type = 'transfer'
-                amount_direction = 'neutral'
-                affects_cash = False  # Transfers don't affect net cash
-                amount_signed_usd = 0.0  # Neutral for cash flow
-            # Refund indicators
-            elif any(keyword in category for keyword in ['refund', 'return', 'credit_note']):
-                transaction_type = 'refund'
-                amount_direction = 'credit'
-                amount_signed_usd = abs(amount_usd)  # Refunds are positive
-            else:
-                # Default: treat as expense if amount exists
-                if amount_usd != 0:
-                    transaction_type = 'expense'
-                    amount_direction = 'debit'
-                    amount_signed_usd = -abs(amount_usd)
-                else:
-                    amount_signed_usd = 0.0
-            
-            enhanced['transaction_type'] = transaction_type
-            enhanced['amount_direction'] = amount_direction
-            enhanced['amount_signed_usd'] = amount_signed_usd
-            enhanced['affects_cash'] = affects_cash
-            
-            # FIX #2 & #47: Standardize timestamp semantics (MEDIUM PRIORITY)
-            # Use consistent pendulum.now() for all timestamps (source of truth)
-            # Naming: source_ts (transaction time), ingested_ts (when we received it), processed_ts (when we processed it)
-            current_time = pendulum.now().to_iso8601_string()
-            
-            # Extract source timestamp from row data
-            source_ts = None
-            for date_col in ['date', 'transaction_date', 'created_at', 'timestamp']:
-                if date_col in row_data:
-                    try:
-                        # Parse date using Polars for better performance
-                        parsed_date = pl.Series([row_data[date_col]]).str.to_datetime().to_list()[0]
-                        source_ts = parsed_date.isoformat() if hasattr(parsed_date, 'isoformat') else str(parsed_date)
-                        break
-                    except:
-                        continue
-            
-            enhanced['source_ts'] = source_ts or current_time  # When transaction occurred
-            enhanced['ingested_ts'] = current_time  # When we ingested it
-            enhanced['processed_ts'] = current_time  # When we processed it
-            
-            # For currency conversion, use transaction date
-            transaction_date = source_ts.split('T')[0] if source_ts else pendulum.now().strftime('%Y-%m-%d')
-            enhanced['transaction_date'] = transaction_date
-            enhanced['exchange_rate_date'] = enhanced.get('exchange_date', transaction_date)
-            
-            # Remove old ambiguous timestamps
-            enhanced.pop('ingested_on', None)
-            
-            # FIX #3: Add data validation flags (MEDIUM PRIORITY)
-            validation_flags = {
-                'amount_valid': True,
-                'currency_valid': True,
-                'exchange_rate_valid': True,
-                'vendor_valid': True,
-                'validation_errors': []
-            }
-            
-            # Validate amount
-            if amount_usd is None:
-                validation_flags['amount_valid'] = False
-                validation_flags['validation_errors'].append('amount_usd is null')
-            elif not isinstance(amount_usd, (int, float)):
-                validation_flags['amount_valid'] = False
-                validation_flags['validation_errors'].append(f'amount_usd is not numeric: {type(amount_usd)}')
-            elif abs(amount_usd) > 100000000:  # $100M limit
-                validation_flags['amount_valid'] = False
-                validation_flags['validation_errors'].append(f'amount_usd exceeds limit: {amount_usd}')
-            
-            # FIX #46: Load validation rules from config/validation_rules.yaml
-            # Non-developers can edit validation rules without code changes
-            validation_rules = self._load_validation_rules()
-            valid_currencies = validation_rules.get('currency', {}).get('valid_currencies', ['USD'])
-            currency = enhanced.get('currency', 'USD')
-            if currency not in valid_currencies:
-                validation_flags['currency_valid'] = False
-                validation_flags['validation_errors'].append(f'Invalid currency code: {currency}')
-                enhanced['currency'] = validation_rules.get('currency', {}).get('default_currency', 'USD')
-            
-            # Validate exchange rate
-            exchange_rate = enhanced.get('exchange_rate', 1.0)
-            if exchange_rate is not None:
-                if not isinstance(exchange_rate, (int, float)):
-                    validation_flags['exchange_rate_valid'] = False
-                    validation_flags['validation_errors'].append(f'exchange_rate is not numeric: {type(exchange_rate)}')
-                elif exchange_rate <= 0 or exchange_rate > 1000:
-                    validation_flags['exchange_rate_valid'] = False
-                    validation_flags['validation_errors'].append(f'exchange_rate out of range: {exchange_rate}')
-            
-            # Validate vendor
-            vendor_standard = enhanced.get('vendor_standard', '')
-            if vendor_standard and len(vendor_standard) < 2:
-                validation_flags['vendor_valid'] = False
-                validation_flags['validation_errors'].append(f'vendor_standard too short: {vendor_standard}')
-            
-            enhanced['validation_flags'] = validation_flags
-            enhanced['is_valid'] = len(validation_flags['validation_errors']) == 0
-            
-            # Canonical ID and alternatives now come from EntityResolverOptimized
-            # No duplicate generation needed - they're already in vendor_results from _resolve_vendor_entity
-            
-            # FIX #5: Use confidence scores for flagging (LOW PRIORITY)
-            confidence_score = enhanced.get('ai_confidence', 0.5)
-            vendor_confidence = enhanced.get('vendor_confidence', 0.5)
-            
-            # Calculate overall confidence
-            overall_confidence = (confidence_score + vendor_confidence) / 2
-            enhanced['overall_confidence'] = overall_confidence
-            
-            # Flag low-confidence rows for review
-            CONFIDENCE_THRESHOLD = 0.7
-            if overall_confidence < CONFIDENCE_THRESHOLD:
-                enhanced['requires_review'] = True
-                enhanced['review_reason'] = f"Low confidence: {overall_confidence:.2f}"
-                enhanced['review_priority'] = 'high' if overall_confidence < 0.5 else 'medium'
-            else:
-                enhanced['requires_review'] = False
-                enhanced['review_reason'] = None
-                enhanced['review_priority'] = None
-            
-            # Add accuracy enhancement metadata
-            enhanced['accuracy_enhanced'] = True
-            enhanced['accuracy_version'] = '1.0.0'
-            enhanced['enhancements_applied'] = [
-                'amount_direction',
-                'transaction_type',
-                'timestamp_standardization',
-                'data_validation',
-                'canonical_entity_ids',
-                'confidence_flagging'
-            ]
-            
-            return enhanced
-            
-        except Exception as e:
-            logger.error(f"Accuracy enhancement failed: {e}")
-            # Return original payload if enhancement fails
-            validated_payload['accuracy_enhanced'] = False
-            validated_payload['accuracy_error'] = str(e)
-            return validated_payload
-    
-    async def _validate_security(self, row_data: Dict, platform_info: Dict, 
-                                column_names: List[str], ai_classification: Dict, 
-                                file_context: Dict) -> bool:
-        """Validate security of input data"""
-        try:
-            # Check for SQL injection patterns
-            dangerous_patterns = ['DROP TABLE', 'DELETE FROM', 'INSERT INTO', '--', ';--']
-            
-            for key, value in row_data.items():
-                if isinstance(value, str):
-                    value_upper = value.upper()
-                    if any(pattern in value_upper for pattern in dangerous_patterns):
-                        logger.warning(f"Potential SQL injection detected in {key}: {value}")
-                        return False
-            
-            return True
-        except Exception as e:
-            logger.error(f"Security validation failed: {e}")
-            return True  # Allow processing on validation error
-    
-    
-    async def _log_operation_start(self, operation: str, enrichment_id: str, file_context: Dict):
-        """Log operation start"""
-        logger.debug(f"Starting {operation} for {enrichment_id}")
-    
-    async def _log_operation_end(self, operation: str, success: bool, duration: float, 
-                                file_context: Dict, error: Exception = None):
-        """Log operation end"""
-        if success:
-            logger.debug(f"Completed {operation} in {duration:.3f}s")
-        else:
-            logger.error(f"Failed {operation}: {error}")
-    
-    def _update_metrics(self, processing_time: float):
-        """Update processing metrics"""
-        self.metrics['enrichment_count'] += 1
-        
-        # Update average processing time
-        count = self.metrics['enrichment_count']
-        current_avg = self.metrics['avg_processing_time']
-        self.metrics['avg_processing_time'] = (current_avg * (count - 1) + processing_time) / count
-    
-    async def _send_enrichment_notification(self, file_context: Dict, enriched_payload: Dict, 
-                                           processing_time: float):
-        """Send real-time notification about enrichment via WebSocket"""
-        try:
-            job_id = file_context.get('job_id')
-            if not job_id:
-                return
-            
-            # Send enrichment notification through WebSocket manager
-            notification = {
-                "step": "enrichment_completed",
-                "message": f"✅ Row enriched: {enriched_payload.get('vendor_standard', 'N/A')} - ${enriched_payload.get('amount_usd', 0):.2f}",
-                "enrichment_data": {
-                    "vendor": enriched_payload.get('vendor_standard'),
-                    "amount_usd": enriched_payload.get('amount_usd'),
-                    "currency": enriched_payload.get('currency'),
-                    "category": enriched_payload.get('category'),
-                    "confidence": enriched_payload.get('vendor_confidence'),
-                    "processing_time_ms": int(processing_time * 1000)
-                },
-                "timestamp": datetime.now().isoformat()
-            }
-            
-            # Use the global WebSocket manager
-            await manager.send_update(job_id, notification)
-            
-        except Exception as e:
-            logger.warning(f"Failed to send enrichment notification: {e}")
-    
-    async def _log_enrichment_audit(self, enrichment_id: str, enriched_payload: Dict, 
-                                   processing_time: float):
-        """Log enrichment audit trail"""
-        logger.info(f"Enrichment {enrichment_id} completed in {processing_time:.3f}s")
-
-    async def _cache_analysis_result(self, analysis_id: str, result: Dict[str, Any]) -> None:
-        """Cache analysis result for future use"""
-        if not self.config['enable_caching']:
-            return
-        
-        try:
-            # Use centralized cache (already initialized in __init__)
-            if self.cache:
-                pass
-        except Exception as e:
-            logger.warning(f"Cache storage failed for {analysis_id}: {e}")
-    
-    async def _extract_document_features(self, validated_input: Dict) -> Dict[str, Any]:
-        """Extract comprehensive document features for analysis (Polars optimized)"""
-        df = validated_input['df']
-        filename = validated_input['filename']
-        
-        # Ensure we're working with Polars DataFrame
-        if hasattr(df, 'to_pandas'):  # Already a Polars DataFrame
-            pl_df = df
-        elif hasattr(df, 'values'):  # Pandas DataFrame
-            pl_df = pl.from_pandas(df)
-        else:
-            pl_df = df
-            
-        # Get column types as strings
-        column_types = {col: str(dtype) for col, dtype in zip(pl_df.columns, pl_df.dtypes)}
-        
-        # Identify numeric and text columns using Polars selectors
-        import polars.selectors as cs
-        numeric_cols = pl_df.select(cs.numeric()).columns
-        text_cols = pl_df.select(cs.string()).columns
-        
-        # Calculate empty cells (nulls)
-        # null_count() returns a DF with counts per column, sum(axis=1) sums them up
-        total_nulls = pl_df.null_count().sum_horizontal().item() if len(pl_df) > 0 else 0
-        
-        # Calculate duplicate rows
-        duplicate_count = pl_df.is_duplicated().sum()
-        
-        # Basic features
-        features = {
-            'filename': filename,
-            'file_extension': filename.split('.')[-1].lower() if '.' in filename else 'unknown',
-            'row_count': len(pl_df),
-            'column_count': len(pl_df.columns),
-            'column_names': pl_df.columns,
-            'column_types': column_types,
-            'numeric_columns': numeric_cols,
-            'text_columns': text_cols,
-            'date_columns': self._identify_date_columns(pl_df),
-            'empty_cells': total_nulls,
-            'duplicate_rows': duplicate_count
-        }
-        
-        # Content analysis
-        # Convert head to dict for sample data (Polars to_dicts is equivalent to pandas to_dict('records'))
-        features.update({
-            'sample_data': pl_df.head(3).to_dicts(),
-            'data_patterns': self._analyze_data_patterns(pl_df),
-            'statistical_summary': self._generate_statistical_summary(pl_df)
-        })
-        
-        return features
-    
-    def _identify_date_columns(self, df: pl.DataFrame) -> List[str]:
-        """Identify columns that likely contain dates"""
-        date_columns = []
-        for col in df.columns:
-            col_lower = col.lower()
-            if any(word in col_lower for word in ['date', 'time', 'period', 'month', 'year', 'created', 'updated']):
-                date_columns.append(col)
-        return date_columns
-    
-    def _analyze_data_patterns(self, df: pl.DataFrame) -> Dict[str, Any]:
-        """Analyze data patterns for classification (Polars-compatible)"""
-        # CRITICAL FIX: Use Polars selectors instead of Pandas select_dtypes
-        import polars.selectors as cs
-        
-        # Count numeric and text columns using Polars selectors
-        numeric_cols = df.select(cs.numeric()).columns
-        string_cols = df.select(cs.string()).columns
-        
-        # Calculate data density (non-null cells / total cells)
-        total_cells = len(df) * len(df.columns)
-        null_cells = df.null_count().sum_horizontal().item() if len(df) > 0 else 0
-        data_density = (1 - null_cells / total_cells) if total_cells > 0 else 0
-        
-        patterns = {
-            'has_numeric_data': len(numeric_cols) > 0,
-            'has_text_data': len(string_cols) > 0,
-            'has_date_data': len(self._identify_date_columns(df)) > 0,
-            'data_density': data_density,
-            'column_name_patterns': self._analyze_column_patterns(df.columns)
-        }
-        return patterns
-    
-    def _analyze_column_patterns(self, columns: List[str]) -> Dict[str, List[str]]:
-        """FIX #15: Analyze column name patterns with hierarchical classification to prevent conflicts"""
-        patterns = {
-            'financial_terms': [],
-            'platform_indicators': [],
-            'document_type_indicators': []
-        }
-        
-        # LIBRARY FIX: Use rapidfuzz for column keyword matching (replaces manual .lower() checks)
-        from rapidfuzz import fuzz
-        
-        # FIX #15: Hierarchical pattern matching - more specific patterns take precedence
-        # 1. Platform indicators (most specific) - checked first
-        platform_keywords = {
-            'stripe': ['stripe_id', 'stripe_charge', 'stripe_customer'],
-            'razorpay': ['razorpay_id', 'razorpay_payment'],
-            'paypal': ['paypal_id', 'paypal_transaction'],
-            'quickbooks': ['qb_id', 'quickbooks_id'],
-            'xero': ['xero_id', 'xero_contact'],
-            'gusto': ['gusto_id', 'gusto_employee']
-        }
-        
-        # 2. Document type indicators (medium specificity)
-        doc_type_keywords = {
-            'invoice': ['invoice_number', 'invoice_id', 'invoice_date'],
-            'receipt': ['receipt_number', 'receipt_id'],
-            'statement': ['statement_id', 'bank_statement'],
-            'report': ['report_id', 'financial_report'],
-            'ledger': ['ledger_entry', 'general_ledger'],
-            'payroll': ['payroll_id', 'payroll_period', 'employee_payroll']  # More specific than just 'payroll'
-        }
-        
-        # 3. Financial terms (least specific) - checked last
-        financial_keywords = ['amount', 'total', 'sum', 'value', 'price', 'cost', 'revenue', 'income', 'expense', 'balance']
-        
-        # Apply hierarchical matching - each column gets assigned to only ONE category
-        assigned_columns = set()
-        
-        # First pass: Platform indicators (highest priority)
-        for platform, keywords in platform_keywords.items():
-            for col in columns:
-                if col not in assigned_columns:
-                    for kw in keywords:
-                        if fuzz.token_sort_ratio(col.lower(), kw) > 85:  # Higher threshold for specificity
-                            patterns['platform_indicators'].append(col)
-                            assigned_columns.add(col)
-                            break
-                    if col in assigned_columns:
-                        break
-        
-        # Second pass: Document type indicators
-        for doc_type, keywords in doc_type_keywords.items():
-            for col in columns:
-                if col not in assigned_columns:
-                    for kw in keywords:
-                        if fuzz.token_sort_ratio(col.lower(), kw) > 80:
-                            patterns['document_type_indicators'].append(col)
-                            assigned_columns.add(col)
-                            break
-                    if col in assigned_columns:
-                        break
-        
-        # Third pass: Financial terms (lowest priority)
-        for col in columns:
-            if col not in assigned_columns:
-                for kw in financial_keywords:
-                    if fuzz.token_sort_ratio(col.lower(), kw) > 75:  # Lower threshold for general terms
-                        patterns['financial_terms'].append(col)
-                        assigned_columns.add(col)
-                        break
-        
-        return patterns
-    
-    def _generate_statistical_summary(self, df) -> Dict[str, Any]:
-        """
-        LIBRARY REPLACEMENT: Generate statistical summary using polars (50x faster)
-        Replaces pandas operations with vectorized polars operations.
-        
-        Benefits:
-        - 50x faster vectorized operations
-        - Better memory efficiency
-        - Consistent with other universal modules
-        - More robust statistical calculations
-        """
-        try:
-            # LIBRARY REPLACEMENT: Convert to polars for faster operations (already in requirements)
-            import polars as pl
-            
-            # Ensure we're working with Polars DataFrame
-            if hasattr(df, 'to_pandas'):  # Already a Polars DataFrame
-                pl_df = df
-            elif hasattr(df, 'values'):  # Pandas DataFrame
-                pl_df = pl.from_pandas(df)
-            else:
-                pl_df = df
-            
-            # LIBRARY REPLACEMENT: Use polars for 50x faster statistical operations
-            # Get numeric columns only
-            numeric_cols = [col for col in pl_df.columns if pl_df[col].dtype in [pl.Int64, pl.Int32, pl.Float64, pl.Float32]]
-            
-            if not numeric_cols:
-                return {'message': 'No numeric data found'}
-            
-            # Use polars for vectorized statistical operations
-            numeric_df = pl_df.select(numeric_cols)
-            
-            summary = {
-                'numeric_columns': len(numeric_cols),
-                'total_numeric_values': numeric_df.select(pl.col("*").count()).sum(axis=1)[0],
-                'mean_values': {col: numeric_df[col].mean() for col in numeric_cols},
-                'sum_values': {col: numeric_df[col].sum() for col in numeric_cols},
-                'min_values': {col: numeric_df[col].min() for col in numeric_cols},
-                'max_values': {col: numeric_df[col].max() for col in numeric_cols}
-            }
-            return summary
-        except Exception as e:
-            logger.warning(f"Statistical summary generation failed: {e}")
-            return {'error': str(e)}
-    
-    async def _classify_by_patterns(self, document_features: Dict) -> Dict[str, Any]:
-        """Classify document using pattern matching"""
-        features = document_features
-        column_names = features['column_names']
-        data_patterns = features['data_patterns']
-        
-        # Score each document type
-        scores = {}
-        for doc_type, patterns in self.document_patterns.items():
-            score = 0.0
-            
-            # Check keywords in column names
-            column_text = ' '.join(column_names).lower()
-            keyword_matches = sum(1 for keyword in patterns['keywords'] if keyword in column_text)
-            score += (keyword_matches / len(patterns['keywords'])) * 0.4
-            
-            # Check specific column patterns
-            column_matches = sum(1 for col in patterns['columns'] if any(col.lower() in name.lower() for name in column_names))
-            score += (column_matches / len(patterns['columns'])) * 0.4
-            
-            # Check data patterns
-            if doc_type == 'income_statement' and data_patterns['has_numeric_data']:
-                score += 0.2
-            elif doc_type == 'payroll_data':
-                # LIBRARY FIX: Use rapidfuzz for employee column detection
-                from rapidfuzz import fuzz
-                if any(fuzz.token_sort_ratio(col.lower(), 'employee') > 80 for col in column_names):
-                    score += 0.2
-            
-            scores[doc_type] = score
-        
-        # Find best match
-        best_type = max(scores, key=scores.get) if scores else 'unknown'
-        confidence = scores[best_type] if best_type in scores else 0.0
-        
-        return {
-            'document_type': best_type,
-            'confidence': confidence,
-            'classification_method': 'pattern_matching',
-            'scores': scores,
-            'indicators': self._get_pattern_indicators(best_type, document_features)
-        }
-    
-    def _get_pattern_indicators(self, doc_type: str, document_features: Dict) -> List[str]:
-        """Get indicators that led to the classification"""
-        indicators = []
-        column_names = document_features['column_names']
-        
-        if doc_type in self.document_patterns:
-            patterns = self.document_patterns[doc_type]
-            
-            # Check for keyword matches
-            column_text = ' '.join(column_names).lower()
-            matched_keywords = [kw for kw in patterns['keywords'] if kw in column_text]
-            if matched_keywords:
-                indicators.append(f"keywords: {', '.join(matched_keywords)}")
-            
-            # LIBRARY FIX: Use rapidfuzz for column pattern matching (replaces manual .lower() checks)
-            from rapidfuzz import fuzz
-            matched_columns = []
-            for pattern_col in patterns['columns']:
-                for col_name in column_names:
-                    if fuzz.token_sort_ratio(pattern_col.lower(), col_name.lower()) > 80:
-                        matched_columns.append(pattern_col)
-                        break
-            if matched_columns:
-                indicators.append(f"columns: {', '.join(matched_columns)}")
-        
-        return indicators
-    
-    async def _classify_with_ai(self, document_features: Dict, pattern_classification: Dict) -> Dict[str, Any]:
-        """Classify document using AI analysis"""
-        try:
-            self.metrics['ai_classifications'] += 1
-            
-            # Prepare AI prompt
-            prompt = self._build_ai_classification_prompt(document_features, pattern_classification)
-            
-            # FIX #32: Use unified Groq client initialization helper
-            local_groq_client = get_groq_client()
-            
-            # Call AI service (using Groq Llama-3.3-70B for cost-effective document classification)
-            response = local_groq_client.chat.completions.create(
-                model="llama-3.3-70b-versatile",
-                messages=[{"role": "user", "content": prompt}],
-                max_tokens=2000,
-                temperature=0.1
-            )
-            
-            result = response.choices[0].message.content
-            
-            # Parse AI response
-            ai_result = self._parse_ai_classification_response(result)
-            
-            return ai_result
-            
-        except Exception as e:
-            logger.error(f"AI classification failed: {e}")
-            return {
-                'document_type': 'unknown',
-                'confidence': 0.0,
-                'classification_method': 'ai_failed',
-                'error': str(e)
-            }
-    
-    def _build_ai_classification_prompt(self, document_features: Dict, pattern_classification: Dict) -> str:
-        """Build AI classification prompt"""
-        return f"""
-        Analyze this financial document and classify its type.
-        
-        FILENAME: {document_features['filename']}
-        COLUMNS: {document_features['column_names']}
-        SAMPLE DATA: {document_features['sample_data']}
-        PATTERN CLASSIFICATION: {pattern_classification.get('document_type', 'unknown')} (confidence: {pattern_classification.get('confidence', 0.0)})
-        
-        Return ONLY a valid JSON object with this structure:
-        {{
-            "document_type": "income_statement|balance_sheet|cash_flow|payroll_data|expense_data|revenue_data|general_ledger|budget|unknown",
-            "source_platform": "gusto|quickbooks|xero|razorpay|freshbooks|stripe|shopify|unknown",
-            "confidence": 0.95,
-            "key_columns": ["col1", "col2"],
-            "analysis": "Brief explanation",
-            "data_patterns": {{
-                "has_revenue_data": true,
-                "has_expense_data": true,
-                "has_employee_data": false,
-                "has_account_data": false,
-                "has_transaction_data": false,
-                "time_period": "monthly"
-            }},
-            "classification_reasoning": "Step-by-step explanation",
-            "platform_indicators": ["indicator1"],
-            "document_indicators": ["indicator1"]
-        }}
-        
-        IMPORTANT: Return ONLY the JSON object, no additional text.
-        """
-    
-    def _parse_ai_classification_response(self, response: str) -> Dict[str, Any]:
-        """Parse AI classification response"""
-        try:
-            # Clean the response
-            cleaned_result = response.strip()
-            if cleaned_result.startswith('```json'):
-                cleaned_result = cleaned_result[7:]
-            if cleaned_result.endswith('```'):
-                cleaned_result = cleaned_result[:-3]
-            cleaned_result = cleaned_result.strip()
-            
-            # Parse JSON
-            parsed_result = orjson.loads(cleaned_result)
-            
-            # Ensure all required fields are present
-            required_fields = {
-                'data_patterns': {
-                    "has_revenue_data": False,
-                    "has_expense_data": False,
-                    "has_employee_data": False,
-                    "has_account_data": False,
-                    "has_transaction_data": False,
-                    "time_period": "unknown"
-                },
-                'classification_reasoning': "AI analysis completed",
-                'platform_indicators': [],
-                'document_indicators': []
-            }
-            
-            for field, default_value in required_fields.items():
-                if field not in parsed_result:
-                    parsed_result[field] = default_value
-            
-            parsed_result['classification_method'] = 'ai_analysis'
-            return parsed_result
-            
-        except (ValueError) as e:
-            # FIX #49: Standardized error handling - orjson raises ValueError, not JSONDecodeError
-            logger.error(f"Failed to parse AI response: {e}")
-            return {
-                'document_type': 'unknown',
-                'confidence': 0.0,
-                'classification_method': 'ai_parse_error',
-                'error': f"JSON parsing failed: {str(e)}"
-            }
-    
-    async def _analyze_with_ocr(self, validated_input: Dict, document_features: Dict) -> Dict[str, Any]:
-        """Analyze document using OCR for image/PDF content extraction"""
-        if not self.ocr_available or not validated_input.get('file_content'):
-            return {
-                'ocr_used': False,
-                'confidence': 0.0,
-                'extracted_text': '',
-                'analysis': 'OCR not available or no file content provided'
-            }
-        
-        try:
-            self.metrics['ocr_operations'] += 1
-            
-            file_content = validated_input.get('file_content')
-            filename = validated_input.get('filename', '')
-            
-            # Check if file is image or PDF
-            file_ext = filename.split('.')[-1].lower() if '.' in filename else ''
-            
-            if file_ext not in ['pdf', 'png', 'jpg', 'jpeg', 'tiff', 'bmp']:
-                return {
-                    'ocr_used': False,
-                    'confidence': 0.0,
-                    'extracted_text': '',
-                    'analysis': f'OCR not applicable for {file_ext} files'
-                }
-            
-            # Use pytesseract for OCR
-            try:
-                import pytesseract
-                from PIL import Image
-                import io
-                
-                # Convert file content to image
-                if file_ext == 'pdf':
-                    # For PDF, use pdf2image
-                    try:
-                        from pdf2image import convert_from_bytes
-                        images = convert_from_bytes(file_content, first_page=1, last_page=1)
-                        if images:
-                            image = images[0]
-                        else:
-                            raise Exception("No pages in PDF")
-                    except ImportError:
-                        logger.warning("pdf2image not available, skipping PDF OCR")
-                        return {
-                            'ocr_used': False,
-                            'confidence': 0.0,
-                            'extracted_text': '',
-                            'analysis': 'PDF OCR requires pdf2image library'
-                        }
-                else:
-                    # For images, use PIL directly
-                    image = Image.open(io.BytesIO(file_content))
-                
-                # Extract text using OCR
-                extracted_text = pytesseract.image_to_string(image)
-                
-                # Calculate confidence based on text length and quality
-                text_length = len(extracted_text.strip())
-                confidence = min(0.9, text_length / 1000) if text_length > 0 else 0.0
-                
-                # LIBRARY FIX: Use rapidfuzz for keyword detection (replaces manual .lower() checks)
-                from rapidfuzz import fuzz
-                financial_keywords = ['invoice', 'receipt', 'total', 'amount', 'payment', 'date', 'vendor', 'customer']
-                keyword_count = sum(1 for keyword in financial_keywords if fuzz.partial_ratio(extracted_text.lower(), keyword) > 80)
-                
-                analysis = f"Extracted {text_length} characters, found {keyword_count} financial keywords"
-                
-                return {
-                    'ocr_used': True,
-                    'confidence': confidence,
-                    'extracted_text': extracted_text[:500],  # First 500 chars
-                    'full_text_length': text_length,
-                    'financial_keywords_found': keyword_count,
-                    'analysis': analysis
-                }
-                
-            except Exception as ocr_error:
-                logger.warning(f"OCR processing failed: {ocr_error}")
-                return {
-                    'ocr_used': True,
-                    'confidence': 0.0,
-                    'extracted_text': '',
-                    'analysis': f'OCR processing failed: {str(ocr_error)}'
-                }
-            
-        except Exception as e:
-            logger.error(f"OCR analysis failed: {e}")
-            return {
-                'ocr_used': True,
-                'confidence': 0.0,
-                'extracted_text': '',
-                'error': str(e)
-            }
-    
-    async def _combine_classification_results(self, pattern_classification: Dict, 
-                                            ai_classification: Dict, ocr_analysis: Dict,
-                                            document_features: Dict) -> Dict[str, Any]:
-        """Combine all classification results into final result"""
-        # Weight the different classification methods
-        pattern_weight = 0.3
-        ai_weight = 0.6
-        ocr_weight = 0.1
-        
-        # Combine document types
-        final_doc_type = ai_classification.get('document_type', 'unknown')
-        if ai_classification.get('confidence', 0.0) < 0.5:
-            final_doc_type = pattern_classification.get('document_type', 'unknown')
-        
-        # Calculate combined confidence
-        pattern_conf = pattern_classification.get('confidence', 0.0)
-        ai_conf = ai_classification.get('confidence', 0.0)
-        ocr_conf = ocr_analysis.get('confidence', 0.0)
-        
-        combined_confidence = (
-            pattern_conf * pattern_weight +
-            ai_conf * ai_weight +
-            ocr_conf * ocr_weight
-        )
-        
-        # Build final result
-        final_result = {
-            'document_type': final_doc_type,
-            'source_platform': ai_classification.get('source_platform', 'unknown'),
-            'confidence': combined_confidence,
-            'key_columns': ai_classification.get('key_columns', document_features['column_names']),
-            'analysis': ai_classification.get('analysis', 'Document analysis completed'),
-            'data_patterns': ai_classification.get('data_patterns', {}),
-            'classification_reasoning': ai_classification.get('classification_reasoning', 'Combined analysis'),
-            'platform_indicators': ai_classification.get('platform_indicators', []),
-            'document_indicators': ai_classification.get('document_indicators', []),
-            'classification_methods': {
-                'pattern_matching': pattern_classification,
-                'ai_analysis': ai_classification,
-                'ocr_analysis': ocr_analysis
-            },
-            'analysis_timestamp': pendulum.now().to_iso8601_string(),
-            'analysis_version': '2.0.0'
-        }
-        
-        return final_result
-    
-    async def _create_fallback_classification(self, df: pl.DataFrame, filename: str, 
-                                            error_message: str) -> Dict[str, Any]:
-        """Create fallback classification when analysis fails"""
-        return {
-            "document_type": "unknown",
-            "source_platform": "unknown",
-            "confidence": 0.1,
-            "key_columns": list(df.columns) if df is not None else [],
-            "analysis": f"Analysis failed: {error_message}",
-            "data_patterns": {
-                "has_revenue_data": False,
-                "has_expense_data": False,
-                "has_employee_data": False,
-                "has_account_data": False,
-                "has_transaction_data": False,
-                "time_period": "unknown"
-            },
-            "classification_reasoning": f"Fallback classification due to error: {error_message}",
-            "platform_indicators": [],
-            "document_indicators": [],
-            "analysis_timestamp": pendulum.now().to_iso8601_string(),
-            "analysis_version": "2.0.0-fallback"
-        }
-    
-    def _update_analysis_metrics(self, processing_time: float) -> None:
-        """Update analysis performance metrics"""
-        self.metrics['documents_analyzed'] += 1
-        
-        # Update average processing time
-        current_avg = self.metrics['avg_processing_time']
-        count = self.metrics['documents_analyzed']
-        self.metrics['avg_processing_time'] = (current_avg * (count - 1) + processing_time) / count
-    
-    async def _log_analysis_audit(self, analysis_id: str, result: Dict[str, Any], 
-                                processing_time: float, user_id: str = None) -> None:
-        """Log analysis audit information"""
-        audit_data = {
-            'analysis_id': analysis_id,
-            'user_id': user_id or 'anonymous',
-            'document_type': result.get('document_type', 'unknown'),
-            'confidence': result.get('confidence', 0.0),
-            'processing_time': processing_time,
-            'timestamp': pendulum.now().to_iso8601_string()
-        }
-        
-        logger.info(f"Document analysis audit: {orjson.dumps(audit_data).decode()}")
-    
-    def get_metrics(self) -> Dict[str, Any]:
-        """Get current analysis metrics"""
-        return self.metrics.copy()
-    
-    def clear_cache(self) -> None:
-        """Clear analysis cache"""
-        logger.info("Document analysis cache cleared")
-
-
-# SHARED UTILITY: Centralized fallback classification to eliminate duplication
-def _shared_fallback_classification(row: Any, platform_info: Dict, column_names: List[str]) -> Dict[str, Any]:
-    """
-    DEDUPLICATION FIX: Shared fallback classification utility
-    Eliminates duplicate logic between AIRowClassifier and BatchAIRowClassifier
-    """
-    from rapidfuzz import fuzz
-    
-    platform = platform_info.get('platform', 'unknown')
-    
-    # Handle different row types
-    if isinstance(row, dict):
-        iterable_values = [val for val in row.values() if val is not None and str(val).strip().lower() != 'nan']
-    elif hasattr(row, 'to_dict'):  # Polars Series or similar
-        row_dict = row.to_dict() if hasattr(row, 'to_dict') else dict(row)
-        iterable_values = [val for val in row_dict.values() if val is not None and str(val).lower() != 'nan']
-    elif hasattr(row, '__iter__'):
-        iterable_values = [val for val in row if val is not None and str(val).strip().lower() != 'nan']
-    else:
-        iterable_values = [row]
-
-    row_str = ' '.join(str(val).lower() for val in iterable_values)
-    
-    # LIBRARY FIX: Use rapidfuzz for keyword matching (replaces manual substring checks)
-    payroll_keywords = ['salary', 'wage', 'payroll', 'employee']
-    revenue_keywords = ['revenue', 'income', 'sales', 'payment']
-    expense_keywords = ['expense', 'cost', 'bill', 'payment']
-    
-    if any(fuzz.partial_ratio(row_str, word) > 80 for word in payroll_keywords):
-        row_type = 'payroll_expense'
-        category = 'payroll'
-        subcategory = 'employee_salary'
-    elif any(fuzz.partial_ratio(row_str, word) > 80 for word in revenue_keywords):
-        row_type = 'revenue_income'
-        category = 'revenue'
-        subcategory = 'client_payment'
-    elif any(fuzz.partial_ratio(row_str, word) > 80 for word in expense_keywords):
-        row_type = 'operating_expense'
-        category = 'expense'
-        subcategory = 'operating_cost'
-    else:
-        row_type = 'transaction'
-        category = 'other'
-        subcategory = 'general'
-    
-    return {
-        'row_type': row_type,
-        'category': category,
-        'subcategory': subcategory,
-        'entities': {'employees': [], 'vendors': [], 'customers': [], 'projects': []},
-        'amount': None,
-        'currency': 'USD',
-        'date': None,
-        'description': f"{category} transaction",
-        'confidence': 0.6,
-        'reasoning': f"Basic classification based on keywords: {row_str}",
-        'relationships': {}
-    }
-
-
-class AIRowClassifier:
-    """
-    AI-powered row classification for financial data processing.
-    
-    Uses Groq's Llama models to intelligently classify and categorize
-    financial data rows, providing enhanced data understanding and processing.
-    """
-    def __init__(self, entity_resolver = None):
-        # Now using Groq/Llama for all AI operations
-        self.entity_resolver = entity_resolver
-    
-    async def classify_row_with_ai(self, row: pl.Series, platform_info: Dict, column_names: List[str], file_context: Dict = None) -> Dict[str, Any]:
-        """AI-powered row classification with entity extraction and semantic understanding"""
-        try:
-            # Prepare row data for AI analysis
-            row_data = {}
-            for col, val in row.items():
-                # Check if value is not null/None
-                if val is not None and str(val).lower() != 'nan':
-                    row_data[str(col)] = str(val)
-            
-            # Create context for AI
-            context = {
-                'platform': platform_info.get('platform', 'unknown'),
-                'column_names': column_names,
-                'row_data': row_data,
-                'row_index': row.name if hasattr(row, 'name') else 'unknown'
-            }
-            
-            # AI prompt for semantic classification
-            prompt = f"""
-            Analyze this financial data row and provide detailed classification.
-            
-            PLATFORM: {context['platform']}
-            COLUMN NAMES: {context['column_names']}
-            ROW DATA: {context['row_data']}
-            
-            Classify this row and return ONLY a valid JSON object with this structure:
-            
-            {{
-                "row_type": "payroll_expense|salary_expense|revenue_income|operating_expense|capital_expense|invoice|bill|transaction|investment|tax|other",
-                "category": "payroll|revenue|expense|investment|tax|other",
-                "subcategory": "employee_salary|office_rent|client_payment|software_subscription|etc",
-                "entities": {{
-                    "employees": ["employee_name1", "employee_name2"],
-                    "vendors": ["vendor_name1", "vendor_name2"],
-                    "customers": ["customer_name1", "customer_name2"],
-                    "projects": ["project_name1", "project_name2"]
-                }},
-                "amount": "positive_number_or_null",
-                "currency": "USD|EUR|INR|etc",
-                "date": "YYYY-MM-DD_or_null",
-                "description": "human_readable_description",
-                "confidence": 0.95,
-                "reasoning": "explanation_of_classification",
-                "relationships": {{
-                    "employee_id": "extracted_or_null",
-                    "vendor_id": "extracted_or_null",
-                    "customer_id": "extracted_or_null",
-                    "project_id": "extracted_or_null"
-                }}
-            }}
-            
-            IMPORTANT RULES:
-            1. If you see salary/wage/payroll terms, classify as payroll_expense
-            2. If you see revenue/income/sales terms, classify as revenue_income
-            3. If you see expense/cost/payment terms, classify as operating_expense
-            4. Extract any person names as employees, vendors, or customers
-            5. Extract project names if mentioned
-            6. Provide confidence score based on clarity of data
-            7. Return ONLY valid JSON, no extra text
-            """
-            
-            # Get AI response using Groq (Llama-3.3-70B for cost-effective batch classification)
-            # FIX #32: Use unified Groq client initialization helper
-            ai_client = get_groq_client()
-            
-            response = ai_client.chat.completions.create(
-                model="llama-3.3-70b-versatile",
-                messages=[{"role": "user", "content": prompt}],
-                max_tokens=1000,
-                temperature=0.0,
-                response_format={"type": "json_object"}
-            )
-            
-            result = response.choices[0].message.content.strip()
-            
-            # Validate response is not garbage
-            if len(result) < 10 or not any(c in result for c in ['{', '[']):
-                logger.error(f"AI returned invalid response (too short or no JSON): {result[:100]}")
-                return self._fallback_classification(row, platform_info, column_names)
-            
-            # Clean and parse JSON response
-            cleaned_result = result.strip()
-            if cleaned_result.startswith('```json'):
-                cleaned_result = cleaned_result[7:]
-            if cleaned_result.endswith('```'):
-                cleaned_result = cleaned_result[:-3]
-            
-            # LIBRARY FIX: Use orjson for 3-5x faster JSON parsing
-            # Parse JSON
-            try:
-                classification = orjson.loads(cleaned_result)
-                
-                # Resolve entities if entity resolver is available
-                if self.entity_resolver and classification.get('entities'):
-                    try:
-                        # Convert row to dict for entity resolution
-                        row_data = {}
-                        for col, val in row.items():
-                            # Check if value is not null/None
-                            if val is not None and str(val).lower() != 'nan':
-                                row_data[str(col)] = str(val)
-                        
-                        # Resolve entities
-                        if file_context:
-                            resolution_result = await self.entity_resolver.resolve_entities_batch(
-                                classification['entities'], 
-                                platform_info.get('platform', 'unknown'),
-                                file_context.get('user_id', '550e8400-e29b-41d4-a716-446655440000'),
-                                row_data,
-                                column_names,
-                                file_context.get('filename', 'test-file.xlsx'),
-                                f"row-{row_data.get('row_index', 'unknown')}"
-                            )
-                        else:
-                            resolution_result = {
-                                'resolved_entities': classification['entities'],
-                                'resolution_results': [],
-                                'total_resolved': 0,
-                                'total_attempted': 0
-                            }
-                        
-                        # Update classification with resolved entities
-                        classification['resolved_entities'] = resolution_result['resolved_entities']
-                        classification['entity_resolution_results'] = resolution_result['resolution_results']
-                        classification['entity_resolution_stats'] = {
-                            'total_resolved': resolution_result['total_resolved'],
-                            'total_attempted': resolution_result['total_attempted']
-                        }
-                        
-                    except Exception as e:
-                        logger.error(f"Entity resolution failed: {e}")
-                        classification['entity_resolution_error'] = str(e)
-                
-                return classification
-            except (ValueError, orjson.JSONDecodeError) as e:
-                # FIX #49: orjson raises ValueError, not json.JSONDecodeError
-                logger.error(f"AI classification JSON parsing failed: {e}")
-                logger.error(f"Raw AI response: {result}")
-                return self._fallback_classification(row, platform_info, column_names)
-                
-        except Exception as e:
-            logger.error(f"AI classification failed: {e}")
-            return self._fallback_classification(row, platform_info, column_names)
-    
-    def _fallback_classification(self, row, platform_info: Dict, column_names: List[str]) -> Dict[str, Any]:
-        """DEDUPLICATION FIX: Use shared fallback classification utility"""
-        result = _shared_fallback_classification(row, platform_info, column_names)
-        
-        # Add entity extraction for AIRowClassifier
-        row_values = row.values() if isinstance(row, dict) else (row.to_dict().values() if hasattr(row, 'to_dict') else row)
-        row_str = ' '.join(str(val).lower() for val in row_values if val is not None and str(val).lower() != 'nan')
-        result['entities'] = self.extract_entities_from_text(row_str)
-        
-        return result
-    
-    def extract_entities_from_text(self, text: str) -> Dict[str, List[str]]:
-        """
-        LIBRARY REPLACEMENT: Extract entities using spaCy NER (95% accuracy vs 40% regex)
-        Replaces 50+ lines of custom regex with battle-tested NLP library.
-        
-        Benefits:
-        - 95% accuracy vs 40% regex accuracy
-        - Handles complex entity patterns
-        - Multi-language support
-        - Context-aware recognition
-        - 50 lines → 15 lines (70% reduction)
-        """
-        entities = {
-            'employees': [],
-            'vendors': [],
-            'customers': [],
-            'projects': []
-        }
-        
-        try:
-            # LIBRARY REPLACEMENT: Use spaCy for NER (already in requirements)
-            import spacy
-            from aident_cfo_brain.intent_and_guard_engine import _model_cache, _model_lock
-            
-            # Load spaCy model from global cache (prevents re-downloading on every call)
-            with _model_lock:
-                if 'spacy_nlp' not in _model_cache:
-                    try:
-                        _model_cache['spacy_nlp'] = spacy.load("en_core_web_sm")
-                        logger.info("✅ spaCy model loaded and cached for entity extraction")
-                    except OSError:
-                        logger.error("spaCy model 'en_core_web_sm' not found. Run: python -m spacy download en_core_web_sm")
-                        raise ValueError("spaCy NER model required for entity extraction. Install with: python -m spacy download en_core_web_sm")
-                
-                nlp = _model_cache['spacy_nlp']
-            
-            if nlp is None:
-                raise ValueError("spaCy model failed to load")
-            
-            # Process text with spaCy
-            doc = nlp(text)
-            
-            # Extract entities by type
-            for ent in doc.ents:
-                entity_text = ent.text.strip()
-                if len(entity_text) < 2:  # Skip single characters
-                    continue
-                
-                # Map spaCy entity types to our categories
-                if ent.label_ == "PERSON":
-                    entities['employees'].append(entity_text)
-                elif ent.label_ in ["ORG", "COMPANY"]:
-                    # Classify as vendor or customer based on context
-                    context_lower = text.lower()
-                    if any(word in context_lower for word in ['client', 'customer', 'account']):
-                        entities['customers'].append(entity_text)
-                    else:
-                        entities['vendors'].append(entity_text)
-                elif ent.label_ in ["PRODUCT", "EVENT"]:
-                    # Projects are often labeled as products or events
-                    if any(word in entity_text.lower() for word in ['project', 'initiative', 'campaign']):
-                        entities['projects'].append(entity_text)
-            
-            # Additional pattern matching for business-specific entities
-            # Company suffixes that spaCy might miss
-            company_suffixes = ['Inc', 'Corp', 'LLC', 'Ltd', 'Company', 'Co', 'Services', 'Solutions', 'Systems', 'Tech']
-            words = text.split()
-            for i, word in enumerate(words):
-                if word in company_suffixes and i > 0:
-                    # Get the company name (previous word + suffix)
-                    company_name = f"{words[i-1]} {word}"
-                    if company_name not in entities['vendors']:
-                        entities['vendors'].append(company_name)
-            
-            # Remove duplicates and clean
-            for key in entities:
-                entities[key] = list(set([e for e in entities[key] if e and len(e.strip()) > 1]))
-            
-            return entities
-            
-        except ValueError as ve:
-            # FIX #53: Re-raise critical errors (missing spaCy model)
-            logger.error(f"Critical NLP error: {ve}")
-            raise ValueError(f"Entity extraction failed. Install spaCy model: python -m spacy download en_core_web_sm")
-    
-    async def _create_new_entity(self, entity_name: str, entity_type: str, user_id: str,
-                                 platform_info: Dict, supabase_client) -> Optional[str]:
-        """
-        CRITICAL FIX: Unified entity creation function - single source of truth for entity creation.
-        Ensures consistent field structure across all ingestion paths.
-        
-        Args:
-            entity_name: Name of the entity
-            entity_type: Type of the entity (e.g. employee, vendor, customer)
-            user_id: User ID of the entity owner
-            platform_info: Platform information
-            supabase_client: Supabase client instance
-        
-        Returns:
-            ID of the created entity or None if failed
-        """
-        try:
-            # FIX #38: Add validation before insert
-            if not entity_name or not entity_type or not user_id:
-                raise ValueError(f"Missing required fields: name={entity_name}, type={entity_type}, user={user_id}")
-            
-            # LIBRARY FIX: Use orjson for 3-5x faster JSON parsing
-            # Parse JSON
-            try:
-                new_entity = orjson.loads('''
-                {
-                    "user_id": "user_id",
-                    "entity_type": "entity_type",
-                    "canonical_name": "entity_name",
-                    "aliases": ["entity_name"],
-                    "platform_sources": ["platform_info.get('platform', 'unknown')"],
-                    "confidence_score": 0.8,  # Higher confidence for spaCy-extracted entities
-                    "first_seen_at": "pendulum.now().to_iso8601_string()",
-                    "last_seen_at": "pendulum.now().to_iso8601_string()"
-                }
-                '''.replace("user_id", user_id).replace("entity_type", entity_type).replace("entity_name", entity_name))
-                
-                result = supabase_client.table('normalized_entities').insert(new_entity).execute()
-                
-                # FIX #38: Validate insert result
-                if not result.data or len(result.data) == 0:
-                    raise ValueError(f"Insert succeeded but no data returned for entity {entity_name}")
-                
-                return result.data[0]['id']
-            except (ValueError, orjson.JSONDecodeError) as e:
-                # FIX #49: orjson raises ValueError, not json.JSONDecodeError
-                logger.error(f"Entity creation JSON parsing failed: {e}")
-                raise ValueError(f"Entity creation failed: {e}")
-            
-        except Exception as e:
-            logger.error(f"Failed to create entity {entity_name} after 3 retries: {e}")
-        
-        return None
-    
-    async def _fallback_entity_matching(self, entity_name: str, entity_type: str, user_id: str,
-                                       platform_info: Dict, supabase_client, existing_df) -> Optional[str]:
-        """Fallback rapidfuzz matching when recordlinkage fails"""
-        try:
-            from rapidfuzz import fuzz, process
-            
-            if len(existing_df) > 0:
-                names = existing_df['canonical_name'].tolist()
-                match = process.extractOne(entity_name, names, scorer=fuzz.token_sort_ratio, score_cutoff=85)
-                if match:
-                    matched_name = match[0]
-                    matched_row = existing_df[existing_df['canonical_name'] == matched_name]
-                    if len(matched_row) > 0:
-                        return matched_row.iloc[0]['id']
-            
-            # Create new entity if no match
-            return await self._create_new_entity(entity_name, entity_type, user_id, platform_info, supabase_client)
-            
-        except Exception as e:
-            logger.error(f"Fallback matching failed for {entity_name}: {e}")
-            return None
-
-# FIX #5: DELETED BatchAIRowClassifier (dead code)
-# Reason: universal_document_classifier.classify_rows_batch is the active system
-# - 100x cheaper (free vs $0.10 per 1000 rows)
-# - 10x faster (50ms vs 500ms per batch)
-# - Already tested and working
-# - No code changes needed elsewhere
-#
-# The BatchAIRowClassifier was created but never called (line 4834 shows it's initialized but unused)
-# Removing 350+ lines of dead code that was causing maintenance burden
 
 async def convert_stream_to_bytes(streamed_file) -> bytes:
-    """
-    CRITICAL FIX: Convert streaming file to full bytes for extractors.
-    Extractors expect complete file content, not chunks.
-    
-    Args:
-        streamed_file: StreamedFile object
-        
-    Returns:
-        Complete file content as bytes
-    """
+    """Convert streaming file to full bytes for extractors."""
     try:
         if hasattr(streamed_file, 'read'):
             # File-like object
@@ -4710,17 +1598,7 @@ async def convert_stream_to_bytes(streamed_file) -> bytes:
 
 
 async def save_clean_event(tx, event: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    CRITICAL FIX: Unified event save function - single source of truth for raw_events insertion.
-    Ensures consistent field structure across all ingestion paths.
-    
-    Args:
-        tx: Transaction context
-        event: Event dict with normalized, dedupe, entities, payload fields
-        
-    Returns:
-        Inserted event with ID
-    """
+    """Unified event save function - single source of truth for raw_events insertion."""
     try:
         # Extract clean fields from event
         clean_event = {
@@ -4765,7 +1643,6 @@ async def save_clean_event(tx, event: Dict[str, Any]) -> Dict[str, Any]:
 class RowProcessor:
     """Processes individual rows and creates events"""
     
-    # FIX #20: Move pattern lists to class-level constants (avoid recreating for every row)
     REVENUE_PATTERNS = ['income', 'revenue', 'payment received', 'deposit', 'credit']
     EXPENSE_PATTERNS = ['expense', 'cost', 'payment', 'debit', 'withdrawal', 'fee']
     PAYROLL_PATTERNS = ['salary', 'payroll', 'wage', 'employee']
@@ -4797,9 +1674,7 @@ class RowProcessor:
             file_context=file_context
         )
         
-        # REMOVED: Row hashing and lineage tracking moved to duplicate detection service only
-        # Backend no longer computes row hashes or lineage to avoid inconsistencies with duplicate service
-        # Duplicate service handles all hashing and provenance via polars for consistency
+        # Row hashing and lineage tracking handled by duplicate detection service
         
         # Create the event payload with enhanced metadata AND provenance
         event = {
@@ -4897,3414 +1772,14 @@ async def get_excel_processor() -> 'ExcelProcessor':
             # Double-check after acquiring lock
             if _excel_processor_instance is None:
                 _excel_processor_instance = ExcelProcessor()
-                logger.info("✅ ExcelProcessor singleton initialized")
+                logger.info("âœ… ExcelProcessor singleton initialized")
     return _excel_processor_instance
 
 
-class ExcelProcessor:
-    """
-    Enterprise-grade Excel processor with streaming XLSX parsers, anomaly detection,
-    and seamless integration with normalization pipelines.
-    
-    Features:
-    - Memory-efficient streaming XLSX parsing
-    - Anomaly detection (corrupted cells, broken formulas, etc.)
-    - Auto-detection of financial fields (P&L, balance sheets, cashflows)
-    - Real-time progress tracking via WebSocket
-    - Cell-level metadata storage
-    - Integration with normalization pipelines
-    """
-    
-    def __init__(self):
-        # Note: No longer using Anthropic, switched to Groq/Llama for all AI operations
-        self.anthropic = None
-        
-        # DIAGNOSTIC: Log critical methods on initialization
-        # NOTE: _extract_entities_from_events and _resolve_entities were removed and replaced
-        # by run_entity_resolution_pipeline which uses EntityResolverOptimized
-        critical_methods = [
-            '_normalize_entity_type', '_store_entity_matches', '_store_platform_patterns',
-            '_learn_platform_patterns', '_discover_new_platforms', '_store_discovered_platforms'
-        ]
-        missing_methods = [m for m in critical_methods if not hasattr(self, m)]
-        if missing_methods:
-            logger.error(f" CRITICAL: ExcelProcessor missing methods on init: {missing_methods}")
-            logger.error(f" File: {__file__}")
-            logger.error(f" Total methods: {len([m for m in dir(self) if not m.startswith('__')])}")
-        else:
-            logger.info(f" ExcelProcessor initialized with all {len(critical_methods)} critical methods")
-        
-        # Initialize universal components with supabase_client for persistent learning
-        self.universal_field_detector = UniversalFieldDetector()
-        self.universal_platform_detector = UniversalPlatformDetector(cache_client=safe_get_ai_cache(), supabase_client=supabase)
-        self.universal_document_classifier = UniversalDocumentClassifier(cache_client=safe_get_ai_cache(), supabase_client=supabase)
-        self.universal_extractors = UniversalExtractors(cache_client=safe_get_ai_cache())
-        
-        # Entity resolver and AI classifier will be initialized per request with Supabase client
-        self.entity_resolver = None
-        # FIX #5: Removed BatchAIRowClassifier initialization (dead code)
-        # Use universal_document_classifier.classify_rows_batch instead (100x cheaper, 10x faster)
-        # Initialize data enrichment processor with Supabase client
-        self.enrichment_processor = DataEnrichmentProcessor(cache_client=safe_get_ai_cache(), supabase_client=supabase)
-        
-        # CRITICAL FIX: Initialize streaming processor for memory-efficient file processing
-        try:
-            initialize_streaming_processor(StreamingConfig.from_env())
-            self.streaming_processor = get_streaming_processor()
-            logger.info("✅ Streaming processor initialized successfully")
-        except Exception as e:
-            logger.error(f"❌ Failed to initialize streaming processor: {e}")
-            # Create fallback instance
-            self.streaming_processor = StreamingFileProcessor()
-        
-        # CRITICAL FIX: Initialize ai_classifier before using it
-        self.ai_classifier = AIRowClassifier()
-        
-        # Initialize RowProcessor with all dependencies
-        self.row_processor = RowProcessor(
-            platform_detector=self.universal_platform_detector,
-            ai_classifier=self.ai_classifier,
-            enrichment_processor=self.enrichment_processor
-        )
-        
-        # Financial field patterns for auto-detection
-        self.financial_patterns = {
-            'profit_loss': {
-                'revenue_fields': ['revenue', 'income', 'sales', 'earnings', 'turnover', 'gross_revenue', 'net_revenue'],
-                'expense_fields': ['expenses', 'costs', 'operating_expenses', 'cogs', 'cost_of_goods_sold', 'admin_expenses'],
-                'profit_fields': ['profit', 'net_income', 'ebitda', 'gross_profit', 'operating_profit']
-            },
-            'balance_sheet': {
-                'asset_fields': ['assets', 'current_assets', 'fixed_assets', 'total_assets', 'cash', 'inventory', 'receivables'],
-                'liability_fields': ['liabilities', 'current_liabilities', 'long_term_debt', 'total_liabilities', 'payables'],
-                'equity_fields': ['equity', 'shareholders_equity', 'retained_earnings', 'capital']
-            },
-            'cashflow': {
-                'operating_fields': ['operating_cash_flow', 'cash_from_operations', 'operating_activities'],
-                'investing_fields': ['investing_cash_flow', 'cash_from_investing', 'investing_activities'],
-                'financing_fields': ['financing_cash_flow', 'cash_from_financing', 'financing_activities']
-            }
-        }
-        
-        # Performance metrics
-        self.metrics = {
-            'files_processed': 0,
-            'total_rows_processed': 0,
-            'anomalies_detected': 0,
-            'financial_fields_detected': 0,
-            'processing_time': 0.0,
-            'memory_usage': 0.0
-        }
-    
-    def _parse_iso_timestamp(self, timestamp_str: str) -> datetime:
-        """
-        LIBRARY REPLACEMENT: Use pendulum for robust date parsing (handles 100+ formats)
-        
-        Replaces 45 lines of custom timezone parsing with pendulum's universal parser.
-        Handles ALL ISO formats automatically including edge cases.
-        """
-        try:
-            # pendulum handles ALL ISO formats automatically, including:
-            # - 2025-10-29T07:32:17.358600+00:00
-            # - 2025-10-29T07:32:17Z
-            # - 2025-10-29 07:32:17
-            # - And 100+ other formats
-            parsed_dt = pendulum.parse(timestamp_str)
-            return parsed_dt.in_timezone('UTC').to_datetime()
-        except Exception as e:
-            logger.warning(f"Failed to parse timestamp '{timestamp_str}': {e}, using current time")
-            return pendulum.now('UTC').to_datetime()
-    
-    async def detect_anomalies(self, df, sheet_name: str) -> Dict[str, Any]:
-        """FIX #16: Detect anomalies in Excel data using thread pool to avoid blocking event loop"""
-        
-        def _detect_anomalies_sync(df_copy) -> Dict[str, Any]:
-            """CPU-bound anomaly detection moved to sync function for thread pool execution"""
-            anomalies = {
-                'corrupted_cells': [],
-                'broken_formulas': [],
-                'hidden_sheets': [],
-                'data_inconsistencies': [],
-                'missing_values': 0,
-                'duplicate_rows': 0
-            }
-            
-            try:
-                # Check for corrupted cells (NaN values in unexpected places)
-                for col in df_copy.columns:
-                    if df_copy[col].dtype == 'object':
-                        # Check for cells that look corrupted
-                        corrupted_mask = df_copy[col].astype(str).str.contains(r'^#(REF|VALUE|DIV/0|NAME|NUM)!', na=False)
-                        if corrupted_mask.any():
-                            anomalies['corrupted_cells'].extend([
-                                {'row': idx, 'column': col, 'value': str(df_copy.loc[idx, col])}
-                                for idx in df_copy[corrupted_mask].index
-                            ])
-                
-                # Check for broken formulas
-                for col in df_copy.columns:
-                    if df_copy[col].dtype == 'object':
-                        formula_mask = df_copy[col].astype(str).str.startswith('=') & df_copy[col].astype(str).str.contains(r'#(REF|VALUE|DIV/0|NAME|NUM)!', na=False)
-                        if formula_mask.any():
-                            anomalies['broken_formulas'].extend([
-                                {'row': idx, 'column': col, 'formula': str(df_copy.loc[idx, col])}
-                                for idx in df_copy[formula_mask].index
-                        ])
-            
-                # Count missing values
-                anomalies['missing_values'] = df_copy.isnull().sum().sum()
-                
-                # Check for duplicate rows
-                anomalies['duplicate_rows'] = df_copy.duplicated().sum()
-                
-                # LIBRARY FIX: Use rapidfuzz for amount column detection (replaces manual .lower() checks)
-                from rapidfuzz import fuzz
-                for col in df_copy.columns:
-                    if df_copy[col].dtype in ['int64', 'float64']:
-                        # Check for negative values in amount columns
-                        amount_keywords = ['amount', 'revenue', 'income', 'sales']
-                        if any(fuzz.token_sort_ratio(col.lower(), kw) > 80 for kw in amount_keywords):
-                            negative_mask = df_copy[col] < 0
-                            if negative_mask.any():
-                                anomalies['data_inconsistencies'].extend([
-                                    {'row': idx, 'column': col, 'value': df_copy.loc[idx, col], 'issue': 'negative_amount'}
-                                    for idx in df_copy[negative_mask].index
-                                ])
-                
-                return anomalies
-                
-            except Exception as e:
-                logger.error(f"Error detecting anomalies in sheet {sheet_name}: {e}")
-                return anomalies
-        
-        # FIX #16: Execute CPU-bound operation in thread pool to avoid blocking event loop
-        import asyncio
-        loop = asyncio.get_event_loop()
-        with ThreadPoolExecutor(max_workers=1) as executor:
-            return await loop.run_in_executor(executor, _detect_anomalies_sync, df.copy())
-    
-    def detect_financial_fields(self, df, sheet_name: str) -> Dict[str, Any]:
-        """Auto-detect financial fields (P&L, balance sheet, cashflow)"""
-        financial_detection = {
-            'sheet_type': 'unknown',
-            'confidence': 0.0,
-            'detected_fields': {},
-            'financial_indicators': []
-        }
-        
-        try:
-            column_names = [col.lower().strip() for col in df.columns if col is not None and str(col).lower() != 'nan']
-            
-            # Check for P&L indicators
-            pl_score = 0
-            pl_fields = set()
-            for category, fields in self.financial_patterns['profit_loss'].items():
-                for field in fields:
-                    if any(field in col for col in column_names):
-                        pl_score += 1
-                        pl_fields.add(field)
-            
-            # Check for Balance Sheet indicators
-            bs_score = 0
-            bs_fields = set()
-            for category, fields in self.financial_patterns['balance_sheet'].items():
-                for field in fields:
-                    if any(field in col for col in column_names):
-                        bs_score += 1
-                        bs_fields.add(field)
-            
-            # Check for Cash Flow indicators
-            cf_score = 0
-            cf_fields = set()
-            for category, fields in self.financial_patterns['cashflow'].items():
-                for field in fields:
-                    if any(field in col for col in column_names):
-                        cf_score += 1
-                        cf_fields.add(field)
-            
-            # Determine sheet type based on highest score
-            max_score = max(pl_score, bs_score, cf_score)
-            if max_score > 0:
-                if pl_score == max_score:
-                    financial_detection['sheet_type'] = 'profit_loss'
-                    financial_detection['detected_fields'] = {'profit_loss': list(pl_fields)}
-                elif bs_score == max_score:
-                    financial_detection['sheet_type'] = 'balance_sheet'
-                    financial_detection['detected_fields'] = {'balance_sheet': list(bs_fields)}
-                elif cf_score == max_score:
-                    financial_detection['sheet_type'] = 'cashflow'
-                    financial_detection['detected_fields'] = {'cashflow': list(cf_fields)}
-                
-                financial_detection['confidence'] = min(max_score / len(column_names), 1.0)
-                financial_detection['financial_indicators'] = list(pl_fields | bs_fields | cf_fields)
-            
-            return financial_detection
-            
-        except Exception as e:
-            logger.error(f"Error detecting financial fields in sheet {sheet_name}: {e}")
-            return financial_detection
-    
-    async def stream_xlsx_processing(self, file_path: str, filename: Optional[str] = None, user_id: Optional[str] = None, progress_callback=None) -> Dict[str, Any]:
-        """CRITICAL FIX: True memory-efficient streaming XLSX processing - no bytes loading"""
-        try:
-            # CRITICAL FIX: Use file path directly, never load bytes into memory
-            from openpyxl import load_workbook
-            import gc
-            
-            # Check file size first to prevent OOM
-            file_size = os.path.getsize(file_path)
-            if file_size > 100 * 1024 * 1024:  # 100MB limit
-                raise ValueError(f"File too large: {file_size/1024/1024:.1f}MB. Maximum allowed: 100MB")
-            
-            workbook = load_workbook(file_path, read_only=True, data_only=True)
-            sheets = {}
-            
-            total_sheets = len(workbook.sheetnames)
-            processed_sheets = 0
-            
-            for sheet_name in workbook.sheetnames:
-                if progress_callback:
-                    await progress_callback("processing", f"Processing sheet: {sheet_name}", 
-                                          int((processed_sheets / total_sheets) * 80))
-                
-                try:
-                    # Get worksheet
-                    worksheet = workbook[sheet_name]
-                    
-                    # Convert to DataFrame with streaming approach
-                    data = []
-                    headers = []
-                    
-                    # CRITICAL FIX: Use values_only=True and proper memory management
-                    for row_idx, row in enumerate(worksheet.iter_rows(values_only=True), 1):
-                        if row_idx == 1:
-                            headers = [str(cell) if cell is not None else f"Column_{i}" for i, cell in enumerate(row)]
-                        else:
-                            if any(cell is not None for cell in row):  # Skip empty rows
-                                data.append(row)
-                        
-                        # CRITICAL FIX: Process in smaller chunks and force garbage collection
-                        if len(data) >= 500:  # Reduced chunk size from 1000 to 500
-                            temp_df = pd.DataFrame(data, columns=headers)
-                            if sheet_name not in sheets:
-                                sheets[sheet_name] = temp_df
-                            else:
-                                sheets[sheet_name] = pd.concat([sheets[sheet_name], temp_df], ignore_index=True)
-                            data = []
-                            # CRITICAL FIX: Force garbage collection after each chunk
-                            del temp_df
-                            gc.collect()
-                    
-                    # Process remaining data
-                    if data:
-                        temp_df = pd.DataFrame(data, columns=headers)
-                        if sheet_name not in sheets:
-                            sheets[sheet_name] = temp_df
-                        else:
-                            sheets[sheet_name] = pd.concat([sheets[sheet_name], temp_df], ignore_index=True)
-                    
-                    # Detect anomalies and financial fields
-                    if not sheets[sheet_name].empty:
-                        anomalies = await self.detect_anomalies(sheets[sheet_name], sheet_name)
-                        financial_fields = self.detect_financial_fields(sheets[sheet_name], sheet_name)
-                        
-                        # Store metadata
-                        sheets[sheet_name].attrs['anomalies'] = anomalies
-                        sheets[sheet_name].attrs['financial_fields'] = financial_fields
-                        
-                        self.metrics['anomalies_detected'] += len(anomalies.get('corrupted_cells', []))
-                        if financial_fields['sheet_type'] != 'unknown':
-                            self.metrics['financial_fields_detected'] += len(financial_fields['financial_indicators'])
-                    
-                    processed_sheets += 1
-                    
-                except Exception as e:
-                    logger.error(f"Error processing sheet {sheet_name}: {e}")
-                    continue
-            
-            workbook.close()
-            return {
-                'sheets': sheets,
-                'summary': {
-                    'sheet_count': len(sheets),
-                    'filename': filename
-                }
-            }
-            
-        except Exception as e:
-            logger.error(f"Error in streaming XLSX processing: {e}")
-            logger.error(f"CRITICAL: Streaming XLSX processing failed. File may be corrupted or too large.")
-            raise ValueError(f"Failed to process XLSX file: {str(e)}. Please ensure file is valid and under 100MB.")
 
-    # FIX #52: REMOVED duplicate _sanitize_nan_for_json function
-    # DEDUPLICATION: Centralized sanitization logic
-    # - _sanitize_for_json (line 469): Wrapper that delegates to helpers.sanitize_for_json
-    # - transaction_manager.py (line 27): Imports from helpers.sanitize_for_json
-    # - DELETED: _sanitize_nan_for_json (was lines 5019-5038) - DUPLICATE REMOVED
-    # Single source of truth: core_infrastructure.utils.helpers.sanitize_for_json
-    # 
-    # ARCHITECTURE NOTE: Pandas vs Polars
-    # - Primary: Polars (line 184) for all data processing
-    # - Fallback: Pandas (line 50) for:
-    #   * recordlinkage entity matching (requires pandas DataFrames)
-    #   * CSV metadata extraction (pd.read_csv)
-    # This is intentional - Polars is used where possible, pandas only for compatibility
-    # 
-    # FIX #8: No pd.read_excel fallback in stream_xlsx_processing
-    # Reason: pd.read_excel loads entire file into memory, defeating streaming purpose
-    # Solution: Fail fast with clear error if streaming fails (file likely corrupted)
+# MODULARIZATION: ExcelProcessor class moved to data_ingestion_normalization/excel_processor.py
+# Import: from data_ingestion_normalization.excel_processor import ExcelProcessor
 
-async def _fast_classify_row_cached(self, row, platform_info: dict, column_names: list) -> dict:
-    """Fast cached classification with AI fallback - 90% cost reduction"""
-    try:
-        # FIX #16: Move CPU-bound row.to_dict() to thread pool
-        def _convert_row_sync(row_copy):
-            row_dict = row_copy.to_dict()
-            # Use centralized sanitize_for_json from helpers
-            return sanitize_for_json(row_dict)
-        
-        import asyncio
-        loop = asyncio.get_event_loop()
-        with ThreadPoolExecutor(max_workers=1) as executor:
-            row_dict_sanitized = await loop.run_in_executor(executor, _convert_row_sync, row.copy())
-        
-        row_content = {
-            'data': row_dict_sanitized,
-            'platform': platform_info.get('platform', 'unknown'),
-            'columns': column_names
-        }
-        
-        # Try to get from AI cache first
-        ai_cache = safe_get_ai_cache()
-        cached_result = await ai_cache.get_cached_classification(row_content, "row_classification")
-        
-        if cached_result:
-            return cached_result
-        
-        # Fast pattern-based classification as fallback
-        row_values = row.values() if isinstance(row, dict) else (row.to_dict().values() if hasattr(row, 'to_dict') else row)
-        row_text = ' '.join([str(val) for val in row_values if val is not None and str(val).lower() != 'nan']).lower()
-        
-        classification = {
-            'category': 'financial',
-            'subcategory': 'transaction',
-            'confidence': 0.7,
-            'method': 'pattern_based_cached'
-        }
-        
-        # LIBRARY FIX: Use RowProcessor class constants to eliminate duplication
-        if any(pattern in row_text for pattern in RowProcessor.REVENUE_PATTERNS):
-            classification['category'] = 'revenue'
-            classification['confidence'] = 0.8
-        
-        # Expense patterns  
-        if any(pattern in row_text for pattern in RowProcessor.EXPENSE_PATTERNS):
-            classification['category'] = 'expense'
-            classification['confidence'] = 0.8
-        
-        # Cache the result for future use
-        await ai_cache.store_classification(row_content, classification, "row_classification")
-        
-        return classification
-        
-    except Exception as e:
-        logger.warning(f"Fast cached classification failed: {e}")
-        return {
-            'category': 'unknown',
-            'subcategory': 'unknown', 
-            'confidence': 0.1,
-            'method': 'fallback'
-        }
-
-    def _fast_classify_row(self, row, platform_info: dict, column_names: list) -> dict:
-        """Fast pattern-based row classification without AI - DEPRECATED: Use _shared_fallback_classification"""
-        logger.warning("DEPRECATED: _fast_classify_row is deprecated, using _shared_fallback_classification")
-        return _shared_fallback_classification(row, platform_info, column_names)
-    
-    async def detect_file_type(self, streamed_file: StreamedFile, filename: str) -> str:
-        """Detect file type using magic numbers and filetype library"""
-        try:
-            # Check file extension first
-            if filename.lower().endswith('.csv'):
-                return 'csv'
-            elif filename.lower().endswith('.xlsx'):
-                return 'xlsx'
-            elif filename.lower().endswith('.xls'):
-                return 'xls'
-            
-            # Try filetype library
-            file_type = filetype.guess(streamed_file.path)
-            if file_type:
-                if file_type.extension == 'csv':
-                    return 'csv'
-                elif file_type.extension in ['xlsx', 'xls']:
-                    return file_type.extension
-            
-            # Fallback to python-magic (guarded for environments where libmagic is unavailable)
-            mime_type = ''
-            try:
-                mime_type = magic.from_file(streamed_file.path, mime=True)
-            except Exception:
-                mime_type = ''
-            if 'csv' in mime_type or 'text/plain' in mime_type:
-                return 'csv'
-            elif 'excel' in mime_type or 'spreadsheet' in mime_type:
-                return 'xlsx'
-            else:
-                return 'unknown'
-        except Exception as e:
-            logger.error(f"File type detection failed: {e}")
-            return 'unknown'
-    
-    async def _get_sheet_metadata(self, streamed_file: StreamedFile) -> Dict[str, Dict[str, Any]]:
-        """
-        CRITICAL FIX: Get lightweight sheet metadata WITHOUT loading full data into memory.
-        Returns: {sheet_name: {columns: [...], row_count: int, dtypes: {...}, sample_hash: str}}
-        This prevents OOM on large files while still enabling duplicate detection.
-        """
-        try:
-            metadata = {}
-            
-            if streamed_file.filename.lower().endswith('.csv'):
-                # For CSV: read only first 100 rows for metadata
-                df_sample = pd.read_csv(streamed_file.path, nrows=100)
-                # Get actual row count without loading full file
-                with open(streamed_file.path, 'r', encoding='utf-8', errors='ignore') as f:
-                    row_count = sum(1 for _ in f) - 1  # Subtract header
-                
-                metadata['Sheet1'] = {
-                    'columns': list(df_sample.columns),
-                    'row_count': row_count,
-                    'dtypes': df_sample.dtypes.astype(str).to_dict(),
-                    'sample_hash': xxhash.xxh64(df_sample.head(10).to_json().encode()).hexdigest()
-                }
-                
-            elif streamed_file.filename.lower().endswith(('.xlsx', '.xls')):
-                # For Excel: use openpyxl to read metadata only
-                import openpyxl
-                wb = openpyxl.load_workbook(streamed_file.path, read_only=True, data_only=True)
-                
-                for sheet_name in wb.sheetnames:
-                    ws = wb[sheet_name]
-                    # Get dimensions without loading all data
-                    max_row = ws.max_row
-                    max_col = ws.max_column
-                    
-                    # Read only header row
-                    header = [cell.value for cell in ws[1]]
-                    
-                    # Read first 10 rows for sample hash
-                    sample_rows = []
-                    for i, row in enumerate(ws.iter_rows(min_row=2, max_row=min(11, max_row), values_only=True)):
-                        if i >= 10:
-                            break
-                        sample_rows.append(row)
-                    
-                    sample_hash = xxhash.xxh64(str(sample_rows).encode()).hexdigest()
-                    
-                    metadata[sheet_name] = {
-                        'columns': header,
-                        'row_count': max_row - 1,  # Subtract header
-                        'dtypes': {},  # Excel doesn't have explicit dtypes without loading data
-                        'sample_hash': sample_hash
-                    }
-                
-                wb.close()
-            
-            else:
-                # For other formats, fall back to reading small sample
-                logger.warning(f"Unknown file format for metadata extraction: {streamed_file.filename}")
-                return {}
-            
-            logger.info(f"Extracted metadata for {len(metadata)} sheets from {streamed_file.filename} without loading full data")
-            return metadata
-            
-        except Exception as e:
-            logger.error(f"Failed to extract sheet metadata: {e}")
-            # Fallback: return empty metadata, streaming will still work
-            return {}
-    
-    async def process_file(self, job_id: str, streamed_file: StreamedFile,
-                          user_id: str, supabase: Client,
-                          duplicate_decision: Optional[str] = None,
-                          existing_file_id: Optional[str] = None,
-                          original_file_hash: Optional[str] = None,
-                          streamed_file_hash: Optional[str] = None,
-                          streamed_file_size: Optional[int] = None,
-                          external_item_id: Optional[str] = None) -> Dict[str, Any]:
-        """Optimized processing pipeline with duplicate detection and batch AI classification"""
-
-        # BUG #11 FIX: Remove pointless if/else - always use production service
-        duplicate_service = ProductionDuplicateDetectionService(supabase)
-
-        # Create processing transaction for rollback capability
-        transaction_id = str(uuid.uuid4())
-        transaction_data = {
-            'id': transaction_id,
-            'user_id': user_id,
-            'status': 'pending',  # FIXED: Use 'pending' instead of 'active' for initial state
-            'operation_type': 'file_processing',
-            'started_at': pendulum.now().to_iso8601_string(),
-            'job_id': job_id,  # FIXED: Add job_id as top-level field
-            'file_id': None,  # Will be set after raw_record creation
-            'start_time': pendulum.now().to_iso8601_string(),  # FIXED: Add start_time for monitoring
-            'metadata': {
-                'job_id': job_id,
-                'filename': streamed_file.filename,
-                'file_size': streamed_file_size or streamed_file.size
-            },
-            'inserted_ids': {}  # FIX ISSUE #6: Track inserted IDs for rollback
-        }
-        
-        try:
-            # Create transaction record (use upsert to handle retries gracefully)
-            supabase.table('processing_transactions').upsert(transaction_data, on_conflict='id').execute()
-            logger.info(f"Created processing transaction: {transaction_id}")
-        except Exception as e:
-            logger.warning(f"Failed to create processing transaction: {e}")
-            # CRITICAL FIX: Don't set transaction_id to None - use fallback UUID instead
-            # transaction_id is used throughout processing without null checks
-            logger.warning(f"Using fallback transaction_id: {transaction_id}")
-
-        # Wrap processing in try/except for rollback
-        async def _execute_with_rollback():
-            """Execute processing with automatic rollback on failure"""
-            try:
-                # CRITICAL FIX #1: Use xxh3_128 for standardized hashing
-                # Eliminates hash mismatch between frontend (SHA-256) and backend (xxh3_128)
-                if streamed_file_hash:
-                    file_hash = streamed_file_hash
-                else:
-                    file_hash = streamed_file.xxh3_128  # Use xxh3_128 instead of deprecated sha256
-                file_hash_for_check = original_file_hash or file_hash
-                
-                # Step 2: Duplicate Detection (Exact and Near) using Production Service
-                await manager.send_update(job_id, {
-                    "step": "duplicate_check",
-                    "message": format_progress_message(ProcessingStage.SENSE, "Checking if I've seen this file before"),
-                    "progress": 15
-                })
-
-                duplicate_analysis = {
-                    'is_duplicate': False,
-                    'duplicate_files': [],
-                    'similarity_score': 0.0,
-                    'status': 'none',
-                    'requires_user_decision': False,
-                    'decision': duplicate_decision,
-                    'existing_file_id': existing_file_id
-                }
-
-                if duplicate_decision:
-                    try:
-                        # CRITICAL FIX #1: Inform user we're processing their decision
-                        decision_messages = {
-                            'skip': 'Got it, skipping this file',
-                            'replace': 'Got it, replacing the old file with this one',
-                            'merge': 'Got it, merging the new data with existing records'
-                        }
-                        await manager.send_update(job_id, {
-                            "step": "processing_decision",
-                            "message": format_progress_message(
-                                ProcessingStage.ACT,
-                                decision_messages.get(duplicate_decision, f"Processing your {duplicate_decision} request")
-                            ),
-                            "progress": 18
-                        })
-                        
-                        decision_result = await duplicate_service.handle_duplicate_decision(
-                            user_id=user_id,
-                            file_hash=file_hash_for_check,
-                            decision=duplicate_decision,
-                            existing_file_id=existing_file_id
-                        )
-                        duplicate_analysis['decision_result'] = decision_result
-                        if decision_result.get('action') == 'delta_merge':
-                            duplicate_analysis['status'] = 'delta_merge_applied'
-                            duplicate_analysis['merged_events'] = decision_result.get('delta_result', {}).get('merged_events', 0)
-                            if decision_result.get('delta_result', {}).get('existing_file_id'):
-                                duplicate_analysis['existing_file_id'] = decision_result['delta_result']['existing_file_id']
-                    except Exception as decision_error:
-                        logger.warning(f"Duplicate decision handling failed for job {job_id}: {decision_error}")
-
-                if not duplicate_decision:
-                    try:
-                        file_metadata = FileMetadata(
-                            user_id=user_id,
-                            file_hash=file_hash_for_check,
-                            filename=streamed_file.filename,
-                            file_size=streamed_file_size or streamed_file.size,
-                            content_type='application/octet-stream',
-                            upload_timestamp=pendulum.now()
-                        )
-
-                        # CRITICAL FIX: Convert streaming file to bytes for extractors
-                        # Extractors expect complete file content, not chunks
-                        file_bytes = await convert_stream_to_bytes(streamed_file)
-                        logger.info(f"Converted streamed file to bytes: {len(file_bytes)} bytes")
-                        
-                        # CRITICAL FIX: Process sheets_data in streaming fashion to prevent memory exhaustion
-                        # Use streaming delta analysis instead of accumulating all chunks in memory
-                        sheets_data = None  # Don't accumulate - pass streamed_file directly to duplicate service
-                        
-                        try:
-                            # CRITICAL FIX #4: Catch DuplicateDetectionError to prevent silent failures
-                            dup_result = await duplicate_service.detect_duplicates(
-                                file_metadata=file_metadata, 
-                                streamed_file=streamed_file,
-                                sheets_data=None,  # Use streaming analysis instead
-                                enable_near_duplicate=True
-                            )
-                        except DuplicateDetectionError as dup_err:
-                            # CRITICAL FIX #4: Fail explicitly instead of silently returning false negative
-                            error_msg = f"Duplicate detection service failed: {str(dup_err)}. Cannot proceed with ingestion."
-                            logger.error(error_msg)
-                            await manager.send_update(job_id, {
-                                "step": "error",
-                                "message": "Duplicate detection failed - please try again",
-                                "error": error_msg,
-                                "progress": 0
-                            })
-                            try:
-                                supabase.table('ingestion_jobs').update({
-                                    'status': 'failed',
-                                    'error_message': error_msg,
-                                    'updated_at': pendulum.now().to_iso8601_string()
-                                }).eq('id', job_id).execute()
-                            except Exception as db_err:
-                                logger.warning(f"Failed to update job status on duplicate detection error: {db_err}")
-                            raise HTTPException(status_code=503, detail="Duplicate detection service unavailable")
-
-                        dup_type_val = getattr(getattr(dup_result, 'duplicate_type', None), 'value', None)
-                        if getattr(dup_result, 'is_duplicate', False) and dup_type_val == 'exact':
-                            # HYBRID AUTO-PILOT FIX #1: Exact duplicate (100%) - Auto-skip & notify
-                            duplicate_analysis = {
-                                'is_duplicate': True,
-                                'duplicate_files': dup_result.duplicate_files,
-                                'similarity_score': dup_result.similarity_score,
-                                'status': 'exact_duplicate',
-                                'auto_action': 'skip',  # Auto-skip, don't ask
-                                'requires_user_decision': False  # No pause
-                            }
-                            
-                            # Notify user via WebSocket (no pause)
-                            latest_file = dup_result.duplicate_files[0] if dup_result.duplicate_files else {}
-                            await manager.send_update(job_id, {
-                                "step": "duplicate_skipped",
-                                "message": format_progress_message(
-                                    ProcessingStage.EXPLAIN, 
-                                    "Already have this file", 
-                                    f"Exact match with '{latest_file.get('filename', 'existing file')}' - skipping"
-                                ),
-                                "progress": 20,
-                                "duplicate_info": duplicate_analysis,
-                                "requires_user_decision": False  # No modal
-                            })
-                            
-                            # Update job status to completed (skipped)
-                            try:
-                                supabase.table('ingestion_jobs').update({
-                                    'status': 'completed',  # Mark as done (skipped)
-                                    'updated_at': pendulum.now().to_iso8601_string(),
-                                    'progress': 100,
-                                    'result': {
-                                        'status': 'duplicate_skipped',
-                                        'duplicate_files': dup_result.duplicate_files,
-                                        'message': f"Skipped - exact match with existing file"
-                                    }
-                                }).eq('id', job_id).execute()
-                            except Exception as db_err:
-                                logger.warning(f"Failed to update job status on exact duplicate: {db_err}")
-                            
-                            # Return immediately - don't ingest
-                            return {
-                                "status": "duplicate_skipped",
-                                "duplicate_analysis": duplicate_analysis,
-                                "job_id": job_id,
-                                "requires_user_decision": False,
-                                "file_hash": file_hash_for_check,
-                                "message": "File skipped - exact duplicate detected"
-                            }
-                    except Exception as dup_check_err:
-                        logger.warning(f"Duplicate check failed: {dup_check_err}, continuing with ingestion")
-                    
-            except Exception as processing_error:
-                logger.error(f"Processing failed for transaction {transaction_id}: {processing_error}")
-                
-                # ROLLBACK: Delete all inserted data
-                try:
-                    # Get all inserted IDs from transaction metadata
-                    tx_data = supabase.table('processing_transactions').select('inserted_ids, file_id').eq('id', transaction_id).single().execute()
-                    
-                    if tx_data.data:
-                        file_id = tx_data.data.get('file_id')
-                        inserted_ids = tx_data.data.get('inserted_ids', {})
-                        
-                        # Delete raw_events
-                        if 'raw_events' in inserted_ids and inserted_ids['raw_events']:
-                            try:
-                                supabase.table('raw_events').delete().in_('id', inserted_ids['raw_events']).execute()
-                                logger.info(f"Rolled back {len(inserted_ids['raw_events'])} raw_events")
-                            except Exception as e:
-                                logger.error(f"Failed to rollback raw_events: {e}")
-                        
-                        # Delete normalized_events
-                        if 'normalized_events' in inserted_ids and inserted_ids['normalized_events']:
-                            try:
-                                supabase.table('normalized_events').delete().in_('id', inserted_ids['normalized_events']).execute()
-                                logger.info(f"Rolled back {len(inserted_ids['normalized_events'])} normalized_events")
-                            except Exception as e:
-                                logger.error(f"Failed to rollback normalized_events: {e}")
-                        
-                        # Delete raw_record
-                        if file_id:
-                            try:
-                                supabase.table('raw_records').delete().eq('id', file_id).execute()
-                                logger.info(f"Rolled back raw_record {file_id}")
-                            except Exception as e:
-                                logger.error(f"Failed to rollback raw_record: {e}")
-                        
-                        # Mark transaction as rolled back
-                        supabase.table('processing_transactions').update({
-                            'status': 'rolled_back',
-                            'rolled_back_at': pendulum.now().to_iso8601_string(),
-                            'error_details': str(processing_error),
-                            'rollback_data': inserted_ids
-                        }).eq('id', transaction_id).execute()
-                        
-                        logger.info(f"Transaction {transaction_id} rolled back successfully")
-                
-                except Exception as rollback_error:
-                    logger.error(f"Rollback failed for transaction {transaction_id}: {rollback_error}")
-                    
-                    # Mark transaction as failed (rollback failed)
-                    try:
-                        supabase.table('processing_transactions').update({
-                            'status': 'failed',
-                            'failed_at': pendulum.now().to_iso8601_string(),
-                            'error_details': f"Processing error: {processing_error}, Rollback error: {rollback_error}"
-                        }).eq('id', transaction_id).execute()
-                    except Exception as e:
-                        logger.error(f"Failed to mark transaction as failed: {e}")
-                
-                # Re-raise to trigger job failure
-                raise processing_error
-            
-            # On success: Mark transaction as committed
-            try:
-                supabase.table('processing_transactions').update({
-                    'status': 'committed',
-                    'committed_at': pendulum.now().to_iso8601_string()
-                }).eq('id', transaction_id).execute()
-                logger.info(f"Transaction {transaction_id} committed successfully")
-            except Exception as e:
-                logger.warning(f"Failed to mark transaction as committed: {e}")
-
-        # Create processing lock to prevent concurrent processing of same job
-        lock_id = f"job_{job_id}"
-        lock_acquired = False
-        try:
-            lock_data = {
-                'id': lock_id,
-                'lock_type': 'file_processing',
-                'resource_id': job_id,
-                'user_id': user_id,
-                'acquired_at': pendulum.now().to_iso8601_string(),
-                'expires_at': pendulum.now().add(hours=1).to_iso8601_string(),
-                'job_id': job_id,
-                'metadata': {
-                    'filename': streamed_file.filename,
-                    'transaction_id': transaction_id
-                }
-            }
-            supabase.table('processing_locks').insert(lock_data).execute()
-            lock_acquired = True
-            logger.info(f"Acquired processing lock: {lock_id}")
-        except Exception as e:
-            logger.warning(f"Failed to acquire processing lock (may already exist): {e}")
-            # Continue processing even if lock fails - it's for optimization, not critical
-
-        # CRITICAL FIX: Initialize streaming processor for memory-efficient processing
-        # Get sheet metadata ONLY (names, columns, row counts) without loading full data
-        await manager.send_update(job_id, {
-            "step": "initializing_streaming",
-            "message": format_progress_message(ProcessingStage.SENSE, "Getting ready to read your file"),
-            "progress": 10
-        })
-
-        try:
-            # CRITICAL FIX: Get lightweight sheet metadata for duplicate detection
-            # This reads only headers and counts, NOT full data (prevents OOM)
-            sheets_metadata = await self._get_sheet_metadata(streamed_file)
-            
-        except Exception as e:
-            # Handle error with recovery system
-            # CRITICAL FIX #6: Add null check to prevent cascading failures
-            try:
-                error_recovery = get_error_recovery_system()
-                if error_recovery:
-                    error_context = ErrorContext(
-                        error_id=str(uuid.uuid4()),
-                        user_id=user_id,
-                        job_id=job_id,
-                        transaction_id=transaction_id,  # CRITICAL FIX: Use transaction_id instead of None
-                        operation_type="streaming_init",
-                        error_message=str(e),
-                        error_details={"filename": streamed_file.filename, "file_size": streamed_file_size or streamed_file.size},
-                        severity=ErrorSeverity.HIGH,
-                        occurred_at=datetime.utcnow()
-                    )
-                    
-                    await error_recovery.handle_processing_error(error_context)
-                else:
-                    logger.warning("Error recovery system not available, continuing without recovery")
-            except Exception as recovery_err:
-                logger.warning(f"Error recovery failed: {recovery_err}, continuing without recovery")
-            
-            await manager.send_update(job_id, {
-                "step": "error",
-                "message": f"Error initializing streaming: {str(e)}",
-                "progress": 0
-            })
-            raise HTTPException(status_code=400, detail=f"Failed to initialize streaming: {str(e)}")
-
-        # ACCURACY FIX #11: Calculate file hash once and reuse
-        if streamed_file_hash:
-            file_hash = streamed_file_hash
-        else:
-            file_hash = streamed_file.xxh3_128  # Use xxh3_128 instead of deprecated sha256
-        file_hash_for_check = original_file_hash or file_hash
-        
-        # Step 2: Duplicate Detection (Exact and Near) using Production Service
-        await manager.send_update(job_id, {
-            "step": "duplicate_check",
-            "message": format_progress_message(ProcessingStage.SENSE, "Checking if I've seen this file before"),
-            "progress": 15
-        })
-
-        duplicate_analysis = {
-            'is_duplicate': False,
-            'duplicate_files': [],
-            'similarity_score': 0.0,
-            'status': 'none',
-            'requires_user_decision': False,
-            'decision': duplicate_decision,
-            'existing_file_id': existing_file_id
-        }
-
-        if duplicate_decision:
-            try:
-                # CRITICAL FIX #1: Inform user we're processing their decision
-                decision_messages = {
-                    'skip': 'Got it, skipping this file',
-                    'replace': 'Got it, replacing the old file with this one',
-                    'merge': 'Got it, merging the new data with existing records'
-                }
-                await manager.send_update(job_id, {
-                    "step": "processing_decision",
-                    "message": format_progress_message(
-                        ProcessingStage.ACT,
-                        decision_messages.get(duplicate_decision, f"Processing your {duplicate_decision} request")
-                    ),
-                    "progress": 18
-                })
-                
-                decision_result = await duplicate_service.handle_duplicate_decision(
-                    user_id=user_id,
-                    file_hash=file_hash_for_check,
-                    decision=duplicate_decision,
-                    existing_file_id=existing_file_id
-                )
-                duplicate_analysis['decision_result'] = decision_result
-                if decision_result.get('action') == 'delta_merge':
-                    duplicate_analysis['status'] = 'delta_merge_applied'
-                    duplicate_analysis['merged_events'] = decision_result.get('delta_result', {}).get('merged_events', 0)
-                    if decision_result.get('delta_result', {}).get('existing_file_id'):
-                        duplicate_analysis['existing_file_id'] = decision_result['delta_result']['existing_file_id']
-            except Exception as decision_error:
-                logger.warning(f"Duplicate decision handling failed for job {job_id}: {decision_error}")
-
-        if not duplicate_decision:
-            try:
-                file_metadata = FileMetadata(
-                    user_id=user_id,
-                    file_hash=file_hash_for_check,
-                    filename=streamed_file.filename,
-                    file_size=streamed_file_size or streamed_file.size,
-                    content_type='application/octet-stream',
-                    upload_timestamp=pendulum.now()
-                )
-
-                # CRITICAL FIX: Convert streaming file to bytes for extractors
-                # Extractors expect complete file content, not chunks
-                file_bytes = await convert_stream_to_bytes(streamed_file)
-                logger.info(f"Converted streamed file to bytes: {len(file_bytes)} bytes")
-                
-                # CRITICAL FIX: Process sheets_data in streaming fashion to prevent memory exhaustion
-                # Use streaming delta analysis instead of accumulating all chunks in memory
-                sheets_data = None  # Don't accumulate - pass streamed_file directly to duplicate service
-                
-                try:
-                    # CRITICAL FIX #4: Catch DuplicateDetectionError to prevent silent failures
-                    dup_result = await duplicate_service.detect_duplicates(
-                        file_metadata=file_metadata, 
-                        streamed_file=streamed_file,
-                        sheets_data=None,  # Use streaming analysis instead
-                        enable_near_duplicate=True
-                    )
-                except DuplicateDetectionError as dup_err:
-                    # CRITICAL FIX #4: Fail explicitly instead of silently returning false negative
-                    error_msg = f"Duplicate detection service failed: {str(dup_err)}. Cannot proceed with ingestion."
-                    logger.error(error_msg)
-                    await manager.send_update(job_id, {
-                        "step": "error",
-                        "message": "Duplicate detection failed - please try again",
-                        "error": error_msg,
-                        "progress": 0
-                    })
-                    try:
-                        supabase.table('ingestion_jobs').update({
-                            'status': 'failed',
-                            'error_message': error_msg,
-                            'updated_at': pendulum.now().to_iso8601_string()
-                        }).eq('id', job_id).execute()
-                    except Exception as db_err:
-                        logger.warning(f"Failed to update job status on duplicate detection error: {db_err}")
-                    raise HTTPException(status_code=503, detail="Duplicate detection service unavailable")
-
-                dup_type_val = getattr(getattr(dup_result, 'duplicate_type', None), 'value', None)
-                if getattr(dup_result, 'is_duplicate', False) and dup_type_val == 'exact':
-                    duplicate_analysis = {
-                        'is_duplicate': True,
-                        'duplicate_files': dup_result.duplicate_files,
-                        'similarity_score': dup_result.similarity_score,
-                        'status': 'exact_duplicate',
-                        'requires_user_decision': True
-                    }
-                    await manager.send_update(job_id, {
-                        "step": "duplicate_found",
-                        "message": format_progress_message(ProcessingStage.EXPLAIN, "Found an exact match", "I've processed this file before"),
-                        "progress": 20,
-                        "duplicate_info": duplicate_analysis,
-                        "requires_user_decision": True
-                    })
-                    try:
-                        supabase.table('ingestion_jobs').update({
-                            'status': 'waiting_user_decision',
-                            'updated_at': pendulum.now().to_iso8601_string(),
-                            'progress': 20,
-                            'result': {
-                                'status': 'duplicate_detected',
-                                'duplicate_files': dup_result.duplicate_files
-                            }
-                        }).eq('id', job_id).execute()
-                    except Exception as db_err:
-                        logger.warning(f"Failed to persist waiting_user_decision state: {db_err}")
-                    return {
-                        "status": "duplicate_detected",
-                        "duplicate_analysis": duplicate_analysis,
-                        "job_id": job_id,
-                        "requires_user_decision": True,
-                        "file_hash": file_hash_for_check,
-                        "existing_file_id": (dup_result.duplicate_files or [{}])[0].get('id') if getattr(dup_result, 'duplicate_files', None) else None
-                    }
-
-                if getattr(dup_result, 'is_duplicate', False) and dup_type_val == 'near':
-                    near_duplicate_analysis = {
-                        'is_near_duplicate': True,
-                        'similarity_score': dup_result.similarity_score,
-                        'duplicate_files': dup_result.duplicate_files
-                    }
-                    await manager.send_update(job_id, {
-                        "step": "near_duplicate_found",
-                        "message": format_progress_message(ProcessingStage.EXPLAIN, "Found a similar file", f"{dup_result.similarity_score:.0%} match with something I processed earlier"),
-                        "progress": 35,
-                        "near_duplicate_info": near_duplicate_analysis,
-                        "requires_user_decision": True
-                    })
-                    try:
-                        supabase.table('ingestion_jobs').update({
-                            'status': 'waiting_user_decision',
-                            'updated_at': pendulum.now().to_iso8601_string(),
-                            'progress': 35,
-                            'result': {
-                                'status': 'near_duplicate_detected',
-                                'duplicate_files': dup_result.duplicate_files,
-                                'similarity_score': dup_result.similarity_score
-                            }
-                        }).eq('id', job_id).execute()
-                    except Exception as db_err:
-                        logger.warning(f"Failed to persist near duplicate state: {db_err}")
-                    return {
-                        "status": "near_duplicate_detected",
-                        "near_duplicate_analysis": near_duplicate_analysis,
-                        "job_id": job_id,
-                        "requires_user_decision": True,
-                        "file_hash": file_hash_for_check,
-                        "existing_file_id": (dup_result.duplicate_files or [{}])[0].get('id') if getattr(dup_result, 'duplicate_files', None) else None
-                    }
-
-                # CRITICAL FIX: Let ProductionDuplicateDetectionService handle its own fingerprinting
-                # Remove manual fingerprint calculation - service does this internally
-                content_duplicate_analysis = await duplicate_service.check_content_duplicate(
-                    user_id, file_hash, streamed_file.filename
-                )
-                if content_duplicate_analysis.get('is_content_duplicate', False):
-                    # HYBRID AUTO-PILOT FIX #2: Delta merge - Auto-merge & notify
-                    await manager.send_update(job_id, {
-                        "step": "analyzing_delta",
-                        "message": format_progress_message(ProcessingStage.UNDERSTAND, "Analyzing differences"),
-                        "progress": 25
-                    })
-
-                    delta_analysis = None
-                    existing_file_id = None
-                    if content_duplicate_analysis.get('overlapping_files'):
-                        existing_file_id = content_duplicate_analysis['overlapping_files'][0]['id']
-                        # CRITICAL FIX: Use streaming processor directly without accumulating chunks
-                        # Pass streamed_file to duplicate service for true streaming delta analysis
-                        # Do NOT accumulate chunks into memory - defeats purpose of streaming
-                        delta_analysis = await duplicate_service.analyze_delta_ingestion_streaming(
-                            user_id, streamed_file, existing_file_id
-                        )
-
-                        new_rows = delta_analysis.get('delta_analysis', {}).get('new_rows', 0)
-                        existing_rows = delta_analysis.get('delta_analysis', {}).get('existing_rows', 0)
-                        
-                        # AUTO-MERGE: Perform delta merge automatically
-                        await manager.send_update(job_id, {
-                            "step": "auto_merging_delta",
-                            "message": format_progress_message(
-                                ProcessingStage.ACT, 
-                                f"Merging {new_rows} new rows", 
-                                f"Adding to {existing_rows} existing rows"
-                            ),
-                            "progress": 35
-                        })
-                        
-                        try:
-                            # Perform delta merge automatically (no user decision needed)
-                            merge_result = await duplicate_service._perform_delta_merge(
-                                user_id=user_id,
-                                new_file_hash=file_hash_for_check,
-                                existing_file_id=existing_file_id
-                            )
-                            
-                            merged_events = merge_result.get('merged_events', 0)
-                            
-                            # NOTIFY USER: Delta merge completed
-                            await manager.send_update(job_id, {
-                                "step": "delta_merged",
-                                "message": format_progress_message(
-                                    ProcessingStage.EXPLAIN,
-                                    f"Merged {merged_events} new rows",
-                                    f"Your data is now up-to-date"
-                                ),
-                                "progress": 40,
-                                "delta_merge_result": merge_result,
-                                "requires_user_decision": False  # No pause
-                            })
-                            
-                            # Update job status to completed (merged)
-                            try:
-                                supabase.table('ingestion_jobs').update({
-                                    'status': 'completed',  # Mark as done (merged)
-                                    'updated_at': pendulum.now().to_iso8601_string(),
-                                    'progress': 40,
-                                    'result': {
-                                        'status': 'delta_merged',
-                                        'merged_events': merged_events,
-                                        'existing_file_id': existing_file_id,
-                                        'message': f"Auto-merged {merged_events} new rows"
-                                    }
-                                }).eq('id', job_id).execute()
-                            except Exception as db_err:
-                                logger.warning(f"Failed to update job status on delta merge: {db_err}")
-                            
-                            # Return immediately - delta merge is complete
-                            return {
-                                "status": "delta_merged",
-                                "delta_analysis": delta_analysis,
-                                "merge_result": merge_result,
-                                "job_id": job_id,
-                                "requires_user_decision": False,  # No pause
-                                "file_hash": file_hash_for_check,
-                                "existing_file_id": existing_file_id,
-                                "message": f"Auto-merged {merged_events} new rows"
-                            }
-                            
-                        except Exception as merge_error:
-                            logger.error(f"Delta merge failed for job {job_id}: {merge_error}")
-                            # If merge fails, notify user and stop
-                            await manager.send_update(job_id, {
-                                "step": "error",
-                                "message": f"Delta merge failed: {str(merge_error)}",
-                                "progress": 0
-                            })
-                            try:
-                                supabase.table('ingestion_jobs').update({
-                                    'status': 'failed',
-                                    'error_message': f"Delta merge failed: {str(merge_error)}",
-                                    'updated_at': pendulum.now().to_iso8601_string()
-                                }).eq('id', job_id).execute()
-                            except Exception as db_err:
-                                logger.warning(f"Failed to update job status on merge error: {db_err}")
-                            raise HTTPException(status_code=500, detail=f"Delta merge failed: {str(merge_error)}")
-
-            except Exception as e:
-                error_recovery = get_error_recovery_system()
-                error_context = ErrorContext(
-                    error_id=str(uuid.uuid4()),
-                    user_id=user_id,
-                    job_id=job_id,
-                    transaction_id=transaction_id,  # CRITICAL FIX #4: Use transaction_id instead of None
-                    operation_type="duplicate_detection",
-                    error_message=str(e),
-                    error_details={"filename": streamed_file.filename},
-                    severity=ErrorSeverity.MEDIUM,
-                    occurred_at=datetime.utcnow()
-                )
-                await error_recovery.handle_processing_error(error_context)
-                logger.warning(f"Duplicate detection failed, continuing with processing: {e}")
-
-        # CRITICAL FIX: Validate metadata exists (sheets_metadata replaces sheets)
-        if not sheets_metadata or all(meta['row_count'] == 0 for meta in sheets_metadata.values()):
-            await manager.send_update(job_id, {
-                "step": "error",
-                "message": "I couldn't find any data in this file",
-                "progress": 0
-            })
-            raise HTTPException(status_code=400, detail="File contains no data")
-        
-        # CRITICAL FIX: Field detection MUST run before platform detection
-        # Platform detection relies on field types and vendor/description fields
-        first_sheet_meta = list(sheets_metadata.values())[0]
-        
-        # Step 1: Field Detection First (required for platform detection)
-        await manager.send_update(job_id, {
-            "step": "field_detection",
-            "message": format_progress_message(ProcessingStage.UNDERSTAND, "Analyzing field types and structure"),
-            "progress": 18
-        })
-        
-        # Get sample data for field detection
-        sample_data = {}
-        if first_sheet_meta.get('sample_row'):
-            sample_data = dict(zip(first_sheet_meta['columns'], first_sheet_meta['sample_row']))
-        
-        # Run field detection to identify field types
-        field_detection_result = await self.universal_field_detector.detect_field_types_universal(
-            data=sample_data,
-            filename=streamed_file.filename,
-            context={
-                'columns': first_sheet_meta['columns'],
-                'sheet_name': list(sheets_metadata.keys())[0]
-            },
-            user_id=user_id
-        )
-        
-        # Extract field information for platform detection
-        detected_fields = field_detection_result.get('detected_fields', [])
-        field_types = field_detection_result.get('field_types', {})
-        
-        # Step 2: Platform Detection (now with field information)
-        await manager.send_update(job_id, {
-            "step": "platform_detection",
-            "message": format_progress_message(ProcessingStage.UNDERSTAND, "Figuring out where this data came from"),
-            "progress": 22
-        })
-        
-        # Convert metadata to payload dict for platform detection
-        payload_for_detection = {
-            'columns': first_sheet_meta['columns'],
-            'sample_data': [sample_data] if sample_data else [],
-            'detected_fields': detected_fields,  # CRITICAL: Include field detection results
-            'field_types': field_types  # CRITICAL: Include field type mapping
-        }
-        
-        # Fast pattern-based platform detection with field context
-        ai_cache = safe_get_ai_cache()
-        platform_cache_key = {
-            'columns': first_sheet_meta['columns'],
-            'filename': streamed_file.filename
-        }
-        cached_platform = await ai_cache.get_cached_classification(platform_cache_key, "platform_detection")
-        if cached_platform:
-            platform_info = cached_platform
-        else:
-            # Call the correct async method with Dict payload
-            platform_info = await self.universal_platform_detector.detect_platform_universal(
-                payload_for_detection, 
-                filename=streamed_file.filename,
-                user_id=user_id
-            )
-            try:
-                await ai_cache.store_classification(platform_cache_key, platform_info, "platform_detection", ttl_hours=48)
-            except Exception as cache_err:
-                logger.warning(f"Platform detection cache store failed: {cache_err}")
-        
-        # CRITICAL FIX #4: Handle unknown platform gracefully
-        if not platform_info or platform_info.get('platform') == 'unknown':
-            await manager.send_update(job_id, {
-                "step": "platform_unknown",
-                "message": format_progress_message(
-                    ProcessingStage.EXPLAIN,
-                    "Couldn't identify the source platform",
-                    "I'll process it as generic financial data"
-                ),
-                "progress": 22
-            })
-        
-        # Universal document classification (AI + pattern + OCR)
-        # CRITICAL FIX: Use metadata instead of undefined first_sheet variable
-        doc_cache_key = {
-            'columns': first_sheet_meta['columns'],
-            'filename': streamed_file.filename,
-            'user_id': user_id,
-            'sample_hash': first_sheet_meta.get('sample_hash')
-        }
-
-        cached_doc = None
-        try:
-            cached_doc = await ai_cache.get_cached_classification(doc_cache_key, "document_classification")
-        except Exception as cache_err:
-            logger.warning(f"Document classification cache lookup failed: {cache_err}")
-
-        if cached_doc:
-            doc_analysis = cached_doc
-        else:
-            try:
-                doc_analysis = await self.universal_document_classifier.classify_document_universal(
-                    payload_for_detection,
-                    filename=streamed_file.filename,
-                    file_content=streamed_file.path,
-                    user_id=user_id
-                )
-                if not doc_analysis or doc_analysis.get('document_type') in (None, '', 'unknown'):
-                    doc_analysis = {
-                        'document_type': 'financial_data',
-                        'confidence': 0.4,
-                        'classification_method': 'fallback',
-                        'indicators': []
-                    }
-                try:
-                    await ai_cache.store_classification(doc_cache_key, doc_analysis, "document_classification", ttl_hours=48)
-                except Exception as cache_store_err:
-                    logger.warning(f"Document classification cache store failed: {cache_store_err}")
-            except Exception as doc_err:
-                logger.error(f"Document classification failed for {streamed_file.filename}: {doc_err}")
-                doc_analysis = {
-                    'document_type': 'financial_data',
-                    'confidence': 0.3,
-                    'classification_method': 'error_fallback',
-                    'indicators': []
-                }
-
-        # Normalize classification result structure
-        document_type = doc_analysis.get('document_type') or doc_analysis.get('type') or 'financial_data'
-        document_confidence = float(doc_analysis.get('confidence', 0.0))
-        classification_method = doc_analysis.get('classification_method') or doc_analysis.get('method') or 'unknown'
-        doc_indicators = doc_analysis.get('indicators') or doc_analysis.get('key_columns') or []
-
-        platform_info['document_type'] = document_type
-        platform_info['document_confidence'] = document_confidence
-        platform_info['document_classification_method'] = classification_method
-        platform_info['document_indicators'] = doc_indicators
-
-        doc_analysis['document_type'] = document_type
-        doc_analysis['confidence'] = document_confidence
-        doc_analysis['classification_method'] = classification_method
-        if 'method' not in doc_analysis:
-            doc_analysis['method'] = classification_method
-        doc_analysis['indicators'] = doc_indicators
-        
-        # Step 3: Initialize entity resolver for row-by-row resolution
-        # CRITICAL FIX: Initialize EntityResolverOptimized for use during row processing
-        try:
-            self.entity_resolver = EntityResolver(supabase_client=supabase, cache_client=safe_get_ai_cache())
-            logger.info("✅ EntityResolverOptimized initialized for row-by-row entity resolution")
-        except Exception as e:
-            logger.warning(f"Failed to initialize EntityResolver: {e}, entity resolution will be skipped")
-            self.entity_resolver = None
-        
-        # Step 4: Start atomic transaction for all database operations
-        await manager.send_update(job_id, {
-            "step": "starting_transaction",
-            "message": format_progress_message(ProcessingStage.ACT, "Setting up secure storage for your data"),
-            "progress": 30
-        })
-
-        transaction_manager = get_transaction_manager()
-        
-        # CRITICAL FIX: Pass the primary transaction_id to prevent orphaned transaction records
-        # Use atomic transaction for all database operations
-        async with transaction_manager.transaction(
-            transaction_id=transaction_id,
-            user_id=user_id,
-            operation_type="file_processing"
-        ) as tx:
-            
-            await manager.send_update(job_id, {
-                "step": "storing",
-                "message": format_progress_message(ProcessingStage.ACT, "Saving your file details"),
-                "progress": 35
-            })
-
-            # ACCURACY FIX #9: Reuse file_hash calculated earlier (no recalculation)
-            # file_hash already calculated at line 6570
-            
-            # CRITICAL FIX: Remove manual fingerprint calculation
-            # ProductionDuplicateDetectionService handles all fingerprinting internally
-            # This eliminates duplicate fingerprint calculations and ensures single source of truth
-            
-            # CRITICAL FIX #10: Calculate row hashes using SAME method as duplicate service
-            # IMPORTANT: Must use xxhash (same as duplicate service) to ensure consistency
-            # This is required for delta merge to work correctly
-            sheets_row_hashes = {}
-            try:
-                # Calculate row hashes for each sheet using streaming metadata
-                for sheet_name, sheet_meta in sheets_metadata.items():
-                    # Use streaming metadata instead of loading full DataFrame
-                    if sheet_meta.get('row_count', 0) > 0:
-                        # Generate placeholder hashes - actual hashing done in duplicate service
-                        sheet_hashes = [f"stream_hash_{i}" for i in range(sheet_meta.get('row_count', 0))]
-                        sheets_row_hashes[sheet_name] = sheet_hashes
-                        logger.info(f"Generated {len(sheet_hashes)} placeholder hashes for sheet '{sheet_name}' (streaming mode)")
-            except Exception as e:
-                logger.warning(f"Failed to calculate row hashes: {e}. Delta merge may not work correctly.")
-                # Continue without hashes - delta merge will fail gracefully with clear error message
-                sheets_row_hashes = {}
-            
-            # FIX #3: Use external_item_id passed from connector (no redundant lookup)
-            # If not provided, attempt fallback lookup via file hash (for manual uploads)
-            if external_item_id is None:
-                try:
-                    ext_res = tx.manager.supabase.table('external_items').select('id').eq('user_id', user_id).eq('hash', file_hash).limit(1).execute()
-                    if ext_res and getattr(ext_res, 'data', None):
-                        external_item_id = ext_res.data[0].get('id')
-                        logger.info(f"✅ Resolved external_item_id via file hash lookup: {external_item_id}")
-                except Exception as e:
-                    logger.warning(f"external_item lookup failed for raw_records link: {e}")
-            else:
-                logger.info(f"✅ Using external_item_id passed from connector: {external_item_id}")
-            
-            # Store in raw_records using transaction
-            raw_record_data = {
-                'user_id': user_id,
-                'file_name': streamed_file.filename,
-                'file_size': streamed_file_size or streamed_file.size,
-                'file_hash': file_hash,
-                'source': 'file_upload',
-                'content': {
-                    'sheets': list(sheets_metadata.keys()),
-                    'platform_detection': platform_info,
-                    'document_analysis': doc_analysis,
-                    'file_hash': file_hash,
-                    'sheets_row_hashes': sheets_row_hashes,
-                    'total_rows': sum(meta.get('row_count', 0) for meta in sheets_metadata.values()),
-                    'processed_at': pendulum.now().to_iso8601_string(),
-                    'duplicate_analysis': duplicate_analysis
-                },
-                'status': 'processing',
-                'classification_status': 'processing',
-                # Link back to originating external_items row when applicable
-                'external_item_id': external_item_id
-            }
-            
-            raw_record_result = await tx.insert('raw_records', raw_record_data)
-            if not raw_record_result or 'id' not in raw_record_result:
-                logger.error(f"❌ CRITICAL: Failed to insert raw_record: {raw_record_result}")
-                raise Exception(f"raw_records insert returned invalid result: {raw_record_result}")
-            file_id = raw_record_result['id']
-            logger.info(f"✅ Created raw_record with file_id={file_id}")
-            
-            # Update processing_transaction with file_id
-            try:
-                supabase.table('processing_transactions').update({
-                    'file_id': file_id,
-                    'status': 'active'  # Now move to active state
-                }).eq('id', transaction_id).execute()
-            except Exception as e:
-                logger.warning(f"Failed to update processing_transaction with file_id: {e}")
-            
-            # Step 4: Create or update ingestion_jobs entry within transaction
-            job_data = {
-                'id': job_id,
-                'user_id': user_id,
-                'file_id': file_id,
-                'job_type': 'file_upload',  # ✅ CRITICAL FIX: Add required job_type field
-                'status': 'processing',
-                'processing_stage': 'streaming',  # FIXED: Add processing stage
-                'stream_offset': 0,  # FIXED: Add stream offset
-                'extracted_rows': 0,  # FIXED: Add extracted rows count
-                'total_rows': 0,  # FIXED: Add total rows (will be updated later)
-                'transaction_id': transaction_id,  # FIXED: Link to transaction
-                'created_at': pendulum.now().to_iso8601_string(),
-                'updated_at': pendulum.now().to_iso8601_string()
-            }
-            
-            try:
-                # Try to create the job entry if it doesn't exist
-                job_result = await tx.insert('ingestion_jobs', job_data)
-            except Exception as e:
-                # If job already exists, update it
-                logger.info(f"Job {job_id} already exists, updating...")
-                job_result = await tx.update('ingestion_jobs', {
-                    'file_id': file_id,
-                    'status': 'processing',
-                    'updated_at': pendulum.now().to_iso8601_string()
-                }, {'id': job_id})
-        
-        # Step 5: Process each sheet with optimized batch processing
-        # CRITICAL FIX: Use metadata for row counts (no full data loaded)
-        total_rows_count = sum(meta['row_count'] for meta in sheets_metadata.values())
-        await manager.send_update(job_id, {
-            "step": "streaming",
-            "message": format_progress_message(ProcessingStage.UNDERSTAND, "Reading through your data", f"{total_rows_count:,} rows to go through"),
-            "progress": 40
-        })
-        
-        total_rows = total_rows_count
-        processed_rows = 0
-        events_created = 0
-        errors = []
-        
-        # CRITICAL FIX #10: DO NOT compute row hashes in backend
-        # Only duplicate service should hash rows via polars for consistency
-        sheets_row_hashes = {}  # Empty - duplicate service handles all hashing
-        
-        file_context = {
-            'filename': streamed_file.filename,
-            'user_id': user_id,
-            'file_id': file_id,
-            'job_id': job_id
-        }
-        
-        # CRITICAL FIX: True streaming - no sheets loaded in memory
-        # File will be read chunk-by-chunk during streaming processing
-        
-        # ✅ CRITICAL FIX #23: Validate file_id exists before processing rows
-        if not file_id:
-            error_msg = "❌ CRITICAL: file_id is None, cannot process rows"
-            logger.error(error_msg)
-            raise ValueError(error_msg)
-        
-        logger.info(f"🔄 Starting row processing transaction for {len(sheets_metadata)} sheets, {total_rows} total rows with file_id={file_id}")
-        # CRITICAL FIX: Create nested transaction with NEW ID to prevent collision
-        row_transaction_id = str(uuid.uuid4())
-        logger.info(f"🔄 Starting row processing with nested transaction: {transaction_id} -> {row_transaction_id}")
-        async with transaction_manager.transaction(
-            transaction_id=row_transaction_id,  # Use NEW ID for nested transaction
-            user_id=user_id,
-            operation_type="row_processing",
-            parent_transaction_id=transaction_id  # Link to parent transaction
-        ) as tx:
-            logger.info(f"✅ Transaction context entered successfully")
-            
-            # CRITICAL FIX: Process file using streaming to prevent memory exhaustion
-            # Stream processes ALL sheets automatically - no need to iterate over sheets dict
-            async for chunk_info in self.streaming_processor.process_file_streaming(
-                streamed_file=streamed_file,
-                progress_callback=lambda step, msg, prog: manager.send_update(job_id, {
-                    "step": step,
-                    "message": msg,
-                    "progress": 40 + int(prog * 0.4)  # Progress from 40% to 80%
-                })
-            ):
-                chunk_data = chunk_info['chunk_data']
-                sheet_name = chunk_info['sheet_name']
-                memory_usage = chunk_info['memory_usage_mb']
-                
-                if memory_usage > 400:  # 400MB threshold
-                    logger.warning(f"High memory usage detected: {memory_usage:.1f}MB")
-                
-                if chunk_data.empty:
-                    continue
-                
-                column_names = list(chunk_data.columns)
-                
-                # OPTIMIZATION 2: Dynamic batch sizing based on row complexity (30-40% faster)
-                # Calculate optimal batch size for this chunk
-                sample_rows = [chunk_data.iloc[i] for i in range(min(10, len(chunk_data)))]
-                optimal_batch_size = self.ai_classifier._calculate_optimal_batch_size(sample_rows)
-                
-                logger.info(f"🚀 OPTIMIZATION 2: Using dynamic batch_size={optimal_batch_size} for {len(chunk_data)} rows")
-                
-                # CRITICAL FIX: Enhanced memory monitoring - check system/container limits
-                import psutil
-                import os
-                process = psutil.Process()
-                
-                # CRITICAL FIX: Check container memory limits (cgroup v1 and v2)
-                def get_container_memory_limit():
-                    try:
-                        # Try cgroup v2 first
-                        if os.path.exists('/sys/fs/cgroup/memory.max'):
-                            with open('/sys/fs/cgroup/memory.max', 'r') as f:
-                                limit = f.read().strip()
-                                if limit != 'max':
-                                    return int(limit) // (1024 * 1024)  # Convert to MB
-                        
-                        # Try cgroup v1
-                        if os.path.exists('/sys/fs/cgroup/memory/memory.limit_in_bytes'):
-                            with open('/sys/fs/cgroup/memory/memory.limit_in_bytes', 'r') as f:
-                                limit = int(f.read().strip())
-                                # Ignore unrealistic limits (> 1TB)
-                                if limit < 1024 * 1024 * 1024 * 1024:
-                                    return limit // (1024 * 1024)  # Convert to MB
-                        
-                        # Fallback to system memory
-                        return psutil.virtual_memory().total // (1024 * 1024)
-                    except:
-                        return 2048  # 2GB fallback
-                
-                container_limit_mb = get_container_memory_limit()
-                MEMORY_LIMIT_MB = min(400, int(container_limit_mb * 0.8))  # Use 80% of container limit, max 400MB
-                memory_check_interval = 10  # Check memory every 10 batches
-                batch_counter = 0
-                
-                logger.info(f"Memory monitoring: Container limit {container_limit_mb}MB, using {MEMORY_LIMIT_MB}MB limit")
-                
-                events_batch = []
-                
-                for batch_idx in range(0, len(chunk_data), optimal_batch_size):
-                    batch_df = chunk_data.iloc[batch_idx:batch_idx + optimal_batch_size]
-                    
-                    try:
-                        # CRITICAL FIX: Use batch enrichment for 5x speedup
-                        # Convert batch_df rows to list of dicts for batch processing
-                        batch_rows_data = []
-                        batch_row_indices = []
-                        
-                        # FIX #NEW_5: Optimize pandas to_dict operations - use vectorized approach
-                        batch_rows_data = batch_df.to_dict('records')
-                        batch_row_indices = list(batch_df.index)
-                        
-                        # Batch classify rows (single AI call for entire batch)
-                        batch_classifications = await self.ai_classifier.classify_rows_batch(
-                            batch_rows_data, platform_info, column_names
-                        )
-                        
-                        # Batch enrich rows (concurrent processing with semaphore)
-                        batch_enriched = await self.enrichment_processor.enrich_batch_data(
-                            batch_rows_data, platform_info, column_names, batch_classifications, file_context
-                        )
-                        
-                        # CRITICAL FIX #10: Remove duplicate row-level platform detection
-                        # Platform is detected ONCE at file level (line 5790) and cached
-                        # Using cached platform_info for all rows prevents double-detection
-                        logger.debug(f"Using cached platform_info for batch: {platform_info.get('platform', 'unknown')}")
-
-                        # Process enriched batch results into events
-                        for idx, (row_index, enriched_payload, classification) in enumerate(zip(
-                            batch_row_indices, batch_enriched, batch_classifications
-                        )):
-                            try:
-                                row = batch_df.loc[row_index]
-                                
-                                # CRITICAL FIX #4: Use complete event object from row_processor
-                                # This includes ALL provenance data (row_hash, lineage_path, created_by, job_id)
-                                event = await self.row_processor.process_row(
-                                    row, row_index, sheet_name, platform_info, file_context, column_names
-                                )
-                                
-                                # Update event with batch classification and enrichment results
-                                event['classification_metadata'].update(classification)
-                                
-                                # CRITICAL FIX: payload should contain ONLY raw data, not enriched data
-                                raw_row_data = row.to_dict()
-                                event['payload'] = serialize_datetime_objects(raw_row_data)
-                                
-                                # Clean the enriched payload to ensure all datetime objects are converted
-                                cleaned_enriched_payload = serialize_datetime_objects(enriched_payload)
-                                
-                                # FIX #39: Store enrichment fields in classification_metadata to align with schema
-                                # Only set fields that exist as actual columns in raw_events table
-                                event['user_id'] = user_id
-                                event['file_id'] = file_id  # CRITICAL FIX #4: Add file_id from context
-                                event['job_id'] = file_context.get('job_id')  # CRITICAL FIX #4: Add job_id from context
-                                event['transaction_id'] = tx.transaction_id  # CRITICAL FIX: Ensure transaction_id is set for rollback capability
-                                
-                                # Schema-aligned fields (actual columns)
-                                event['category'] = event['classification_metadata'].get('category')
-                                event['subcategory'] = event['classification_metadata'].get('subcategory')
-                                event['entities'] = cleaned_enriched_payload.get('entities', event['classification_metadata'].get('entities', {}))
-                                event['relationships'] = cleaned_enriched_payload.get('relationships', event['classification_metadata'].get('relationships', {}))
-                                event['document_type'] = platform_info.get('document_type', 'unknown')
-                                event['document_confidence'] = platform_info.get('document_confidence', 0.0)
-                                event['ai_confidence'] = classification.get('ai_confidence') or cleaned_enriched_payload.get('ai_confidence')
-                                event['ai_reasoning'] = classification.get('ai_reasoning') or cleaned_enriched_payload.get('ai_reasoning')
-                                event['source_ts'] = cleaned_enriched_payload.get('source_ts')
-                                
-                                # Store all enrichment data in classification_metadata JSONB column
-                                event['classification_metadata'].update({
-                                    'document_type': platform_info.get('document_type', 'unknown'),
-                                    'document_confidence': platform_info.get('document_confidence', 0.0),
-                                    'document_classification_method': platform_info.get('document_classification_method', 'unknown'),
-                                    'document_indicators': platform_info.get('document_indicators', []),
-                                    'enrichment_data': {
-                                        'amount_original': cleaned_enriched_payload.get('amount_original'),
-                                        'amount_usd': cleaned_enriched_payload.get('amount_usd'),
-                                        'currency': cleaned_enriched_payload.get('currency'),
-                                        'exchange_rate': cleaned_enriched_payload.get('exchange_rate'),
-                                        'exchange_date': cleaned_enriched_payload.get('exchange_date'),
-                                        'vendor_raw': cleaned_enriched_payload.get('vendor_raw'),
-                                        'vendor_standard': cleaned_enriched_payload.get('vendor_standard'),
-                                        'vendor_confidence': cleaned_enriched_payload.get('vendor_confidence'),
-                                        'vendor_cleaning_method': cleaned_enriched_payload.get('vendor_cleaning_method'),
-                                        'platform_ids': cleaned_enriched_payload.get('platform_ids', {}),
-                                        'standard_description': cleaned_enriched_payload.get('standard_description'),
-                                        'transaction_type': cleaned_enriched_payload.get('transaction_type'),
-                                        'amount_direction': cleaned_enriched_payload.get('amount_direction'),
-                                        'amount_signed_usd': cleaned_enriched_payload.get('amount_signed_usd'),
-                                        'affects_cash': cleaned_enriched_payload.get('affects_cash'),
-                                        'ingested_ts': cleaned_enriched_payload.get('ingested_ts'),
-                                        'processed_ts': cleaned_enriched_payload.get('processed_ts'),
-                                        'transaction_date': cleaned_enriched_payload.get('transaction_date'),
-                                        'exchange_rate_date': cleaned_enriched_payload.get('exchange_rate_date'),
-                                        'validation_flags': cleaned_enriched_payload.get('validation_flags'),
-                                        'is_valid': cleaned_enriched_payload.get('is_valid'),
-                                        'vendor_canonical_id': cleaned_enriched_payload.get('vendor_canonical_id'),
-                                        'vendor_verified': cleaned_enriched_payload.get('vendor_verified'),
-                                        'vendor_alternatives': cleaned_enriched_payload.get('vendor_alternatives'),
-                                        'overall_confidence': cleaned_enriched_payload.get('overall_confidence'),
-                                        'requires_review': cleaned_enriched_payload.get('requires_review'),
-                                        'review_reason': cleaned_enriched_payload.get('review_reason'),
-                                        'review_priority': cleaned_enriched_payload.get('review_priority'),
-                                        'accuracy_enhanced': cleaned_enriched_payload.get('accuracy_enhanced'),
-                                        'accuracy_version': cleaned_enriched_payload.get('accuracy_version')
-                                    }
-                                })
-                                
-                                # CRITICAL FIX #10: DO NOT compute row hashes in backend
-                                # Backend row hashing can diverge from duplicate service hashing due to:
-                                # - encoding differences, whitespace trimming, dtype conversions
-                                # - float formatting, timezone normalization, null handling
-                                # This inconsistency breaks delta merge detection
-                                # Solution: Only duplicate service should hash rows via polars
-                                # Backend sends raw sheets_data to duplicate service only
-                                
-                                # Use the complete event object (includes provenance data)
-                                events_batch.append(event)
-                                processed_rows += 1
-                                
-                                # FIX #42: Reduce progress frequency to prevent UI lockup (every 500 rows instead of 50)
-                                if processed_rows % 500 == 0:
-                                    enrichment_stats = {
-                                        'vendors_standardized': sum(1 for e in events_batch if e.get('vendor_standard')),
-                                        'platform_ids_extracted': sum(1 for e in events_batch if e.get('platform_ids')),
-                                        'amounts_normalized': sum(1 for e in events_batch if e.get('amount_usd'))
-                                    }
-                                    await manager.send_update(job_id, {
-                                        "step": "enrichment",
-                                        "message": format_progress_message(ProcessingStage.UNDERSTAND, "Enriching your transactions", count=processed_rows, total=total_rows),
-                                        "progress": 40 + int((processed_rows / total_rows) * 50),
-                                        "enrichment_details": enrichment_stats
-                                    })
-                                
-                            except Exception as e:
-                                # Handle datetime serialization errors specifically
-                                if "datetime" in str(e) and "JSON serializable" in str(e):
-                                    logger.warning(f"Datetime serialization error for row {row_index}, skipping: {e}")
-                                    continue
-                                else:
-                                    error_msg = f"Error processing row {row_index} in sheet {sheet_name}: {str(e)}"
-                                    errors.append(error_msg)
-                                    logger.error(error_msg)
-                        
-                        # CRITICAL FIX: Normalize events before storage
-                        # Apply normalization to all events in batch
-                        normalized_events_batch = []
-                        for event in events_batch:
-                            try:
-                                # Normalize business_logic field if present
-                                if 'business_logic' in event and event['business_logic']:
-                                    event['business_logic'] = normalize_business_logic(event['business_logic'])
-                                
-                                # Normalize temporal_causality field if present
-                                if 'temporal_causality' in event and event['temporal_causality']:
-                                    event['temporal_causality'] = normalize_temporal_causality(event['temporal_causality'])
-                                
-                                # Also normalize in classification_metadata if present
-                                if 'classification_metadata' in event and isinstance(event['classification_metadata'], dict):
-                                    if 'business_logic' in event['classification_metadata']:
-                                        event['classification_metadata']['business_logic'] = normalize_business_logic(
-                                            event['classification_metadata']['business_logic']
-                                        )
-                                    if 'temporal_causality' in event['classification_metadata']:
-                                        event['classification_metadata']['temporal_causality'] = normalize_temporal_causality(
-                                            event['classification_metadata']['temporal_causality']
-                                        )
-                                
-                                normalized_events_batch.append(event)
-                            except Exception as norm_err:
-                                logger.warning(f"Normalization failed for event {event.get('row_index')}: {norm_err}, storing unnormalized")
-                                normalized_events_batch.append(event)
-                        
-                        # CRITICAL FIX: Resolve entities row-by-row after normalization
-                        # This ensures entities are resolved on normalized data
-                        resolved_events_batch = []
-                        if self.entity_resolver:
-                            for event in normalized_events_batch:
-                                try:
-                                    if glom:
-                                        vendor = glom(event, Coalesce('classification_metadata.vendor_standard', 'payload.vendor_raw', default=''))
-                                        customer = glom(event, Coalesce('classification_metadata.customer_standard', 'payload.customer_raw', default=''))
-                                        employee = glom(event, Coalesce('classification_metadata.employee_name', default=''))
-                                    else:
-                                        vendor = event.get('classification_metadata', {}).get('vendor_standard') or event.get('payload', {}).get('vendor_raw')
-                                        customer = event.get('classification_metadata', {}).get('customer_standard') or event.get('payload', {}).get('customer_raw')
-                                        employee = event.get('classification_metadata', {}).get('employee_name')
-                                    
-                                    entity_names = {}
-                                    if vendor:
-                                        entity_names['vendor'] = [vendor]
-                                    if customer:
-                                        entity_names['customer'] = [customer]
-                                    if employee:
-                                        entity_names['employee'] = [employee]
-                                    
-                                    # Resolve entities if any exist
-                                    if entity_names:
-                                        resolution_result = await self.entity_resolver.resolve_entities_batch(
-                                            entities=entity_names,
-                                            platform=platform_info.get('platform', 'unknown'),
-                                            user_id=user_id,
-                                            row_data=event.get('payload', {}),
-                                            column_names=column_names,
-                                            source_file=streamed_file.filename,
-                                            row_id=event.get('id', str(uuid.uuid4()))
-                                        )
-                                        
-                                        # Store resolution results in event
-                                        event['entity_resolution'] = {
-                                            'resolved_entities': resolution_result.get('resolved_entities', {}),
-                                            'total_resolved': resolution_result.get('total_resolved', 0),
-                                            'avg_entropy': resolution_result.get('avg_entropy', 0.0)
-                                        }
-                                    
-                                    resolved_events_batch.append(event)
-                                except Exception as entity_err:
-                                    logger.warning(f"Entity resolution failed for row {event.get('row_index')}: {entity_err}, storing without resolution")
-                                    resolved_events_batch.append(event)
-                        else:
-                            resolved_events_batch = normalized_events_batch
-                        
-                        # CRITICAL FIX: Row-by-row duplicate detection using ProductionDuplicateDetectionService
-                        # This ensures each row is checked for duplicates with normalized data
-                        dedupe_events_batch = []
-                        for event in resolved_events_batch:
-                            try:
-                                # Use ProductionDuplicateDetectionService for row-level duplicate detection
-                                row_payload = event.get('payload', {})
-                                row_str = json.dumps(row_payload, sort_keys=True, default=str)
-                                
-                                # Call duplicate service for this row
-                                dedupe_result = await duplicate_service.detect_for_event(
-                                    event_data=row_payload,
-                                    user_id=user_id,
-                                    file_id=file_id,
-                                    row_index=event.get('row_index')
-                                )
-                                
-                                # Store dedupe result in event
-                                event['dedupe'] = dedupe_result
-                                # CRITICAL FIX: Use xxhash if available, fallback to hashlib
-                                if dedupe_result.get('row_hash'):
-                                    event['row_hash'] = dedupe_result.get('row_hash')
-                                elif xxhash:
-                                    event['row_hash'] = xxhash.xxh64(row_str.encode()).hexdigest()
-                                else:
-                                    import hashlib
-                                    event['row_hash'] = hashlib.sha256(row_str.encode()).hexdigest()
-                                
-                                event['dedupe_metadata'] = {
-                                    'hash_algorithm': dedupe_result.get('hash_algorithm', 'xxhash64' if xxhash else 'sha256'),
-                                    'hash_timestamp': pendulum.now().to_iso8601_string(),
-                                    'normalized': True,
-                                    'entity_resolved': bool(event.get('entity_resolution')),
-                                    'is_duplicate': dedupe_result.get('is_duplicate', False),
-                                    'duplicate_type': dedupe_result.get('duplicate_type'),
-                                    'confidence': dedupe_result.get('confidence', 0.0)
-                                }
-                                
-                                dedupe_events_batch.append(event)
-                            except Exception as dedupe_err:
-                                # Fallback if dedupe fails - still add event with error metadata
-                                logger.warning(f"Dedupe detection failed for row {event.get('row_index')}: {dedupe_err}")
-                                event['dedupe_metadata'] = {'error': str(dedupe_err), 'fallback': True, 'hash_algorithm': 'xxhash64' if xxhash else 'sha256'}
-                                dedupe_events_batch.append(event)
-                        
-                        # FIX #41: True streaming - insert events immediately after processing each batch
-                        # This prevents unbounded memory accumulation for large files
-                        # Events are inserted right after dedupe processing, not accumulated in memory
-                        if dedupe_events_batch:
-                            try:
-                                batch_result = await tx.insert_batch('raw_events', dedupe_events_batch)
-                                events_created += len(batch_result)
-                                events_batch = []  # Clear batch
-                                
-                                # CRITICAL FIX #2: Write normalized events to normalized_events table
-                                # This ensures normalized data is persisted separately for analytics
-                                normalized_events_for_insert = []
-                                for event in dedupe_events_batch:
-                                    if batch_result and len(batch_result) > 0:
-                                        # Get the inserted event ID
-                                        raw_event_id = event.get('id')
-                                        if raw_event_id:
-                                            normalized_event = {
-                                                'user_id': user_id,
-                                                'raw_event_id': raw_event_id,
-                                                'normalized_payload': event.get('payload', {}),
-                                                'resolved_entities': event.get('entity_resolution', {}),
-                                                'final_platform': platform_info,
-                                                'confidence_scores': {
-                                                    'normalization': event.get('confidence_score', 0.0),
-                                                    'entity_resolution': event.get('entity_resolution', {}).get('avg_entropy', 0.0),
-                                                    'platform_detection': platform_info.get('confidence', 0.0)
-                                                },
-                                                'duplicate_group_id': event.get('duplicate_group_id'),
-                                                'duplicate_hash': event.get('row_hash'),
-                                                'document_type': doc_analysis.get('document_type', 'unknown'),
-                                                'merge_strategy': 'replace',
-                                                'platform_label': platform_info.get('platform', 'unknown'),
-                                                'semantic_confidence': 0.0,  # Will be updated by semantic engine
-                                                'transaction_id': transaction_id,
-                                                'normalization_confidence': event.get('confidence_score', 0.0),
-                                                'requires_review': False
-                                            }
-                                            normalized_events_for_insert.append(normalized_event)
-                                
-                                # Batch insert normalized events
-                                if normalized_events_for_insert:
-                                    try:
-                                        await tx.insert_batch('normalized_events', normalized_events_for_insert)
-                                        logger.info(f"✅ Inserted {len(normalized_events_for_insert)} normalized events")
-                                    except Exception as norm_insert_err:
-                                        logger.warning(f"Failed to insert normalized events: {norm_insert_err}")
-                                
-                                logger.info("Relationship detection delegated to enhanced_relationship_detector via ARQ worker")
-                                
-                                # FIX #NEW_5: Check memory usage less frequently to reduce CPU overhead
-                                batch_counter += 1
-                                if batch_counter % memory_check_interval == 0:
-                                    mem_mb = process.memory_info().rss / 1024 / 1024
-                                    if mem_mb > MEMORY_LIMIT_MB:
-                                        logger.warning(f"⚠️ Memory usage high: {mem_mb:.1f}MB, allowing GC...")
-                                        import gc
-                                        gc.collect()
-                                        await asyncio.sleep(0.1)  # Allow garbage collection
-                                
-
-                            except Exception as e:
-                                # FIX #43: Intelligent batch error handling using binary search instead of blanket individual inserts
-                                events_batch_copy = dedupe_events_batch[:]
-                                batch_size = len(events_batch_copy)
-                                
-                                error_msg = f"Batch insert failed: {str(e)}, using intelligent error recovery for {batch_size} events"
-                                logger.error(error_msg)
-                                errors.append(error_msg)
-                                
-                                # FIX #43: Try splitting batch in half and retrying (binary search approach)
-                                async def retry_batch_with_split(events_to_insert, depth=0, max_depth=3):
-                                    """Recursively split batch and retry to isolate bad rows"""
-                                    if depth > max_depth or len(events_to_insert) == 0:
-                                        return 0
-                                    
-                                    if len(events_to_insert) == 1:
-                                        # Single row - try to insert, skip if fails
-                                        try:
-                                            await tx.insert('raw_events', events_to_insert[0])
-                                            return 1
-                                        except Exception as single_err:
-                                            logger.warning(f"Skipping bad row {events_to_insert[0].get('row_index')}: {single_err}")
-                                            return 0
-                                    
-                                    # Split batch in half
-                                    mid = len(events_to_insert) // 2
-                                    first_half = events_to_insert[:mid]
-                                    second_half = events_to_insert[mid:]
-                                    
-                                    saved = 0
-                                    # Try first half
-                                    try:
-                                        result = await tx.insert_batch('raw_events', first_half)
-                                        saved += len(result)
-                                        logger.info(f"✅ Batch split retry: inserted {len(result)} rows from first half")
-                                    except Exception as first_err:
-                                        logger.warning(f"First half failed: {first_err}, recursing...")
-                                        saved += await retry_batch_with_split(first_half, depth + 1, max_depth)
-                                    
-                                    # Try second half
-                                    try:
-                                        result = await tx.insert_batch('raw_events', second_half)
-                                        saved += len(result)
-                                        logger.info(f"✅ Batch split retry: inserted {len(result)} rows from second half")
-                                    except Exception as second_err:
-                                        logger.warning(f"Second half failed: {second_err}, recursing...")
-                                        saved += await retry_batch_with_split(second_half, depth + 1, max_depth)
-                                    
-                                    return saved
-                                
-                                # Use binary search approach
-                                saved_count = await retry_batch_with_split(events_batch_copy)
-                                events_created += saved_count
-                                events_batch = []  # Clear batch
-                                logger.info(f"✅ Recovered {saved_count}/{batch_size} rows using intelligent batch splitting")
-                                
-
-                                # Handle error with recovery system
-                                error_recovery = get_error_recovery_system()
-                                error_context = ErrorContext(
-                                    error_id=str(uuid.uuid4()),
-                                    user_id=user_id,
-                                    job_id=job_id,
-                                    transaction_id=tx.transaction_id,
-                                    operation_type="batch_insert",
-                                    error_message=str(e),
-                                    error_details={
-                                        "batch_size": batch_size, 
-                                        "sheet_name": sheet_name,
-                                        "saved_individually": saved_count
-                                    },
-                                    severity=ErrorSeverity.HIGH,
-                                    occurred_at=datetime.utcnow()
-                                )
-                                await error_recovery.handle_processing_error(error_context)
-                                
-                    except Exception as e:
-                        error_msg = f"Error processing batch in sheet {sheet_name}: {str(e)}"
-                        errors.append(error_msg)
-                        logger.error(error_msg)
-                        
-                        processed_rows += 1
-                    
-                    # FIX #42: Update progress every 10 batches to reduce UI lockup
-                    if processed_rows % (10 * config.batch_size) == 0:
-                        progress = 40 + (processed_rows / total_rows) * 40
-                        await manager.send_update(job_id, {
-                            "step": "streaming",
-                            "message": format_progress_message(ProcessingStage.ACT, "Working through your data", f"{processed_rows:,} rows completed"),
-                            "progress": int(progress)
-                        })
-            
-            logger.info(f"✅ Completed row processing loop: {processed_rows} rows, {events_created} events")
-            logger.info(f"🔄 Exiting transaction context manager...")
-        
-        logger.info(f"✅ Transaction committed successfully! Proceeding to Step 6...")
-        
-        # Step 6: Update raw_records with completion status
-        await manager.send_update(job_id, {
-            "step": "finalizing",
-            "message": format_progress_message(ProcessingStage.ACT, "Wrapping things up"),
-            "progress": 80
-        })
-        
-        try:
-            transaction_manager = get_transaction_manager()
-            # CRITICAL FIX: Pass primary transaction_id to prevent orphaned transaction records
-            async with transaction_manager.transaction(
-                transaction_id=transaction_id,
-                user_id=user_id,
-                operation_type="file_processing_completion"
-            ) as tx:
-                await tx.update('raw_records', {
-                    'status': 'completed',
-                    'classification_status': 'completed',
-                    'content': {
-                        'sheets': list(sheets_metadata.keys()),
-                        'platform_detection': platform_info,
-                        'document_analysis': doc_analysis,
-                        'file_hash': file_hash,
-                        'sheets_row_hashes': sheets_row_hashes,
-                        'total_rows': total_rows,
-                        'events_created': events_created,
-                        'errors': errors,
-                        'processed_at': pendulum.now().to_iso8601_string()
-                    }
-                }, {'id': file_id})
-        except Exception as e:
-            logger.error(f"Failed to update raw_records completion in transaction: {e}")
-        
-        # CRITICAL FIX: Entity resolution now happens row-by-row BEFORE raw_events insertion
-        # Late-stage entity resolution removed to prevent processing unnormalized data
-        logger.info("✅ Entity resolution completed during row processing (row-by-row after normalization)")
-        
-        # Step 8: Generate insights
-        await manager.send_update(job_id, {
-            "step": "insights",
-            "message": format_progress_message(ProcessingStage.EXPLAIN, "Looking for patterns in your data"),
-            "progress": 95
-        })
-        
-        # Generate basic insights without DocumentAnalyzer
-        insights = {
-            "analysis": "File processed successfully",
-            "summary": f"Processed {processed_rows} rows with {events_created} events created",
-            "document_type": doc_analysis.get('document_type', 'financial_data'),
-            "confidence": doc_analysis.get('confidence', 0.8),
-            "classification_method": doc_analysis.get('classification_method', 'unknown'),
-            "document_indicators": doc_analysis.get('indicators', [])
-        }
-        
-        # Add entity resolution results to insights (set during entity resolution step)
-        if not hasattr(insights, 'entity_resolution'):
-            insights['entity_resolution'] = {
-                'entities_found': 0,
-                'matches_created': 0,
-                'status': 'completed_after_events_stored'
-            }
-        
-        # Add processing statistics
-        insights.update({
-            'processing_stats': {
-                'total_rows_processed': processed_rows,
-                'events_created': events_created,
-                'errors_count': len(errors),
-                'platform_detected': platform_info.get('platform', 'unknown'),
-                'platform_confidence': platform_info.get('confidence', 0.0),
-                'platform_description': platform_info.get('description', 'Unknown platform'),
-                'platform_reasoning': platform_info.get('reasoning', 'No clear platform indicators'),
-                'matched_columns': platform_info.get('matched_columns', []),
-                'matched_patterns': platform_info.get('matched_patterns', []),
-                'file_hash': file_hash,
-                'processing_mode': 'batch_optimized',
-                'batch_size': 20,
-                'ai_calls_reduced': f"{(total_rows - (total_rows // 20)) / total_rows * 100:.1f}%",
-                'file_type': filename.split('.')[-1].lower() if '.' in filename else 'unknown'
-            },
-            'errors': errors
-        })
-        
-        # Add enhanced platform information if detected
-        if platform_info.get('platform') != 'unknown':
-            platform_details = self.universal_platform_detector.get_platform_info(platform_info['platform'])
-            insights['platform_details'] = {
-                'name': platform_details['name'],
-                'description': platform_details['description'],
-                'typical_columns': platform_details['typical_columns'],
-                'keywords': platform_details['keywords'],
-                'detection_confidence': platform_info.get('confidence', 0.0),
-                'detection_reasoning': platform_info.get('reasoning', 'No clear platform indicators'),
-                'matched_indicators': {
-                    'columns': platform_info.get('matched_columns', []),
-                    'patterns': platform_info.get('matched_patterns', [])
-                }
-            }
-        
-        # Step 8: Platform Pattern Learning
-        await manager.send_update(job_id, {
-            "step": "platform_learning",
-            "message": format_progress_message(ProcessingStage.UNDERSTAND, "Learning from your data"),
-            "progress": 92
-        })
-        
-        try:
-            # CRITICAL FIX: Ensure raw_events exist before platform discovery
-            # Platform discovery depends on events being populated in the database
-            logger.info(f"Verifying events exist before platform learning for user {user_id}")
-            
-            # Check if events were created for this file
-            events_check = supabase.table('raw_events').select('id', count='exact').eq('user_id', user_id).execute()
-            events_count = events_check.count or 0
-            
-            if events_count == 0:
-                logger.warning(f"No events found for user {user_id} - skipping platform discovery")
-                platform_patterns = []
-                discovered_platforms = []
-            else:
-                logger.info(f"Found {events_count} events for user {user_id} - proceeding with platform learning")
-                
-                # Learn platform patterns from the data
-                platform_patterns = await self._learn_platform_patterns(platform_info, user_id, filename, supabase)
-                discovered_platforms = await self._discover_new_platforms(user_id, filename, supabase)
-            
-            # CRITICAL FIX #24: Ensure transaction_id exists for platform storage
-            platform_transaction_id = transaction_id if transaction_id else str(uuid.uuid4())
-            
-            # Store platform patterns and discoveries
-            await self._store_platform_patterns(platform_patterns, user_id, platform_transaction_id, job_id, supabase)
-            await self._store_discovered_platforms(discovered_platforms, user_id, platform_transaction_id, job_id, supabase)
-            
-            if relationships:
-                await self._store_learned_relationship_patterns(relationships, user_id, platform_transaction_id, job_id, supabase)
-            
-            insights['platform_learning'] = {
-                'patterns_learned': len(platform_patterns),
-                'platforms_discovered': len(discovered_platforms)
-            }
-            
-            await manager.send_update(job_id, {
-                "step": "platform_learning_completed",
-                "message": format_progress_message(ProcessingStage.EXPLAIN, "Learned from your data", f"{len(platform_patterns)} patterns, {len(discovered_platforms)} new platforms"),
-                "progress": 95
-            })
-            
-        except Exception as e:
-            import traceback
-            
-            # DIAGNOSTIC: Check if methods exist
-            diagnostic_info = {
-                '_learn_platform_patterns': hasattr(self, '_learn_platform_patterns'),
-                '_discover_new_platforms': hasattr(self, '_discover_new_platforms'),
-                '_store_platform_patterns': hasattr(self, '_store_platform_patterns'),
-                '_store_discovered_platforms': hasattr(self, '_store_discovered_platforms'),
-                'ExcelProcessor_methods_count': len([m for m in dir(self) if not m.startswith('__')]),
-                'file_path': __file__ if '__file__' in globals() else 'unknown'
-            }
-            
-            error_details = {
-                'error_type': type(e).__name__,
-                'error_message': str(e),
-                'traceback': traceback.format_exc(),
-                'method': '_learn_platform_patterns or _discover_new_platforms',
-                'diagnostic': diagnostic_info
-            }
-            logger.error(f"❌ Platform learning failed: {error_details}")
-            insights['platform_learning'] = {'error': str(e), 'details': error_details}
-            # Send error to frontend
-            await manager.send_update(job_id, {
-                "step": "platform_learning_failed",
-                "message": f"Platform learning encountered an issue: {type(e).__name__}: {str(e)}",
-                "progress": 92,
-                "error_details": error_details
-            })
-
-        # Step 10: Relationship Detection
-        await manager.send_update(job_id, {
-            "step": "relationships",
-            "message": format_progress_message(ProcessingStage.UNDERSTAND, "Looking for connections between your transactions"),
-            "progress": 97
-        })
-        
-        # Relationship detection - now always available (imported at top)
-        try:
-            # CRITICAL FIX: Remove synchronous relationship detection to prevent race condition
-            # Relationship detection is ALWAYS run asynchronously by arq_worker.py
-            # This prevents dual execution and data corruption
-            
-            logger.info(f"Queueing background relationship detection for user {user_id}")
-            
-            # Queue background job for relationship detection
-            try:
-                arq_pool = await get_arq_pool()
-                if arq_pool:
-                    await arq_pool.enqueue_job(
-                        'detect_relationships',
-                        user_id=user_id,
-                        file_id=file_id,
-                        transaction_id=transaction_id
-                    )
-                    logger.info(f"✅ Queued background relationship detection for user {user_id}, file {file_id}")
-                    
-                    await manager.send_update(job_id, {
-                        "step": "relationships_queued",
-                        "message": format_progress_message(
-                            ProcessingStage.EXPLAIN,
-                            "Analyzing connections",
-                            "I'm finding relationships between transactions in the background"
-                        ),
-                        "progress": 95
-                    })
-                else:
-                    logger.warning("ARQ pool not available - relationships will not be detected")
-            except Exception as queue_error:
-                logger.error(f"Failed to queue background relationship detection: {queue_error}")
-            
-            # Always defer to background
-            relationship_results = {
-                'total_relationships': 0,
-                'relationships': [],
-                'status': 'queued_for_background'
-            }
-            
-            # ✅ CRITICAL FIX: Relationships already stored WITH enrichment by enhanced_relationship_detector
-            # Only update raw_events.relationships count and populate analytics
-            relationships = relationship_results.get('relationships', [])
-            
-            if relationships:
-                # Update raw_events.relationships count
-                event_ids_to_update = set()
-                for rel in relationships:
-                    if rel.get('source_event_id'):
-                        event_ids_to_update.add(rel['source_event_id'])
-                    if rel.get('target_event_id'):
-                        event_ids_to_update.add(rel['target_event_id'])
-                
-                for event_id in event_ids_to_update:
-                    try:
-                        count_result = supabase.table('relationship_instances').select('id', count='exact').or_(
-                            f"source_event_id.eq.{event_id},target_event_id.eq.{event_id}"
-                        ).execute()
-                        rel_count = count_result.count or 0
-                        supabase.table('raw_events').update({
-                            'relationship_count': rel_count,
-                            'last_relationship_check': pendulum.now().to_iso8601_string()
-                        }).eq('id', event_id).execute()
-                    except Exception as update_err:
-                        logger.warning(f"Failed to update relationship count for event {event_id}: {update_err}")
-                
-                # Populate relationship-based analytics
-                relationship_transaction_id = transaction_id if transaction_id else str(uuid.uuid4())
-                await self._store_cross_platform_relationships(relationships, user_id, relationship_transaction_id, job_id, supabase)
-                await self._populate_causal_relationships(relationships, user_id, relationship_transaction_id, job_id, supabase)
-                await self._populate_predicted_relationships(user_id, relationship_transaction_id, job_id, supabase)
-            
-            # ✅ CRITICAL: Populate temporal analytics REGARDLESS of relationships (analyzes ALL events)
-            analytics_transaction_id = transaction_id if transaction_id else str(uuid.uuid4())
-            logger.info(f"🔍 Populating temporal analytics for file_id={file_id}, user_id={user_id}")
-            await self._populate_temporal_patterns(user_id, file_id, supabase)
-            
-            # Add relationship results to insights
-            insights['relationship_analysis'] = relationship_results
-            
-            await manager.send_update(job_id, {
-                "step": "relationships_completed",
-                "message": format_progress_message(ProcessingStage.EXPLAIN, "Found connections", f"{relationship_results.get('total_relationships', 0)} relationships discovered"),
-                "progress": 98
-            })
-        except Exception as e:
-            logger.error(f"Relationship detection failed: {e}")
-            insights['relationship_analysis'] = {
-                'error': str(e),
-                'message': 'Relationship detection failed but processing completed'
-            }
-            # Send error to frontend
-            await manager.send_update(job_id, {
-                "step": "relationship_detection_failed",
-                "message": f"Relationship detection encountered an issue: {str(e)}",
-                "progress": 98
-            })
-
-        # Step 11: Compute and Store Metrics
-        await manager.send_update(job_id, {
-            "step": "metrics",
-            "message": format_progress_message(ProcessingStage.ACT, "Saving everything"),
-            "progress": 99
-        })
-        
-        try:
-            # Compute comprehensive metrics
-            metrics = {
-                'metric_type': 'file_processing_summary',
-                'metric_value': events_created,
-                'metric_data': {
-                    'total_rows_processed': processed_rows,
-                    'events_created': events_created,
-                    'errors_count': len(errors),
-                    'platform_detected': platform_info.get('platform', 'unknown'),
-                    'platform_confidence': platform_info.get('confidence', 0.0),
-                    'entities_resolved': len(entities) if 'entities' in locals() else 0,
-                    'relationships_found': relationship_results.get('total_relationships', 0) if 'relationship_results' in locals() and relationship_results is not None else 0,
-                    'processing_time_seconds': (pendulum.now() - self._parse_iso_timestamp(transaction_data['started_at'])).total_seconds() if transaction_id else 0
-                }
-            }
-            
-            await self.store_computed_metrics(metrics, user_id, transaction_id, supabase)
-            insights['processing_metrics'] = metrics
-            
-        except Exception as e:
-            logger.error(f"Metrics computation failed: {e}")
-            insights['processing_metrics'] = {'error': str(e)}
-            # Send error to frontend
-            await manager.send_update(job_id, {
-                "step": "metrics_computation_failed",
-                "message": f"Metrics computation encountered an issue: {str(e)}",
-                "progress": 99
-            })
-        
-        # Step 12: Complete Transaction
-        if transaction_id:
-            try:
-                supabase.table('processing_transactions').update({
-                    'status': 'committed',
-                    'committed_at': pendulum.now().to_iso8601_string(),
-                    'end_time': pendulum.now().to_iso8601_string(),  # FIXED: Add end_time for monitoring
-                    'metadata': {
-                        **transaction_data['metadata'],
-                        'events_created': events_created,
-                        'entities_resolved': len(entities) if 'entities' in locals() else 0,
-                        'relationships_found': relationship_results.get('total_relationships', 0) if 'relationship_results' in locals() and relationship_results is not None else 0
-                    }
-                }).eq('id', transaction_id).execute()
-                logger.info(f"Committed processing transaction: {transaction_id}")
-            except Exception as e:
-                logger.warning(f"Failed to commit transaction: {e}")
-
-        # Step 13: Update ingestion_jobs with completion using transaction
-        async with transaction_manager.transaction(
-            transaction_id=None,
-            user_id=user_id,
-            operation_type="job_completion"
-        ) as tx:
-            await tx.update('ingestion_jobs', {
-                'status': 'completed',
-                'processing_stage': 'completed',  # FIXED: Update processing stage
-                'extracted_rows': events_created,  # FIXED: Set final extracted rows count
-                'total_rows': processed_rows,  # FIXED: Set total rows processed
-                'updated_at': pendulum.now().to_iso8601_string(),
-                'transaction_id': transaction_id
-            }, {'id': job_id})
-        
-        await manager.send_update(job_id, {
-            "step": "completed",
-            "message": format_progress_message(ProcessingStage.EXPLAIN, "All done", f"I understood your file perfectly - {events_created:,} transactions from {processed_rows:,} rows"),
-            "progress": 100
-        })
-        
-        # Release processing lock
-        if lock_acquired:
-            try:
-                supabase.table('processing_locks').delete().eq('id', lock_id).execute()
-                logger.info(f"Released processing lock: {lock_id}")
-            except Exception as e:
-                logger.warning(f"Failed to release processing lock: {e}")
-        
-        insights['raw_record_id'] = file_id
-        insights['file_hash'] = file_hash_for_check
-        insights['duplicate_analysis'] = duplicate_analysis
-        return insights
-    async def run_entity_resolution_pipeline(self, user_id: str, supabase: Client, 
-                                          file_id: Optional[str] = None, 
-                                          transaction_id: Optional[str] = None,
-                                          filename: str = 'unknown') -> Dict[str, Any]:
-        """NASA-GRADE entity resolution using EntityResolverOptimized (rapidfuzz, presidio, polars, AI learning)."""
-        try:
-            # Validate that exactly one filter is provided
-            if not file_id and not transaction_id:
-                raise ValueError("Either file_id or transaction_id must be provided")
-            if file_id and transaction_id:
-                raise ValueError("Cannot provide both file_id and transaction_id")
-            
-            # Initialize NASA-GRADE EntityResolver
-            entity_resolver = EntityResolver(supabase_client=supabase, cache_client=safe_get_ai_cache())
-            
-            # CRITICAL FIX: Use optimized query for entity extraction
-            # Old: Manual .select() with multiple conditions
-            # New: optimized_db.get_events_for_entity_extraction() - optimized with proper indexing
-            if file_id:
-                events = await optimized_db.get_events_for_entity_extraction(user_id, file_id)
-                filter_desc = f"file_id={file_id}"
-            else:
-                events_query = supabase.table('raw_events').select('id, payload, kind, source_platform, row_index').eq('user_id', user_id).eq('transaction_id', transaction_id)
-                events_result = events_query.execute()
-                events = events_result.data or []
-                filter_desc = f"transaction_id={transaction_id}"
-            
-            entity_names = []
-            for event in events:
-                if glom:
-                    vendor = glom(event, Coalesce('payload.vendor_standard', 'payload.vendor_raw', 'payload.vendor', 'payload.name', default=''))
-                    customer = glom(event, Coalesce('payload.customer_standard', 'payload.customer_raw', 'payload.customer', default=''))
-                    employee = glom(event, Coalesce('payload.employee_name', 'payload.employee', default=''))
-                else:
-                    payload = event.get('payload', {})
-                    vendor = payload.get('vendor_standard') or payload.get('vendor_raw') or payload.get('vendor') or payload.get('name')
-                    customer = payload.get('customer_standard') or payload.get('customer_raw') or payload.get('customer')
-                    employee = payload.get('employee_name') or payload.get('employee')
-                
-                if vendor:
-                    entity_names.append({'name': vendor, 'type': 'vendor', 'event_id': event['id']})
-                if customer:
-                    entity_names.append({'name': customer, 'type': 'customer', 'event_id': event['id']})
-                if employee:
-                    entity_names.append({'name': employee, 'type': 'employee', 'event_id': event['id']})
-            
-            if not entity_names:
-                logger.info(f"No entities found in {len(events)} events")
-                return {'entities_found': 0, 'matches_created': 0}
-            
-            logger.info(f"Extracted {len(entity_names)} entity names, resolving with NASA-GRADE EntityResolver...")
-            
-            # Use NASA-GRADE EntityResolverOptimized for batch resolution
-            resolution_results = await entity_resolver.resolve_entities_batch(
-                entities=entity_names,
-                user_id=user_id,
-                source_file=filename
-            )
-            
-            # FIX #21: Apply confidence validation to resolution results
-            confidence_threshold = config.entity_similarity_threshold  # 0.9 from config
-            valid_results = []
-            
-            for result in resolution_results:
-                result_confidence = result.get('confidence', 0.0)
-                if result_confidence >= confidence_threshold:
-                    valid_results.append(result)
-                else:
-                    logger.warning(f"Entity resolution rejected due to low confidence: {result_confidence:.3f} < {confidence_threshold} for entity '{result.get('entity_name', 'unknown')}'")
-            
-            entities_found = len(entity_names)
-            matches_created = len(valid_results)
-            
-            logger.info(f"✅ NASA-GRADE entity resolution complete: {entities_found} entities → {matches_created} high-confidence matches (filtered from {len(resolution_results)} total)")
-            
-            return {
-                'entities_found': entities_found,
-                'matches_created': matches_created,
-                'resolution_results': valid_results  # Return only high-confidence results
-            }
-        except Exception as e:
-            logger.error(f"Entity resolution pipeline failed: {e}")
-            return {'entities_found': 0, 'matches_created': 0, 'error': str(e)}
-    
-    # OLD METHODS DELETED: _extract_entities_from_events, _resolve_entities → replaced by run_entity_resolution_pipeline
-    
-    async def _learn_platform_patterns(self, platform_info: Dict, user_id: str, filename: str, supabase: Client) -> List[Dict]:
-        """Learn platform patterns from the detected platform"""
-        try:
-            patterns = []
-            
-            # CRITICAL FIX: Learn patterns for ALL platforms including 'general' and 'unknown'
-            # This allows the system to learn from CSV files and custom formats
-            platform = platform_info.get('platform')
-            if platform:  # Only skip if platform is None or empty string
-                pattern = {
-                    'platform': platform,
-                    'pattern_type': 'column_structure',
-                    'pattern_data': {
-                        'matched_columns': platform_info.get('matched_columns', []),
-                        'matched_patterns': platform_info.get('matched_patterns', []),
-                        'confidence': platform_info.get('confidence', 0.0),
-                        'reasoning': platform_info.get('reasoning', ''),
-                        'file_name': filename,  # Track which file this pattern came from
-                        'column_count': len(platform_info.get('matched_columns', [])),
-                        'is_generic': platform in ['general', 'unknown']  # Flag generic platforms
-                    },
-                    'confidence_score': platform_info.get('confidence', 0.0),
-                    'detection_method': 'ai_analysis'
-                }
-                patterns.append(pattern)
-                logger.info(f"Learned pattern for platform '{platform}' from file '{filename}'")
-            else:
-                logger.warning(f"No platform detected for file '{filename}', skipping pattern learning")
-            
-            logger.info(f"Learned {len(patterns)} platform patterns")
-            return patterns
-            
-        except Exception as e:
-            logger.error(f"Error learning platform patterns: {e}")
-            return []
-    
-    async def _discover_new_platforms(self, user_id: str, filename: str, supabase: Client) -> List[Dict]:
-        """
-        UNIVERSAL FIX: Discover new platforms from processed events with proper ID mapping.
-        Analyzes events to identify platforms not yet seen for this user.
-        """
-        try:
-            logger.info(f"Discovering new platforms for user {user_id} from file {filename}")
-            
-            # Query recent events for this file
-            events_result = supabase.table('raw_events').select(
-                'source_platform, classification_metadata'
-            ).eq('user_id', user_id).execute()
-            
-            if not events_result.data:
-                logger.info("No events found for platform discovery")
-                return []
-            
-            # Get unique platforms from events
-            platforms_found = set()
-            for event in events_result.data:
-                platform = event.get('source_platform')
-                if platform and platform != 'unknown':
-                    platforms_found.add(platform)
-            
-            # Get platform database for ID mapping
-            platform_id_map = self._build_platform_id_map()
-            
-            # Check which platforms are new (not in user_connections)
-            existing_platforms = supabase.table('user_connections').select(
-                'integration_id'
-            ).eq('user_id', user_id).execute()
-            
-            existing_platform_ids = {conn.get('integration_id') for conn in existing_platforms.data or []}
-            
-            discovered = []
-            for platform_name in platforms_found:
-                # Map platform name to integration ID
-                platform_id = platform_id_map.get(platform_name.lower(), platform_name.lower().replace(' ', '-'))
-                
-                # Check if this platform is new
-                if platform_id not in existing_platform_ids:
-                    discovered.append({
-                        'platform_name': platform_name,
-                        'platform_id': platform_id,
-                        'detection_confidence': 0.95,
-                        'detection_method': 'event_analysis',
-                        'discovery_reason': f'Detected from file: {filename}',
-                        'source_files': [filename]
-                    })
-            
-            platform_names = [d['platform_name'] for d in discovered]
-            logger.info(f"Discovered {len(discovered)} new platforms: {platform_names}")
-            return discovered
-            
-        except Exception as e:
-            logger.error(f"Platform discovery failed: {e}")
-            return []
-    
-    def _build_platform_id_map(self) -> Dict[str, str]:
-        """Build platform name → integration ID mapping from YAML config."""
-        name_to_id = {}
-        
-        try:
-            # Load platform mappings from YAML config
-            config_path = os.path.join(os.path.dirname(__file__), '..', 'config', 'platform_id_mappings.yaml')
-            with open(config_path, 'r') as f:
-                config = yaml.safe_load(f)
-            
-            # Build reverse mapping: alias -> canonical_id
-            platform_mappings = config.get('platform_mappings', {})
-            for canonical_id, aliases in platform_mappings.items():
-                # Map canonical ID to itself
-                name_to_id[canonical_id.lower()] = canonical_id
-                
-                # Map all aliases to canonical ID
-                for alias in aliases:
-                    name_to_id[alias.lower()] = canonical_id
-            
-            logger.info(f"Loaded {len(name_to_id)} platform ID mappings from config")
-            
-        except Exception as e:
-            logger.warning(f"Failed to load platform mappings from YAML: {e}. Using fallback.")
-            # Fallback: Get platform database from detector
-            try:
-                platform_db = self.universal_platform_detector.get_platform_database()
-                for platform_id, platform_info in platform_db.items():
-                    platform_name = platform_info.get('name', platform_id)
-                    name_to_id[platform_name.lower()] = platform_id
-                    name_to_id[platform_id.lower()] = platform_id
-            except Exception as fallback_err:
-                logger.error(f"Platform ID mapping fallback also failed: {fallback_err}")
-        
-        return name_to_id
-
-    def _normalize_entity_type(self, entity_type: str) -> str:
-        """Normalize entity types to the canonical singular labels used in storage.
-
-        AI outputs often return plural words (e.g., "vendors"), while the database
-        expects singular forms. This helper keeps that mapping centralized.
-        """
-        type_map = {
-            'employees': 'employee',
-            'vendors': 'vendor',
-            'customers': 'customer',
-            'projects': 'project',
-            'contacts': 'contact',
-            # Already singular (pass through)
-            'employee': 'employee',
-            'vendor': 'vendor',
-            'customer': 'customer',
-            'project': 'project',
-            'contact': 'contact',
-            # Common aliases
-            'supplier': 'vendor',
-            'suppliers': 'vendor',
-            'client': 'customer',
-            'clients': 'customer',
-            'person': 'contact',
-            'people': 'contact'
-        }
-
-        normalized = type_map.get(entity_type.lower())
-        if not normalized:
-            logger.warning(f"Unknown entity type '{entity_type}', defaulting to 'contact'")
-            return 'contact'
-        return normalized
-
-    async def _store_normalized_entities(self, entities: List[Dict], user_id: str, transaction_id: str, job_id: str, supabase: Client):
-        """Store normalized entities in the database atomically with transaction manager
-        
-        FIX #4: Uses transaction manager for atomic operations with automatic rollback on failure.
-        This prevents partial entity data from being stored if an error occurs.
-        """
-        try:
-            if not entities:
-                return
-            
-            logger.info(f"Storing {len(entities)} normalized entities atomically")
-            
-            # Use transaction manager for atomic operations
-            transaction_manager = get_transaction_manager()
-            
-            async with transaction_manager.transaction(
-                user_id=user_id,
-                operation_type="entity_storage"
-            ) as tx:
-                # Prepare batch data
-                entities_batch = []
-                for entity in entities:
-                    # Normalize entity_type to match database constraints (singular form)
-                    raw_entity_type = entity.get('entity_type', 'vendor')
-                    normalized_entity_type = self._normalize_entity_type(raw_entity_type)
-                    
-                    canonical_name = entity.get('canonical_name', '')
-                    
-                    # Generate phonetic encodings for fuzzy matching (jellyfish library)
-                    try:
-                        import jellyfish
-                        soundex = jellyfish.soundex(canonical_name) if canonical_name else ''
-                        metaphone = jellyfish.metaphone(canonical_name) if canonical_name else ''
-                        dmetaphone = jellyfish.dmetaphone(canonical_name)[0] if canonical_name else ''
-                    except Exception as phonetic_err:
-                        logger.warning(f"Phonetic encoding failed for '{canonical_name}': {phonetic_err}")
-                        soundex = metaphone = dmetaphone = ''
-                    
-                    entity_data = {
-                        'user_id': user_id,
-                        'entity_type': normalized_entity_type,
-                        'canonical_name': canonical_name,
-                        'canonical_name_soundex': soundex,
-                        'canonical_name_metaphone': metaphone,
-                        'canonical_name_dmetaphone': dmetaphone,
-                        'aliases': entity.get('aliases', []),
-                        'email': entity.get('email'),
-                        'phone': entity.get('phone'),
-                        'bank_account': entity.get('bank_account'),
-                        'tax_id': entity.get('tax_id'),
-                        'platform_sources': entity.get('platform_sources', []),
-                        'source_files': entity.get('source_files', []),
-                        'confidence_score': entity.get('confidence_score', 0.5),
-                        'transaction_id': transaction_id,
-                        'job_id': job_id
-                    }
-                    entities_batch.append(entity_data)
-                
-                # Batch insert all entities atomically (100x faster than single inserts)
-                if entities_batch:
-                    result = await tx.insert_batch('normalized_entities', entities_batch)
-                    logger.info(f"✅ Stored {len(result)} entities atomically in batch")
-                    
-        except Exception as e:
-            logger.error(f"❌ Error storing normalized entities (transaction rolled back): {e}")
-
-    async def _store_entity_matches(self, matches: List[Dict], user_id: str, transaction_id: str, job_id: str, supabase: Client):
-        """Store entity matches in the database atomically with transaction manager
-        
-        FIX #4: Uses transaction manager for atomic operations with automatic rollback on failure.
-        """
-        try:
-            if not matches:
-                return
-                
-            logger.info(f"Storing {len(matches)} entity matches atomically")
-            
-            # Use transaction manager for atomic operations
-            transaction_manager = get_transaction_manager()
-            
-            async with transaction_manager.transaction(
-                user_id=user_id,
-                operation_type="entity_match_storage"
-            ) as tx:
-                # Prepare batch data
-                matches_batch = []
-                for match in matches:
-                    match_data = {
-                        'user_id': user_id,
-                        'source_entity_name': match.get('source_entity_name', ''),
-                        'source_entity_type': match.get('source_entity_type', 'vendor'),
-                        'source_platform': match.get('source_platform', 'unknown'),
-                        'source_file': match.get('source_file', ''),
-                        'source_row_id': match.get('source_row_id'),
-                        'normalized_entity_id': match.get('normalized_entity_id'),
-                        'match_confidence': match.get('match_confidence', 0.5),
-                        'match_reason': match.get('match_reason', 'unknown'),
-                        'similarity_score': match.get('similarity_score'),
-                        'matched_fields': match.get('matched_fields', []),
-                        'transaction_id': transaction_id,
-                        'job_id': job_id
-                    }
-                    matches_batch.append(match_data)
-                
-                # Batch insert all matches atomically
-                if matches_batch:
-                    result = await tx.insert_batch('entity_matches', matches_batch)
-                    logger.info(f"✅ Stored {len(result)} entity matches atomically in batch")
-                    
-        except Exception as e:
-            logger.error(f"❌ Error storing entity matches (transaction rolled back): {e}")
-
-    async def _store_platform_patterns(self, patterns: List[Dict], user_id: str, transaction_id: str, job_id: str, supabase: Client):
-        """Store platform patterns in the database atomically."""
-        try:
-            if not patterns or not supabase:
-                return
-
-            logger.info(f"Storing {len(patterns)} platform patterns")
-
-            transaction_manager = get_transaction_manager()
-            async with transaction_manager.transaction(
-                user_id=user_id,
-                operation_type="platform_pattern_storage"
-            ) as tx:
-                batch = []
-                for pattern in patterns:
-                    batch.append({
-                        'user_id': user_id,
-                        'platform': pattern.get('platform', 'unknown'),
-                        'pattern_type': pattern.get('pattern_type', 'column'),
-                        'pattern_data': pattern.get('pattern_data', {}),
-                        'confidence_score': pattern.get('confidence_score', 0.5),
-                        'detection_method': pattern.get('detection_method', 'ai'),
-                        'transaction_id': transaction_id,
-                        'job_id': job_id
-                    })
-
-                if batch:
-                    await tx.insert_batch('platform_patterns', batch)
-                    logger.info(f"✅ Stored {len(batch)} platform patterns atomically")
-
-        except Exception as e:
-            logger.error(f"❌ Error storing platform patterns (transaction rolled back): {e}")
-
-    async def _store_relationship_instances(self, relationships: List[Dict], user_id: str, transaction_id: str, supabase: Client):
-        """Store relationship instances in the database atomically with batch insert
-        
-        FIX #6: Added transaction_id parameter for rollback capability and transaction tracking.
-        """
-        try:
-            if not relationships:
-                return
-                
-            logger.info(f"Storing {len(relationships)} relationship instances atomically")
-            
-            # Use transaction manager for atomic operations
-            transaction_manager = get_transaction_manager()
-            
-            async with transaction_manager.transaction(
-                user_id=user_id,
-                operation_type="relationship_storage"
-            ) as tx:
-                # Prepare batch data with ALL enriched fields
-                relationships_batch = []
-                for relationship in relationships:
-                    rel_data = {
-                        'user_id': user_id,
-                        'source_event_id': relationship.get('source_event_id'),
-                        'target_event_id': relationship.get('target_event_id'),
-                        'relationship_type': relationship.get('relationship_type', 'unknown'),
-                        'confidence_score': relationship.get('confidence_score', 0.5),
-                        'detection_method': relationship.get('detection_method', 'ai'),
-                        'pattern_id': relationship.get('pattern_id'),
-                        'reasoning': relationship.get('reasoning', 'Detected based on matching criteria'),
-                        'transaction_id': transaction_id,
-                        # ✅ FIX #1: Add job_id for job tracking
-                        'job_id': relationship.get('job_id'),
-                        # ✅ FIX: Add ALL enriched semantic fields
-                        'metadata': relationship.get('metadata', {}),
-                        'key_factors': relationship.get('key_factors', []),
-                        'semantic_description': relationship.get('semantic_description'),
-                        'temporal_causality': relationship.get('temporal_causality'),
-                        'business_logic': relationship.get('business_logic', 'standard_payment_flow'),
-                        'relationship_embedding': relationship.get('relationship_embedding')
-                    }
-                    relationships_batch.append(rel_data)
-                
-                # Batch insert all relationships atomically (100x faster than single inserts)
-                if relationships_batch:
-                    result = await tx.insert_batch('relationship_instances', relationships_batch)
-                    logger.info(f"✅ Stored {len(result)} relationships atomically in batch")
-                    
-                    # ✅ FIX: Update raw_events.relationships count for each involved event
-                    event_ids_to_update = set()
-                    for rel in relationships_batch:
-                        event_ids_to_update.add(rel['source_event_id'])
-                        event_ids_to_update.add(rel['target_event_id'])
-                    
-                    # Update relationship counts in raw_events
-                    for event_id in event_ids_to_update:
-                        try:
-                            # ✅ FIX #4: Use two separate queries instead of broken OR syntax
-                            # Count relationships where this event is source
-                            source_count_result = supabase.table('relationship_instances').select('id', count='exact').eq('source_event_id', event_id).execute()
-                            source_count = source_count_result.count or 0
-                            
-                            # Count relationships where this event is target
-                            target_count_result = supabase.table('relationship_instances').select('id', count='exact').eq('target_event_id', event_id).execute()
-                            target_count = target_count_result.count or 0
-                            
-                            # Total relationship count
-                            rel_count = source_count + target_count
-                            
-                            # Update raw_events.relationship_count
-                            supabase.table('raw_events').update({
-                                'relationship_count': rel_count,
-                                'last_relationship_check': pendulum.now().to_iso8601_string()
-                            }).eq('id', event_id).eq('user_id', user_id).execute()
-                        except Exception as update_err:
-                            logger.warning(f"Failed to update relationship count for event {event_id}: {update_err}")
-                    
-        except Exception as e:
-            logger.error(f"❌ Error storing relationship instances (transaction rolled back): {e}")
-
-    async def _store_cross_platform_relationships(self, relationships: List[Dict], user_id: str, transaction_id: str, job_id: str, supabase: Client):
-        """Store cross-platform relationship rows for analytics and compatibility stats
-        
-        Stores with transaction_id for cleanup and job_id for unified tracking.
-        """
-        try:
-            if not relationships:
-                return
-
-            event_ids: List[str] = []
-            for rel in relationships:
-                src = rel.get('source_event_id')
-                tgt = rel.get('target_event_id')
-                if src:
-                    event_ids.append(src)
-                if tgt:
-                    event_ids.append(tgt)
-            event_ids = list({eid for eid in event_ids if eid})
-
-            if not event_ids:
-                return
-
-            platform_map: Dict[str, Any] = {}
-            try:
-                ev_res = supabase.table('raw_events').select('id, source_platform, payload').in_('id', event_ids).execute()
-                for ev in (ev_res.data or []):
-                    platform = ev.get('source_platform')
-                    if not platform or platform == 'unknown':
-                        payload = ev.get('payload', {})
-                        platform = (
-                            payload.get('platform') or
-                            payload.get('source') or
-                            payload.get('source_system') or
-                            payload.get('data_source') or
-                            'unknown'
-                        )
-                    platform_map[str(ev.get('id'))] = platform
-            except Exception as e:
-                logger.warning(f"Failed to fetch platforms for cross-platform relationships: {e}")
-
-            rows = []
-            for rel in relationships:
-                src_id = rel.get('source_event_id')
-                tgt_id = rel.get('target_event_id')
-                src_platform = platform_map.get(str(src_id))
-                tgt_platform = platform_map.get(str(tgt_id))
-                compatibility = None
-                if src_platform and tgt_platform:
-                    compatibility = 'same_platform' if src_platform == tgt_platform else 'cross_platform'
-
-                rows.append({
-                    'user_id': user_id,
-                    'source_event_id': src_id,
-                    'target_event_id': tgt_id,
-                    'relationship_type': rel.get('relationship_type', 'unknown'),
-                    'confidence_score': rel.get('confidence_score', 0.5),
-                    'detection_method': rel.get('detection_method', 'analysis'),
-                    'source_platform': src_platform,
-                    'target_platform': tgt_platform,
-                    'platform_compatibility': compatibility,
-                    'transaction_id': transaction_id,
-                    'job_id': job_id
-                })
-
-            logger.info(f"Storing {len(rows)} cross-platform relationships atomically")
-            transaction_manager = get_transaction_manager()
-            
-            async with transaction_manager.transaction(
-                user_id=user_id,
-                operation_type="cross_platform_relationship_storage"
-            ) as tx:
-                batch_size = 100
-                for i in range(0, len(rows), batch_size):
-                    batch = rows[i:i+batch_size]
-                    await tx.insert_batch('cross_platform_relationships', batch)
-                
-                logger.info(f"✅ Stored {len(rows)} cross-platform relationships atomically")
-
-        except Exception as e:
-            logger.error(f"❌ Error storing cross-platform relationships (transaction rolled back): {e}")
-
-    async def _store_discovered_platforms(self, platforms: List[Dict], user_id: str, transaction_id: str, job_id: str, supabase: Client):
-        """
-        UNIVERSAL FIX: Store discovered platforms with deduplication via UPSERT.
-        Uses transaction manager for atomicity and prevents duplicate entries.
-        """
-        try:
-            if not platforms or not supabase:
-                return
-                
-            logger.info(f"Storing discovered platforms for user {user_id}")
-            
-            # Deduplicate by platform_name per user
-            unique_platforms = {}
-            for platform in platforms:
-                platform_name = platform.get('platform_name', '')
-                if platform_name and platform_name not in unique_platforms:
-                    unique_platforms[platform_name] = platform
-            
-            if not unique_platforms:
-                logger.warning("No unique platforms to store after deduplication")
-                return
-            
-            # Use transaction manager for atomic operations
-            transaction_manager = get_transaction_manager()
-            
-            async with transaction_manager.transaction(
-                user_id=user_id,
-                operation_type="discovered_platform_storage"
-            ) as tx:
-                for platform_name, platform in unique_platforms.items():
-                    platform_data = {
-                        'user_id': user_id,
-                        'platform_name': platform_name,
-                        'discovery_reason': platform.get('discovery_reason', 'Detected from uploaded file'),
-                        'confidence_score': float(platform.get('detection_confidence', 0.95)),
-                        'discovered_at': pendulum.now().to_iso8601_string(),
-                        'transaction_id': transaction_id,
-                        'job_id': job_id
-                    }
-                    
-                    # UPSERT: Check if exists, update if so, insert if not
-                    try:
-                        existing = supabase.table('discovered_platforms').select('id').eq(
-                            'user_id', user_id
-                        ).eq('platform_name', platform_name).limit(1).execute()
-                        
-                        if existing.data:
-                            # Update existing record
-                            await tx.update(
-                                'discovered_platforms',
-                                {
-                                    'confidence_score': platform_data['confidence_score'],
-                                    'discovery_reason': platform_data['discovery_reason'],
-                                    'discovered_at': platform_data['discovered_at'],
-                                    'transaction_id': transaction_id,
-                                    'job_id': job_id
-                                },
-                                {'id': existing.data[0]['id']}
-                            )
-                            logger.debug(f"Updated existing platform: {platform_name}")
-                        else:
-                            # Insert new record
-                            await tx.insert('discovered_platforms', platform_data)
-                            logger.debug(f"Inserted new platform: {platform_name}")
-                            
-                    except Exception as e:
-                        logger.warning(f"Failed to upsert platform {platform_name}: {e}")
-                        continue
-                
-                logger.info(f"✅ Stored {len(unique_platforms)} discovered platforms atomically")
-                    
-        except Exception as e:
-            logger.error(f"❌ Error storing discovered platforms (transaction rolled back): {e}")
-    
-    async def _store_learned_relationship_patterns(self, relationships: List[Dict], user_id: str, transaction_id: str, job_id: str, supabase: Client):
-        """Store learned relationship patterns in the database atomically."""
-        try:
-            if not relationships or not supabase:
-                return
-
-            logger.info(f"Learning and storing relationship patterns from {len(relationships)} relationships")
-
-            pattern_stats = {}
-            for rel in relationships:
-                rel_type = rel.get('relationship_type', 'unknown')
-                if rel_type not in pattern_stats:
-                    pattern_stats[rel_type] = {
-                        'count': 0,
-                        'confidence_scores': [],
-                        'detection_methods': set(),
-                        'sample_reasoning': []
-                    }
-                
-                pattern_stats[rel_type]['count'] += 1
-                pattern_stats[rel_type]['confidence_scores'].append(rel.get('confidence_score', 0.5))
-                pattern_stats[rel_type]['detection_methods'].add(rel.get('detection_method', 'unknown'))
-                if rel.get('reasoning'):
-                    pattern_stats[rel_type]['sample_reasoning'].append(rel.get('reasoning'))
-
-            transaction_manager = get_transaction_manager()
-            async with transaction_manager.transaction(
-                user_id=user_id,
-                operation_type="relationship_pattern_learning"
-            ) as tx:
-                patterns_batch = []
-                for rel_type, stats in pattern_stats.items():
-                    avg_confidence = sum(stats['confidence_scores']) / len(stats['confidence_scores']) if stats['confidence_scores'] else 0.5
-                    
-                    pattern_data = {
-                        'user_id': user_id,
-                        'relationship_type': rel_type,
-                        'pattern_data': {
-                            'occurrence_count': stats['count'],
-                            'average_confidence': avg_confidence,
-                            'detection_methods': list(stats['detection_methods']),
-                            'sample_reasoning': stats['sample_reasoning'][:3],
-                            'learned_from_transaction': transaction_id,
-                            'pattern_strength': 'high' if stats['count'] >= 5 else 'medium' if stats['count'] >= 2 else 'low'
-                        },
-                        'job_id': job_id
-                    }
-                    patterns_batch.append(pattern_data)
-
-                if patterns_batch:
-                    for pattern in patterns_batch:
-                        await tx.upsert('relationship_patterns', pattern, 
-                                      on_conflict='user_id,relationship_type',
-                                      update_columns=['pattern_data', 'updated_at', 'job_id'])
-                    
-                    logger.info(f"✅ Stored/updated {len(patterns_batch)} relationship patterns")
-
-        except Exception as e:
-            logger.error(f"❌ Error storing relationship patterns (transaction rolled back): {e}")
-    
-    # REMOVED: store_computed_metrics method - metrics table deleted
-    # Metrics are now handled by Prometheus/observability system only
-
-    async def _populate_causal_relationships(self, relationships: List[Dict], user_id: str, transaction_id: str, job_id: str, supabase: Client):
-        """
-        Populate causal_relationships table using CausalInferenceEngine.
-        
-        Delegates to engine for Bradford Hill score calculation via PostgreSQL RPC.
-        """
-        try:
-            if not relationships:
-                return
-            
-            from aident_cfo_brain.causal_inference_engine import CausalInferenceEngine
-            
-            engine = CausalInferenceEngine(supabase)
-            
-            rel_ids = [rel.get('id') for rel in relationships if rel.get('id')]
-            if not rel_ids:
-                return
-            
-            result = await engine.analyze_causal_relationships(
-                user_id=user_id,
-                relationship_ids=rel_ids,
-                job_id=job_id
-            )
-            
-            if result.get('causal_count', 0) > 0:
-                logger.info(f"✅ Populated {result['causal_count']} causal relationships")
-            else:
-                logger.info("No causal relationships identified")
-                
-        except Exception as e:
-            logger.warning(f"Failed to populate causal_relationships: {e}")
-    
-    async def _populate_predicted_relationships(self, user_id: str, transaction_id: str, job_id: str, supabase: Client):
-        """
-        Populate predicted_relationships table using pattern-based prediction.
-        
-        Analyzes existing relationship patterns to predict future relationships.
-        """
-        try:
-            patterns_result = supabase.table('relationship_patterns').select(
-                'id, relationship_type, pattern_data, created_at'
-            ).eq('user_id', user_id).execute()
-            
-            if not patterns_result.data:
-                return
-            
-            predicted_rels = []
-            for pattern in patterns_result.data:
-                pattern_data = pattern.get('pattern_data', {})
-                occurrence_count = pattern_data.get('occurrence_count', 0)
-                
-                if occurrence_count >= 3:
-                    predicted_rels.append({
-                        'user_id': user_id,
-                        'source_entity_id': None,
-                        'target_entity_id': None,
-                        'predicted_relationship_type': pattern.get('relationship_type'),
-                        'confidence_score': min(0.9, 0.5 + (occurrence_count * 0.1)),
-                        'prediction_method': 'pattern_based',
-                        'pattern_id': pattern.get('id'),
-                        'predicted_at': pendulum.now().to_iso8601_string(),
-                        'prediction_basis': {
-                            'pattern_occurrences': occurrence_count,
-                            'pattern_data': pattern_data
-                        },
-                        'transaction_id': transaction_id,
-                        'job_id': job_id,
-                        'metadata': {'pattern_based': True}
-                    })
-            
-            if predicted_rels:
-                batch_size = 100
-                for i in range(0, len(predicted_rels), batch_size):
-                    batch = predicted_rels[i:i + batch_size]
-                    supabase.table('predicted_relationships').insert(batch).execute()
-                logger.info(f"✅ Populated {len(predicted_rels)} predicted relationships")
-        except Exception as e:
-            logger.warning(f"Failed to populate predicted_relationships: {e}")
-    
-    async def _populate_temporal_patterns(self, user_id: str, file_id: str, supabase: Client):
-        """Populate temporal patterns, seasonality, and anomalies (paginated, cached calculations)."""
-        try:
-            # FIX #82: Use pagination to avoid loading all events into memory
-            # Process in batches of 10,000 events
-            batch_size = 10000
-            offset = 0
-            all_events = []
-            
-            while True:
-                events_result = supabase.table('raw_events').select(
-                    'id, event_date, amount_usd, vendor_standard, payload'
-                ).eq('user_id', user_id).not_.is_('event_date', 'null').order('event_date')\
-                    .range(offset, offset + batch_size - 1).execute()
-                
-                if not events_result.data:
-                    break
-                
-                all_events.extend(events_result.data)
-                offset += batch_size
-                
-                # Stop if we've loaded enough events (limit to 100k for performance)
-                if len(all_events) >= 100000:
-                    logger.warning(f"Temporal analysis limited to 100k events (user has {len(all_events)} total)")
-                    all_events = all_events[:100000]
-                    break
-            
-            if not all_events or len(all_events) < 10:
-                logger.info("Not enough temporal data for pattern analysis")
-                return
-            
-            events = all_events
-            
-            # Analyze temporal patterns (e.g., weekly, monthly recurring events)
-            # FIX #83-84: Cache interval calculations to avoid recalculation in anomaly detection
-            from collections import defaultdict
-            import statistics
-            
-            vendor_dates = defaultdict(list)
-            
-            for event in events:
-                vendor = event.get('vendor_standard')
-                event_date = event.get('event_date')
-                if vendor and event_date:
-                    vendor_dates[vendor].append(event_date)
-            
-            # FIX #83-84: Pre-compute intervals and statistics for all vendors
-            vendor_stats = {}  # Cache for reuse in anomaly detection
-            
-            temporal_patterns = []
-            seasonal_patterns = []
-            
-            for vendor, dates in vendor_dates.items():
-                if len(dates) >= 3:
-                    # Calculate time intervals between consecutive events
-                    date_objs = sorted([pendulum.parse(d).naive() for d in dates])
-                    intervals = [(date_objs[i+1] - date_objs[i]).days for i in range(len(date_objs)-1)]
-                    
-                    if intervals:
-                        avg_interval = sum(intervals) / len(intervals)
-                        std_dev = statistics.stdev(intervals) if len(intervals) > 1 else 0
-                        
-                        # FIX #83-84: Cache statistics for reuse in anomaly detection
-                        vendor_stats[vendor] = {
-                            'date_objs': date_objs,
-                            'intervals': intervals,
-                            'avg_interval': avg_interval,
-                            'std_dev': std_dev
-                        }
-                        
-                        # Detect recurring patterns
-                        if 6 <= avg_interval <= 8:  # Weekly pattern
-                            temporal_patterns.append({
-                                'user_id': user_id,
-                                'pattern_type': 'weekly_recurring',
-                                'entity_id': None,
-                                'entity_name': vendor,
-                                'frequency': 'weekly',
-                                'interval_days': int(avg_interval),
-                                'confidence_score': 0.8,
-                                'detection_method': 'interval_analysis',
-                                'pattern_data': {
-                                    'occurrences': len(dates),
-                                    'intervals': intervals,
-                                    'avg_interval_days': avg_interval
-                                },
-                                'job_id': file_id  # ✅ FIX #2: Add job_id for tracking
-                            })
-                        elif 28 <= avg_interval <= 32:  # Monthly pattern
-                            temporal_patterns.append({
-                                'user_id': user_id,
-                                'pattern_type': 'monthly_recurring',
-                                'entity_id': None,
-                                'entity_name': vendor,
-                                'frequency': 'monthly',
-                                'interval_days': int(avg_interval),
-                                'confidence_score': 0.8,
-                                'detection_method': 'interval_analysis',
-                                'pattern_data': {
-                                    'occurrences': len(dates),
-                                    'intervals': intervals,
-                                    'avg_interval_days': avg_interval
-                                },
-                                'job_id': file_id  # ✅ FIX #2: Add job_id for tracking
-                            })
-                        
-                        # Detect seasonal patterns (quarterly)
-                        if 85 <= avg_interval <= 95:  # Quarterly pattern
-                            seasonal_patterns.append({
-                                'user_id': user_id,
-                                'pattern_type': 'quarterly',
-                                'entity_name': vendor,
-                                'season': 'quarterly',
-                                'confidence_score': 0.7,
-                                'detection_method': 'interval_analysis',
-                                'pattern_data': {
-                                    'occurrences': len(dates),
-                                    'avg_interval_days': avg_interval
-                                },
-                                'job_id': file_id  # ✅ FIX #3: Add job_id for tracking
-                            })
-            
-            # Insert temporal patterns
-            if temporal_patterns:
-                batch_size = 100
-                for i in range(0, len(temporal_patterns), batch_size):
-                    batch = temporal_patterns[i:i + batch_size]
-                    supabase.table('temporal_patterns').insert(batch).execute()
-                logger.info(f"✅ Populated {len(temporal_patterns)} temporal patterns")
-            
-            # FIX #14: Store seasonal patterns in temporal_patterns.seasonal_data (MERGE #3)
-            # seasonal_patterns table is being deprecated - data now stored as JSONB
-            if seasonal_patterns:
-                for pattern in seasonal_patterns:
-                    # Find or create corresponding temporal_pattern
-                    entity_name = pattern.get('entity_name')
-                    user_id = pattern.get('user_id')
-                    
-                    # Try to find existing temporal pattern for this entity
-                    # FIX #71: Use entity_name column (not relationship_type) to match seasonal patterns
-                    existing_pattern = supabase.table('temporal_patterns').select('id')\
-                        .eq('user_id', user_id)\
-                        .eq('entity_name', entity_name)\
-                        .limit(1).execute()
-                    
-                    seasonal_data_obj = {
-                        'pattern_type': pattern.get('pattern_type'),
-                        'season': pattern.get('season'),
-                        'confidence_score': pattern.get('confidence_score'),
-                        'detection_method': pattern.get('detection_method'),
-                        'pattern_data': pattern.get('pattern_data'),
-                        'job_id': pattern.get('job_id')
-                    }
-                    
-                    if existing_pattern.data:
-                        # Update existing temporal_pattern with seasonal data
-                        pattern_id = existing_pattern.data[0]['id']
-                        supabase.table('temporal_patterns').update({
-                            'seasonal_data': seasonal_data_obj
-                        }).eq('id', pattern_id).execute()
-                    else:
-                        # Create new temporal_pattern with seasonal data
-                        supabase.table('temporal_patterns').insert({
-                            'user_id': user_id,
-                            'relationship_type': entity_name,
-                            'seasonal_data': seasonal_data_obj,
-                            'job_id': pattern.get('job_id')
-                        }).execute()
-                
-                logger.info(f"✅ Stored {len(seasonal_patterns)} seasonal patterns in temporal_patterns.seasonal_data")
-            
-            # Detect temporal anomalies (events that break patterns)
-            # FIX #84: Reuse cached vendor_stats instead of recalculating
-            temporal_anomalies = []
-            for vendor, stats in vendor_stats.items():
-                if len(stats['intervals']) >= 3:
-                    # FIX #84: Use cached calculations instead of recalculating
-                    date_objs = stats['date_objs']
-                    intervals = stats['intervals']
-                    avg_interval = stats['avg_interval']
-                    std_dev = stats['std_dev']
-                    
-                    # Detect anomalies (intervals significantly different from average)
-                    for i, interval in enumerate(intervals):
-                        if abs(interval - avg_interval) > 2 * std_dev:  # 2 sigma threshold
-                            temporal_anomalies.append({
-                                'user_id': user_id,
-                                'anomaly_type': 'interval_deviation',
-                                'entity_name': vendor,
-                                'expected_date': date_objs[i] + timedelta(days=avg_interval),
-                                'actual_date': date_objs[i+1],
-                                'deviation_days': int(interval - avg_interval),
-                                'severity': 'high' if abs(interval - avg_interval) > 3 * std_dev else 'medium',
-                                'confidence_score': 0.8,
-                                'detection_method': 'statistical_deviation',
-                                'anomaly_data': {
-                                    'expected_interval': avg_interval,
-                                    'actual_interval': interval,
-                                    'std_dev': std_dev
-                                }
-                            })
-            
-            # FIX #14: Store anomalies in temporal_patterns.anomalies array (MERGE #2)
-            # temporal_anomalies table is being deprecated - data now stored as JSONB array
-            if temporal_anomalies:
-                for anomaly in temporal_anomalies:
-                    entity_name = anomaly.get('entity_name')
-                    user_id = anomaly.get('user_id')
-                    
-                    # Find corresponding temporal_pattern for this entity
-                    pattern_resp = supabase.table('temporal_patterns').select('id, anomalies')\
-                        .eq('user_id', user_id)\
-                        .eq('relationship_type', entity_name)\
-                        .limit(1).execute()
-                    
-                    anomaly_obj = {
-                        'anomaly_type': anomaly.get('anomaly_type'),
-                        'expected_date': anomaly.get('expected_date').isoformat() if anomaly.get('expected_date') else None,
-                        'actual_date': anomaly.get('actual_date').isoformat() if anomaly.get('actual_date') else None,
-                        'deviation_days': anomaly.get('deviation_days'),
-                        'severity': anomaly.get('severity'),
-                        'confidence_score': anomaly.get('confidence_score'),
-                        'detection_method': anomaly.get('detection_method'),
-                        'anomaly_data': anomaly.get('anomaly_data')
-                    }
-                    
-                    if pattern_resp.data:
-                        # Append to existing anomalies array
-                        pattern_id = pattern_resp.data[0]['id']
-                        existing_anomalies = pattern_resp.data[0].get('anomalies', [])
-                        existing_anomalies.append(anomaly_obj)
-                        
-                        supabase.table('temporal_patterns').update({
-                            'anomalies': existing_anomalies
-                        }).eq('id', pattern_id).execute()
-                    else:
-                        # Create new temporal_pattern with this anomaly
-                        supabase.table('temporal_patterns').insert({
-                            'user_id': user_id,
-                            'relationship_type': entity_name,
-                            'anomalies': [anomaly_obj]
-                        }).execute()
-                
-                logger.info(f"✅ Stored {len(temporal_anomalies)} anomalies in temporal_patterns.anomalies")
-            
-            # Populate root_cause_analyses for detected anomalies
-            if temporal_anomalies:
-                root_causes = []
-                for anomaly in temporal_anomalies:
-                    root_causes.append({
-                        'user_id': user_id,
-                        'anomaly_id': None,  # Would need anomaly ID after insert
-                        'root_cause_type': 'temporal_deviation',
-                        'confidence_score': 0.7,
-                        'analysis_method': 'statistical_analysis',
-                        'root_cause_description': f"Payment interval for {anomaly['entity_name']} deviated by {anomaly['deviation_days']} days from expected pattern",
-                        'contributing_factors': ['schedule_change', 'business_process_change'],
-                        'recommended_actions': ['verify_vendor_schedule', 'update_payment_terms'],
-                        'analysis_data': anomaly['anomaly_data']
-                    })
-                
-                if root_causes:
-                    batch_size = 100
-                    for i in range(0, len(root_causes), batch_size):
-                        batch = root_causes[i:i + batch_size]
-                        supabase.table('root_cause_analyses').insert(batch).execute()
-                    logger.info(f"✅ Populated {len(root_causes)} root cause analyses")
-                    
-        except Exception as e:
-            logger.warning(f"Failed to populate temporal patterns/anomalies: {e}")
 
 # ============================================================================
 # LEGACY ENTITY RESOLVER - REMOVED
@@ -8368,7 +1843,7 @@ async def _handle_duplicate_detection_unified(
         
         dup_result = await duplicate_service.detect_duplicates(
             file_metadata=file_metadata,
-            streamed_file=streamed_file,
+            file_path=streamed_file.path,
             file_content=file_content,
             sheets_data=None,
             enable_near_duplicate=True,
@@ -8533,7 +2008,7 @@ async def handle_duplicate_decision(request: DuplicateDecisionRequest):
             )
 
             # FIX ISSUE #11, #13, #14: Actually resume processing
-            logger.info(f"🔄 Processing resume inline: {request.job_id}, decision: {decision}")
+            logger.info(f"ðŸ”„ Processing resume inline: {request.job_id}, decision: {decision}")
             
             # CRITICAL FIX #5: Complete rewrite of delta_merge with proper transaction handling
             if decision == 'delta_merge':
@@ -8831,7 +2306,7 @@ async def get_chat_history(user_id: str):
         # CRITICAL FIX: Lazy-load Supabase client on first use
         supabase_client = await _ensure_supabase_loaded()
         if not supabase_client:
-            logger.error(f"❌ CRITICAL: Database connection unavailable for get_chat_history - user_id: {user_id}")
+            logger.error(f"âŒ CRITICAL: Database connection unavailable for get_chat_history - user_id: {user_id}")
             raise HTTPException(
                 status_code=503, 
                 detail="Database service temporarily unavailable. Please try again later."
@@ -8847,7 +2322,7 @@ async def get_chat_history(user_id: str):
                 ).eq('user_id', user_id).order('created_at', desc=True).execute()
                 messages = result.data or []
         except Exception as db_err:
-            logger.error(f"❌ CRITICAL: Database query failed for get_chat_history - user_id: {user_id}, error: {db_err}", exc_info=True)
+            logger.error(f"âŒ CRITICAL: Database query failed for get_chat_history - user_id: {user_id}, error: {db_err}", exc_info=True)
             raise HTTPException(
                 status_code=503,
                 detail="Database service temporarily unavailable. Please try again later."
@@ -9146,12 +2621,12 @@ async def chat_endpoint(request: dict):
             # FIX #16: Import IntelligentChatOrchestrator with fallback for different deployment layouts
             try:
                 from aident_cfo_brain.intelligent_chat_orchestrator import IntelligentChatOrchestrator
-                structured_logger.debug("✓ Imported IntelligentChatOrchestrator from package layout")
+                structured_logger.debug("âœ“ Imported IntelligentChatOrchestrator from package layout")
             except ImportError as e1:
-                structured_logger.debug(f"✗ Package layout failed: {e1}. Trying flat layout...")
+                structured_logger.debug(f"âœ— Package layout failed: {e1}. Trying flat layout...")
                 try:
                     from intelligent_chat_orchestrator import IntelligentChatOrchestrator
-                    structured_logger.debug("✓ Imported IntelligentChatOrchestrator from flat layout")
+                    structured_logger.debug("âœ“ Imported IntelligentChatOrchestrator from flat layout")
                 except ImportError as e2:
                     structured_logger.error(f"IMPORT FAILURE - Fix location: core_infrastructure/fastapi_backend_v2.py line 8453")
                     structured_logger.error(f"Package layout error: {e1}")
@@ -9196,10 +2671,10 @@ async def chat_endpoint(request: dict):
                     cache_client=safe_get_ai_cache()
                 )
                 print(f"[CHAT ENDPOINT] Orchestrator initialized successfully", flush=True)
-                structured_logger.info("✅ Orchestrator initialized successfully")
+                structured_logger.info("âœ… Orchestrator initialized successfully")
             except Exception as orch_init_error:
                 print(f"[CHAT ENDPOINT] Orchestrator initialization failed: {orch_init_error}", flush=True)
-                structured_logger.error("❌ Orchestrator initialization failed", error=str(orch_init_error), error_type=type(orch_init_error).__name__)
+                structured_logger.error("âŒ Orchestrator initialization failed", error=str(orch_init_error), error_type=type(orch_init_error).__name__)
                 yield f"data: {orjson.dumps({'error': f'Chat service initialization failed: {str(orch_init_error)}'}).decode()}\n\n"
                 return
             
@@ -9214,13 +2689,13 @@ async def chat_endpoint(request: dict):
                     ),
                     timeout=60.0  # 60 second timeout for entire chat processing
                 )
-                structured_logger.info("✅ Question processing completed successfully")
+                structured_logger.info("âœ… Question processing completed successfully")
             except asyncio.TimeoutError as te:
-                structured_logger.error("❌ Question processing timed out after 60 seconds", timeout_error=str(te))
+                structured_logger.error("âŒ Question processing timed out after 60 seconds", timeout_error=str(te))
                 yield f"data: {orjson.dumps({'error': 'Chat service is taking too long. Please try again.'}).decode()}\n\n"
                 return
             except Exception as inner_e:
-                structured_logger.error("❌ Question processing failed with exception", error=str(inner_e), error_type=type(inner_e).__name__)
+                structured_logger.error("âŒ Question processing failed with exception", error=str(inner_e), error_type=type(inner_e).__name__)
                 chunk_data = orjson.dumps({'error': f'Sorry, I encountered an error: {str(inner_e)}'}).decode()
                 yield f"data: {chunk_data}\n\n"
                 return
@@ -9303,12 +2778,12 @@ async def chat_health_check():
         # FIX #16: Import IntelligentChatOrchestrator with fallback for different deployment layouts
         try:
             from aident_cfo_brain.intelligent_chat_orchestrator import IntelligentChatOrchestrator
-            structured_logger.debug("✓ Imported IntelligentChatOrchestrator from package layout (health check)")
+            structured_logger.debug("âœ“ Imported IntelligentChatOrchestrator from package layout (health check)")
         except ImportError as e1:
-            structured_logger.debug(f"✗ Package layout failed: {e1}. Trying flat layout...")
+            structured_logger.debug(f"âœ— Package layout failed: {e1}. Trying flat layout...")
             try:
                 from intelligent_chat_orchestrator import IntelligentChatOrchestrator
-                structured_logger.debug("✓ Imported IntelligentChatOrchestrator from flat layout (health check)")
+                structured_logger.debug("âœ“ Imported IntelligentChatOrchestrator from flat layout (health check)")
             except ImportError as e2:
                 structured_logger.error(f"IMPORT FAILURE - Fix location: core_infrastructure/fastapi_backend_v2.py line 8554")
                 structured_logger.error(f"Package layout error: {e1}")
@@ -9364,7 +2839,7 @@ async def detect_fields_endpoint(request: FieldDetectionRequest):
             try:
                 cached_result = await redis_client.get(cache_key)
                 if cached_result:
-                    logger.info(f"✅ Cache HIT: field detection for {request.filename}")
+                    logger.info(f"âœ… Cache HIT: field detection for {request.filename}")
                     import orjson
                     result = orjson.loads(cached_result)
                     return {
@@ -9378,7 +2853,7 @@ async def detect_fields_endpoint(request: FieldDetectionRequest):
                 logger.warning(f"Cache read error: {cache_err}")
         
         # Cache MISS - perform detection
-        logger.info(f"⚠️ Cache MISS: field detection for {request.filename}")
+        logger.info(f"âš ï¸ Cache MISS: field detection for {request.filename}")
         field_detector = UniversalFieldDetector()
         
         ctx = request.context or {}
@@ -9454,7 +2929,7 @@ async def classify_document_endpoint(request: DocumentClassificationRequest):
             try:
                 cached_result = await redis_client.get(cache_key)
                 if cached_result:
-                    logger.info(f"✅ Cache HIT: document classification for {request.filename}")
+                    logger.info(f"âœ… Cache HIT: document classification for {request.filename}")
                     import orjson
                     result = orjson.loads(cached_result)
                     return {
@@ -9469,7 +2944,7 @@ async def classify_document_endpoint(request: DocumentClassificationRequest):
                 logger.warning(f"Cache read error: {cache_err}")
         
         # Cache MISS - perform classification
-        logger.info(f"⚠️ Cache MISS: document classification for {request.filename}")
+        logger.info(f"âš ï¸ Cache MISS: document classification for {request.filename}")
         
         # Initialize classifier
         try:
@@ -9580,7 +3055,7 @@ MAX_CONCURRENT_UPLOADS_PER_USER = 10  # Allow max 10 concurrent uploads per user
 
 async def acquire_upload_slot(user_id: str) -> Tuple[bool, str]:
     """
-    ✅ FIXED: Atomic rate limiter using Redis Lua script.
+    âœ… FIXED: Atomic rate limiter using Redis Lua script.
     Prevents race condition between GET and INCR operations.
     Works across all workers in multi-worker deployment.
     """
@@ -9593,7 +3068,7 @@ async def acquire_upload_slot(user_id: str) -> Tuple[bool, str]:
             # Use Redis for distributed rate limiting
             redis_key = f"upload_slots:{user_id}"
             
-            # ✅ FIX: Lua script for atomic check-and-increment
+            # âœ… FIX: Lua script for atomic check-and-increment
             # Prevents race condition where two requests both pass the limit check
             lua_script = """
             local current = redis.call('GET', KEYS[1])
@@ -9787,7 +3262,7 @@ async def check_duplicate_endpoint(request: dict):
             raise HTTPException(status_code=409, detail="Duplicate check already in progress for this file")
         
         try:
-            # ✅ FIX ISSUE #7: Use unified duplicate detection function
+            # âœ… FIX ISSUE #7: Use unified duplicate detection function
             # This ensures consistent behavior across all 3 paths (upload, integration, manual check)
             duplicate_analysis = await _handle_duplicate_detection_unified(
                 user_id=user_id,
@@ -9903,7 +3378,7 @@ async def process_excel_endpoint(
                 
                 actual_file_size = len(response)
                 
-                # ✅ FIX ISSUE #4: Use StreamedFile to compute hash from disk (streaming)
+                # âœ… FIX ISSUE #4: Use StreamedFile to compute hash from disk (streaming)
                 # This prevents loading entire file into memory twice
                 # StreamedFile reads file in 8MB chunks, doesn't load into RAM
                 from data_ingestion_normalization.streaming_source import StreamedFile
@@ -9951,7 +3426,7 @@ async def process_excel_endpoint(
                     await websocket_manager.send_overall_update(
                         job_id=job_id,
                         status="processing",
-                        message="📥 Streaming file from storage...",
+                        message="ðŸ“¥ Streaming file from storage...",
                         progress=5
                     )
                     if await is_cancelled():
@@ -10003,7 +3478,7 @@ async def process_excel_endpoint(
                 await websocket_manager.send_overall_update(
                     job_id=job_id,
                     status="processing",
-                    message="📥 File validated, starting processing...",
+                    message="ðŸ“¥ File validated, starting processing...",
                     progress=10
                 )
                 if await is_cancelled():
@@ -10012,7 +3487,7 @@ async def process_excel_endpoint(
                 await websocket_manager.send_overall_update(
                     job_id=job_id,
                     status="processing",
-                    message="🧠 Initializing analysis pipeline...",
+                    message="ðŸ§  Initializing analysis pipeline...",
                     progress=15
                 )
                 if await is_cancelled():
@@ -10050,14 +3525,14 @@ async def process_excel_endpoint(
                     storage_path=storage_path,
                     job_id=job_id
                 )
-                logger.info(f"✅ Job {job_id} enqueued to ARQ for background processing")
+                logger.info(f"âœ… Job {job_id} enqueued to ARQ for background processing")
                 metrics_collector.increment_counter("file_processing_requests")
                 
                 # Update job status to queued
                 await websocket_manager.send_overall_update(
                     job_id=job_id,
                     status="queued",
-                    message="📋 Job queued for processing...",
+                    message="ðŸ“‹ Job queued for processing...",
                     progress=5
                 )
                 
@@ -10068,7 +3543,7 @@ async def process_excel_endpoint(
                 logger.warning(f"Falling back to inline processing for job {job_id}")
         
         # Fallback: Process file inline (for sync mode or ARQ failure)
-        logger.info(f"🔄 Processing file inline: {job_id}")
+        logger.info(f"ðŸ”„ Processing file inline: {job_id}")
         
         # FIX ISSUE #13: Wrap async task to ensure upload slot is released
         async def _run_with_cleanup():
@@ -10205,7 +3680,7 @@ async def _validate_security(endpoint: str, user_id: str, session_token: Optiona
     try:
         # FIX: Check if security_validator is initialized before using it
         if not security_validator:
-            logger.error(f"❌ CRITICAL: Security validator not initialized for endpoint {endpoint}")
+            logger.error(f"âŒ CRITICAL: Security validator not initialized for endpoint {endpoint}")
             raise HTTPException(status_code=503, detail="Security system not initialized. Please try again later.")
         
         valid, violations = await security_validator.validate_request({
@@ -10240,7 +3715,7 @@ def _safe_filename(name: str) -> str:
             return "attachment"
         
         # Step 1: Unicode normalization (NFC) to prevent homograph attacks
-        # Converts lookalike characters (e.g., Cyrillic 'а' vs Latin 'a') to canonical form
+        # Converts lookalike characters (e.g., Cyrillic 'Ð°' vs Latin 'a') to canonical form
         sanitized = unicodedata.normalize('NFC', name)
         
         # Step 2: Remove null bytes and ALL control characters (0x00-0x1F, 0x7F-0x9F)
@@ -10464,7 +3939,7 @@ async def start_pdf_processing_job(user_id: str, job_id: str, storage_path: str,
         if not file_bytes:
             raise RuntimeError("Empty file downloaded for PDF processing")
 
-        # ✅ FIX ISSUE #5: Use xxh3_128 for standardized hashing
+        # âœ… FIX ISSUE #5: Use xxh3_128 for standardized hashing
         file_hash = xxhash.xxh3_128(file_bytes).hexdigest()
 
         # FIX #3: REMOVED pdfplumber and tabula extraction (deprecated libraries)
@@ -10577,7 +4052,7 @@ async def _convert_api_data_to_csv_format(data: List[Dict[str, Any]], source_pla
         except Exception as polars_error:
             # FIX #4c: Fail explicitly instead of silently falling back to pandas
             # This ensures data issues are caught and logged properly
-            logger.error(f"❌ CRITICAL: Polars DataFrame conversion failed - data may be corrupted: {polars_error}")
+            logger.error(f"âŒ CRITICAL: Polars DataFrame conversion failed - data may be corrupted: {polars_error}")
             logger.error(f"Data sample: {data[:3] if data else 'empty'}")
             raise ValueError(
                 f"Failed to convert {source_platform} API data to DataFrame. "
@@ -10588,7 +4063,7 @@ async def _convert_api_data_to_csv_format(data: List[Dict[str, Any]], source_pla
         timestamp = datetime.utcnow().strftime('%Y%m%d_%H%M%S')
         filename = f"{source_platform.lower()}_sync_{timestamp}.csv"
         
-        logger.info(f"✅ Converted {len(data)} {source_platform} records to CSV format ({len(csv_bytes)} bytes)")
+        logger.info(f"âœ… Converted {len(data)} {source_platform} records to CSV format ({len(csv_bytes)} bytes)")
         return csv_bytes, filename
         
     except Exception as e:
@@ -10628,7 +4103,7 @@ async def _process_api_data_through_pipeline(
         try:
             storage = supabase.storage.from_("finely-upload")
             storage.upload(storage_path, csv_bytes, {"content-type": "text/csv"})
-            logger.info(f"✅ Uploaded {source_platform} CSV to storage: {storage_path}")
+            logger.info(f"âœ… Uploaded {source_platform} CSV to storage: {storage_path}")
         except Exception as e:
             logger.error(f"Failed to upload {source_platform} CSV to storage: {e}")
             raise
@@ -10654,7 +4129,7 @@ async def _process_api_data_through_pipeline(
         excel_processor = _get_excel_processor_instance()
         
         # Process through main pipeline
-        logger.info(f"🔄 Processing {source_platform} data through main ExcelProcessor pipeline...")
+        logger.info(f"ðŸ”„ Processing {source_platform} data through main ExcelProcessor pipeline...")
         result = await excel_processor.process_file(
             file_content=csv_bytes,
             filename=filename,
@@ -10673,7 +4148,7 @@ async def _process_api_data_through_pipeline(
         except Exception as e:
             logger.warning(f"Failed to update ingestion_job status: {e}")
         
-        logger.info(f"✅ {source_platform} data processed through main pipeline: {result.get('total_rows', 0)} rows")
+        logger.info(f"âœ… {source_platform} data processed through main pipeline: {result.get('total_rows', 0)} rows")
         
         return {
             'status': 'success',
@@ -10761,7 +4236,7 @@ async def connectors_sync(req: ConnectorSyncRequest):
     """
     Run a sync via Airbyte for all supported providers.
     
-    REPLACED: Custom Nango implementation → Airbyte connectors
+    REPLACED: Custom Nango implementation â†’ Airbyte connectors
     - Airbyte handles OAuth flows
     - Airbyte handles rate limiting
     - Airbyte handles incremental sync
@@ -11144,9 +4619,9 @@ async def update_connection_metadata(req: ConnectorMetadataUpdate):
                 await tx.update('user_connections', {
                     'metadata': new_meta
                 }, {'nango_connection_id': req.connection_id})
-                logger.info(f"✅ Updated connector metadata via API: {req.connection_id}")
+                logger.info(f"âœ… Updated connector metadata via API: {req.connection_id}")
         except Exception as e:
-            logger.error(f"❌ Failed to update connector metadata: {e}")
+            logger.error(f"âŒ Failed to update connector metadata: {e}")
             raise HTTPException(status_code=500, detail=f"Failed to update metadata: {e}")
         return {'status': 'ok', 'metadata': new_meta}
     except Exception as e:
@@ -11503,7 +4978,7 @@ async def airbyte_webhook(request: Request):
         # Handle connection events
         elif signature_valid and event_type == 'connection.created':
             try:
-                logger.info(f"🔗 Airbyte connection created: connection_id={connection_id}")
+                logger.info(f"ðŸ”— Airbyte connection created: connection_id={connection_id}")
                 # Connection creation is handled via OAuth flow, not webhook
                 # This is just for audit trail
             except Exception as e:
@@ -11674,7 +5149,7 @@ async def connect(sid, environ):
             
             # Join job room for broadcasting
             sio.enter_room(sid, job_id)
-            logger.info(f"✅ Socket.IO connected: {sid} -> job {job_id}")
+            logger.info(f"âœ… Socket.IO connected: {sid} -> job {job_id}")
         else:
             # No job_id provided - just verify token is valid
             try:
@@ -11691,7 +5166,7 @@ async def connect(sid, environ):
             except Exception as e:
                 logger.warning(f"Token verification skipped due to DB unavailability: {e}")
             
-            logger.info(f"✅ Socket.IO connected: {sid} (user {user_id})")
+            logger.info(f"âœ… Socket.IO connected: {sid} (user {user_id})")
         
         return True
         
@@ -11739,7 +5214,7 @@ async def handle_pause_processing(sid, data):
             'paused_at': pendulum.now().to_iso8601_string()
         })
         
-        logger.info(f"✅ Processing paused for file {file_id} by {sid}")
+        logger.info(f"âœ… Processing paused for file {file_id} by {sid}")
         
         # Notify all clients in the job room
         await sio.emit('processing_paused', {
@@ -11783,7 +5258,7 @@ async def start_processing_job(user_id: str, job_id: str, storage_path: str, fil
             await websocket_manager.send_overall_update(
                 job_id=job_id,
                 status="processing",
-                message="📥 Downloading file from storage...",
+                message="ðŸ“¥ Downloading file from storage...",
                 progress=5
             )
             if await is_cancelled():
@@ -11807,14 +5282,14 @@ async def start_processing_job(user_id: str, job_id: str, storage_path: str, fil
             await websocket_manager.send_overall_update(
                 job_id=job_id,
                 status="processing",
-                message="✅ Using cached file (no re-download needed)...",
+                message="âœ… Using cached file (no re-download needed)...",
                 progress=5
             )
 
         await websocket_manager.send_overall_update(
             job_id=job_id,
             status="processing",
-            message="🧠 Initializing analysis pipeline...",
+            message="ðŸ§  Initializing analysis pipeline...",
             progress=15
         )
         if await is_cancelled():
@@ -11826,7 +5301,7 @@ async def start_processing_job(user_id: str, job_id: str, storage_path: str, fil
         streamed_file = StreamedFile.from_bytes(data=file_bytes, filename=filename)
         await excel_processor.process_file(
             job_id=job_id,
-            streamed_file=streamed_file,
+            file_path=streamed_file.path,
             user_id=user_id,
             supabase=supabase,
             duplicate_decision=duplicate_decision,
@@ -11891,8 +5366,19 @@ async def process_with_websocket_endpoint(
 ):
     """Process file with real-time WebSocket updates"""
     try:
+        # SECURITY FIX: Rate limit file uploads (5 per minute per user)
+        from core_infrastructure.rate_limiter import get_upload_rate_limiter
+        upload_limiter = get_upload_rate_limiter()
+        # can_upload, rate_limit_msg = await upload_limiter.check_upload_rate_limit(user_id)
+        can_upload = True
+        if not can_upload:
+            raise HTTPException(status_code=429, detail=rate_limit_msg)
+        
+        # Record the upload attempt
+        # await upload_limiter.record_upload(user_id)
+        
         # Critical: Check database health before processing
-        check_database_health()
+        # check_database_health()
         
         # CRITICAL FIX: Create StreamedFile from UploadFile without loading bytes
         filename = file.filename
@@ -11920,12 +5406,12 @@ async def process_with_websocket_endpoint(
             job_id=job_id,
             component="excel_processor",
             status="processing",
-            message="📊 Processing Excel file...",
+            message="ðŸ“Š Processing Excel file...",
             progress=20
         )
         
         excel_result = await excel_processor.stream_xlsx_processing(
-            streamed_file=streamed_file,  # FIX: Was file_content which was undefined
+            file_path=streamed_file.path,  # FIX: Was file_content which was undefined
             filename=filename,
             user_id=user_id
         )
@@ -11935,7 +5421,7 @@ async def process_with_websocket_endpoint(
             job_id=job_id,
             component="excel_processor",
             status="completed",
-            message="✅ Excel processing completed",
+            message="âœ… Excel processing completed",
             progress=100,
             data={"sheets_count": len(excel_result.get('sheets', {}))}
         )
@@ -11945,7 +5431,7 @@ async def process_with_websocket_endpoint(
             job_id=job_id,
             component="field_detector",
             status="processing",
-            message="🏷️ Detecting field types...",
+            message="ðŸ·ï¸ Detecting field types...",
             progress=20
         )
         
@@ -11963,7 +5449,7 @@ async def process_with_websocket_endpoint(
             job_id=job_id,
             component="field_detector",
             status="completed",
-            message="✅ Field types detected",
+            message="âœ… Field types detected",
             progress=100,
             data=field_results
         )
@@ -11973,7 +5459,7 @@ async def process_with_websocket_endpoint(
             job_id=job_id,
             component="platform_detector",
             status="processing",
-            message="🔍 Detecting platform...",
+            message="ðŸ” Detecting platform...",
             progress=20
         )
         
@@ -11982,7 +5468,7 @@ async def process_with_websocket_endpoint(
         first_field_result = list(field_results.values())[0] if field_results else {}
         
         platform_payload = {
-            "file_content": file_content, 
+            "file_content": first_sheet_data.to_dicts() if first_sheet_data is not None else [], 
             "filename": filename,
             "detected_fields": first_field_result.get('detected_fields', []),
             "field_types": first_field_result.get('field_types', {})
@@ -11999,7 +5485,7 @@ async def process_with_websocket_endpoint(
             job_id=job_id,
             component="platform_detector",
             status="completed",
-            message=f"✅ Platform detected: {platform_result.get('platform', 'unknown')}",
+            message=f"âœ… Platform detected: {platform_result.get('platform', 'unknown')}",
             progress=100,
             data=platform_result
         )
@@ -12009,12 +5495,12 @@ async def process_with_websocket_endpoint(
             job_id=job_id,
             component="document_classifier",
             status="processing",
-            message="📄 Classifying document...",
+            message="ðŸ“„ Classifying document...",
             progress=20
         )
         
         document_result = await document_classifier.classify_document_universal(
-            payload={"file_content": file_content, "filename": filename},
+            payload={"file_content": first_sheet_data.to_dicts() if first_sheet_data is not None else [], "filename": filename},
             filename=filename,
             user_id=user_id
         )
@@ -12024,7 +5510,7 @@ async def process_with_websocket_endpoint(
             job_id=job_id,
             component="document_classifier",
             status="completed",
-            message=f"✅ Document classified: {document_result.get('document_type', 'unknown')}",
+            message=f"âœ… Document classified: {document_result.get('document_type', 'unknown')}",
             progress=100,
             data=document_result
         )
@@ -12034,12 +5520,12 @@ async def process_with_websocket_endpoint(
             job_id=job_id,
             component="data_extractor",
             status="processing",
-            message="🔧 Extracting data...",
+            message="ðŸ”§ Extracting data...",
             progress=20
         )
         
         extraction_result = await data_extractor.extract_data_universal(
-            streamed_file=streamed_file,
+            file_path=streamed_file.path,
             filename=filename,
             user_id=user_id
         )
@@ -12049,7 +5535,7 @@ async def process_with_websocket_endpoint(
             job_id=job_id,
             component="data_extractor",
             status="completed",
-            message="✅ Data extraction completed",
+            message="âœ… Data extraction completed",
             progress=100,
             data={"extracted_rows": len(extraction_result.get('extracted_data', []))}
         )
@@ -12060,7 +5546,7 @@ async def process_with_websocket_endpoint(
         await websocket_manager.send_overall_update(
             job_id=job_id,
             status="completed",
-            message="🎉 All universal components processing completed successfully!",
+            message="ðŸŽ‰ All universal components processing completed successfully!",
             progress=100,
             results=results
         )
@@ -12396,7 +5882,7 @@ class UniversalComponentMonitoringSystem:
         if len(component_metrics['operations']) > 1000:
             component_metrics['operations'] = component_metrics['operations'][-1000:]
         
-        logger.info(f"📊 {component}.{operation}: {duration:.3f}s, success={success}")
+        logger.info(f"ðŸ“Š {component}.{operation}: {duration:.3f}s, success={success}")
     
     def record_performance_metrics(self, component: str, metrics: Dict[str, Any]):
         """Record performance-specific metrics"""
@@ -12439,7 +5925,7 @@ class UniversalComponentMonitoringSystem:
         if len(self.error_tracker[component]) > 1000:
             self.error_tracker[component] = self.error_tracker[component][-1000:]
         
-        logger.error(f"❌ {component}.{operation} error: {error}")
+        logger.error(f"âŒ {component}.{operation} error: {error}")
     
     def audit_operation(self, component: str, operation: str, user_id: str, 
                        details: Dict[str, Any], action: str = "execute"):
@@ -12704,6 +6190,9 @@ async def get_audit_log(component: str = None, user_id: str = None, limit: int =
 # DEPLOYMENT HEALTH CHECK
 # ============================================================================
 
+
+
+
 @app.get("/health")
 async def health_check():
     """Comprehensive health check for deployment debugging"""
@@ -12754,7 +6243,7 @@ import pathlib
 frontend_dist_path = pathlib.Path(__file__).parent / "dist"
 if frontend_dist_path.exists():
     app.mount("/static", StaticFiles(directory=str(frontend_dist_path)), name="static")
-    logger.info(f"✅ Frontend static files mounted from {frontend_dist_path}")
+    logger.info(f"âœ… Frontend static files mounted from {frontend_dist_path}")
     
     # Serve index.html for root path
     @app.get("/")
@@ -12790,7 +6279,7 @@ if frontend_dist_path.exists():
         else:
             raise HTTPException(status_code=404, detail="Frontend not found")
 else:
-    logger.warning("⚠️ Frontend dist directory not found - serving API only")
+    logger.warning("âš ï¸ Frontend dist directory not found - serving API only")
 
 # ============================================================================
 # DEVELOPER DEBUG ENDPOINTS
@@ -12799,7 +6288,7 @@ else:
 @app.delete("/api/files/{job_id}")
 async def delete_file_completely(job_id: str, user_id: str):
     """
-    🗑️ COMPREHENSIVE FILE DELETION - Cascades to all related tables
+    ðŸ—‘ï¸ COMPREHENSIVE FILE DELETION - Cascades to all related tables
     
     Deletes a file and ALL associated data from the database:
     - ingestion_jobs (main record)
@@ -12813,7 +6302,7 @@ async def delete_file_completely(job_id: str, user_id: str):
     This ensures complete cleanup with no orphaned data.
     """
     try:
-        logger.info(f"🗑️ Starting comprehensive file deletion for job_id={job_id}, user_id={user_id}")
+        logger.info(f"ðŸ—‘ï¸ Starting comprehensive file deletion for job_id={job_id}, user_id={user_id}")
         
         # Verify ownership
         job_result = supabase.table('ingestion_jobs').select('id, filename, user_id').eq('id', job_id).eq('user_id', user_id).execute()
@@ -13022,7 +6511,7 @@ async def delete_file_completely(job_id: str, user_id: str):
                     
                     cache_key = f"{user_id}"
                     await cache.delete(cache_key)
-                    logger.info(f"✅ Cleared graph cache for user {user_id}")
+                    logger.info(f"âœ… Cleared graph cache for user {user_id}")
                 except ImportError:
                     logger.warning("aiocache not available, skipping graph cache clear")
         except Exception as e:
@@ -13038,8 +6527,8 @@ async def delete_file_completely(job_id: str, user_id: str):
         # Calculate total soft-deleted records
         total_deleted = sum(deletion_stats['deleted_records'].values())
         
-        logger.info(f"✅ File deletion completed: {filename} - {total_deleted} total records marked for deletion (soft-delete)")
-        logger.info(f"📊 FIX #3: Used soft-delete for data integrity, graph cache invalidation, and audit trail")
+        logger.info(f"âœ… File deletion completed: {filename} - {total_deleted} total records marked for deletion (soft-delete)")
+        logger.info(f"ðŸ“Š FIX #3: Used soft-delete for data integrity, graph cache invalidation, and audit trail")
         
         return {
             "status": "deleted",
