@@ -25,9 +25,30 @@ from typing import Optional, Dict, Any, List, Tuple, TypedDict
 from dataclasses import dataclass, field
 import asyncio
 
-from langchain.memory import ConversationSummaryBufferMemory
 from langchain_groq import ChatGroq
 from groq import AsyncGroq
+try:
+    from langchain.memory import ConversationSummaryBufferMemory
+except ImportError:
+    # Fallback for newer LangChain versions
+    from langchain_community.chat_message_histories import ChatMessageHistory
+    from langchain_core.messages import HumanMessage, AIMessage
+    
+    class ConversationSummaryBufferMemory:
+        """Fallback implementation for newer LangChain versions"""
+        def __init__(self, llm, max_token_limit=2000, buffer="", human_prefix="User", ai_prefix="Assistant"):
+            self.llm = llm
+            self.max_token_limit = max_token_limit
+            self.buffer = buffer
+            self.human_prefix = human_prefix
+            self.ai_prefix = ai_prefix
+            self.chat_memory = ChatMessageHistory()
+        
+        def add_user_message(self, message: str):
+            self.chat_memory.add_user_message(message)
+        
+        def add_ai_message(self, message: str):
+            self.chat_memory.add_ai_message(message)
 
 logger = logging.getLogger(__name__)
 
@@ -456,7 +477,10 @@ def _preload_all_modules():
     
     # Preload LangChain memory components
     try:
-        from langchain.memory import ConversationSummaryBufferMemory
+        try:
+            from langchain.memory import ConversationSummaryBufferMemory
+        except ImportError:
+            from langchain_community.chat_message_histories import ChatMessageHistory
         logger.info("✅ PRELOAD: LangChain ConversationSummaryBufferMemory loaded")
     except Exception as e:
         logger.warning(f"⚠️ PRELOAD: LangChain memory load failed: {e}")

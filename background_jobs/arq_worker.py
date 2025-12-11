@@ -15,7 +15,7 @@ from core_infrastructure.fastapi_backend_v2 import (
     logger,
     JOBS_PROCESSED,
 )
-from core_infrastructure.airbyte_client import AirbytePythonClient
+from data_ingestion_normalization.airbyte_client import AirbytePythonClient
 
 # FIX #6: Supabase client initialization with graceful degradation
 try:

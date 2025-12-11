@@ -21,16 +21,48 @@ import os
 from typing import Dict, Any, List, Optional
 from datetime import datetime, timedelta
 
-from langchain.memory import ConversationSummaryBufferMemory
 from langchain_groq import ChatGroq
 
 # Use LangChain's Redis persistence instead of custom implementation
 try:
+    from langchain.memory import ConversationSummaryBufferMemory
+except ImportError:
+    # Fallback for newer LangChain versions
+    from langchain_community.chat_message_histories import ChatMessageHistory
+    from langchain_core.messages import HumanMessage, AIMessage
+    
+    class ConversationSummaryBufferMemory:
+        """Fallback implementation for newer LangChain versions"""
+        def __init__(self, llm, max_token_limit=2000, buffer="", human_prefix="User", ai_prefix="Assistant"):
+            self.llm = llm
+            self.max_token_limit = max_token_limit
+            self.buffer = buffer
+            self.human_prefix = human_prefix
+            self.ai_prefix = ai_prefix
+            self.chat_memory = ChatMessageHistory()
+
+try:
     from langchain_community.chat_message_histories import RedisChatMessageHistory, ChatMessageHistory
     LANGCHAIN_REDIS_AVAILABLE = True
 except ImportError:
-    from langchain.schema import ChatMessageHistory
-    LANGCHAIN_REDIS_AVAILABLE = False
+    try:
+        from langchain_core.chat_history import BaseChatMessageHistory
+        from langchain_core.messages import HumanMessage, AIMessage
+        
+        class ChatMessageHistory(BaseChatMessageHistory):
+            def __init__(self):
+                super().__init__()
+                self.messages = []
+            
+            def add_user_message(self, message: str):
+                self.messages.append(HumanMessage(content=message))
+            
+            def add_ai_message(self, message: str):
+                self.messages.append(AIMessage(content=message))
+        
+        LANGCHAIN_REDIS_AVAILABLE = False
+    except ImportError:
+        LANGCHAIN_REDIS_AVAILABLE = False
     RedisChatMessageHistory = None
 
 try:

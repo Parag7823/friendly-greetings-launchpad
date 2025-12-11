@@ -89,7 +89,7 @@ class UniversalPlatformDetectorOptimized:
                     if indicator_lower:
                         automaton.add_word(indicator_lower, (platform_id, indicator_lower))
             
-            automaton.make_automaton()
+            automaton.make_automaton() if hasattr(automaton, 'make_automaton') else automaton.finalize()
             cls._class_automaton = automaton
             cls._automaton_preloaded = True
             logger.info("Automaton built at module-load time",
