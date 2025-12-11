@@ -1,17 +1,4 @@
-"""Entity Resolver v4.0.0
-
-Probabilistic entity resolution using:
-- Fuzzy matching (rapidfuzz)
-- PII detection (presidio-analyzer)
-- Retry logic (tenacity)
-- Vectorized batch processing (polars)
-- Redis-backed caching (aiocache)
-- AI learning for ambiguous matches (Groq + instructor)
-- Structured logging (structlog)
-
-Author: Senior Full-Stack Engineer
-Version: 4.0.0
-"""
+"""Probabilistic entity resolution with fuzzy matching, PII detection, and AI learning."""
 
 import asyncio
 import os
@@ -21,7 +8,6 @@ from datetime import datetime
 from typing import Dict, Any, List, Optional
 from dataclasses import dataclass
 
-# NASA-GRADE v4.0: Industry-standard libraries
 from aiocache import Cache
 from aiocache.serializers import JsonSerializer
 from presidio_analyzer import AnalyzerEngine, RecognizerRegistry
@@ -33,6 +19,7 @@ from pydantic import BaseModel, Field, validator
 from pydantic_settings import BaseSettings
 from supabase import Client
 import instructor  # v4.0: AI learning for ambiguous matches
+from core_infrastructure.rate_limiter import GlobalRateLimiter
 
 # Configure structlog for JSON logging
 structlog.configure(
@@ -52,18 +39,11 @@ structlog.configure(
 
 logger = structlog.get_logger(__name__)
 
-# ============================================================================
-# PRELOAD PATTERN: Module-level presidio analyzer (zero first-request latency)
-# ============================================================================
-_PRESIDIO_ANALYZER = None  # Preloaded at module import
-_PRESIDIO_PRELOADED = False  # Flag to track preload status
+_PRESIDIO_ANALYZER = None
+_PRESIDIO_PRELOADED = False
 
 def _preload_presidio_analyzer():
-    """
-    PRELOAD PATTERN: Initialize presidio analyzer at module-load time.
-    Called automatically when module is imported.
-    This eliminates first-request latency for PII detection.
-    """
+    """Initialize presidio analyzer at module-load time"""
     global _PRESIDIO_ANALYZER, _PRESIDIO_PRELOADED
     
     if _PRESIDIO_PRELOADED:
@@ -73,14 +53,12 @@ def _preload_presidio_analyzer():
         from presidio_analyzer import AnalyzerEngine
         _PRESIDIO_ANALYZER = AnalyzerEngine()
         _PRESIDIO_PRELOADED = True
-        logger.info("✅ PRELOAD: Presidio analyzer built at module-load time")
+        logger.info("Presidio analyzer built at module-load time")
         return _PRESIDIO_ANALYZER
     except Exception as e:
-        logger.warning(f"⚠️ PRELOAD: Presidio analyzer build failed, will use fallback: {e}")
-        _PRESIDIO_PRELOADED = True  # Don't retry
+        logger.warning(f"Presidio analyzer build failed, will use fallback: {e}")
+        _PRESIDIO_PRELOADED = True
         return None
-
-# v4.0: pydantic models for type-safe validation
 class ScoredLabel(BaseModel):
     """Scored entity label with confidence"""
     label: str
@@ -190,6 +168,8 @@ class EntityResolverOptimized:
                    version="4.0.0", 
                    libraries="rapidfuzz+presidio+polars+aiocache+tenacity",
                    analyzer_ready=self.analyzer is not None)
+        
+        self.rate_limiter = GlobalRateLimiter()
     
     def _get_instructor_client(self):
         """FIX #90: Lazy load instructor client on first use"""
@@ -483,8 +463,14 @@ class EntityResolverOptimized:
                 return None
         
         # v4.0: GENIUS AI - If ambiguous (0.7-0.9), ask AI to decide
-        if 0.7 <= sim < 0.9 and self.instructor_client:
+        if 0.7 <= sim < 0.9 and self._get_instructor_client():
             try:
+                # Apply rate limiting before AI call
+                can_sync, msg = await self.rate_limiter.check_global_rate_limit("groq_entity_resolution", "system")
+                if not can_sync:
+                    logger.warning(f"Rate limit exceeded for AI entity resolution: {msg}")
+                    return match  # Fall back to fuzzy match
+                
                 logger.info("ai_resolution_triggered", entity_name=entity_name, candidate=match['canonical_name'], similarity=sim)
                 
                 # FIX #69: instructor.patch() is synchronous, run in thread pool to avoid blocking
@@ -493,7 +479,8 @@ class EntityResolverOptimized:
                 from concurrent.futures import ThreadPoolExecutor
                 
                 def _call_instructor():
-                    return self.instructor_client.chat.completions.create(
+                    # Check rate limit before calling (sync check inside thread)
+                    return self._instructor_client.chat.completions.create(
                         model="llama-3.3-70b-versatile",
                         response_model=AIEntityDecision,
                         messages=[

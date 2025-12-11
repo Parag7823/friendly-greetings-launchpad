@@ -1,26 +1,8 @@
 """
 Production-Grade Temporal Pattern Learning Engine v2.0
-======================================================
 
-COMPLETE REWRITE using genius libraries for production-grade quality.
-
-REPLACED:
-- 72 lines of custom FFT seasonality → statsmodels STL decomposition (3 lines)
-- 30 lines of custom timestamp parsing → python-dateutil (1 line)
-- 95 lines of basic anomaly detection → PyOD (5 lines)
-- NO forecasting → Prophet (full forecasting capability)
-
-NEW CAPABILITIES:
-- AutoML time series forecasting (Prophet)
-- State-of-the-art anomaly detection (20+ algorithms)
-- Robust timestamp parsing (handles all formats)
-- Advanced seasonality decomposition (STL)
-- Matrix Profile pattern discovery (stumpy)
-- Zero dead code
-
-Author: Senior Full-Stack Engineer
-Version: 2.0.0
-Date: 2025-11-05
+Learns temporal patterns, detects anomalies, predicts missing relationships,
+and identifies seasonal cycles using statsmodels, Prophet, and STUMPY.
 """
 
 import structlog
@@ -32,42 +14,19 @@ from enum import Enum
 from collections import defaultdict
 import asyncio
 
-# Timestamp parsing (replaces 30 lines of custom regex)
 import pendulum
-
-# FIX #3: Caching for expensive forecasting
 from aiocache import cached
 from aiocache.serializers import PickleSerializer
-
-# ✅ LAZY LOADING: Heavy imports moved inside functions to prevent startup blocking
-# Time series decomposition (replaces 72 lines of custom FFT)
-# from statsmodels.tsa.seasonal import seasonal_decompose
-
-# Anomaly detection (replaces 95 lines of basic 2σ threshold)
-# from pyod.models.iforest import IForest
-# from pyod.models.lof import LOF
-
-# Model explainability (ENHANCEMENT #11)
-# import shap
-
-# Forecasting (NEW CAPABILITY - replaces nothing, adds forecasting)
-# from prophet import Prophet
-
-# Matrix Profile for advanced pattern discovery (STUMPY)
-# - Finds unknown repeating patterns automatically
-# - Detects regime changes (business behavior shifts)
-# - Motif search (find all instances of specific patterns)
-# import stumpy
-
-# Keep for basic stats and time series
 from scipy import stats
 import pandas as pd
 
-# CRITICAL FIX: Import shared normalization functions
 from core_infrastructure.provenance_tracker import normalize_business_logic, normalize_temporal_causality
-
-# COMPULSORY: Embedding service for semantic intelligence
 from data_ingestion_normalization.embedding_service import get_embedding_service
+
+# Centralized utilities
+from core_infrastructure.centralized_cache import safe_get_cache
+from core_infrastructure.rate_limiter import GlobalRateLimiter
+from core_infrastructure.transaction_manager import DatabaseTransactionManager
 
 logger = structlog.get_logger(__name__)
 
@@ -152,19 +111,12 @@ class SeasonalPattern:
 
 
 class TemporalPatternLearner:
-    """
-    Production-grade temporal pattern learning engine.
-    
-    Learns from historical relationship timings to:
-    1. Identify patterns (e.g., "invoices paid in 30±5 days")
-    2. Detect seasonal cycles
-    3. Predict missing relationships
-    4. Identify temporal anomalies
-    """
+    """Production-grade temporal pattern learning engine for relationship timing analysis."""
     
     def __init__(self, supabase_client, config: Optional[Dict[str, Any]] = None):
         self.supabase = supabase_client
         self.config = config or self._get_default_config()
+        self.transaction_manager = DatabaseTransactionManager(supabase_client) if supabase_client else None
         
         # Metrics
         self.metrics = {
@@ -177,14 +129,7 @@ class TemporalPatternLearner:
         logger.info("✅ TemporalPatternLearner initialized")
     
     async def _generate_pattern_embedding(self, pattern: 'TemporalPattern') -> Optional[List[float]]:
-        """
-        COMPULSORY: Generate BGE embedding for semantic similarity search of patterns.
-        
-        The embedding captures the semantic meaning of the pattern for:
-        - Finding similar patterns across different relationship types
-        - Semantic grouping of patterns
-        - AI-powered pattern recommendations
-        """
+        """Generate BGE embedding for semantic similarity search of patterns."""
         try:
             # Build semantic text from pattern metadata
             embedding_text = (
@@ -209,12 +154,7 @@ class TemporalPatternLearner:
     
     @staticmethod
     def _parse_iso_timestamp(timestamp_str: str) -> datetime:
-        """
-        Parse ISO timestamp using pendulum for consistent timezone handling.
-        
-        STANDARDIZATION: Using pendulum across entire codebase (not isoparse).
-        Handles ALL ISO formats automatically with proper timezone support.
-        """
+        """Parse ISO timestamp using pendulum for consistent timezone handling."""
         try:
             import pendulum
             parsed = pendulum.parse(timestamp_str)
@@ -362,25 +302,16 @@ class TemporalPatternLearner:
         user_id: str,
         relationship_type: str
     ) -> Tuple[bool, Optional[int], Optional[float]]:
-        """
-        Detect seasonal patterns using statsmodels STL decomposition with fallback to STUMPY.
-        
-        REPLACES 72 LINES OF CUSTOM FFT with statsmodels + STUMPY fallback.
-        CRITICAL FIX: Handle sparse financial data with fillna before decomposition.
-        
-        Returns:
-            (has_seasonal_pattern, period_days, amplitude)
-        """
+        """Detect seasonal patterns using statsmodels STL decomposition with STUMPY fallback."""
         try:
             # Fetch timing data
             result = self.supabase.table('relationship_instances').select(
                 'source_event_id, target_event_id'
             ).eq('user_id', user_id).eq('relationship_type', relationship_type).execute()
             
-            if not result.data or len(result.data) < 14:  # Need at least 2 weeks of data
+            if not result.data or len(result.data) < 14:
                 return False, None, None
             
-            # Get event timestamps
             event_ids = []
             for rel in result.data:
                 event_ids.extend([rel['source_event_id'], rel['target_event_id']])
@@ -392,13 +323,11 @@ class TemporalPatternLearner:
             if not events_result.data or len(events_result.data) < 14:
                 return False, None, None
             
-            # Convert to pandas time series
             timestamps = sorted([
                 self._parse_iso_timestamp(e['source_ts'])
                 for e in events_result.data
             ])
             
-            # Create time series with daily frequency
             ts_data = pd.Series(
                 data=range(len(timestamps)),
                 index=pd.DatetimeIndex(timestamps)
@@ -407,16 +336,12 @@ class TemporalPatternLearner:
             if len(ts_data) < 14:
                 return False, None, None
             
-            # CRITICAL FIX: Fill NaN values before decomposition (sparse financial data)
             ts_data = ts_data.fillna(0)
             
-            # STL decomposition (Seasonal-Trend decomposition using Loess)
-            # Try different periods (weekly, bi-weekly, monthly)
             stl_succeeded = False
             for period in [7, 14, 30]:
                 if len(ts_data) >= 2 * period:
                     try:
-                        # ✅ LAZY LOADING: Import statsmodels only when needed
                         from statsmodels.tsa.seasonal import seasonal_decompose
                         
                         decomposition = seasonal_decompose(
@@ -459,15 +384,7 @@ class TemporalPatternLearner:
         self,
         ts_data: pd.Series
     ) -> Tuple[bool, Optional[int], Optional[float]]:
-        """
-        STUMPY-based motif discovery for complex seasonal patterns.
-        
-        Used as fallback when STL decomposition fails on sparse financial data.
-        Finds repeating motifs (patterns) in time series.
-        
-        Returns:
-            (has_pattern, motif_period_days, confidence_score)
-        """
+        """STUMPY-based motif discovery for complex seasonal patterns."""
         try:
             # ✅ LAZY LOADING: Import stumpy only when needed
             import stumpy
@@ -794,53 +711,57 @@ class TemporalPatternLearner:
         job_id: Optional[str] = None,
         transaction_id: Optional[str] = None
     ):
-        """Store temporal pattern in database"""
+        """Store temporal pattern in database using DatabaseTransactionManager for atomicity"""
         try:
-            # Generate business logic (raw text)
-            business_logic_raw = f"Predictable pattern based on {pattern.sample_count} historical occurrences"
-            if pattern.confidence_score >= 0.8:
-                business_logic_raw += " (high confidence - reliable for forecasting)"
-            elif pattern.confidence_score >= 0.6:
-                business_logic_raw += " (moderate confidence - use with caution)"
-            else:
-                business_logic_raw += " (low confidence - insufficient data)"
-            
-            data = {
-                'user_id': user_id,
-                'relationship_type': pattern.relationship_type,
-                'avg_days_between': pattern.avg_days_between,
-                'std_dev_days': pattern.std_dev_days,
-                'min_days': pattern.min_days,
-                'max_days': pattern.max_days,
-                'median_days': pattern.median_days,
-                'sample_count': pattern.sample_count,
-                'confidence_score': pattern.confidence_score,
-                'pattern_description': pattern.pattern_description,
-                'has_seasonal_pattern': pattern.has_seasonal_pattern,
-                'seasonal_period_days': pattern.seasonal_period_days,
-                'seasonal_amplitude': pattern.seasonal_amplitude,
-                'learned_from_relationship_ids': pattern.learned_from_relationship_ids if hasattr(pattern, 'learned_from_relationship_ids') else [],
-                'business_logic': normalize_business_logic(business_logic_raw)
-            }
-            
-            if job_id:
-                data['job_id'] = job_id
-            if transaction_id:
-                data['transaction_id'] = transaction_id
-            
-            # COMPULSORY: Generate embedding for semantic intelligence
-            pattern_embedding = await self._generate_pattern_embedding(pattern)
-            if pattern_embedding:
-                data['pattern_embedding'] = pattern_embedding
-            else:
-                logger.warning("pattern_embedding_generation_failed", 
-                              relationship_type=pattern.relationship_type)
-            
-            self.supabase.table('temporal_patterns').upsert(data).execute()
-
-            
-            # CRITICAL FIX #3: Update normalized_events with temporal metadata
-            try:
+            # USE TRANSACTION MANAGER for atomic multi-table updates
+            async with self.transaction_manager.transaction(
+                user_id=user_id,
+                operation_type="store_temporal_pattern"
+            ) as txn_ctx:
+                # Generate business logic (raw text)
+                business_logic_raw = f"Predictable pattern based on {pattern.sample_count} historical occurrences"
+                if pattern.confidence_score >= 0.8:
+                    business_logic_raw += " (high confidence - reliable for forecasting)"
+                elif pattern.confidence_score >= 0.6:
+                    business_logic_raw += " (moderate confidence - use with caution)"
+                else:
+                    business_logic_raw += " (low confidence - insufficient data)"
+                
+                data = {
+                    'user_id': user_id,
+                    'relationship_type': pattern.relationship_type,
+                    'avg_days_between': pattern.avg_days_between,
+                    'std_dev_days': pattern.std_dev_days,
+                    'min_days': pattern.min_days,
+                    'max_days': pattern.max_days,
+                    'median_days': pattern.median_days,
+                    'sample_count': pattern.sample_count,
+                    'confidence_score': pattern.confidence_score,
+                    'pattern_description': pattern.pattern_description,
+                    'has_seasonal_pattern': pattern.has_seasonal_pattern,
+                    'seasonal_period_days': pattern.seasonal_period_days,
+                    'seasonal_amplitude': pattern.seasonal_amplitude,
+                    'learned_from_relationship_ids': pattern.learned_from_relationship_ids if hasattr(pattern, 'learned_from_relationship_ids') else [],
+                    'business_logic': normalize_business_logic(business_logic_raw)
+                }
+                
+                if job_id:
+                    data['job_id'] = job_id
+                if transaction_id:
+                    data['transaction_id'] = transaction_id
+                
+                # COMPULSORY: Generate embedding for semantic intelligence
+                pattern_embedding = await self._generate_pattern_embedding(pattern)
+                if pattern_embedding:
+                    data['pattern_embedding'] = pattern_embedding
+                else:
+                    logger.warning("pattern_embedding_generation_failed", 
+                                  relationship_type=pattern.relationship_type)
+                
+                # First write: Insert/update temporal_patterns table
+                self.supabase.table('temporal_patterns').upsert(data).execute()
+                
+                # Second write: Update normalized_events with temporal metadata
                 # Find all events matching this relationship type and update them
                 events_result = self.supabase.table('relationship_instances').select(
                     'source_event_id, target_event_id'
@@ -867,12 +788,11 @@ class TemporalPatternLearner:
                             'updated_at': datetime.utcnow().isoformat()
                         }).eq('raw_event_id', rel['source_event_id']).execute()
                 
-                logger.debug(f"Updated normalized_events with temporal patterns for {pattern.relationship_type}")
-            except Exception as norm_update_err:
-                logger.warning(f"Failed to update normalized_events with temporal metadata: {norm_update_err}")
+                logger.debug(f"Updated normalized_events with temporal patterns for {pattern.relationship_type} (transactional)")
             
         except Exception as e:
             logger.error(f"Failed to store temporal pattern: {e}")
+    
     
     async def _store_predicted_relationship(
         self,

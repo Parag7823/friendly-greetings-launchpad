@@ -1,7 +1,4 @@
-"""
-FinleyGraph FastAPI Integration
-Production-ready graph query endpoints
-"""
+"""Production-ready graph query endpoints for FinleyGraph FastAPI integration."""
 
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any
@@ -42,12 +39,8 @@ async def get_supabase_client_dependency() -> Client:
         raise HTTPException(status_code=503, detail="Database service unavailable")
 
 
-# ============================================================================
-# REQUEST/RESPONSE MODELS
-# ============================================================================
-
 class GraphBuildRequest(BaseModel):
-    user_id: str = Field(..., min_length=1)  # FIXED: Reject empty user_id
+    user_id: str = Field(..., min_length=1)
     force_rebuild: bool = False
 
 
@@ -69,12 +62,11 @@ class PathQueryResponse(BaseModel):
     status: str
     path: Optional[PathResult]
     message: str
-    # Intelligence insights
-    temporal_insights: Optional[Dict[str, Any]] = None  # Recurring patterns, frequency
-    seasonal_insights: Optional[Dict[str, Any]] = None  # Seasonal cycles, months
-    fraud_risk: Optional[float] = None  # Duplicate/fraud confidence (0-1)
-    root_causes: Optional[List[str]] = None  # Why this path exists
-    predictions: Optional[Dict[str, Any]] = None  # Future connections
+    temporal_insights: Optional[Dict[str, Any]] = None
+    seasonal_insights: Optional[Dict[str, Any]] = None
+    fraud_risk: Optional[float] = None
+    root_causes: Optional[List[str]] = None
+    predictions: Optional[Dict[str, Any]] = None
 
 
 class ImportanceQueryRequest(BaseModel):
@@ -85,12 +77,12 @@ class ImportanceQueryRequest(BaseModel):
 
 class ImportanceQueryResponse(BaseModel):
     status: str
-    top_entities: List[Dict[str, Any]]  # FIXED: Contains entity_id (str), name (str), score (float)
+    top_entities: List[Dict[str, Any]]
     algorithm: str
 
 
 class CommunityQueryRequest(BaseModel):
-    user_id: str = Field(..., min_length=1)  # FIXED: Reject empty user_id
+    user_id: str = Field(..., min_length=1)
 
 
 class CommunityQueryResponse(BaseModel):

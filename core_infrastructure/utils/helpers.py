@@ -1,11 +1,4 @@
-"""
-Utility Helper Functions
-========================
-Consolidated utility functions for JWT handling, Base64 decoding, and data sanitization.
-
-This module centralizes commonly used helper functions to reduce code duplication
-and improve maintainability across the application.
-"""
+"""Utility Helper Functions - JWT handling, Base64 decoding, and data sanitization."""
 
 import base64
 import binascii
@@ -27,52 +20,25 @@ except ImportError:
 
 
 def clean_jwt_token(token: str) -> str:
-    """
-    Clean JWT token by removing only harmful whitespace, preserving valid Base64 padding.
-    
-    Args:
-        token: JWT token string that may contain unwanted whitespace
-        
-    Returns:
-        Cleaned JWT token with only harmful whitespace removed
-        
-    Examples:
-        >>> clean_jwt_token("eyJhbGc.\neyJzdWI.")
-        "eyJhbGc.eyJzdWI."
-    """
+    """Clean JWT token by removing harmful whitespace while preserving Base64 padding."""
     if not token:
         return token
     
-    # Only remove newlines, carriage returns, and tabs
-    # DO NOT remove spaces as they may be valid Base64 padding
     cleaned = token.strip().replace('\n', '').replace('\r', '').replace('\t', '')
     
-    # Ensure it's a valid JWT format (3 parts separated by dots)
     parts = cleaned.split('.')
     if len(parts) == 3:
-        # Valid JWT format - return with only harmful whitespace removed
         return cleaned
     else:
-        # If not valid JWT format, be more conservative - only remove line breaks
         return token.strip().replace('\n', '').replace('\r', '')
 
 
 def is_base64(s: str) -> bool:
-    """
-    Check if string is valid base64.
-    
-    Args:
-        s: String to validate
-        
-    Returns:
-        True if string is valid base64, False otherwise
-    """
+    """Check if string is valid base64."""
     try:
         if isinstance(s, str):
-            # Check if it looks like base64 (length multiple of 4, valid chars)
             if len(s) % 4 != 0:
                 return False
-            # Try to decode
             base64.b64decode(s, validate=True)
             return True
     except (ValueError, binascii.Error):
@@ -81,32 +47,16 @@ def is_base64(s: str) -> bool:
 
 
 def safe_decode_base64(content: str) -> str:
-    """
-    Safely decode base64 content with fallback to original if decoding fails.
-    
-    Args:
-        content: Base64-encoded string or plain text
-        
-    Returns:
-        Decoded UTF-8 string if valid base64, otherwise original content
-        
-    Examples:
-        >>> safe_decode_base64("aGVsbG8=")
-        "hello"
-        >>> safe_decode_base64("not-base64")
-        "not-base64"
-    """
+    """Safely decode base64 content with fallback to original if decoding fails."""
     if not content:
         return content
     
     try:
         if is_base64(content):
             decoded_bytes = base64.b64decode(content)
-            # Try to decode as UTF-8 text
             try:
                 return decoded_bytes.decode('utf-8')
             except UnicodeDecodeError:
-                # If not text, return original (might be binary)
                 return content
         else:
             return content
@@ -116,27 +66,7 @@ def safe_decode_base64(content: str) -> str:
 
 
 def sanitize_for_json(obj: Any) -> Any:
-    """
-    Recursively sanitize NaN/Inf values for JSON serialization.
-    
-    Handles all types of NaN values including:
-    - Python float NaN/Inf
-    - NumPy NaN/Inf
-    - NumPy scalars (np.float64(nan), etc.)
-    - Polars null values
-    
-    Args:
-        obj: Object to sanitize (dict, list, float, or any type)
-        
-    Returns:
-        Sanitized object with NaN/Inf replaced by None
-        
-    Examples:
-        >>> sanitize_for_json({'value': float('nan')})
-        {'value': None}
-        >>> sanitize_for_json([1.0, float('inf'), 3.0])
-        [1.0, None, 3.0]
-    """
+    """Recursively sanitize NaN/Inf values for JSON serialization."""
     if isinstance(obj, dict):
         return {k: sanitize_for_json(v) for k, v in obj.items()}
     elif isinstance(obj, list):

@@ -1,20 +1,6 @@
-"""Universal Document Classifier v4.0.0
-
-Multi-faceted document classification using:
-- Pattern matching (pyahocorasick)
-- AI classification (Groq Llama-3.3-70B)
-- OCR processing (easyocr)
-- Zero-shot classification (sentence-transformers)
-- TF-IDF indicator weighting
-- Redis-backed caching (aiocache)
-- Learning system with database persistence
-
-Author: Senior Full-Stack Engineer
-Version: 4.0.0
-"""
+"""Multi-faceted document classification with pattern matching, AI, OCR, and caching."""
 
 import asyncio
-import hashlib
 import orjson as json
 import re
 import time
@@ -37,6 +23,10 @@ from aiocache.serializers import JsonSerializer
 import yaml
 from sentence_transformers import SentenceTransformer
 
+# Core infrastructure utilities (Source of Truth)
+from core_infrastructure.database_optimization_utils import calculate_row_hash
+from core_infrastructure.security_system import InputSanitizer
+
 logger = structlog.get_logger(__name__)
 
 # Global preloaded models (shared across all instances)
@@ -53,14 +43,14 @@ _TFIDF_CACHE = {
 }
 
 def _initialize_global_models():
-    """Preload all models at module import time (standard Python practice)."""
+    """Preload all models at module import time"""
     global _SENTENCE_MODEL, _OCR_READER, _AUTOMATON
     
     try:
         if _SENTENCE_MODEL is None:
             logger.info("Preloading SentenceTransformer model...")
             _SENTENCE_MODEL = SentenceTransformer('all-MiniLM-L6-v2')
-            logger.info("✅ SentenceTransformer preloaded")
+            logger.info("SentenceTransformer preloaded")
     except Exception as e:
         logger.warning(f"Failed to preload SentenceTransformer: {e}")
         _SENTENCE_MODEL = None
@@ -69,7 +59,7 @@ def _initialize_global_models():
         if _OCR_READER is None:
             logger.info("Preloading EasyOCR reader...")
             _OCR_READER = easyocr.Reader(['en'], gpu=False)
-            logger.info("✅ EasyOCR preloaded")
+            logger.info("EasyOCR preloaded")
     except Exception as e:
         logger.warning(f"Failed to preload EasyOCR: {e}")
         _OCR_READER = None
@@ -84,7 +74,7 @@ def _initialize_global_models():
             for keyword in keywords:
                 _AUTOMATON.add_word(keyword, keyword)
             _AUTOMATON.make_deterministic()
-            logger.info("✅ Ahocorasick automaton preloaded")
+            logger.info("Ahocorasick automaton preloaded")
     except Exception as e:
         logger.warning(f"Failed to preload Ahocorasick: {e}")
         _AUTOMATON = None
@@ -138,20 +128,7 @@ class DocumentClassificationResult:
     metadata: Dict[str, Any]
 
 class UniversalDocumentClassifierOptimized:
-    """
-    Production-grade universal document classifier with AI, OCR integration,
-    confidence scoring, and comprehensive document type coverage.
-    
-    Features:
-    - AI-powered document classification with GPT-4
-    - OCR integration for image-based documents
-    - Comprehensive document type database (20+ types)
-    - Intelligent caching and learning
-    - Confidence scoring and validation
-    - Async processing for high concurrency
-    - Robust error handling and fallbacks
-    - Real-time classification updates
-    """
+    """Production-grade document classifier with AI, OCR, caching, and learning"""
     
     def __init__(self, groq_client=None, cache_client=None, supabase_client=None, config=None):
         self.groq_client = groq_client
@@ -193,12 +170,11 @@ class UniversalDocumentClassifierOptimized:
             'processing_times': []
         }
         
-        # FIX #81: Use shared learning system
         from data_ingestion_normalization.shared_learning_system import SharedLearningSystem
         self.learning_system = SharedLearningSystem()
         self.learning_enabled = True
         
-        logger.info("NASA-GRADE Document Classifier v4.0.0 initialized (PRELOADED models)",
+        logger.info("Document Classifier initialized",
                    cache_size=self.config.max_cache_size,
                    document_types=len(self.document_database),
                    automaton_ready=self.automaton is not None,
@@ -211,7 +187,7 @@ class UniversalDocumentClassifierOptimized:
         return DocumentClassifierConfig()
     
     def _initialize_row_type_embeddings(self):
-        """Initialize row type embeddings using preloaded SentenceTransformer."""
+        """Initialize row type embeddings using preloaded SentenceTransformer"""
         if self.sentence_model is None:
             logger.warning("SentenceTransformer not available, row type embeddings skipped")
             self.row_type_embeddings = None
@@ -235,7 +211,7 @@ class UniversalDocumentClassifierOptimized:
                 for row_type, embedding in zip(self.row_types.keys(), embeddings)
             }
             
-            logger.info("✅ Row type embeddings preloaded successfully",
+            logger.info("Row type embeddings preloaded successfully",
                        row_types=len(self.row_type_embeddings),
                        embedding_model="all-MiniLM-L6-v2")
         except Exception as e:

@@ -1,20 +1,7 @@
-"""
-Intelligent Chat Orchestrator - The Brain of Finley AI
-======================================================
+"""Intelligent Chat Orchestrator - Routes questions to intelligence engines.
 
-This module connects the chat interface to all intelligence engines,
-providing natural language understanding and intelligent routing.
-
-Features:
-- Natural language question classification
-- Intelligent routing to appropriate engines
-- Human-readable response formatting
-- Context-aware conversation management
-- Proactive insights and suggestions
-
-Author: Finley AI Team
-Version: 1.0.0
-Date: 2025-01-22
+Features: Question classification, intelligent routing, response formatting,
+context management, and proactive insights.
 """
 
 import structlog
@@ -40,12 +27,7 @@ from jinja2 import Template
 _spacy_nlp = None  # Global spaCy model (loaded once to prevent 500MB+ overhead)
 
 def _load_spacy_model():
-    """
-    Load spaCy model with EntityRuler for financial keyword detection.
-    
-    REFACTORED: Replaced custom PhraseMatcher + YAML parsing with spaCy's built-in EntityRuler.
-    Loads patterns from financial_patterns.jsonl (60+ financial keywords).
-    """
+    """Load spaCy model with EntityRuler for financial keyword detection."""
     global _spacy_nlp
     if _spacy_nlp is None:
         try:
@@ -103,10 +85,7 @@ except ImportError:
 
 logger = structlog.get_logger(__name__)
 
-# REFACTOR: Removed filesystem scanning - use proper package imports
-# Python packaging should handle module discovery, not runtime filesystem scans
-
-# Proper package imports with graceful fallback
+# Package imports with graceful fallback
 try:
     from aident_cfo_brain.finley_graph_engine import FinleyGraphEngine
     from aident_cfo_brain.aident_memory_manager import AidentMemoryManager
@@ -135,6 +114,15 @@ try:
 except ImportError:
     from entity_resolver_optimized import EntityResolverOptimized as EntityResolver
 
+# REFACTORED: Using centralized cache with circuit breaker
+from core_infrastructure.centralized_cache import get_cache, safe_get_cache
+# REFACTORED: Using optimized database queries with Prometheus metrics
+from core_infrastructure.database_optimization_utils import OptimizedDatabaseQueries
+# REFACTORED: Using transaction manager for atomic database operations
+from core_infrastructure.transaction_manager import DatabaseTransactionManager, get_transaction_manager
+# REFACTORED: Using security system for input validation
+from core_infrastructure.security_system import SecurityValidator, SecurityContext, get_global_security_system
+
 try:
     from data_ingestion_normalization.embedding_service import EmbeddingService
 except ImportError:
@@ -160,9 +148,7 @@ class QuestionType(Enum):
     UNKNOWN = "unknown"  # Couldn't classify
 
 
-# FIX #INSTRUCTOR: Pydantic models for type-safe extraction with instructor
-# Pydantic models for LangChain's .with_structured_output()
-# These models define structured outputs for various handler responses
+# Pydantic models for type-safe extraction with instructor
 
 class QuestionClassification(BaseModel):
         metrics: List[str] = Field(
@@ -363,65 +349,43 @@ class MetaFeedbackResponse(BaseModel):
 
 
 class DataMode(Enum):
-    """FIX #4: Data availability modes for response differentiation"""
+    """Data availability modes for response differentiation"""
     NO_DATA = "no_data"  # User has no data connected yet
     LIMITED_DATA = "limited_data"  # User has <50 transactions
     RICH_DATA = "rich_data"  # User has >50 transactions
 
 
 class OnboardingState(Enum):
-    """FIX #5: Track onboarding state to prevent repetition"""
+    """Track onboarding state to prevent repetition"""
     FIRST_VISIT = "first_visit"  # User's first interaction
     ONBOARDED = "onboarded"  # User has seen onboarding
     DATA_CONNECTED = "data_connected"  # User has connected data
     ACTIVE = "active"  # User is actively using system
 
 
-# PHASE 1: LangGraph State - Replaces manual parameter passing
 class OrchestratorState(TypedDict, total=False):
-    """
-    Unified state for LangGraph orchestrator.
-    
-    REPLACES: Manual memory initialization (lines 608-614)
-    - LangGraph automatically persists this state across nodes
-    - Eliminates manual parameter passing between functions
-    - Automatic context injection between nodes
-    """
-    # Input
+    """Unified state for LangGraph orchestrator with automatic persistence."""
     question: str
     user_id: str
     chat_id: Optional[str]
-    chat_title: Optional[str]  # FIX #1: Chat title passed from backend
+    chat_title: Optional[str]
     context: Optional[Dict[str, Any]]
-    
-    # Classification results
     intent: str
     intent_confidence: float
     question_type: str
     question_confidence: float
-    
-    # FEATURE #3: Confidence thresholds and quality gates
     low_confidence_intent: bool
     low_confidence_question: bool
     confidence_threshold_breached: bool
-    
-    # Memory & Context
     conversation_history: List[Dict[str, str]]
     memory_context: str
     memory_messages: List[Dict[str, str]]
-    
-    # PHASE 3: Parallel query results
     temporal_data: Optional[Dict[str, Any]]
     seasonal_data: Optional[Dict[str, Any]]
     fraud_data: Optional[Dict[str, Any]]
     root_cause_data: Optional[Dict[str, Any]]
-    
-    # PHASE 5: Data mode for conditional branching
     data_mode: str
-    
-    # Response
     response: Any
-    
     # Metadata
     processing_steps: List[str]
     errors: List[str]
@@ -477,13 +441,7 @@ class ChatResponse:
 
 
 class NullEmbeddingService:
-    """
-    ISSUE #5 FIX: Null object pattern for graceful degradation when EmbeddingService unavailable.
-    
-    This prevents cascading failures when embedding service initialization fails.
-    Instead of passing None and checking everywhere, we provide a no-op implementation
-    that logs warnings but allows the system to continue functioning.
-    """
+    """Null object pattern for graceful degradation when EmbeddingService unavailable."""
     def __init__(self):
         self.available = False
     
@@ -504,23 +462,10 @@ class NullEmbeddingService:
 
 
 class IntelligentChatOrchestrator:
-    """
-    The brain that understands questions and routes to intelligence engines.
-    
-    This is the missing link between the chat interface and the backend intelligence.
-    """
+    """Routes questions to intelligence engines and manages orchestration."""
     
     def __init__(self, supabase_client, cache_client=None, groq_client=None, embedding_service=None):
-        """
-        Initialize the orchestrator with all intelligence engines.
-        
-        Args:
-            supabase_client: Supabase client for database access
-            cache_client: Optional cache client for performance
-            groq_client: Optional Groq client for LLM (for testing/mocking)
-            embedding_service: Optional embedding service for dependency injection (FIX #6)
-        """
-        # FIX #3: Accept groq_client for dependency injection (testing/mocking)
+        """Initialize orchestrator with all intelligence engines."""
         if groq_client:
             self.groq = groq_client
         else:
@@ -531,16 +476,25 @@ class IntelligentChatOrchestrator:
         
         self.openai = None  # Not used - using Groq internally
         self.supabase = supabase_client
-        self.cache = cache_client
         
-        # ISSUE #5 FIX: Initialize or use injected embedding service with graceful fallback
+        # REFACTORED: Use centralized cache with circuit breaker
+        self.cache = safe_get_cache() if cache_client is None else cache_client
+        
+        # REFACTORED: Initialize optimized database queries
+        self.db_queries = OptimizedDatabaseQueries(supabase_client)
+        
+        # REFACTORED: Initialize transaction manager
+        self.transaction_manager = get_transaction_manager(supabase_client)
+        
+        # REFACTORED: Initialize security validator
+        self.security_validator = get_global_security_system()
+        
         if embedding_service is None:
             try:
                 self.embedding_service = EmbeddingService(cache_client=cache_client)
-                logger.info("✅ EmbeddingService initialized for chat orchestrator")
+                logger.info("✅ EmbeddingService initialized")
             except Exception as e:
                 logger.warning("Failed to initialize EmbeddingService, using NullEmbeddingService fallback", error=str(e))
-                # Use NullEmbeddingService instead of None to prevent cascading failures
                 self.embedding_service = NullEmbeddingService()
         else:
             self.embedding_service = embedding_service
@@ -557,7 +511,7 @@ class IntelligentChatOrchestrator:
         self.relationship_detector = EnhancedRelationshipDetector(
             supabase_client=supabase_client,
             cache_client=cache_client,
-            embedding_service=self.embedding_service  # FIX #6: Pass injected embedding service
+            embedding_service=self.embedding_service
         )
         
         self.entity_resolver = EntityResolver(
@@ -565,73 +519,42 @@ class IntelligentChatOrchestrator:
             cache_client=cache_client
         )
         
-        # NEW: Initialize FinleyGraph engine for intelligence queries
         self.graph_engine = FinleyGraphEngine(
             supabase=supabase_client,
             redis_url=os.getenv('ARQ_REDIS_URL') or os.getenv('REDIS_URL')
         )
         
-        # FIX #19: Initialize intent classification and output guard components
         self.intent_classifier = get_intent_classifier()
-        self.output_guard = get_output_guard(self.groq, self.embedding_service)  # FIX #8: Pass embedding_service for DI
+        self.output_guard = get_output_guard(self.groq, self.embedding_service)
         
-        # REFACTOR: Initialize PromptLoader for externalized prompt management
         self.prompt_loader = get_prompt_loader()
-        logger.info("✅ PromptLoader initialized from external YAML config")
+        logger.info("✅ PromptLoader initialized")
         
-        # REFACTOR: Initialize Jinja2 for response templating
         from jinja2 import Environment, FileSystemLoader
         from pathlib import Path
         templates_dir = Path(__file__).parent / "templates"
         self.jinja_env = Environment(loader=FileSystemLoader(str(templates_dir)))
-        logger.info(f"✅ Jinja2 environment initialized (templates: {templates_dir})")
+        logger.info("✅ Jinja2 environment initialized")
         
-        logger.info("✅ IntelligentChatOrchestrator initialized with all engines including FinleyGraph")
-        logger.info("✅ FIX #19: Intent Classifier and OutputGuard initialized (LangGraph-based)")
+        logger.info("✅ IntelligentChatOrchestrator initialized")
         
-        # PHASE 1: Build LangGraph state machine (replaces manual routing)
         self.graph = self._build_langgraph()
-        logger.info("✅ PHASE 1: LangGraph state machine compiled")
+        logger.info("✅ LangGraph state machine compiled")
     
     def _build_langgraph(self):
-        """
-        PHASE 1: Build LangGraph state machine.
-        
-        REPLACES:
-        - 60+ lines of manual if/elif routing (lines 656-710)
-        - Manual memory initialization (lines 608-614)
-        - Manual asyncio.gather for parallel queries (lines 339-370)
-        
-        FEATURE #1: Added RetryPolicy to critical nodes for automatic error recovery
-        - classify_intent: 3 attempts with exponential backoff
-        - classify_question: 3 attempts with exponential backoff
-        - All LLM-dependent handlers: 2 attempts with exponential backoff
-        
-        Returns:
-            Compiled LangGraph workflow
-        """
+        """Build LangGraph state machine with retry policies for error recovery."""
         workflow = StateGraph(OrchestratorState)
         
-        # FEATURE #1: Define retry policy for critical nodes
-        # Max 3 attempts with exponential backoff (1s, 2s, 4s)
         retry_policy_critical = RetryPolicy(max_attempts=3, backoff_multiplier=2.0)
-        # Max 2 attempts for less critical nodes
         retry_policy_standard = RetryPolicy(max_attempts=2, backoff_multiplier=2.0)
         
-        # REFACTORED: Add setup nodes (moved from process_question)
         workflow.add_node("init_memory", self._node_init_memory)
+        workflow.add_node("validate_input_security", self._node_validate_input_security, retry_policy=retry_policy_critical)
         workflow.add_node("determine_data_mode", self._node_determine_data_mode)
-        
-        # Add nodes for routing and handlers with retry policies
-        # FEATURE #1: Critical classification nodes get max retries
         workflow.add_node("classify_intent", self._node_classify_intent, retry_policy=retry_policy_critical)
         workflow.add_node("route_by_intent", self._node_route_by_intent)
-        
-        # FEATURE #3: Clarifying question handler for low confidence
         workflow.add_node("ask_clarifying_question", self._node_ask_clarifying_question, retry_policy=retry_policy_standard)
         
-        # Intent handlers (REPLACES: 7 if/elif chains)
-        # FEATURE #1: Intent handlers get standard retry (LLM-dependent)
         workflow.add_node("handle_greeting", self._node_handle_greeting, retry_policy=retry_policy_standard)
         workflow.add_node("handle_smalltalk", self._node_handle_smalltalk, retry_policy=retry_policy_standard)
         workflow.add_node("handle_capability_summary", self._node_handle_capability_summary, retry_policy=retry_policy_standard)
@@ -640,13 +563,8 @@ class IntelligentChatOrchestrator:
         workflow.add_node("handle_meta_feedback", self._node_handle_meta_feedback, retry_policy=retry_policy_standard)
         workflow.add_node("handle_help", self._node_handle_help, retry_policy=retry_policy_standard)
         
-        # Question type classification & routing
-        # FEATURE #1: Critical classification node gets max retries
         workflow.add_node("classify_question", self._node_classify_question, retry_policy=retry_policy_critical)
         workflow.add_node("route_by_question_type", self._node_route_by_question_type)
-        
-        # Question type handlers (REPLACES: 7 elif chains)
-        # FEATURE #1: All handlers get standard retry (LLM-dependent)
         workflow.add_node("handle_causal", self._node_handle_causal, retry_policy=retry_policy_standard)
         workflow.add_node("handle_temporal", self._node_handle_temporal, retry_policy=retry_policy_standard)
         workflow.add_node("handle_relationship", self._node_handle_relationship, retry_policy=retry_policy_standard)
@@ -655,43 +573,30 @@ class IntelligentChatOrchestrator:
         workflow.add_node("handle_data_query", self._node_handle_data_query, retry_policy=retry_policy_standard)
         workflow.add_node("handle_general", self._node_handle_general, retry_policy=retry_policy_standard)
         
-        # PHASE 3: Parallel query nodes (REPLACES: asyncio.gather at lines 339-370)
-        # These nodes execute in parallel for temporal/causal analysis
-        # FEATURE #1: Data fetch nodes get standard retry (network-dependent)
         workflow.add_node("fetch_temporal_data", self._node_fetch_temporal_data, retry_policy=retry_policy_standard)
         workflow.add_node("fetch_seasonal_data", self._node_fetch_seasonal_data, retry_policy=retry_policy_standard)
         workflow.add_node("fetch_fraud_data", self._node_fetch_fraud_data, retry_policy=retry_policy_standard)
         workflow.add_node("fetch_root_cause_data", self._node_fetch_root_cause_data, retry_policy=retry_policy_standard)
         workflow.add_node("aggregate_parallel_results", self._node_aggregate_parallel_results)
         
-        # PHASE 4: Output Validation & Enrichment Pipeline (REPLACES: lines 1282-1298)
-        # Automatic pipeline with conditional branching
         workflow.add_node("validate_response", self._node_validate_response)
         workflow.add_node("enrich_with_graph_intelligence", self._node_enrich_with_graph_intelligence, retry_policy=retry_policy_standard)
         workflow.add_node("store_in_database", self._node_store_in_database, retry_policy=retry_policy_standard)
         
-        # PHASE 5: Conditional Branching Logic (REPLACES: manual if/else throughout)
-        # Route based on data availability
         workflow.add_node("determine_data_mode", self._node_determine_data_mode)
         workflow.add_node("onboarding_handler", self._node_onboarding_handler)
         workflow.add_node("exploration_handler", self._node_exploration_handler)
         workflow.add_node("advanced_handler", self._node_advanced_handler)
         
-        # Post-processing
         workflow.add_node("apply_output_guard", self._node_apply_output_guard)
         workflow.add_node("save_memory", self._node_save_memory)
         
-        # Set entry point (REFACTORED: Start with memory initialization)
         workflow.set_entry_point("init_memory")
         
-        # Define edges (REFACTORED: Setup pipeline)
-        workflow.add_edge("init_memory", "determine_data_mode")
+        workflow.add_edge("init_memory", "validate_input_security")
+        workflow.add_edge("validate_input_security", "determine_data_mode")
         workflow.add_edge("determine_data_mode", "classify_intent")
         workflow.add_edge("classify_intent", "route_by_intent")
-        
-        
-        # Intent routing (REFACTORED: Inline lambda instead of separate function)
-        # FEATURE #3: Check confidence threshold before routing
         workflow.add_conditional_edges(
             "route_by_intent",
             lambda state: {
@@ -880,6 +785,65 @@ class IntelligentChatOrchestrator:
         except Exception as e:
             logger.error("Memory initialization failed", error=str(e))
             state["errors"] = state.get("errors", []) + [f"Memory init failed: {str(e)}"]
+        
+        return state
+    
+    async def _node_validate_input_security(self, state: OrchestratorState) -\u003e OrchestratorState:
+        """
+        SECURITY: Validate user input for XSS, injection attacks, and authentication.
+        
+        This node protects the system from malicious inputs before processing.
+        """
+        try:
+            # Sanitize user question
+            sanitized_question = self.security_validator.input_sanitizer.sanitize_text(state["question"])
+            
+            # Check if sanitization changed the input (potential attack detected)
+            if sanitized_question != state["question"]:
+                logger.warning("Potentially malicious input detected and sanitized",
+                             user_id=state["user_id"],
+                             original_length=len(state["question"]),
+                             sanitized_length=len(sanitized_question))
+            
+            # Update state with sanitized input
+            state["question"] = sanitized_question
+            
+            # Create security context
+            security_context = SecurityContext(
+                user_id=state["user_id"],
+                ip_address=state.get("context", {}).get("ip_address", "unknown"),
+                user_agent=state.get("context", {}).get("user_agent", "unknown"),
+                endpoint="/chat",
+                timestamp=datetime.now()
+            )
+            
+            # Validate request (authentication + rate limiting)
+            is_valid, violations = await self.security_validator.validate_request(
+                {"question": sanitized_question},
+                security_context
+            )
+            
+            if not is_valid:
+                error_msg = f"Security validation failed: {'; '.join(v.violation_type for v in violations)}"
+                logger.error("Security validation failed",
+                           user_id=state["user_id"],
+                           violations=[v.violation_type for v in violations])
+                state["errors"] = state.get("errors", []) + [error_msg]
+                # Stop processing - return error state
+                state["response"] = ChatResponse(
+                    answer="Security validation failed. Please try again later.",
+                    question_type=QuestionType.UNKNOWN,
+                    confidence=0.0,
+                    error=error_msg
+                )
+                return state
+            
+            state["processing_steps"] = state.get("processing_steps", []) + ["validate_input_security"]
+            logger.info("Input security validated successfully", user_id=state["user_id"])
+            
+        except Exception as e:
+            logger.error("Security validation failed", error=str(e))
+            state["errors"] = state.get("errors", []) + [f"Security validation error: {str(e)}"]
         
         return state
     
@@ -1249,21 +1213,27 @@ Could you be more specific? For example:
     
     async def _node_store_in_database(self, state: OrchestratorState) -> OrchestratorState:
         """
-        PHASE 4: Store response in database.
+        PHASE 4: Store response in database using DatabaseTransactionManager.
         
-        REPLACES: Manual _store_chat_message at line 1298
+        REFACTORED: Wrapped in transaction to ensure atomic operations.
         """
         try:
             if state.get("response"):
-                await self._store_chat_message(
+                # USE TRANSACTION MANAGER for atomic database writes
+                async with self.transaction_manager.transaction(
                     user_id=state["user_id"],
-                    chat_id=state.get("chat_id"),
-                    question=state["question"],
-                    response=state["response"],
-                    chat_title=state.get("chat_title")  # FIX #1: Pass chat_title from state
-                )
+                    operation_type="store_chat_message"
+                ) as txn_ctx:
+                    await self._store_chat_message(
+                        user_id=state["user_id"],
+                        chat_id=state.get("chat_id"),
+                        question=state["question"],
+                        response=state["response"],
+                        chat_title=state.get("chat_title")
+                    )
+                    
             state["processing_steps"] = state.get("processing_steps", []) + ["store_in_database"]
-            logger.info("Response stored in database")
+            logger.info("Response stored in database (transactional)")
         except Exception as e:
             logger.error("Database storage failed", error=str(e))
             state["errors"] = state.get("errors", []) + [f"Storage failed: {str(e)}"]

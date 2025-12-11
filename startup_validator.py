@@ -87,29 +87,38 @@ def check_critical_files() -> bool:
     """
     print_header("STEP 1: Validating Python File Syntax")
     
-    # In Docker, files are copied to subdirectories (see Dockerfile COPY commands)
+    # Directory sequence: aident_intelligence → aident_cfo_brain → data_ingestion_normalization → core_infrastructure → background_jobs
     critical_files = [
+        # Core Infrastructure
         "core_infrastructure/fastapi_backend_v2.py",
         "core_infrastructure/config_manager.py",
         "core_infrastructure/rate_limiter.py",
         "core_infrastructure/database_optimization_utils.py",
+        "core_infrastructure/inference_service.py",
+        "core_infrastructure/persistent_lsh_service.py",
+        # Aident Intelligence
+        "aident_intelligence/intelligent_chat_orchestrator.py",
+        "aident_intelligence/aident_memory_manager.py",
+        "aident_intelligence/intent_and_guard_engine.py",
+        "aident_intelligence/prompt_loader.py",
+        "aident_intelligence/question_classifier_setfit.py",
+        "aident_intelligence/train_question_classifier.py",
+        "aident_intelligence/business_rules_engine.py",
+        # Aident CFO Brain
         "aident_cfo_brain/temporal_pattern_learner.py",
         "aident_cfo_brain/causal_inference_engine.py",
         "aident_cfo_brain/semantic_relationship_extractor.py",
         "aident_cfo_brain/enhanced_relationship_detector.py",
-        "aident_cfo_brain/intelligent_chat_orchestrator.py",
+        "aident_cfo_brain/finley_graph_engine.py",
+        # Data Ingestion Normalization
         "data_ingestion_normalization/universal_document_classifier_optimized.py",
         "data_ingestion_normalization/universal_platform_detector_optimized.py",
         "data_ingestion_normalization/universal_extractors_optimized.py",
         "data_ingestion_normalization/universal_field_detector.py",
         "data_ingestion_normalization/entity_resolver_optimized.py",
-        "duplicate_detection_fraud/production_duplicate_detection_service.py",
+        "data_ingestion_normalization/production_duplicate_detection_service.py",
+        # Background Jobs
         "background_jobs/arq_worker.py",
-        "aident_cfo_brain/prompt_loader.py",
-        "aident_cfo_brain/question_classifier_setfit.py",
-        "aident_cfo_brain/train_question_classifier.py",
-        "aident_cfo_brain/chat_message_store.py",
-        "aident_cfo_brain/business_rules_engine.py",
     ]
     
     all_valid = True

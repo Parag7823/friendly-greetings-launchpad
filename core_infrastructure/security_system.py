@@ -1,19 +1,4 @@
-"""NASA-GRADE Security System v4.0.0 - Industry-Standard Libraries
-====================================================================
-
-GENIUS REPLACEMENTS (Zero Custom Logic, 100% Battle-Tested):
-1. bleach: XSS sanitization (99.9% protection, Mozilla-backed)
-2. python-magic: MIME type detection (libmagic, industry standard)
-3. defusedxml: XML bomb protection (OWASP recommended)
-4. Supabase Auth: JWT authentication (stateless, scalable)
-5. slowapi: Rate limiting (Redis-backed, async, zero config)
-6. structlog + sentry-sdk: Security logging (JSON + real-time alerts)
-7. pydantic: Schema validation (type-safe, auto-validate)
-
-CODE REDUCTION: 703 → ~200 lines (72% reduction)
-SECURITY: +40% (battle-tested libraries)
-MAINTAINABILITY: +300% (no custom regex hell)
-"""
+"""NASA-GRADE Security System v4.0.0 - Industry-standard libraries for XSS, MIME detection, and validation."""
 
 import os
 import re
@@ -26,12 +11,12 @@ from datetime import datetime, timedelta
 from enum import Enum
 from pathlib import Path
 
-# NASA-GRADE v4.0: Industry-standard security libraries
-import bleach  # XSS protection (Mozilla-backed, 99.9% effective)
-import magic  # MIME type detection (libmagic)
-import structlog  # JSON logging
-from pydantic import BaseModel, Field, validator  # Schema validation
-from slowapi import Limiter  # Rate limiting
+# Industry-standard security libraries
+import bleach
+import magic
+import structlog
+from pydantic import BaseModel, Field, validator
+from slowapi import Limiter
 from slowapi.util import get_remote_address
 
 logger = structlog.get_logger(__name__)
@@ -75,10 +60,7 @@ class SecurityContext(BaseModel):  # v4.0: pydantic for validation
         arbitrary_types_allowed = True
 
 class InputSanitizer:
-    """NASA-GRADE v4.0: bleach for XSS (99.9% protection, Mozilla-backed)
-    
-    REMOVED: 100+ lines of custom regex patterns → bleach handles it all
-    """
+    """Input sanitization using bleach for XSS protection (Mozilla-backed)."""
     
     def __init__(self):
         # FIX #29: v4.0: python-magic for MIME detection with fallback
@@ -95,22 +77,89 @@ class InputSanitizer:
             '.php', '.asp', '.aspx', '.jsp', '.py', '.pl', '.sh', '.ps1'
         }
     
+    
+    def detect_sql_injection(self, input_string: str) -> bool:
+        """Detect SQL injection patterns.
+        
+        Returns:
+            True if SQL injection pattern detected, False otherwise
+        """
+        sql_patterns = [
+            r"(\bUNION\b.*\bSELECT\b)",
+            r"(\bDROP\b.*\bTABLE\b)",
+            r"(\bDELETE\b.*\bFROM\b)",
+            r"(--|#|/\*|\*/)",  # SQL comments
+            r"(\bOR\b.*=.*)",
+            r"(\bAND\b.*=.*)",
+            r"('.*--)",
+            r"(;.*DROP)",
+        ]
+        
+        for pattern in sql_patterns:
+            if re.search(pattern, input_string, re.IGNORECASE):
+                logger.warning(f"SQL injection pattern detected: {pattern}")
+                return True
+        return False
+    
+    def detect_path_traversal(self, input_string: str) -> bool:
+        """Detect path traversal patterns.
+        
+        Returns:
+            True if path traversal pattern detected, False otherwise
+        """
+        traversal_patterns = [
+            r"\.\./",
+            r"\.\.\\",
+            r"%2e%2e/",
+            r"%2e%2e\\",
+        ]
+        
+        for pattern in traversal_patterns:
+            if re.search(pattern, input_string, re.IGNORECASE):
+                logger.warning(f"Path traversal pattern detected: {pattern}")
+                return True
+        
+        # Check for absolute paths
+        if input_string.startswith('/') or (len(input_string) > 1 and input_string[1] == ':'):
+            logger.warning("Absolute path detected")
+            return True
+        
+        return False
+    
     def sanitize_string(self, input_string: str, max_length: int = 1000) -> str:
-        """v4.0: bleach.clean() - 99.9% XSS protection (Mozilla-backed)"""
+        """Enhanced sanitization with SQL injection and path traversal detection.
+        
+        Args:
+            input_string: String to sanitize
+            max_length: Maximum allowed length
+            
+        Returns:
+            Sanitized string
+            
+        Raises:
+            ValueError: If SQL injection or path traversal pattern detected
+        """
         if not isinstance(input_string, str):
             return str(input_string)
         
-        # Truncate if too long
+        # SECURITY: Check for SQL injection
+        if self.detect_sql_injection(input_string):
+            raise ValueError("SQL injection pattern detected - request blocked")
+        
+        # SECURITY: Check for path traversal 
+        if self.detect_path_traversal(input_string):
+           raise ValueError("Path traversal pattern detected - request blocked")
+        
+        # Length check
         if len(input_string) > max_length:
             input_string = input_string[:max_length]
         
-        # GENIUS v4.0: bleach.clean() replaces 50+ lines of custom HTML encoding
-        # Mozilla-backed, battle-tested, 99.9% XSS protection
+        # XSS protection via bleach
         cleaned = bleach.clean(
             input_string,
-            tags=[],  # Strip all HTML tags
-            attributes={},  # Strip all attributes
-            strip=True  # Remove tags completely
+            tags=[],
+            attributes={},
+            strip=True
         )
         
         # Remove null bytes and control characters
@@ -120,25 +169,18 @@ class InputSanitizer:
         return cleaned.strip()
     
     def sanitize_filename(self, filename: str) -> str:
-        """Sanitize filename input"""
+        """Sanitize filename input."""
         if not filename:
             return "unnamed_file"
         
-        # Remove path components
         filename = Path(filename).name
-        
-        # Remove dangerous characters
         filename = re.sub(r'[<>:"/\\|?*]', '_', filename)
-        
-        # Remove control characters
         filename = ''.join(char for char in filename if ord(char) >= 32)
         
-        # Limit length
         if len(filename) > 255:
             name, ext = filename.rsplit('.', 1) if '.' in filename else (filename, '')
             filename = name[:250] + ('.' + ext if ext else '')
         
-        # Check for dangerous extensions
         file_ext = Path(filename).suffix.lower()
         if file_ext in self.dangerous_extensions:
             filename = filename.replace(file_ext, '.txt')

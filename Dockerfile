@@ -92,15 +92,11 @@ COPY startup_validator.py .
 COPY worker_entry.py .
 
 # Copy entire directory structures to preserve module paths
-# NOTE: All Python modules are already included in their respective directories:
-# - aident_memory_manager.py, intelligent_chat_orchestrator.py, causal_inference_engine.py,
-#   enhanced_relationship_detector.py, finley_graph_engine.py, temporal_pattern_learner.py
-#   are in aident_cfo_brain/
-# - centralized_cache.py is in core_infrastructure/
-COPY core_infrastructure/ ./core_infrastructure/
-COPY data_ingestion_normalization/ ./data_ingestion_normalization/
+# Directory sequence: aident_intelligence → aident_cfo_brain → data_ingestion_normalization → core_infrastructure → background_jobs
+COPY aident_intelligence/ ./aident_intelligence/
 COPY aident_cfo_brain/ ./aident_cfo_brain/
-COPY duplicate_detection_fraud/ ./duplicate_detection_fraud/
+COPY data_ingestion_normalization/ ./data_ingestion_normalization/
+COPY core_infrastructure/ ./core_infrastructure/
 COPY background_jobs/ ./background_jobs/
 COPY start.sh .
 
@@ -113,14 +109,20 @@ COPY --from=frontend-builder /app/frontend/dist ./core_infrastructure/dist
 # Make start.sh executable
 RUN chmod +x start.sh
 
-# VERIFICATION: Confirm all aident_cfo_brain files are copied
-RUN echo "🔍 VERIFYING aident_cfo_brain files:" && \
-    ls -la aident_cfo_brain/ | grep -E "(train_question|question_classifier|prompt_loader|chat_message|business_rules)" && \
-    echo "✅ All required files present" || echo "⚠️ Some files missing"
+# VERIFICATION: Confirm all aident_intelligence files are copied
+RUN echo "🔍 VERIFYING aident_intelligence files:" && \
+    ls -la aident_intelligence/ | grep -E "(train_question|question_classifier|prompt_loader|chat_message|business_rules)" && \
+    echo "✅ All intelligence files present" || echo "⚠️ Some files missing"
 
-# VERIFICATION: Show IntelligentChatOrchestrator __init__ signature to confirm correct version
-RUN echo "🔍 VERIFYING IntelligentChatOrchestrator signature:" && \
-    grep -A 5 "def __init__" aident_cfo_brain/intelligent_chat_orchestrator.py | head -6 || echo "File not found"
+# VERIFICATION: Confirm core_infrastructure has inference and lsh services
+RUN echo "🔍 VERIFYING core_infrastructure services:" && \
+    ls -la core_infrastructure/ | grep -E "(inference_service|persistent_lsh)" && \
+    echo "✅ All core services present" || echo "⚠️ Some services missing"
+
+# VERIFICATION: Confirm data_ingestion has duplicate detection
+RUN echo "🔍 VERIFYING data_ingestion_normalization:" && \
+    ls -la data_ingestion_normalization/ | grep "production_duplicate" && \
+    echo "✅ Duplicate detection service present" || echo "⚠️ Duplicate detection missing"
 
 EXPOSE 8000
 

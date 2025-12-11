@@ -1,16 +1,4 @@
-"""Universal Platform Detector v4.0.0
-
-Multi-method platform detection using:
-- Pattern matching (pyahocorasick)
-- AI classification (Groq Llama-3.3-70B)
-- Confidence scoring with entropy calculation
-- Redis-backed caching (aiocache)
-- PII detection (presidio-analyzer)
-- Learning system with database persistence
-
-Author: Senior Full-Stack Engineer
-Version: 4.0.0
-"""
+"""Multi-method platform detection with pattern matching, AI, caching, and learning."""
 
 import asyncio
 import hashlib
@@ -21,13 +9,14 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple, Literal
 from dataclasses import dataclass
 
-# NASA-GRADE v4.0 LIBRARIES (Consistent with all optimized files)
-import ahocorasick  # Replaces flashtext (2x faster, async-ready)
+import ahocorasick
 import structlog
 from pydantic import BaseModel, Field, field_validator, ConfigDict
 from pydantic_settings import BaseSettings
 from aiocache import cached, Cache
 from aiocache.serializers import JsonSerializer
+import yaml
+from parse import parse
 
 logger = structlog.get_logger(__name__)
 
@@ -52,7 +41,6 @@ class PlatformDetectorConfig(BaseSettings):
         case_sensitive=False
     )
 
-# OPTIMIZED: Type-safe platform definition with pydantic
 class PlatformDefinition(BaseModel):
     """Type-safe platform definition with auto-validation"""
     name: str
@@ -79,44 +67,20 @@ class PlatformDetectionResult:
     metadata: Dict[str, Any]
 
 class UniversalPlatformDetectorOptimized:
-    """
-    Production-grade universal platform detection with AI, machine learning,
-    caching, and comprehensive platform coverage.
+    """Production-grade platform detection with AI, ML, caching, and learning"""
     
-    Features:
-    - AI-powered platform detection with GPT-4
-    - Machine learning pattern recognition
-    - Comprehensive platform database (50+ platforms)
-    - Intelligent caching and learning
-    - Confidence scoring and validation
-    - Async processing for high concurrency
-    - Robust error handling and fallbacks
-    - Real-time platform updates
-    - PRELOADED AUTOMATON: Zero first-request latency
-    """
-    
-    # CRITICAL PERFORMANCE FIX: Class-level automaton cache (built only ONCE)
-    # PRELOAD PATTERN: Automaton is built at module-load time, not on first request
-    # Eliminates 3625ms first-request latency completely
-    _class_automaton = None  # Class-level cache (preloaded at module import)
-    _automaton_preloaded = False  # Flag to track preload status
+    _class_automaton = None
+    _automaton_preloaded = False
     
     @classmethod
     def _preload_automaton_sync(cls):
-        """
-        PRELOAD PATTERN: Build automaton at module-load time.
-        Called automatically when module is imported.
-        This eliminates first-request latency.
-        """
+        """Build automaton at module-load time to eliminate first-request latency"""
         if cls._automaton_preloaded:
             return cls._class_automaton
         
         try:
-            # Build Aho-Corasick automaton from hardcoded platform database
             import ahocorasick
             automaton = ahocorasick.Automaton()
-            
-            # Get platform database (hardcoded fallback for preloading)
             platform_database = cls._get_preload_platform_database()
             
             for platform_id, platform_info in platform_database.items():
@@ -128,13 +92,13 @@ class UniversalPlatformDetectorOptimized:
             automaton.make_automaton()
             cls._class_automaton = automaton
             cls._automaton_preloaded = True
-            logger.info("✅ PRELOAD: Automaton built at module-load time",
+            logger.info("Automaton built at module-load time",
                        platforms=len(platform_database),
                        total_indicators=sum(len(p.get('indicators', [])) for p in platform_database.values()))
             return automaton
         except Exception as e:
-            logger.warning(f"⚠️ PRELOAD: Automaton build failed, will use fallback: {e}")
-            cls._automaton_preloaded = True  # Don't retry
+            logger.warning(f"Automaton build failed, will use fallback: {e}")
+            cls._automaton_preloaded = True
             return None
     
     @classmethod
@@ -177,17 +141,10 @@ class UniversalPlatformDetectorOptimized:
         self.supabase = supabase_client
         self.config = config or self._get_default_config()
         
-        # FIX #52: Use shared cache initialization utility
         self.cache = initialize_centralized_cache(cache_client)
-        
-        # Comprehensive platform database
         self.platform_database = self._initialize_platform_database()
-        
-        # PRELOAD PATTERN: Use class-level preloaded automaton (already built at module import)
-        # No lazy-loading - automaton is ready immediately
         self.automaton = UniversalPlatformDetectorOptimized._class_automaton
         
-        # Performance tracking
         self.metrics = {
             'detections_performed': 0,
             'cache_hits': 0,
@@ -200,16 +157,14 @@ class UniversalPlatformDetectorOptimized:
             'processing_times': []
         }
         
-        # FIX #81: Use shared learning system
         from data_ingestion_normalization.shared_learning_system import SharedLearningSystem
         self.learning_system = SharedLearningSystem()
         self.learning_enabled = True
         
-        # CRITICAL FIX: Add cache versioning and invalidation
-        self.cache_version = "v2.1.0"  # Increment when patterns change
-        self.pattern_cache_ttl = 3600  # 1 hour TTL for pattern cache
+        self.cache_version = "v2.1.0"
+        self.pattern_cache_ttl = 3600
         
-        logger.info("NASA-GRADE Platform Detector initialized (PRELOADED automaton)", 
+        logger.info("Platform Detector initialized", 
                    cache_size=self.config.max_cache_size,
                    platforms_loaded=len(self.platform_database),
                    cache_version=self.cache_version,
@@ -220,17 +175,11 @@ class UniversalPlatformDetectorOptimized:
         return PlatformDetectorConfig()
     
     def _initialize_platform_database(self) -> Dict[str, Dict[str, Any]]:
-        """
-        Initialize comprehensive platform database from YAML or hardcoded fallback.
-        
-        PRODUCTION FIX #5: Standardize on YAML for configuration.
-        Non-developers can update platform patterns without code changes.
-        """
+        """Initialize platform database from YAML or hardcoded fallback"""
         import yaml
         import os
         from pathlib import Path
         
-        # Try to load from YAML first (production-ready approach)
         yaml_paths = [
             Path(__file__).parent / 'platform_patterns.yaml',
             Path('/etc/finley/platform_patterns.yaml'),
@@ -243,14 +192,12 @@ class UniversalPlatformDetectorOptimized:
                     with open(yaml_path, 'r') as f:
                         platforms = yaml.safe_load(f)
                         if platforms and isinstance(platforms, dict):
-                            logger.info(f"✅ Loaded platform patterns from {yaml_path}")
+                            logger.info(f"Loaded platform patterns from {yaml_path}")
                             return platforms
                 except Exception as e:
                     logger.warning(f"Failed to load platform patterns from {yaml_path}: {e}")
         
-        # Fallback to hardcoded database (for backward compatibility)
-        logger.warning("⚠️ Platform patterns YAML not found. Using hardcoded fallback. "
-                      "For production, create platform_patterns.yaml with platform definitions.")
+        logger.warning("Platform patterns YAML not found. Using hardcoded fallback.")
         return self._get_hardcoded_platform_database()
     
     def _get_hardcoded_platform_database(self) -> Dict[str, Dict[str, Any]]:
@@ -1052,3 +999,467 @@ try:
     UniversalPlatformDetectorOptimized._preload_automaton_sync()
 except Exception as e:
     logger.warning(f"Module-level automaton preload failed (will use fallback): {e}")
+    async def extract_platform_ids(self, row_data: Dict[str, Any], platform: str) -> Dict[str, Any]:
+        """
+        Extract platform-specific IDs from row data using YAML configuration.
+        Centralizes platform knowledge and allows non-developers to edit patterns.
+        """
+        try:
+            # Load platform patterns from YAML config file
+            platform_patterns = self._load_platform_patterns()
+            
+            # Extract IDs using the patterns from YAML
+            platform_ids = {}
+            patterns = platform_patterns.get(platform.lower(), {})
+            
+            for id_type, pattern_info in patterns.items():
+                pattern_list = pattern_info if isinstance(pattern_info, list) else [pattern_info]
+                
+                for col_name, col_value in row_data.items():
+                    if col_value and isinstance(col_value, str):
+                        for pattern in pattern_list:
+                            result = parse(pattern, col_value)
+                            if result:
+                                extracted_data = {}
+                                if result.named:
+                                    extracted_data = result.named
+                                    platform_ids[id_type] = extracted_data.get('id', col_value)
+                                    platform_ids[f"{id_type}_parsed"] = extracted_data
+                                else:
+                                    platform_ids[id_type] = col_value
+                                break
+                    if id_type in platform_ids:
+                        break
+            
+            return {
+                'platform_ids': platform_ids,
+                'platform_id_count': len(platform_ids),
+                'has_platform_id': len(platform_ids) > 0
+            }
+        except Exception as e:
+            logger.error(f"Platform ID extraction failed: {e}")
+            return {
+                'platform_ids': {},
+                'platform_id_count': 0,
+                'has_platform_id': False
+            }
+
+    def _load_platform_patterns(self) -> Dict[str, Any]:
+        """
+        Load platform patterns from config/platform_id_patterns.yaml.
+        Falls back to empty dict if YAML not found.
+        """
+        try:
+            # Handle config path relative to this file
+            # Assuming structure:
+            # root/
+            #   data_ingestion_normalization/universal_platform_detector_optimized.py
+            #   config/platform_id_patterns.yaml
+            config_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'config', 'platform_id_patterns.yaml')
+            
+            if os.path.exists(config_path):
+                with open(config_path, 'r') as f:
+                    config = yaml.safe_load(f)
+                    # logger.debug(f"✅ Platform patterns loaded from {config_path}")
+                    return config.get('platforms', {})
+            else:
+                # Try core_infrastructure relative path just in case
+                config_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'core_infrastructure', 'config', 'platform_id_patterns.yaml')
+                if os.path.exists(config_path):
+                    with open(config_path, 'r') as f:
+                        config = yaml.safe_load(f)
+                        return config.get('platforms', {})
+                        
+        except Exception as e:
+            logger.warning(f"Failed to load platform patterns from YAML: {e}. Using empty patterns.")
+        
+        return {}
+
+# ============================================================================
+# PlatformIDExtractor - Moved from core_infrastructure/fastapi_backend_v2.py
+# ============================================================================
+
+class PlatformIDExtractor:
+    """
+    LIBRARY REPLACEMENT: Platform ID extraction using parse library (85% code reduction)
+    Replaces 100+ lines of custom regex with declarative parse patterns.
+    
+    Benefits:
+    - 85% code reduction (178 lines → 30 lines)
+    - Inverse of format() - more maintainable
+    - Better error handling
+    - Cleaner pattern definitions
+    - No regex compilation overhead
+    - Patterns externalized to config/platform_id_patterns.yaml (non-developers can edit)
+    """
+    
+    def __init__(self):
+        """Initialize with patterns and rules from config file"""
+        import yaml
+        import os
+        
+        # Load all configuration from YAML
+        config_path = os.path.join(os.path.dirname(__file__), '..', 'config', 'platform_id_patterns.yaml')
+        try:
+            with open(config_path, 'r') as f:
+                config = yaml.safe_load(f)
+                self.platform_patterns = config.get('platforms', {})
+                self.validation_rules = config.get('validation_rules', {})
+                
+                # FIX #5: Extract patterns from nested structure
+                suspicious_config = config.get('suspicious_patterns', {})
+                self.suspicious_patterns = suspicious_config.get('patterns', []) if isinstance(suspicious_config, dict) else suspicious_config
+                self.suspicious_threshold = suspicious_config.get('similarity_threshold', 80) if isinstance(suspicious_config, dict) else 80
+                
+                self.mixed_platform_indicators = config.get('mixed_platform_indicators', {})
+                self.mixed_platform_threshold = self.mixed_platform_indicators.pop('similarity_threshold', 75) if isinstance(self.mixed_platform_indicators, dict) else 75
+                
+                id_config = config.get('id_column_indicators', {})
+                self.id_column_indicators = id_config.get('patterns', []) if isinstance(id_config, dict) else id_config
+                self.id_column_threshold = id_config.get('similarity_threshold', 80) if isinstance(id_config, dict) else 80
+                
+                self.confidence_scores = config.get('confidence_scores', {})
+                logger.info(f"✅ Platform ID patterns and rules loaded from {config_path}")
+        except Exception as e:
+            logger.warning(f"⚠️ Failed to load platform patterns from config: {e}. Using defaults.")
+            self.platform_patterns = {}
+            self.validation_rules = {}
+            self.suspicious_patterns = ['test', 'dummy', 'sample', 'example']
+            self.suspicious_threshold = 80
+            self.mixed_platform_indicators = {}
+            self.mixed_platform_threshold = 75
+            self.id_column_indicators = ['id', 'reference', 'number', 'ref', 'num', 'code', 'key']
+            self.id_column_threshold = 80
+            self.confidence_scores = {
+                'id_column_match': 0.9,
+                'pattern_match': 0.7,
+                'full_text_search': 0.6,
+                'generated_fallback': 0.1,
+                'suspicious_pattern': 0.5,
+                'mixed_platform': 0.3
+            }
+    
+    async def extract_platform_ids(self, row_data: Dict, platform: str, column_names: List[str]) -> Dict[str, Any]:
+        """
+        LIBRARY REPLACEMENT: Extract platform IDs using parse library (85% code reduction)
+        Replaces 150+ lines of complex regex logic with simple parse patterns.
+        """
+        try:
+            # LIBRARY REPLACEMENT: Use parse library (already in requirements)
+            from parse import parse
+            from rapidfuzz import fuzz
+            
+            extracted_ids = {}
+            confidence_scores = {}
+            platform_lower = platform.lower()
+            
+            # Get patterns for this platform
+            patterns = self.platform_patterns.get(platform_lower, {})
+            
+            if not patterns:
+                return {
+                    "platform": platform,
+                    "extracted_ids": {},
+                    "confidence_scores": {},
+                    "total_ids_found": 0,
+                    "warnings": ["No patterns defined for platform"]
+                }
+            
+            # Check ID columns first (higher confidence) - FIX #5: Use externalized config
+            id_indicators = self.id_column_indicators
+            id_similarity_threshold = self.id_column_threshold
+            
+            for col_name in column_names:
+                col_value = row_data.get(col_name)
+                if not col_value:
+                    continue
+                
+                col_value_str = str(col_value).strip()
+                if not col_value_str:
+                    continue
+                
+                # Check if this looks like an ID column - FIX #5: Use externalized threshold
+                is_id_column = any(fuzz.token_sort_ratio(col_name.lower(), indicator) > id_similarity_threshold for indicator in id_indicators)
+                
+                # Try to parse with each pattern
+                for id_type, pattern_list in patterns.items():
+                    # Handle both single patterns and lists
+                    patterns_to_try = pattern_list if isinstance(pattern_list, list) else [pattern_list]
+                    
+                    for pattern in patterns_to_try:
+                        try:
+                            result = parse(pattern, col_value_str)
+                            if result:
+                                extracted_data = {}
+                                extracted_id = None
+                                
+                                if result.named:
+                                    extracted_data = result.named
+                                    extracted_id = str(result.named.get('id', result.named.get(list(result.named.keys())[0]) if result.named else col_value_str))
+                                elif len(result.fixed) > 0:
+                                    extracted_id = str(result.fixed[0])
+                                else:
+                                    extracted_id = col_value_str
+                                
+                                confidence = 0.9 if is_id_column else 0.7
+                                
+                                if len(extracted_id) >= 3 and extracted_id.replace('-', '').replace('_', '').isalnum():
+                                    extracted_ids[id_type] = extracted_id
+                                    confidence_scores[id_type] = confidence
+                                    if extracted_data:
+                                        extracted_ids[f"{id_type}_parsed"] = extracted_data
+                                    break
+                        except Exception as e:
+                            logger.debug(f"Parse failed for pattern {pattern}: {e}")
+                            continue
+                    
+                    if id_type in extracted_ids:
+                        break  # Found ID, move to next column
+            
+            # If no IDs found in columns, try full text search (lower confidence)
+            if not extracted_ids:
+                all_text = ' '.join(str(val) for val in row_data.values() if val and str(val).strip())
+                
+                for id_type, pattern_list in patterns.items():
+                    patterns_to_try = pattern_list if isinstance(pattern_list, list) else [pattern_list]
+                    
+                    for pattern in patterns_to_try:
+                        try:
+                            words = all_text.split()
+                            for word in words:
+                                result = parse(pattern, word)
+                                if result:
+                                    extracted_data = {}
+                                    extracted_id = None
+                                    
+                                    if result.named:
+                                        extracted_data = result.named
+                                        extracted_id = str(result.named.get('id', result.named.get(list(result.named.keys())[0]) if result.named else word))
+                                    elif len(result.fixed) > 0:
+                                        extracted_id = str(result.fixed[0])
+                                    else:
+                                        extracted_id = word
+                                    
+                                    confidence = 0.6
+                                    
+                                    if len(extracted_id) >= 3 and extracted_id.replace('-', '').replace('_', '').isalnum():
+                                        extracted_ids[id_type] = extracted_id
+                                        confidence_scores[id_type] = confidence
+                                        if extracted_data:
+                                            extracted_ids[f"{id_type}_parsed"] = extracted_data
+                                        break
+                            
+                            if id_type in extracted_ids:
+                                break
+                        except Exception as e:
+                            logger.debug(f"Text parse failed for pattern {pattern}: {e}")
+                            continue
+            
+            # Generate deterministic platform ID if none found
+            if not extracted_ids:
+                deterministic_id = self._generate_deterministic_platform_id(row_data, platform_lower)
+                extracted_ids['platform_generated_id'] = deterministic_id
+                confidence_scores['platform_generated_id'] = 0.1
+            
+            # Calculate overall confidence
+            overall_confidence = sum(confidence_scores.values()) / len(confidence_scores) if confidence_scores else 0.0
+            
+            return {
+                "platform": platform,
+                "extracted_ids": extracted_ids,
+                "confidence_scores": confidence_scores,
+                "total_ids_found": len(extracted_ids),
+                "overall_confidence": overall_confidence,
+                "extraction_method": "parse_library"
+            }
+            
+        except Exception as e:
+            logger.error(f"Platform ID extraction failed: {e}")
+            return {
+                "platform": platform,
+                "extracted_ids": {},
+                "confidence_scores": {},
+                "validation_results": {},
+                "total_ids_found": 0,
+                "overall_confidence": 0.0,
+                "error": str(e),
+                "extraction_method": "error_fallback"
+            }
+    
+    async def _validate_platform_id(self, id_value: str, id_type: str, platform: str) -> Dict[str, Any]:
+        """Validate extracted platform ID against business rules"""
+        try:
+            validation_result = {
+                'is_valid': True,
+                'reason': 'Valid ID format',
+                'validation_method': 'format_check',
+                'warnings': []
+            }
+            
+            # Basic format validation
+            if not id_value or not id_value.strip():
+                validation_result['is_valid'] = False
+                validation_result['reason'] = 'Empty or null ID value'
+                return validation_result
+            
+            id_value = id_value.strip()
+            
+            # Length validation
+            if len(id_value) < 1 or len(id_value) > 50:
+                validation_result['is_valid'] = False
+                validation_result['reason'] = f'ID length invalid: {len(id_value)} (must be 1-50 characters)'
+                return validation_result
+            
+            # Platform-specific validation
+            if platform == 'quickbooks':
+                validation_result.update(self._validate_quickbooks_id(id_value, id_type))
+            elif platform == 'stripe':
+                validation_result.update(self._validate_stripe_id(id_value, id_type))
+            elif platform == 'razorpay':
+                validation_result.update(self._validate_razorpay_id(id_value, id_type))
+            elif platform == 'xero':
+                validation_result.update(self._validate_xero_id(id_value, id_type))
+            elif platform == 'gusto':
+                validation_result.update(self._validate_gusto_id(id_value, id_type))
+            
+            # Common validation rules
+            if not validation_result['is_valid']:
+                return validation_result
+            
+            # FIX #45: Move CPU-heavy rapidfuzz operations to thread pool
+            def _check_suspicious_patterns_sync(id_value):
+                suspicious_patterns = ['test', 'dummy', 'sample', 'example']
+                for suspicious in suspicious_patterns:
+                    if fuzz.partial_ratio(id_value.lower(), suspicious) > 80:
+                        return True
+                return False
+            
+            # Execute CPU-bound rapidfuzz operation in global thread pool
+            import asyncio
+            loop = asyncio.get_event_loop()
+            # FIX #6: Add null check for _thread_pool to prevent race condition
+            if _thread_pool is None:
+                logger.warning("Thread pool not initialized, running pattern check synchronously")
+                has_suspicious = _check_suspicious_patterns_sync(id_value)
+            else:
+                has_suspicious = await loop.run_in_executor(_thread_pool, _check_suspicious_patterns_sync, id_value)
+            
+            if has_suspicious:
+                validation_result['warnings'].append('ID contains test/sample indicators')
+                validation_result['confidence'] = 0.5
+            
+            # LIBRARY FIX: Use rapidfuzz for mixed platform detection
+            if platform == 'quickbooks':
+                other_platforms = ['stripe', 'paypal', 'square']
+                for other_platform in other_platforms:
+                    if fuzz.partial_ratio(id_value.lower(), other_platform) > 75:
+                        validation_result['warnings'].append('ID contains mixed platform indicators')
+                        validation_result['confidence'] = 0.3
+                        break
+            
+            return validation_result
+            
+        except Exception as e:
+            return {
+                'is_valid': False,
+                'reason': f'Validation error: {str(e)}',
+                'validation_method': 'error_fallback'
+            }
+    
+    def _validate_quickbooks_id(self, id_value: str, id_type: str) -> Dict[str, Any]:
+        """Validate QuickBooks-specific ID formats"""
+        # QuickBooks IDs are typically numeric or have simple prefixes
+        if id_type in ['transaction_id', 'invoice_id', 'vendor_id', 'customer_id']:
+            # Should be numeric or have simple prefix
+            if re.match(r'^(?:TXN-?|INV-?|VEN-?|CUST-?|BILL-?|PAY-?|ACC-?|CLASS-?|ITEM-?|JE-?)?\d{1,8}$', id_value, re.IGNORECASE):
+                return {'is_valid': True, 'reason': 'Valid QuickBooks ID format'}
+            else:
+                return {'is_valid': False, 'reason': 'Invalid QuickBooks ID format'}
+        
+        return {'is_valid': True, 'reason': 'Standard validation passed'}
+    
+    def _validate_stripe_id(self, id_value: str, id_type: str) -> Dict[str, Any]:
+        """Validate Stripe-specific ID formats"""
+        if id_type in ['charge_id', 'payment_intent', 'customer_id', 'invoice_id']:
+            # Stripe IDs have specific prefixes and lengths
+            if re.match(r'^(ch_|pi_|cus_|in_)[a-zA-Z0-9]{14,24}$', id_value):
+                return {'is_valid': True, 'reason': 'Valid Stripe ID format'}
+            else:
+                return {'is_valid': False, 'reason': 'Invalid Stripe ID format'}
+        
+        return {'is_valid': True, 'reason': 'Standard validation passed'}
+    
+    def _validate_razorpay_id(self, id_value: str, id_type: str) -> Dict[str, Any]:
+        """Validate Razorpay-specific ID formats"""
+        if id_type in ['payment_id', 'order_id', 'refund_id', 'settlement_id']:
+            # Razorpay IDs have specific prefixes
+            if re.match(r'^(pay_|order_|rfnd_|setl_)[a-zA-Z0-9]{14}$', id_value):
+                return {'is_valid': True, 'reason': 'Valid Razorpay ID format'}
+            else:
+                return {'is_valid': False, 'reason': 'Invalid Razorpay ID format'}
+        
+        return {'is_valid': True, 'reason': 'Standard validation passed'}
+    
+    def _validate_xero_id(self, id_value: str, id_type: str) -> Dict[str, Any]:
+        """Validate Xero-specific ID formats"""
+        if id_type == 'invoice_id':
+            if re.match(r'^INV-\d{4}-\d{6}$', id_value):
+                return {'is_valid': True, 'reason': 'Valid Xero invoice ID format'}
+            else:
+                return {'is_valid': False, 'reason': 'Invalid Xero invoice ID format'}
+        elif id_type == 'bank_transaction_id':
+            if re.match(r'^BT-\d{8}$', id_value):
+                return {'is_valid': True, 'reason': 'Valid Xero bank transaction ID format'}
+            else:
+                return {'is_valid': False, 'reason': 'Invalid Xero bank transaction ID format'}
+        
+        return {'is_valid': True, 'reason': 'Standard validation passed'}
+    
+    def _validate_gusto_id(self, id_value: str, id_type: str) -> Dict[str, Any]:
+        """Validate Gusto-specific ID formats"""
+        if id_type in ['employee_id', 'payroll_id', 'timesheet_id']:
+            # Gusto IDs have specific prefixes
+            if re.match(r'^(emp_|pay_|ts_)[a-zA-Z0-9]{8,12}$', id_value):
+                return {'is_valid': True, 'reason': 'Valid Gusto ID format'}
+            else:
+                return {'is_valid': False, 'reason': 'Invalid Gusto ID format'}
+        
+        return {'is_valid': True, 'reason': 'Standard validation passed'}
+    
+    def _generate_deterministic_platform_id(self, row_data: Dict, platform: str) -> str:
+        """
+        PHASE 3.2: hashids for deterministic IDs (Reversible, URL-safe)
+        Replaces 34 lines of custom hash generation with battle-tested library.
+        
+        Benefits:
+        - Reversible IDs (can decode back to original data)
+        - URL-safe (no special characters)
+        - Collision-resistant
+        - 34 lines → 10 lines (70% reduction)
+        """
+        from hashids import Hashids
+        
+        try:
+            # Create deterministic hash from key row data
+            key_fields = ['amount', 'date', 'description', 'vendor', 'customer']
+            hash_input = []
+            
+            for field in key_fields:
+                value = row_data.get(field)
+                if value is not None:
+                    hash_input.append(f"{field}:{str(value)}")
+            
+            # Add platform for uniqueness
+            hash_input.append(f"platform:{platform}")
+            
+            # Use hashids for reversible, URL-safe IDs
+            hashids = Hashids(salt="|".join(sorted(hash_input)), min_length=8)
+            numeric_hash = hash(frozenset(hash_input)) & 0x7FFFFFFF  # Positive int
+            
+            return f"{platform}_{hashids.encode(numeric_hash)}"
+            
+        except Exception as e:
+            logger.error(f"Failed to generate deterministic ID: {e}")
+            # Fallback (xxhash: 5-10x faster for non-crypto hashing)
+            fallback_hash = xxhash.xxh64(str(row_data).encode()).hexdigest()[:8]
+            return f"{platform}_fallback_{fallback_hash}"

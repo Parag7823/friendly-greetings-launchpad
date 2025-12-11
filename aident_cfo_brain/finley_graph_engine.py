@@ -1,7 +1,4 @@
-"""
-FinleyGraph Engine - Production Knowledge Graph for Financial Intelligence
-Uses igraph (13-32x faster than networkx) + Supabase + Redis caching
-"""
+"""Production knowledge graph using igraph, Supabase, and Redis caching for financial intelligence."""
 
 import asyncio
 from datetime import datetime
@@ -13,12 +10,10 @@ import structlog
 from pydantic import BaseModel, Field
 from supabase import Client
 
-try:
-    from aiocache import Cache
-    from aiocache.serializers import PickleSerializer
-    AIOCACHE_AVAILABLE = True
-except ImportError:
-    AIOCACHE_AVAILABLE = False
+# REFACTORED: Using centralized cache with circuit breaker
+from core_infrastructure.centralized_cache import get_cache, safe_get_cache
+# REFACTORED: Using optimized database queries with Prometheus metrics
+from core_infrastructure.database_optimization_utils import OptimizedDatabaseQueries
 
 logger = structlog.get_logger(__name__)
 
@@ -38,8 +33,7 @@ class GraphNode(BaseModel):
 
 
 class GraphEdge(BaseModel):
-    """Edge with 9 layers of intelligence: causal, temporal, seasonal, pattern, cross-platform, prediction, root cause, delta, fraud"""
-    # Core relationship data
+    """Multi-layered relationship edge with causal, temporal, seasonal, pattern, and fraud intelligence."""
     id: str
     source_id: str
     target_id: str
@@ -48,46 +42,28 @@ class GraphEdge(BaseModel):
     detection_method: str
     reasoning: Optional[str] = None
     created_at: datetime
-    
-    # Layer 1: Causal Intelligence
     causal_strength: Optional[float] = None
     causal_direction: Optional[str] = None
-    
-    # Layer 2: Temporal Intelligence
     temporal_pattern_id: Optional[str] = None
     recurrence_score: Optional[float] = None
-    recurrence_frequency: Optional[str] = None  # daily, weekly, monthly, yearly, etc.
+    recurrence_frequency: Optional[str] = None
     last_occurrence: Optional[datetime] = None
     next_predicted_occurrence: Optional[datetime] = None
-    
-    # Layer 3: Seasonal Intelligence
     seasonal_pattern_id: Optional[str] = None
     seasonal_strength: Optional[float] = None
-    seasonal_months: Optional[List[int]] = None  # [1,2,12] for Jan, Feb, Dec
-    
-    # Layer 4: Pattern Intelligence
+    seasonal_months: Optional[List[int]] = None
     pattern_id: Optional[str] = None
     pattern_confidence: Optional[float] = None
     pattern_name: Optional[str] = None
-    
-    # Layer 5: Cross-Platform Intelligence
     cross_platform_id: Optional[str] = None
     platform_sources: Optional[List[str]] = None
-    
-    # Layer 6: Prediction Intelligence
     predicted_relationship_id: Optional[str] = None
     prediction_confidence: Optional[float] = None
     prediction_reason: Optional[str] = None
-    
-    # Layer 7: Root Cause Intelligence
     root_cause_id: Optional[str] = None
     root_cause_analysis: Optional[str] = None
-    
-    # Layer 8: Change Tracking
     delta_log_id: Optional[str] = None
-    change_type: Optional[str] = None  # created, modified, deleted
-    
-    # Layer 9: Fraud Detection
+    change_type: Optional[str] = None
     duplicate_transaction_id: Optional[str] = None
     is_duplicate: Optional[bool] = None
     duplicate_confidence: Optional[float] = None
@@ -125,6 +101,12 @@ class FinleyGraphEngine:
         self.node_id_to_index: Dict[str, int] = {}
         self.index_to_node_id: Dict[int, str] = {}
         self.last_build_time: Optional[datetime] = None
+        
+        # REFACTORED: Use centralized cache instead of custom aiocache
+        self.cache = safe_get_cache()
+        
+        # REFACTORED: Use optimized database queries
+        self.db_queries = OptimizedDatabaseQueries(supabase)
     
     async def build_graph(self, user_id: str, force_rebuild: bool = False) -> GraphStats:
         """Build graph from Supabase tables"""
@@ -1047,31 +1029,39 @@ class FinleyGraphEngine:
             logger.warning("Graph enrichment failed (non-blocking)", error=str(e))
             return None
     
-    async def _clear_redis_cache(self, user_id: str):
-        """
-        Clear cached graph from Redis for user.
-        
-        FIX #3: Called when file is deleted to invalidate stale graph data.
-        Prevents ghost nodes from appearing in graph queries.
-        
-        FIX #26b: Handle case where supabase=None (cache-only mode).
-        """
-        if not self.redis_url:
-            logger.debug("Redis not configured, skipping cache clear")
-            return
-        
+    async def _save_to_cache(self, user_id: str, stats: GraphStats):
+        """Save graph stats to centralized cache"""
         try:
-            if AIOCACHE_AVAILABLE:
-                cache = self._get_cache()
-                
-                # Delete the cached graph for this user
-                cache_key = f"{user_id}"
-                await cache.delete(cache_key)
-                logger.info(f"✅ Cleared Redis cache for user {user_id}")
-            else:
-                logger.warning("aiocache not available, cannot clear Redis cache")
+            cache_key = f"finley_graph:{user_id}"
+            await self.cache.set(cache_key, stats.model_dump(), ttl=3600)
+            logger.info("graph_cached", user_id=user_id)
         except Exception as e:
-            logger.warning(f"Failed to clear Redis cache for user {user_id}: {e}")
+            logger.warning("Failed to cache graph (non-blocking)", error=str(e))
+    
+    async def _load_from_cache(self, user_id: str) -> Optional[GraphStats]:
+        """Load graph stats from centralized cache"""
+        try:
+            cache_key = f"finley_graph:{user_id}"
+            cached_data = await self.cache.get(cache_key)
+            if cached_data:
+                logger.info("graph_cache_hit", user_id=user_id)
+                return GraphStats(**cached_data)
+        except Exception as e:
+            logger.debug("Cache load failed (non-blocking)", error=str(e))
+        return None
+    
+    async def clear_graph_cache(self, user_id: str):
+        """Invalidate graph cache for a user using centralized cache"""
+        try:
+            cache_key = f"finley_graph:{user_id}"
+            await self.cache.delete(cache_key)
+            logger.info(f"Graph cache cleared for user {user_id}")
+        except Exception as e:
+            logger.warning(f"Failed to clear graph cache: {e}")
+    
+    async def _clear_redis_cache(self, user_id: str):
+        """Clear cached graph from Redis (calls clear_graph_cache)"""
+        await self.clear_graph_cache(user_id)
 
 
 # ============================================================================

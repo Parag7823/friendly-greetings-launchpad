@@ -1,14 +1,4 @@
-"""
-Production-Grade Causal Inference Engine
-=========================================
-
-Implements Bradford Hill criteria for causal relationship detection.
-Uses PostgreSQL RPC functions for efficient score calculation.
-
-Author: Senior Full-Stack Engineer
-Version: 2.0.0
-Date: 2025-11-05
-"""
+"""Production-grade causal inference engine using Bradford Hill criteria and PostgreSQL RPC functions."""
 
 import structlog
 import asyncio
@@ -44,8 +34,8 @@ from typing import Dict, List, Optional, Any, Tuple, Set
 from dataclasses import dataclass, asdict
 from enum import Enum
 
-# COMPULSORY: Embedding service for semantic intelligence
 from data_ingestion_normalization.embedding_service import get_embedding_service
+from core_infrastructure.transaction_manager import DatabaseTransactionManager
 
 logger = structlog.get_logger(__name__)
 
@@ -112,23 +102,13 @@ class CounterfactualAnalysis:
 
 
 class CausalInferenceEngine:
-    """
-    Production-grade causal inference engine for financial event analysis.
-    
-    Implements:
-    1. Bradford Hill criteria for causal detection
-    2. Root cause analysis using graph traversal
-    3. Counterfactual analysis for what-if scenarios
-    """
+    """Production-grade causal inference engine with Bradford Hill criteria, root cause analysis, and counterfactual scenarios."""
     
     def __init__(self, supabase_client, config: Optional[Dict[str, Any]] = None):
         self.supabase = supabase_client
         self.config = config or self._get_default_config()
-        
-        # Causal graph (built on demand)
         self.causal_graph: Optional[ig.Graph] = None
-        
-        # Metrics
+        self.transaction_manager = DatabaseTransactionManager(supabase_client) if supabase_client else None
         self.metrics = {
             'causal_analyses': 0,
             'root_cause_analyses': 0,
@@ -140,14 +120,7 @@ class CausalInferenceEngine:
         logger.info("✅ CausalInferenceEngine initialized")
     
     async def _generate_causal_embedding(self, causal_rel: 'CausalRelationship') -> Optional[List[float]]:
-        """
-        COMPULSORY: Generate BGE embedding for semantic similarity search of causal relationships.
-        
-        The embedding captures the semantic meaning of the causality for:
-        - Finding similar causal chains across different relationship types
-        - Semantic grouping of causal explanations
-        - AI-powered causal reasoning recommendations
-        """
+        """Generate BGE embedding for semantic similarity search of causal relationships."""
         try:
             # Build semantic text from causal analysis
             shap_explanation = causal_rel.criteria_details.get('shap_explanation', {})

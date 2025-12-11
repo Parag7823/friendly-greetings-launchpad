@@ -1,14 +1,4 @@
-"""
-Streaming File Processor for Finley AI
-======================================
-
-Memory-efficient streaming processor that handles large files without loading
-them entirely into memory. Prevents OOM crashes and enables processing of
-files up to several GB in size.
-
-Author: Principal Engineer
-Version: 1.0.0
-"""
+"""Memory-efficient streaming processor for large files without OOM crashes."""
 
 import asyncio
 import structlog
@@ -27,15 +17,12 @@ logger = structlog.get_logger(__name__)
 @dataclass
 class StreamingConfig:
     """Configuration for streaming operations - all values configurable via environment"""
-    chunk_size: int = 1000  # Rows per chunk (env: STREAMING_CHUNK_SIZE)
-    # FIX #6: Consolidated memory limit default to 1600MB (matches fastapi_backend_v2.py usage)
-    # Previously: 800MB default in streaming_processor.py vs 1600MB in fastapi_backend_v2.py
-    # Now: Single source of truth via environment variable STREAMING_MEMORY_LIMIT_MB
-    memory_limit_mb: int = 1600  # Memory limit in MB (env: STREAMING_MEMORY_LIMIT_MB)
-    max_file_size_gb: int = 5  # Maximum file size in GB (env: STREAMING_MAX_FILE_SIZE_GB)
-    temp_dir: Optional[str] = None  # Temp directory (env: STREAMING_TEMP_DIR)
-    enable_compression: bool = True  # Enable compression (env: STREAMING_ENABLE_COMPRESSION)
-    progress_callback_interval: int = 100  # Chunks between progress updates (env: STREAMING_PROGRESS_INTERVAL)
+    chunk_size: int = 1000
+    memory_limit_mb: int = 1600
+    max_file_size_gb: int = 5
+    temp_dir: Optional[str] = None
+    enable_compression: bool = True
+    progress_callback_interval: int = 100
     
     @staticmethod
     def from_env() -> 'StreamingConfig':
@@ -43,7 +30,6 @@ class StreamingConfig:
         import os
         return StreamingConfig(
             chunk_size=int(os.getenv('STREAMING_CHUNK_SIZE', '1000')),
-            # FIX #6: Updated default from 800 to 1600 for consistency
             memory_limit_mb=int(os.getenv('STREAMING_MEMORY_LIMIT_MB', '1600')),
             max_file_size_gb=int(os.getenv('STREAMING_MAX_FILE_SIZE_GB', '5')),
             temp_dir=os.getenv('STREAMING_TEMP_DIR'),
@@ -69,20 +55,10 @@ class MemoryMonitor:
     """Monitors memory usage during processing with auto-scaling for wide data"""
     
     def __init__(self, limit_mb: int = 500, estimated_row_width: int = 1):
-        """
-        Initialize memory monitor with optional auto-scaling.
-        
-        Args:
-            limit_mb: Base memory limit in MB (default 500)
-            estimated_row_width: Estimated number of columns per row (for auto-scaling)
-                                 Used to adjust limit for wide Excel sheets
-        """
+        """Initialize memory monitor with auto-scaling for wide Excel sheets"""
         self.process = psutil.Process()
         
-        # Auto-scale memory limit for wide data (100+ columns)
-        # Wide sheets need more memory per chunk due to DataFrame overhead
         if estimated_row_width > 50:
-            # Scale: 50 cols = 1x, 100 cols = 1.2x, 200 cols = 1.4x
             scale_factor = 1.0 + (min(estimated_row_width - 50, 150) / 500.0)
             self.limit_mb = max(limit_mb, int(limit_mb * scale_factor))
             logger.info(f"memory_limit_auto_scaled", base_limit=limit_mb, 
@@ -108,10 +84,7 @@ class StreamingExcelProcessor:
     
     def __init__(self, config: StreamingConfig):
         self.config = config
-        # Initialize with default; will be updated per sheet based on column count
         self.memory_monitor = MemoryMonitor(config.memory_limit_mb, estimated_row_width=1)
-        # FIX #15: Use aiometer rate limiter from centralized rate_limiter module
-        # Replaces ThreadPoolExecutor(max_workers=2) with library-based rate limiting
         self.rate_limiter = get_rate_limiter()
     
     async def process_excel_stream(self, file_path: str, 
@@ -302,7 +275,6 @@ class StreamingCSVProcessor:
                 
                 yield chunk
                 
-                # Memory management - check after EVERY chunk, not just every 10
                 if self.memory_monitor.check_memory_limit():
                     self.memory_monitor.force_garbage_collection()
                 
@@ -415,14 +387,13 @@ class StreamingFileProcessor:
             memory_usage_mb=self.memory_monitor.get_memory_usage_mb()
         )
 
-# Global streaming processor instance
 _streaming_processor: Optional[StreamingFileProcessor] = None
 
 def initialize_streaming_processor(config: Optional[StreamingConfig] = None):
     """Initialize the global streaming processor"""
     global _streaming_processor
     _streaming_processor = StreamingFileProcessor(config)
-    logger.info("✅ Streaming processor initialized")
+    logger.info("Streaming processor initialized")
 
 def get_streaming_processor() -> StreamingFileProcessor:
     """Get the global streaming processor instance"""
@@ -430,21 +401,7 @@ def get_streaming_processor() -> StreamingFileProcessor:
         raise Exception("Streaming processor not initialized. Call initialize_streaming_processor() first.")
     return _streaming_processor
 
-
-# ============================================================================
-# PRELOAD PATTERN: Initialize streaming processor at module-load time
-# ============================================================================
-# This runs automatically when the module is imported, eliminating the
-# need to call initialize_streaming_processor() manually and preventing
-# first-request latency.
-# 
-# BENEFITS:
-# - First request is instant (no cold-start delay)
-# - Shared across all worker instances
-# - Memory is allocated once, not per-instance
-
 try:
-    # Use environment-based configuration for preloading
     initialize_streaming_processor(StreamingConfig.from_env())
 except Exception as e:
-    logger.warning(f"Module-level streaming processor preload failed (will use fallback): {e}")
+    logger.warning(f"Module-level streaming processor preload failed: {e}")

@@ -1,17 +1,4 @@
-"""
-Semantic Relationship Extractor v2.0
-
-Production-grade semantic relationship extraction using:
-- Redis-backed distributed caching (aiocache)
-- Prometheus metrics (Grafana-ready)
-- Automatic rate limiting (aiometer)
-- Structured output validation (instructor)
-- Streaming support
-- AI-powered extraction (Groq)
-
-Author: Senior Full-Stack Engineer
-Version: 2.0.0
-"""
+"""Production-grade semantic relationship extraction with Redis caching, metrics, and rate limiting."""
 
 import asyncio
 import hashlib
@@ -40,6 +27,12 @@ from jinja2 import Environment, BaseLoader, select_autoescape
 
 # Embeddings - COMPULSORY: Import must succeed for semantic intelligence
 from data_ingestion_normalization.embedding_service import get_embedding_service
+
+# Centralized utilities
+from core_infrastructure.centralized_cache import safe_get_cache
+from core_infrastructure.rate_limiter import GlobalRateLimiter
+# REFACTORED: Using transaction manager for atomic database operations
+from core_infrastructure.transaction_manager import DatabaseTransactionManager, get_transaction_manager
 
 
 logger = structlog.get_logger(__name__)
@@ -255,6 +248,7 @@ class SemanticRelationshipExtractor:
         self.config = config or self._get_default_config()
         self._cache_hits = 0
         self._cache_misses = 0
+        self.rate_limiter = GlobalRateLimiter()
         logger.info("SemanticRelationshipExtractor initialized")
     
     def _get_default_config(self) -> Dict[str, Any]:
@@ -553,6 +547,14 @@ Provide: relationship_type, semantic_description, confidence (0.0-1.0), temporal
     async def _call_ai_with_instructor(self, prompt: str) -> Optional[SemanticRelationshipResponse]:
         """Call AI with instructor for auto-validated structured output."""
         try:
+            # Rate limit check before AI call
+            can_proceed, rate_msg = await self.rate_limiter.check_global_rate_limit(
+                "groq_semantic_extraction", "system"
+            )
+            if not can_proceed:
+                logger.warning("semantic_extraction_rate_limited", message=rate_msg)
+                return None
+            
             response = await self.groq.chat.completions.create(
                 model=self.config['semantic_model'],
                 response_model=SemanticRelationshipResponse,
@@ -593,33 +595,43 @@ Provide: relationship_type, semantic_description, confidence (0.0-1.0), temporal
             return None
     
     async def _store_in_database(self, semantic_rel: SemanticRelationship):
-        """Store semantic relationship in Supabase"""
+        """Store semantic relationship in Supabase using DatabaseTransactionManager for atomicity"""
         if not self.supabase:
             return
         
         try:
-            update_data = {
-                'semantic_description': semantic_rel.semantic_description,
-                'temporal_causality': semantic_rel.temporal_causality.value,
-                'business_logic': semantic_rel.business_logic.value,
-                'reasoning': semantic_rel.reasoning,
-                'key_factors': semantic_rel.key_factors,
-                'metadata': semantic_rel.metadata,
-                'updated_at': datetime.utcnow().isoformat()
-            }
+            # Initialize transaction manager if not already done
+            if not hasattr(self, 'transaction_manager'):
+                self.transaction_manager = get_transaction_manager(self.supabase)
             
-            if semantic_rel.embedding:
-                update_data['relationship_embedding'] = semantic_rel.embedding
-            
-            self.supabase.table('relationship_instances').update(update_data).eq(
-                'source_event_id', semantic_rel.source_event_id
-            ).eq(
-                'target_event_id', semantic_rel.target_event_id
-            ).execute()
-            
-            logger.debug(f"Stored: {semantic_rel.source_event_id} → {semantic_rel.target_event_id}")
-            
-            try:
+            # USE TRANSACTION MANAGER for atomic multi-table updates
+            async with self.transaction_manager.transaction(
+                user_id=semantic_rel.metadata.get('user_id', 'unknown'),
+                operation_type="store_semantic_relationship"
+            ) as txn_ctx:
+                update_data = {
+                    'semantic_description': semantic_rel.semantic_description,
+                    'temporal_causality': semantic_rel.temporal_causality.value,
+                    'business_logic': semantic_rel.business_logic.value,
+                    'reasoning': semantic_rel.reasoning,
+                    'key_factors': semantic_rel.key_factors,
+                    'metadata': semantic_rel.metadata,
+                    'updated_at': datetime.utcnow().isoformat()
+                }
+                
+                if semantic_rel.embedding:
+                    update_data['relationship_embedding'] = semantic_rel.embedding
+                
+                # First write: Update relationship_instances
+                self.supabase.table('relationship_instances').update(update_data).eq(
+                    'source_event_id', semantic_rel.source_event_id
+                ).eq(
+                    'target_event_id', semantic_rel.target_event_id
+                ).execute()
+                
+                logger.debug(f"Stored: {semantic_rel.source_event_id} → {semantic_rel.target_event_id}")
+                
+                # Second write: Update normalized_events with semantic metadata
                 self.supabase.table('normalized_events').update({
                     'semantic_links': [
                         {
@@ -637,8 +649,8 @@ Provide: relationship_type, semantic_description, confidence (0.0-1.0), temporal
                     'semantic_confidence': semantic_rel.confidence,
                     'updated_at': datetime.utcnow().isoformat()
                 }).eq('raw_event_id', semantic_rel.source_event_id).execute()
-            except Exception as norm_update_err:
-                logger.warning(f"Failed to update normalized_events with semantic metadata: {norm_update_err}")
+                
+                logger.debug(f"Updated normalized_events with semantic metadata (transactional)")
             
         except Exception as e:
             logger.error(f"Database store failed: {e}")

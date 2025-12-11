@@ -1,13 +1,4 @@
-"""
-Database Transaction Manager for Finley AI
-==========================================
-
-Provides atomic transaction management for complex multi-table operations.
-Ensures data consistency and proper rollback on failures.
-
-Author: Principal Engineer
-Version: 1.0.0
-"""
+"""Database Transaction Manager - Atomic transaction management for multi-table operations."""
 
 import asyncio
 import structlog
@@ -50,18 +41,7 @@ class TransactionResult:
     execution_time_ms: int = 0
 
 class DatabaseTransactionManager:
-    """
-    Manages atomic database transactions for complex operations.
-    
-    Features:
-    - Atomic multi-table operations (HTTP client)
-    - RPC-based ACID transactions (Postgres functions)
-    - Automatic rollback on failure
-    - Transaction logging and monitoring
-    - Deadlock detection and retry
-    - Memory-efficient operation batching
-    - Idempotency support for safe retries
-    """
+    """Manages atomic database transactions with automatic rollback and deadlock retry."""
     
     def __init__(self, supabase: Client):
         self.supabase = supabase
@@ -82,43 +62,7 @@ class DatabaseTransactionManager:
     async def transaction(self, transaction_id: Optional[str] = None, 
                          user_id: Optional[str] = None,
                          operation_type: str = "data_processing"):
-        """
-        Context manager for atomic database transactions.
-        
-        TRANSACTION SAFETY NOTES (FIX #40):
-        - HTTP client transactions: Each .execute() is a separate HTTP request
-        - Network failure between requests = partial transaction
-        - SOLUTION: Use idempotency keys and unique constraints for safe retries
-        - For true ACID: Deploy Postgres RPC functions (future enhancement)
-        - Deadlock detection: Automatic retry with exponential backoff (3 attempts)
-        
-        CASCADING DELETE NOTES (FIX #41):
-        - Manual cascading deletes implemented for: raw_events, normalized_entities, raw_records
-        - LIMITATION: Should use database foreign keys with ON DELETE CASCADE
-        - Current approach is brittle and can miss tables, prone to orphaned data
-        - FUTURE: Migrate to database-level cascading constraints
-        
-        ROLLBACK OPTIMIZATION (FIX #42):
-        - Fetches original values ONLY for fields being updated (prevents concurrent overwrites)
-        - Extra SELECT query per update (line 397) - could use Postgres RETURNING clause
-        - Trade-off: Current approach is safer but less efficient
-        
-        MEMORY LEAK FIX (FIX #45):
-        - Guaranteed cleanup in finally block even if exception occurs before yield
-        - Uses try-except-finally pattern to ensure active_transactions dict is cleaned
-        - Prevents memory leak of transaction metadata
-        
-        IDEMPOTENCY STRATEGY:
-        - All operations include transaction_id for deduplication
-        - Unique constraints prevent duplicate inserts on retry
-        - Rollback is best-effort (may be partial on network failure)
-        
-        Usage:
-            async with transaction_manager.transaction() as tx:
-                await tx.insert('raw_records', {...})
-                await tx.insert('raw_events', {...})
-                await tx.update('ingestion_jobs', {...})
-        """
+        """Context manager for atomic database transactions with automatic rollback."""
         if transaction_id is None:
             transaction_id = str(uuid.uuid4())
         

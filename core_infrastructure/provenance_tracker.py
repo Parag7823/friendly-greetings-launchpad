@@ -1,22 +1,4 @@
-"""
-Provenance Tracker - Complete Data Lineage and Tamper Detection
-================================================================
-
-This module provides comprehensive provenance tracking for Finley's financial data,
-enabling "Google Maps for your financial data" - every number can explain itself.
-
-Features:
-- Row-level tamper detection via centralized hashing (xxh3_128)
-- Full transformation chain tracking (lineage path)
-- Audit trail with created_by/modified_by
-- "Ask Why" explainability support
-
-Author: Finley AI Team
-Date: 2025-10-16
-
-FIX #4: Uses centralized hashing from database_optimization_utils.py
-to ensure compatibility with production_duplicate_detection_service.py
-"""
+"""Provenance Tracker - Complete data lineage and tamper detection with centralized hashing."""
 
 import orjson as json  # LIBRARY REPLACEMENT: orjson for 3-5x faster JSON parsing
 from datetime import datetime
@@ -51,23 +33,10 @@ class LineageStep:
 
 
 class ProvenanceTracker:
-    """
-    Tracks complete provenance for financial data events.
-    
-    Provides:
-    1. Row hash calculation for tamper detection
-    2. Lineage path construction for transformation tracking
-    3. Audit trail management
-    """
+    """Tracks complete provenance for financial data events with tamper detection and lineage."""
     
     def __init__(self):
         self.logger = structlog.get_logger(__name__)
-    
-    # ========================================================================
-    # ROW HASH CALCULATION (Tamper Detection)
-    # ========================================================================
-    # FIX #4: These methods now delegate to centralized functions in database_optimization_utils
-    # to ensure consistency with production_duplicate_detection_service
     
     def calculate_row_hash(
         self,
@@ -75,20 +44,7 @@ class ProvenanceTracker:
         row_index: int,
         payload: Dict[str, Any]
     ) -> str:
-        """
-        Calculate normalized hash of row data for duplicate detection alignment.
-        
-        CRITICAL FIX #4: Delegates to centralized calculate_row_hash() function
-        to ensure consistency with production_duplicate_detection_service.
-        
-        Args:
-            source_filename: Name of source file
-            row_index: Row index in source file
-            payload: Original row data as dictionary
-            
-        Returns:
-            xxh3_128 hash as hex string (32 characters)
-        """
+        """Calculate normalized hash of row data for duplicate detection (delegates to centralized function)."""
         # Delegate to centralized function
         return calculate_row_hash(source_filename, row_index, payload)
     
@@ -99,43 +55,12 @@ class ProvenanceTracker:
         row_index: int,
         payload: Dict[str, Any]
     ) -> tuple:
-        """
-        Verify row integrity by comparing stored hash with recalculated hash.
-        
-        CRITICAL FIX #4: Delegates to centralized verify_row_hash() function
-        to ensure consistency with production_duplicate_detection_service.
-        
-        Args:
-            stored_hash: Hash stored in database
-            source_filename: Name of source file
-            row_index: Row index in source file
-            payload: Current row data
-            
-        Returns:
-            Tuple of (is_valid: bool, message: str)
-        """
+        """Verify row integrity by comparing stored hash with recalculated hash."""
         # Delegate to centralized function
         return verify_row_hash(stored_hash, source_filename, row_index, payload)
     
-    # ========================================================================
-    # LINEAGE PATH CONSTRUCTION (Transformation Tracking)
-    # ========================================================================
-    
     def create_lineage_path(self, initial_step: str = "ingestion") -> List[Dict[str, Any]]:
-        """
-        Create initial lineage path with ingestion step.
-        
-        Args:
-            initial_step: Name of initial step (default: "ingestion")
-            
-        Returns:
-            List containing initial lineage step
-            
-        Example:
-            >>> lineage = tracker.create_lineage_path("file_upload")
-            >>> print(lineage)
-            [{'step': 'file_upload', 'operation': 'raw_extract', 'timestamp': '2025-10-16T10:00:00Z', 'metadata': {}}]
-        """
+        """Create initial lineage path with ingestion step."""
         return [self._build_lineage_step(
             step=initial_step,
             operation="raw_extract",

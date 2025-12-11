@@ -15,35 +15,28 @@ from typing import Optional
 
 class ConnectorConfig(BaseSettings):
     """Connector and sync configuration."""
-    concurrency: int = 5  # Max concurrent downloads per sync
-    max_concurrency: int = 10  # Hard limit
-    
-    # Sync settings
+    concurrency: int = 5
+    max_concurrency: int = 10
     incremental_sync_enabled: bool = True
-    cursor_validity_days: int = 30  # Cursors older than this are discarded
+    cursor_validity_days: int = 30
     
     # Rate limiting (global defaults)
     rate_limit_per_second: int = 10
     rate_limit_burst: int = 20
-    
-    # CRITICAL FIX #1: Global rate limiting across all users
-    # UPDATED (Dec 1, 2025): Increased from 5 to 20 to support 50 concurrent users
-    # Math: 50 users × 100 queries/sync = 5000 concurrent queries
-    # With 20 syncs/min: All 50 users can start within 2.5 minutes (vs 10 minutes at 5/min)
-    global_max_syncs_per_minute: int = 20  # Max syncs per minute per provider (across ALL users)
-    global_max_queued_syncs_per_provider: int = 100  # Max queued syncs per provider
-    global_max_queued_syncs_per_user: int = 10  # Max queued syncs per user
-    sync_lock_expiry_seconds: int = 1800  # 30 minutes - auto-cleanup for stuck locks
+    global_max_syncs_per_minute: int = 20
+    global_max_queued_syncs_per_provider: int = 100
+    global_max_queued_syncs_per_user: int = 10
+    sync_lock_expiry_seconds: int = 1800
     
     # Provider-specific rate limits (requests per second)
     gmail_rate_limit: int = 10
     dropbox_rate_limit: int = 5
     google_drive_rate_limit: int = 10
     zoho_mail_rate_limit: int = 5
-    quickbooks_rate_limit: int = 3  # QB has stricter limits
-    xero_rate_limit: int = 3  # Xero has strict API limits
+    quickbooks_rate_limit: int = 3
+    xero_rate_limit: int = 3
     zoho_books_rate_limit: int = 5
-    stripe_rate_limit: int = 10  # Stripe allows higher concurrency
+    stripe_rate_limit: int = 10
     razorpay_rate_limit: int = 4
     
     # Provider-specific concurrency limits
@@ -99,20 +92,11 @@ class AppConfig(BaseSettings):
     """Application-wide configuration."""
     environment: str = "development"
     debug: bool = False
-    
-    # API settings
     api_host: str = "0.0.0.0"
     api_port: int = 8000
-    
-    # File upload settings
     max_upload_size_mb: int = 500
     upload_temp_dir: str = "/tmp"
-    
-    # CRITICAL FIX #7: Attachment size limit to prevent OOM crashes
-    # Prevents downloading huge attachments that exhaust worker RAM
-    # Math: 5 users × 10 attachments × 50MB = 2.5GB RAM → OOM on 2GB worker
-    # Solution: Limit to 25MB per attachment (reasonable for business documents)
-    max_attachment_size_mb: int = 25  # Max size for provider attachments (Gmail, Dropbox, etc.)
+    max_attachment_size_mb: int = 25
     
     class Config:
         env_prefix = "APP_"
@@ -146,13 +130,5 @@ def get_airbyte_config() -> AirbytePythonConfig:
     return airbyte_config
 
 
-# ============================================================================
-# PRELOAD PATTERN: Config singletons are initialized at module-load time
-# ============================================================================
-# The singletons (connector_config, queue_config, app_config, airbyte_config)
-# defined above (lines 123-126) are automatically created when module is imported.
-# This is the ideal preload pattern - no additional preload code needed!
-#
-# All config values are immediately available after import:
-# - from config_manager import get_connector_config, get_app_config, etc.
+# Config singletons are initialized at module-load time and available immediately after import
 

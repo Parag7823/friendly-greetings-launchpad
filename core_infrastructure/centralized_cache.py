@@ -1,20 +1,4 @@
-"""
-Centralized Redis Cache Configuration
-======================================
-Single source of truth for all caching across the application.
-Replaces 5 different caching systems with one production-ready aiocache Redis backend.
-
-Usage:
-    from centralized_cache import get_cache, initialize_cache
-    
-    # Initialize once at startup
-    cache = initialize_cache()
-    
-    # Use in any module
-    cache = get_cache()
-    await cache.set("key", value, ttl=3600)
-    result = await cache.get("key")
-"""
+"""Centralized Redis Cache - Single source of truth for all caching across the application."""
 
 import os
 import structlog
@@ -29,9 +13,9 @@ logger = structlog.get_logger(__name__)
 _cache_instance: Optional[Cache] = None
 _health_check_task = None
 
-# CRITICAL FIX: Circuit breaker configuration - hybrid Redis + in-memory fallback
-CIRCUIT_BREAKER_THRESHOLD = 5  # Open circuit after 5 failures
-CIRCUIT_BREAKER_TIMEOUT = 60  # Reset after 60 seconds
+# Circuit breaker configuration - hybrid Redis + in-memory fallback
+CIRCUIT_BREAKER_THRESHOLD = 5
+CIRCUIT_BREAKER_TIMEOUT = 60
 CIRCUIT_BREAKER_KEY = "cache:circuit_breaker"
 CIRCUIT_BREAKER_FAILURE_KEY = "cache:circuit_breaker:failures"
 
@@ -41,12 +25,7 @@ _circuit_breaker_failure_count = 0
 _circuit_breaker_last_reset = None
 
 def _parse_redis_url(redis_url: str) -> Dict[str, Any]:
-    """
-    FIX #16: Extract Redis URL parsing to eliminate duplication.
-    
-    Parses Redis URL and returns connection components.
-    Used by both __init__ and initialize_cache.
-    """
+    """Parse Redis URL and return connection components."""
     from urllib.parse import urlparse
     
     parsed = urlparse(redis_url)
@@ -61,17 +40,7 @@ def _parse_redis_url(redis_url: str) -> Dict[str, Any]:
 
 
 class CentralizedCache:
-    """
-    Production-ready centralized cache with Redis backend.
-    
-    Features:
-    - Redis backend for distributed caching across workers/instances
-    - JSON serialization for complex objects
-    - Configurable TTL
-    - Connection pooling
-    - Automatic reconnection
-    - Metrics tracking
-    """
+    """Production-ready centralized cache with Redis backend and circuit breaker."""
     
     def __init__(self, redis_url: Optional[str] = None, default_ttl: int = 3600):
         """
@@ -128,15 +97,7 @@ class CentralizedCache:
         logger.info("centralized_cache_initialized", redis_url=self.redis_url, default_ttl=default_ttl)
     
     async def _check_circuit_breaker(self) -> bool:
-        """
-        Check circuit breaker state with in-memory fallback.
-        
-        CRITICAL FIX: When Redis is down, use in-memory circuit breaker state
-        to prevent app hangs trying to check Redis-based breaker.
-        
-        Returns:
-            True if circuit is open (cache unavailable), False if closed (cache available)
-        """
+        """Check circuit breaker state with in-memory fallback."""
         global _circuit_breaker_open, _circuit_breaker_failure_count, _circuit_breaker_last_reset
         from datetime import datetime, timedelta
         
@@ -168,15 +129,7 @@ class CentralizedCache:
             return _circuit_breaker_open
     
     async def _update_circuit_breaker(self, error: Exception) -> None:
-        """
-        Update circuit breaker state with in-memory fallback.
-        
-        CRITICAL FIX: Increment failure count in Redis, but also update
-        in-memory state so app doesn't hang if Redis is down.
-        
-        Args:
-            error: The exception that triggered the failure
-        """
+        """Update circuit breaker state with in-memory fallback."""
         global _circuit_breaker_open, _circuit_breaker_failure_count, _circuit_breaker_last_reset
         from datetime import datetime
         

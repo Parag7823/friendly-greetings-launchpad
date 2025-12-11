@@ -1,13 +1,4 @@
-"""
-Error Recovery System for Finley AI
-===================================
-
-Comprehensive error recovery and cleanup system that handles failed operations,
-partial data corruption, and provides robust rollback mechanisms.
-
-Author: Principal Engineer
-Version: 1.0.0
-"""
+"""Error Recovery System - Comprehensive error recovery and cleanup with rollback mechanisms."""
 
 import asyncio
 import structlog
@@ -63,17 +54,7 @@ class RecoveryResult:
     recovery_time_ms: int = 0
 
 class ErrorRecoverySystem:
-    """
-    Comprehensive error recovery system.
-    
-    Features:
-    - Automatic cleanup of partial data
-    - Transaction rollback coordination
-    - Failed job recovery
-    - WebSocket connection cleanup
-    - Data consistency validation
-    - Retry mechanisms with exponential backoff
-    """
+    """Comprehensive error recovery with automatic cleanup, rollback, and retry mechanisms."""
     
     def __init__(self, supabase: Client):
         self.supabase = supabase

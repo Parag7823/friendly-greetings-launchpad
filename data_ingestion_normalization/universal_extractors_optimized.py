@@ -1,21 +1,6 @@
-"""Universal Extractors v3.1.0
-
-Multi-format data extraction using:
-- Direct lightweight parsers (pdfminer.six, python-docx, python-pptx, csv)
-- OCR processing (easyocr)
-- PII detection (presidio-analyzer)
-- Redis-backed caching (aiocache)
-- Structured logging (structlog)
-
-ONNX-FREE: No unstructured/onnxruntime dependencies
-
-Author: Senior Full-Stack Engineer
-Version: 3.1.0
-"""
+"""Multi-format data extraction with direct parsers, OCR, PII detection, and caching."""
 
 import asyncio
-import hashlib
-import xxhash
 import time
 from datetime import datetime
 from typing import Any, Dict, List, Optional
@@ -24,29 +9,26 @@ from pathlib import Path
 import tempfile
 import io
 
-# REMOVED: Direct easyocr import - lazy-loaded via inference_service
 import structlog
 from aiocache import cached, Cache
 from aiocache.serializers import JsonSerializer
 from pydantic import BaseModel, Field, validator
 from pydantic_settings import BaseSettings
 
-# ONNX-FREE: Direct lightweight parsers (NO unstructured/onnxruntime)
 from pdfminer.high_level import extract_text as extract_pdf_text
 from docx import Document as DocxDocument
 from pptx import Presentation
 import csv
-import orjson as json_lib  # LIBRARY REPLACEMENT: orjson for 3-5x faster JSON parsing
+import orjson as json_lib
 
-# GENIUS: presidio for PII/field detection (50x faster)
 from presidio_analyzer import AnalyzerEngine, Pattern, PatternRecognizer
+
+# Core infrastructure utilities (Source of Truth)
+from core_infrastructure.database_optimization_utils import calculate_row_hash
+from core_infrastructure.security_system import InputSanitizer
 
 logger = structlog.get_logger(__name__)
 
-
-# ============================================================================
-# PYDANTIC MODELS (Type-Safe Configuration)
-# ============================================================================
 
 class ExtractorConfig(BaseSettings):
     """Type-safe configuration with auto-validation"""
@@ -74,26 +56,11 @@ class ExtractionResult:
     error: Optional[str] = None
 
 
-# ============================================================================
-# NASA-GRADE UNIVERSAL EXTRACTORS (200 lines vs 793 lines)
-# ============================================================================
-
 class UniversalExtractorsOptimized:
-    """
-    NASA-GRADE Universal Extractors - ONNX-FREE (v3.1.0)
+    """Universal extractors with direct parsers, OCR, PII detection, and caching"""
     
-    GENIUS FEATURES:
-    - Direct parsers: pdfminer.six (PDF), python-docx (DOCX), python-pptx (PPTX), csv, json
-    - easyocr: 92% OCR accuracy + spatial data
-    - presidio: PII/field detection (50x faster)
-    - aiocache: Decorator-based caching
-    - structlog: JSON logging
-    - NO onnxruntime dependency (fixes Railway executable stack errors)
-    """
-    
-    def __init__(self, openai_client=None, cache_client=None, config=None):
+    def __init__(self, openai_client=None, cache_client=None, config=None, sanitizer=None):
         self.openai = openai_client
-        # CRITICAL FIX: Use centralized Redis cache - FAIL FAST if unavailable
         from core_infrastructure.centralized_cache import safe_get_cache
         self.cache = cache_client or safe_get_cache()
         if self.cache is None:
@@ -103,6 +70,9 @@ class UniversalExtractorsOptimized:
                 "MEMORY cache fallback removed to prevent cache divergence across workers."
             )
         self.config = config or ExtractorConfig()
+        
+        # Initialize security singleton (Source of Truth for sanitization)
+        self.sanitizer = sanitizer or InputSanitizer()
         
         # CRITICAL FIX: Lazy-load OCR via inference service
         # This prevents 200MB-1GB memory per worker and GPU contention
@@ -689,7 +659,11 @@ class UniversalExtractorsOptimized:
             return {'text': '', 'format': 'image', 'error': str(e)}
     
     def _generate_extraction_id(self, file_content_or_path, filename: str, user_id: Optional[str]) -> str:
-        """Generate deterministic extraction ID using xxhash
+        """
+        Generate deterministic extraction ID using standardized row hashing.
+        
+        INTEGRATION NOTE: Uses database_optimization_utils.calculate_row_hash
+        for semantic normalization and consistent hashing across all modules.
         
         Args:
             file_content_or_path: Either bytes (file content) or str (file path)
@@ -700,23 +674,26 @@ class UniversalExtractorsOptimized:
             Deterministic extraction ID
         """
         try:
-            # Hash file content or path
-            if isinstance(file_content_or_path, bytes):
-                content_hash = xxhash.xxh64(file_content_or_path).hexdigest()[:8]
-            else:
-                # It's a path
-                content_hash = xxhash.xxh64(str(file_content_or_path).encode()).hexdigest()[:8]
+            # Use standardized row hash (Source of Truth for hashing)
+            payload = {
+                'filename': filename or 'unknown',
+                'user_id': user_id or 'anon',
+                'content_type': 'bytes' if isinstance(file_content_or_path, bytes) else 'path'
+            }
             
-            # Hash filename
-            filename_part = xxhash.xxh64((filename or "-").encode()).hexdigest()[:6]
+            extraction_hash = calculate_row_hash(
+                source_filename=filename or 'unknown',
+                row_index=0,
+                payload=payload
+            )
             
-            # User part
             user_part = (user_id or "anon")[:12]
-            
-            return f"extract_{user_part}_{filename_part}_{content_hash}"
+            return f"extract_{user_part}_{extraction_hash[:16]}"
         except Exception as e:
             logger.error(f"Failed to generate extraction ID: {e}")
-            return f"extract_error_{xxhash.xxh64(str(time.time()).encode()).hexdigest()[:12]}"
+            import hashlib
+            fallback_hash = hashlib.sha256(str(time.time()).encode()).hexdigest()[:12]
+            return f"extract_error_{fallback_hash}"
     
     def _calculate_confidence(self, extracted_data: Dict) -> float:
         """GENIUS: Entropy-based confidence calculation"""

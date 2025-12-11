@@ -1,15 +1,4 @@
-"""Universal Field Detector v3.0.0
-
-Multi-faceted field type detection using:
-- Format validation (validators library)
-- Semantic pattern matching
-- PII detection (presidio-analyzer)
-- Parallel processing with caching (aiocache)
-- AI fallback (instructor + Groq)
-
-Author: Senior Full-Stack Engineer
-Version: 3.0.0
-"""
+"""Multi-faceted field type detection with format validation, PII detection, and AI fallback."""
 
 import asyncio
 import hashlib
@@ -32,8 +21,8 @@ import instructor
 from groq import AsyncGroq
 import os
 
-# CRITICAL FIX: Import centralized cache for aiocache @cached decorator
 from core_infrastructure.centralized_cache import safe_get_cache
+from core_infrastructure.rate_limiter import GlobalRateLimiter
 
 logger = structlog.get_logger(__name__)
 
@@ -90,7 +79,7 @@ class UniversalFieldDetector:
     
     @classmethod
     def _preload_analyzer_sync(cls):
-        """Initialize presidio analyzer at module-load time."""
+        """Initialize presidio analyzer at module-load time"""
         if cls._analyzer_preloaded:
             return cls._class_analyzer
         
@@ -110,11 +99,11 @@ class UniversalFieldDetector:
             
             cls._class_analyzer = analyzer
             cls._analyzer_preloaded = True
-            logger.info("✅ PRELOAD: Presidio analyzer built at module-load time")
+            logger.info("Presidio analyzer built at module-load time")
             return analyzer
         except Exception as e:
-            logger.warning(f"⚠️ PRELOAD: Presidio analyzer build failed, will use fallback: {e}")
-            cls._analyzer_preloaded = True  # Don't retry
+            logger.warning(f"Presidio analyzer build failed, will use fallback: {e}")
+            cls._analyzer_preloaded = True
             return None
     
     def __init__(self, openai_client=None):
@@ -131,7 +120,9 @@ class UniversalFieldDetector:
         else:
             self.groq_client = None
         
-        logger.info("NASA-GRADE UniversalFieldDetector v3.0.0 initialized (PRELOADED analyzer)",
+        self.rate_limiter = GlobalRateLimiter()
+        
+        logger.info("UniversalFieldDetector initialized",
                    field_patterns=sum(len(v) for v in self.field_patterns.values()),
                    format_patterns=len(self.format_patterns),
                    analyzer_ready=self.analyzer is not None)
@@ -335,6 +326,12 @@ class UniversalFieldDetector:
     async def _ai_fallback_with_instructor(self, field_name: str, sample_value: str) -> Optional[Dict[str, Any]]:
         """AI fallback using instructor + Jinja2."""
         try:
+            # Apply rate limiting before AI call
+            can_sync, msg = await self.rate_limiter.check_global_rate_limit("groq_field_detection", "system")
+            if not can_sync:
+                logger.warning(f"Rate limit exceeded for AI field detection: {msg}")
+                return None
+            
             prompt_template = Template("""
 You are a financial data expert. Analyze this field:
 Field Name: {{ field_name }}
@@ -407,3 +404,284 @@ try:
     UniversalFieldDetector._preload_analyzer_sync()
 except Exception as e:
     logger.warning(f"Module-level analyzer preload failed: {e}")
+
+
+# ============================================================================
+# FIELD MAPPING LEARNER (Merged from field_mapping_learner.py)
+# ============================================================================
+# Production-grade field mapping learning system with:
+# - Async batch learning from successful extractions
+# - Confidence scoring based on extraction success
+# - Platform and document type awareness
+# - Graceful degradation on DB errors
+# - Exponential backoff retry strategy
+
+from dataclasses import dataclass
+from supabase import Client
+from collections import defaultdict
+
+# LIBRARY FIX: Use tenacity for exponential backoff retry (replaces custom asyncio.sleep loop)
+try:
+    from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+    TENACITY_AVAILABLE = True
+except ImportError:
+    TENACITY_AVAILABLE = False
+    logger.warning("tenacity not installed, field mapping retries will be disabled")
+
+
+@dataclass
+class FieldMappingRecord:
+    """Structured record for a field mapping observation"""
+    user_id: str
+    source_column: str
+    target_field: str
+    platform: Optional[str]
+    document_type: Optional[str]
+    filename_pattern: Optional[str]  # FIX #10: Add filename pattern support
+    confidence: float
+    extraction_success: bool
+    metadata: Dict[str, Any]
+
+
+class FieldMappingLearner:
+    """
+    UNIVERSAL FIELD MAPPING LEARNER
+    
+    Learns field mappings from successful extractions and stores them
+    in the database for future use. Uses async batching and retry logic.
+    """
+    
+    def __init__(
+        self,
+        supabase: Optional[Client] = None,
+        batch_size: int = 50,
+        flush_interval: float = 5.0,
+        max_retries: int = 3
+    ):
+        self.supabase = supabase
+        self.batch_size = batch_size
+        self.flush_interval = flush_interval
+        self.max_retries = max_retries
+        self._total_learned = 0
+        self._total_failed = 0
+        self._running = False  # Track if learner is running
+        
+    async def learn_mapping(
+        self,
+        user_id: str,
+        source_column: str,
+        target_field: str,
+        platform: Optional[str] = None,
+        document_type: Optional[str] = None,
+        filename_pattern: Optional[str] = None,  # FIX #10: Add filename_pattern parameter
+        confidence: float = 0.8,
+        extraction_success: bool = True,
+        metadata: Optional[Dict[str, Any]] = None
+    ):
+        """
+        Learn a field mapping from a successful extraction.
+        
+        Args:
+            user_id: User ID
+            source_column: Source column name from the file
+            target_field: Target field name (e.g., 'amount', 'vendor', 'date')
+            platform: Optional platform name
+            document_type: Optional document type
+            filename_pattern: Optional filename pattern (e.g., 'invoice_*.csv')
+            confidence: Confidence score (0-1)
+            extraction_success: Whether the extraction was successful
+            metadata: Additional metadata
+        """
+        if not user_id or not source_column or not target_field:
+            return
+        
+        try:
+            from core_infrastructure.fastapi_backend_v2 import get_arq_pool
+            pool = await get_arq_pool()
+            
+            mapping_data = {
+                'user_id': user_id,
+                'source_column': source_column,
+                'target_field': target_field,
+                'platform': platform,
+                'document_type': document_type,
+                'filename_pattern': filename_pattern,
+                'confidence': confidence,
+                'extraction_success': extraction_success,
+                'metadata': metadata or {},
+                'observed_at': datetime.utcnow().isoformat()
+            }
+            
+            await pool.enqueue_job('learn_field_mapping_batch', mappings=[mapping_data])
+            self._total_learned += 1
+            logger.debug(f"✅ Enqueued field mapping to ARQ: {source_column} → {target_field}")
+            
+        except Exception as e:
+            logger.error(f"Failed to enqueue field mapping to ARQ: {e}")
+            self._total_failed += 1
+            try:
+                if self.supabase:
+                    await self._write_mapping_with_retry(mapping_data)
+            except Exception as fallback_error:
+                logger.error(f"Fallback DB write also failed: {fallback_error}")
+    
+    def _write_mapping_with_retry_wrapper(self, mapping_data: Dict) -> bool:
+        """Wrapper for retry decorator when tenacity is available."""
+        if not TENACITY_AVAILABLE:
+            return asyncio.run(self._write_mapping_direct(mapping_data))
+        
+        @retry(
+            stop=stop_after_attempt(3),
+            wait=wait_exponential(multiplier=1, min=1, max=10),
+            retry=retry_if_exception_type(Exception),
+            reraise=True
+        )
+        async def _retry_logic():
+            return await self._write_mapping_direct(mapping_data)
+        
+        return asyncio.run(_retry_logic())
+    
+    async def _write_mapping_with_retry(self, mapping_data: Dict) -> bool:
+        """Write mapping to database with exponential backoff retry."""
+        return await self._write_mapping_direct(mapping_data)
+    
+    async def _write_mapping_direct(self, mapping_data: Dict) -> bool:
+        """Direct database write without retry wrapper."""
+        if not self.supabase:
+            logger.warning("No Supabase client available for field mapping learning")
+            return False
+        
+        try:
+            result = self.supabase.rpc(
+                'upsert_field_mapping',
+                {
+                    'p_user_id': mapping_data['user_id'],
+                    'p_source_column': mapping_data['source_column'],
+                    'p_target_field': mapping_data['target_field'],
+                    'p_platform': mapping_data['platform'],
+                    'p_document_type': mapping_data['document_type'],
+                    'p_confidence': mapping_data['confidence'],
+                    'p_mapping_source': 'ai_learned',
+                    'p_metadata': mapping_data['metadata']
+                }
+            ).execute()
+            
+            if result.data:
+                logger.debug(f"Learned field mapping: {mapping_data['source_column']} -> {mapping_data['target_field']}")
+                return True
+            else:
+                logger.warning("Failed to upsert field mapping")
+                raise Exception("Upsert returned no data")
+                
+        except Exception as e:
+            logger.warning(f"Error writing field mapping: {e}")
+            raise
+        
+    async def get_mappings(
+        self,
+        user_id: str,
+        platform: Optional[str] = None,
+        min_confidence: float = 0.5
+    ) -> Dict[str, str]:
+        """Retrieve learned field mappings for a user."""
+        if not self.supabase or not user_id:
+            return {}
+        
+        try:
+            result = self.supabase.rpc(
+                'get_user_field_mappings',
+                {
+                    'p_user_id': user_id,
+                    'p_platform': platform
+                }
+            ).execute()
+            
+            if not result.data:
+                return {}
+            
+            mappings = {}
+            for row in result.data:
+                target_field = row.get('target_field')
+                source_column = row.get('source_column')
+                confidence = row.get('confidence', 0.0)
+                
+                if confidence < min_confidence:
+                    continue
+                
+                if target_field not in mappings or confidence > mappings[target_field]['confidence']:
+                    mappings[target_field] = {
+                        'source_column': source_column,
+                        'confidence': confidence
+                    }
+            
+            return {
+                target: data['source_column']
+                for target, data in mappings.items()
+            }
+            
+        except Exception as e:
+            logger.error(f"Error retrieving field mappings: {e}")
+            return {}
+    
+    async def start(self):
+        """Start the learner."""
+        self._running = True
+
+
+# Global singleton instance
+_global_field_mapping_learner: Optional[FieldMappingLearner] = None
+
+
+def get_field_mapping_learner(supabase: Optional[Client] = None) -> FieldMappingLearner:
+    """Get or create the global field mapping learner instance."""
+    global _global_field_mapping_learner
+    
+    if _global_field_mapping_learner is None:
+        _global_field_mapping_learner = FieldMappingLearner(supabase=supabase)
+    
+    if supabase is not None and _global_field_mapping_learner.supabase is None:
+        _global_field_mapping_learner.supabase = supabase
+        
+    return _global_field_mapping_learner
+
+
+async def learn_field_mapping(
+    user_id: str,
+    source_column: str,
+    target_field: str,
+    platform: Optional[str] = None,
+    document_type: Optional[str] = None,
+    confidence: float = 0.8,
+    extraction_success: bool = True,
+    metadata: Optional[Dict[str, Any]] = None,
+    supabase: Optional[Client] = None
+):
+    """Convenience function to learn a field mapping."""
+    learner = get_field_mapping_learner(supabase)
+    
+    # Start learner if not running
+    if not learner._running:
+        await learner.start()
+        
+    await learner.learn_mapping(
+        user_id=user_id,
+        source_column=source_column,
+        target_field=target_field,
+        platform=platform,
+        document_type=document_type,
+        confidence=confidence,
+        extraction_success=extraction_success,
+        metadata=metadata
+    )
+
+
+async def get_learned_mappings(
+    user_id: str,
+    platform: Optional[str] = None,
+    min_confidence: float = 0.5,
+    supabase: Optional[Client] = None
+) -> Dict[str, str]:
+    """Convenience function to retrieve learned field mappings."""
+    learner = get_field_mapping_learner(supabase)
+    return await learner.get_mappings(user_id, platform, min_confidence)
+

@@ -28,6 +28,9 @@ from supabase import create_client, Client
 
 import pendulum
 from core_infrastructure.provenance_tracker import normalize_business_logic, normalize_temporal_causality
+from core_infrastructure.rate_limiter import GlobalRateLimiter
+# REFACTORED: Using transaction manager for atomic database operations
+from core_infrastructure.transaction_manager import DatabaseTransactionManager, get_transaction_manager
 
 # Lazy-loaded heavy libraries
 ig = None
@@ -43,9 +46,6 @@ RandomForestClassifier = None
 import structlog
 logger = structlog.get_logger(__name__)
 
-# ============================================
-# SEMANTIC RELATIONSHIP CONFIGURATION
-# ============================================
 SEMANTIC_CONFIG = {
     'enable_caching': os.getenv('ENABLE_SEMANTIC_CACHE', 'true').lower() == 'true',
     'cache_ttl_seconds': int(os.getenv('SEMANTIC_CACHE_TTL', str(48 * 3600))),  # 48 hours
@@ -72,7 +72,6 @@ except ImportError:
     INSTRUCTOR_AVAILABLE = False
     logger.warning("instructor not available - AI responses won't be auto-validated")
 
-# Lazy-load EmbeddingService
 _embedding_service_instance = None
 _embedding_service_loaded = False
 EmbeddingService = None
@@ -100,7 +99,6 @@ def _ensure_embedding_service_loaded():
             _embedding_service_instance = None
     return _embedding_service_instance
 
-# ProductionDuplicateDetectionService
 try:
     try:
         from duplicate_detection_fraud.production_duplicate_detection_service import ProductionDuplicateDetectionService
@@ -111,15 +109,12 @@ except ImportError as e:
     DUPLICATE_SERVICE_AVAILABLE = False
     logger.warning(f"ProductionDuplicateDetectionService not available: {e}")
 
-# Retry logic with exponential backoff
 try:
     from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
     TENACITY_AVAILABLE = True
 except ImportError:
     TENACITY_AVAILABLE = False
     logger.warning("tenacity not available - retry logic disabled")
-
-# Pydantic models for data validation
 if INSTRUCTOR_AVAILABLE:
     class RelationshipEnrichment(BaseModel):
         """Auto-validated AI response for relationship enrichment"""
@@ -340,64 +335,30 @@ def _load_numpy():
     return np
 
 
-# ============================================================================
-# PRELOAD PATTERN: Module-level preloading for heavy dependencies
-# ============================================================================
-# These flags track preload status to avoid repeated initialization attempts
 _PRELOAD_COMPLETED = False
 
 def _preload_all_modules():
-    """
-    PRELOAD PATTERN: Initialize all heavy modules at module-load time.
-    Called automatically when module is imported.
-    This eliminates first-request latency.
-    """
+    """Initialize heavy modules at module-load time to eliminate first-request latency."""
     global _PRELOAD_COMPLETED
     
     if _PRELOAD_COMPLETED:
         return
     
-    # Preload EmbeddingService
-    try:
-        _ensure_embedding_service_loaded()
-        logger.info("✅ PRELOAD: EmbeddingService loaded at module-load time")
-    except Exception as e:
-        logger.warning(f"⚠️ PRELOAD: EmbeddingService load failed: {e}")
+    modules_to_preload = [
+        ("EmbeddingService", _ensure_embedding_service_loaded),
+        ("SemanticRelationshipExtractor", _load_semantic_relationship_extractor),
+        ("CausalInferenceEngine", _load_causal_inference_engine),
+        ("TemporalPatternLearner", _load_temporal_pattern_learner),
+        ("numpy", _load_numpy),
+        ("rapidfuzz", _load_rapidfuzz),
+    ]
     
-    # Preload SemanticRelationshipExtractor
-    try:
-        _load_semantic_relationship_extractor()
-        logger.info("✅ PRELOAD: SemanticRelationshipExtractor loaded at module-load time")
-    except Exception as e:
-        logger.warning(f"⚠️ PRELOAD: SemanticRelationshipExtractor load failed: {e}")
-    
-    # Preload CausalInferenceEngine
-    try:
-        _load_causal_inference_engine()
-        logger.info("✅ PRELOAD: CausalInferenceEngine loaded at module-load time")
-    except Exception as e:
-        logger.warning(f"⚠️ PRELOAD: CausalInferenceEngine load failed: {e}")
-    
-    # Preload TemporalPatternLearner
-    try:
-        _load_temporal_pattern_learner()
-        logger.info("✅ PRELOAD: TemporalPatternLearner loaded at module-load time")
-    except Exception as e:
-        logger.warning(f"⚠️ PRELOAD: TemporalPatternLearner load failed: {e}")
-    
-    # Preload numpy
-    try:
-        _load_numpy()
-        logger.info("✅ PRELOAD: numpy loaded at module-load time")
-    except Exception as e:
-        logger.warning(f"⚠️ PRELOAD: numpy load failed: {e}")
-    
-    # Preload rapidfuzz
-    try:
-        _load_rapidfuzz()
-        logger.info("✅ PRELOAD: rapidfuzz loaded at module-load time")
-    except Exception as e:
-        logger.warning(f"⚠️ PRELOAD: rapidfuzz load failed: {e}")
+    for module_name, loader_func in modules_to_preload:
+        try:
+            loader_func()
+            logger.info(f"Preloaded {module_name}")
+        except Exception as e:
+            logger.warning(f"Failed to preload {module_name}: {e}")
     
     _PRELOAD_COMPLETED = True
 
@@ -427,8 +388,6 @@ class EnhancedRelationshipDetector:
         self._semantic_extractor_client = llm_client
         self._semantic_extractor_supabase = supabase_client
         
-        # CRITICAL FIX: Initialize advanced semantic extractor with configuration
-        # This replaces the lazy-loading approach with eager initialization
         self.semantic_extractor = None
         self._semantic_extractor_loaded = False
         try:
@@ -466,6 +425,9 @@ class EnhancedRelationshipDetector:
         # ML model for adaptive relationship scoring (trained on-demand)
         self.ml_model = None
         self.ml_model_trained = False
+        
+        # Rate limiter for AI calls
+        self.rate_limiter = GlobalRateLimiter()
     
     def _ensure_causal_engine(self):
         """Lazy load causal engine on first use."""
@@ -492,9 +454,7 @@ class EnhancedRelationshipDetector:
         return self.temporal_learner
     
     def _ensure_semantic_extractor(self):
-        """Return the already-initialized semantic extractor."""
-        # CRITICAL FIX: Semantic extractor is now initialized eagerly in __init__
-        # This method now simply returns the cached instance
+        """Return the cached semantic extractor instance."""
         if not self._semantic_extractor_loaded:
             logger.warning("Semantic extractor was not initialized during __init__")
             return None
@@ -710,6 +670,12 @@ class EnhancedRelationshipDetector:
             source_desc = self._format_event_for_ai(source_event, "Event 1")
             target_desc = self._format_event_for_ai(target_event, "Event 2")
             
+            # Apply rate limiting before AI call
+            can_proceed, rate_msg = await self.rate_limiter.check_global_rate_limit("groq_relationship_detection", user_id)
+            if not can_proceed:
+                logger.warning(f"Rate limit exceeded for AI relationship detection: {rate_msg}")
+                return None
+            
             prompt = f"""You are a financial analyst AI. Analyze these two financial events and determine if they are related.
 
 {source_desc}
@@ -915,15 +881,25 @@ Only return valid JSON, no markdown or explanations."""
                 relationship_instances.append(record)
             
             if relationship_instances:
+            # REFACTORED: Use DatabaseTransactionManager for atomic batch insertions
+            # Initialize transaction manager if not already done
+                if not hasattr(self, 'transaction_manager'):
+                    self.transaction_manager = get_transaction_manager(self.supabase)
+                
                 try:
-                    result = self.supabase.table('relationship_instances').insert(relationship_instances).execute()
-                    if result.data:
-                        stored_relationships = result.data
-                        logger.info(
-                            "relationships_stored",
-                            count=len(stored_relationships),
-                            total_attempted=len(relationship_instances)
-                        )
+                    # USE TRANSACTION MANAGER for atomic batch inserts
+                    async with self.transaction_manager.transaction(
+                        user_id=user_id,
+                        operation_type="batch_store_relationships"
+                    ) as txn_ctx:
+                        result = self.supabase.table('relationship_instances').insert(relationship_instances).execute()
+                        if result.data:
+                            stored_relationships = result.data
+                            logger.info(
+                                "relationships_stored_transactionally",
+                                count=len(stored_relationships),
+                                total_attempted=len(relationship_instances)
+                            )
                 except Exception as e:
                     logger.error(f"Failed to insert relationships: {e}")
                     raise
