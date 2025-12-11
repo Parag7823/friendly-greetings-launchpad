@@ -587,7 +587,11 @@ import os as _os
 try:
     from aident_intelligence.aident_memory_manager import get_memory_manager
 except ImportError:
-    from aident_memory_manager import get_memory_manager
+    try:
+        from aident_memory_manager import get_memory_manager
+    except ImportError:
+        # Memory manager not available - will be handled gracefully
+        get_memory_manager = None
 
 
 # ----------------------------------------------------------------------------
