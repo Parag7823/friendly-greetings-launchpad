@@ -113,6 +113,9 @@ try:
 except ImportError as e:
     # Fallback for direct module execution (not in package context)
     try:
+        import sys
+        from pathlib import Path
+        sys.path.insert(0, str(Path(__file__).parent.parent / "aident_cfo_brain"))
         from finley_graph_engine import FinleyGraphEngine
         from aident_memory_manager import AidentMemoryManager
         from causal_inference_engine import CausalInferenceEngine
@@ -126,18 +129,39 @@ except ImportError as e:
 try:
     from data_ingestion_normalization.entity_resolver_optimized import EntityResolverOptimized as EntityResolver
 except ImportError:
-    from entity_resolver_optimized import EntityResolverOptimized as EntityResolver
+    try:
+        import sys
+        from pathlib import Path
+        sys.path.insert(0, str(Path(__file__).parent.parent / "data_ingestion_normalization"))
+        from entity_resolver_optimized import EntityResolverOptimized as EntityResolver
+    except ImportError:
+        EntityResolver = None
 
 try:
-    from data_ingestion_normalization.embedding_service import EmbeddingService
+    from core_infrastructure.embedding_service import EmbeddingService
 except ImportError:
-    from embedding_service import EmbeddingService
+    try:
+        from data_ingestion_normalization.embedding_service import EmbeddingService
+    except ImportError:
+        try:
+            import sys
+            from pathlib import Path
+            sys.path.insert(0, str(Path(__file__).parent.parent / "core_infrastructure"))
+            from embedding_service import EmbeddingService
+        except ImportError:
+            EmbeddingService = None
 
 # REFACTOR: Import PromptLoader for externalized prompt management
 try:
     from aident_cfo_brain.prompt_loader import get_prompt_loader
 except ImportError:
-    from prompt_loader import get_prompt_loader
+    try:
+        import sys
+        from pathlib import Path
+        sys.path.insert(0, str(Path(__file__).parent.parent / "aident_cfo_brain"))
+        from prompt_loader import get_prompt_loader
+    except ImportError:
+        get_prompt_loader = None
 
 
 

@@ -92,7 +92,7 @@ class IngestionPipelineUser(HttpUser):
         start_time = time.time()
         # Increased timeout to 120s in client too
         with self.client.post(
-            "/api/process-with-websocket", 
+            "/api/upload-simple", 
             files=files, 
             data=data, 
             catch_response=True, 
