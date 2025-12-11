@@ -5394,7 +5394,7 @@ async def process_with_websocket_endpoint(
         
         # CRITICAL FIX: Create StreamedFile from UploadFile without loading bytes
         filename = file.filename
-        streamed_file = StreamedFile.from_upload(file)
+        streamed_file = await StreamedFile.from_upload(file)
         
         # Send initial update
         await websocket_manager.send_overall_update(
